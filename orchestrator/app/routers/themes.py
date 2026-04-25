@@ -34,6 +34,10 @@ class ThemeResponse(BaseModel):
     typography: dict
     spacing: dict
     animation: dict
+    # Top-level toggle: when true, the frontend forces every border CSS
+    # variable to transparent for this theme. Defaults to False so any
+    # theme that predates this field renders with its original borders.
+    borderless: bool = False
 
     class Config:
         from_attributes = True
@@ -99,6 +103,7 @@ async def list_themes_full(db: AsyncSession = Depends(get_db)):
                 typography=theme.theme_json.get("typography", {}),
                 spacing=theme.theme_json.get("spacing", {}),
                 animation=theme.theme_json.get("animation", {}),
+                borderless=bool(theme.theme_json.get("borderless", False)),
             )
         )
 
@@ -130,6 +135,7 @@ async def get_theme(theme_id: str, db: AsyncSession = Depends(get_db)):
         typography=theme.theme_json.get("typography", {}),
         spacing=theme.theme_json.get("spacing", {}),
         animation=theme.theme_json.get("animation", {}),
+        borderless=bool(theme.theme_json.get("borderless", False)),
     )
 
 
@@ -169,4 +175,5 @@ async def get_default_theme(mode: str, db: AsyncSession = Depends(get_db)):
         typography=theme.theme_json.get("typography", {}),
         spacing=theme.theme_json.get("spacing", {}),
         animation=theme.theme_json.get("animation", {}),
+        borderless=bool(theme.theme_json.get("borderless", False)),
     )

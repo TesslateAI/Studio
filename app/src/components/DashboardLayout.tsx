@@ -5,8 +5,17 @@ import { List } from '@phosphor-icons/react';
 
 import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
+import { BuilderShellProvider, useBuilderShell } from '../contexts/BuilderShellContext';
 
 export function DashboardLayout() {
+  return (
+    <BuilderShellProvider>
+      <DashboardLayoutInner />
+    </BuilderShellProvider>
+  );
+}
+
+function DashboardLayoutInner() {
   const location = useLocation();
   const fromLogin = location.state?.fromLogin === true;
   const [showSidebarContainer, setShowSidebarContainer] = useState(!fromLogin);
@@ -39,7 +48,13 @@ export function DashboardLayout() {
     }
   }, [fromLogin]);
 
-  // Determine active page based on current path
+  const { builderSection, setIsLeftSidebarExpanded } = useBuilderShell();
+
+  // Determine active page based on current path. /project/* counts as
+  // 'dashboard' so the Workspaces nav stays highlighted — being inside a
+  // project is conceptually a deeper view of the same Workspaces section,
+  // and keeping the highlight stable makes the sidebar feel like it's the
+  // exact same instance as the dashboard's.
   const getActivePage = (): 'home' | 'chat' | 'apps' | 'dashboard' | 'marketplace' | 'library' | 'feedback' => {
     const path = location.pathname;
     if (path.includes('/home')) return 'home';
@@ -80,7 +95,12 @@ export function DashboardLayout() {
       )}
       {mobileNavOpen && (
         <div className="md:hidden fixed inset-y-0 left-0 z-50">
-          <NavigationSidebar activePage={getActivePage()} showContent forceVisible />
+          <NavigationSidebar
+            activePage={getActivePage()}
+            showContent
+            forceVisible
+            builderSection={builderSection}
+          />
         </div>
       )}
 
@@ -101,7 +121,12 @@ export function DashboardLayout() {
           className="flex-shrink-0 h-full"
         >
           {/* Navigation Sidebar - This stays mounted during navigation */}
-          <NavigationSidebar activePage={getActivePage()} showContent={showSidebarContent} />
+          <NavigationSidebar
+            activePage={getActivePage()}
+            showContent={showSidebarContent}
+            builderSection={builderSection}
+            onExpandedChange={setIsLeftSidebarExpanded}
+          />
         </motion.div>
       )}
 

@@ -268,6 +268,12 @@ export function applyThemePreset(theme: Theme): void {
   safeSetProperty(root, '--surface', colors.surface);
   safeSetProperty(root, '--surface-hover', colors.surfaceHover);
 
+  const cardHover =
+    theme.mode === 'dark'
+      ? `color-mix(in srgb, ${colors.surface} 92%, white 8%)`
+      : `color-mix(in srgb, ${colors.surface} 95%, ${colors.textMuted} 5%)`;
+  safeSetProperty(root, '--card-hover', cardHover);
+
   // === TEXT ===
   safeSetProperty(root, '--text', colors.text);
   safeSetProperty(root, '--text-muted', colors.textMuted);
@@ -363,6 +369,26 @@ export function applyThemePreset(theme: Theme): void {
   safeSetProperty(root, '--easing', animation.easing);
   safeSetProperty(root, '--easing-layout', animation.easing); // Layout transitions use same easing
   safeSetProperty(root, '--ease', animation.easing); // Legacy alias
+
+  // === BORDERLESS OVERRIDE ===
+  // When the theme opts into borderless mode, force every border CSS
+  // variable to transparent. This catches both the canonical names and
+  // legacy aliases without requiring a per-component sweep — anything
+  // that resolves through one of these vars vanishes. Components that
+  // need a divider regardless can fall back to --surface-hover or read
+  // [data-borderless="true"] from the root element.
+  if (theme.borderless) {
+    root.style.setProperty('--border', 'transparent');
+    root.style.setProperty('--border-hover', 'transparent');
+    root.style.setProperty('--border-color', 'transparent');
+    root.style.setProperty('--sidebar-border', 'transparent');
+    root.style.setProperty('--input-border', 'transparent');
+    root.style.setProperty('--input-border-focus', 'transparent');
+    root.style.setProperty('--code-block-border', 'transparent');
+    root.setAttribute('data-borderless', 'true');
+  } else {
+    root.removeAttribute('data-borderless');
+  }
 
   // === MODE CLASS ===
   document.body.classList.remove('light-mode', 'dark-mode');

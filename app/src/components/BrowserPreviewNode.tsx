@@ -381,6 +381,7 @@ const BrowserPreviewNodeComponent = ({ data, id }: BrowserPreviewNodeProps) => {
                 ref={iframeRef}
                 src={getFullUrl(currentPath)}
                 className="w-full h-full border-0"
+                style={{ colorScheme: 'normal' }}
                 title={`Preview: ${data.connectedContainerName}`}
                 onLoad={handleIframeLoad}
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"

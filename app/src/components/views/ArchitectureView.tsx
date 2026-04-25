@@ -1903,7 +1903,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
     return (
       <div className="flex-1 flex relative h-full">
         {/* React Flow canvas area */}
-        <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform">
+        <div className="flex-1 relative bg-[var(--bg)] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform">
           {/* Floating component drawer — hidden for viewers */}
           {!readOnly && (
             <MarketplaceSidebar

@@ -33,8 +33,8 @@ export function ReviewCard({ review, onEdit, onDelete }: ReviewCardProps) {
   return (
     <div
       className={`
-      p-4 rounded-xl border
-      ${theme === 'light' ? 'bg-white border-black/10' : 'bg-white/5 border-white/10'}
+      p-4 rounded-xl border border-[var(--border)]
+      ${theme === 'light' ? 'bg-white' : 'bg-white/5'}
     `}
     >
       {/* Header */}

@@ -357,6 +357,13 @@ function AppContent() {
           <Route path="/admin/marketplace/yanks" element={<AdminYankCenterPage />} />
           <Route path="/admin/marketplace/reputation" element={<AdminCreatorReputationPage />} />
           <Route path="/admin/marketplace/adversarial" element={<AdminAdversarialSuitePage />} />
+
+          {/* Project builder — shares the same NavigationSidebar instance so
+              navigating Dashboard ↔ Project doesn't unmount/remount the
+              sidebar shell. ProjectPage publishes its sidebar additions via
+              BuilderShellContext. */}
+          <Route path="/project/:slug" element={<ProjectPage />} />
+          <Route path="/project/:slug/builder" element={<ProjectPage />} />
         </Route>
 
         {/* Standalone Routes */}
@@ -366,22 +373,6 @@ function AppContent() {
           element={
             <PrivateRoute>
               <AppWorkspacePage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/project/:slug"
-          element={
-            <PrivateRoute>
-              <ProjectPage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/project/:slug/builder"
-          element={
-            <PrivateRoute>
-              <ProjectPage />
             </PrivateRoute>
           }
         />

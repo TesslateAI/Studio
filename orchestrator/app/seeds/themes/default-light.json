@@ -8,6 +8,7 @@
   "category": "general",
   "tags": ["light", "default", "clean"],
   "icon": "sun",
+  "borderless": true,
 
   "colors": {
     "primary": "#F89521",

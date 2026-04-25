@@ -1264,7 +1264,7 @@ export default function Dashboard() {
                 : `these ${selectedProjectIds.size} projects`}
               ? This action cannot be undone.
             </p>
-            <div className="max-h-40 overflow-y-auto space-y-1 bg-white/5 rounded-xl p-3 border border-white/10">
+            <div className="max-h-40 overflow-y-auto space-y-1 bg-white/5 rounded-xl p-3 border border-[var(--border)]">
               {projects
                 .filter((p) => selectedProjectIds.has(p.id))
                 .map((p) => (

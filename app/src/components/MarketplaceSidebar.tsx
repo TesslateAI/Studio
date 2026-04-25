@@ -334,7 +334,7 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                                     className={`group bg-[var(--bg)] border border-[var(--border-color)] rounded-lg p-2 transition-all ${
                                       isComingSoon
                                         ? 'opacity-50 cursor-not-allowed'
-                                        : 'cursor-move hover:border-[var(--primary)] hover:shadow-md'
+                                        : 'cursor-move hover:bg-[var(--card-hover)]'
                                     }`}
                                   >
                                     <div className="flex items-start gap-2">
@@ -352,7 +352,7 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                                             className={`font-medium text-sm truncate transition-colors ${
                                               isComingSoon
                                                 ? 'text-[var(--text)]/50'
-                                                : 'text-[var(--text)] group-hover:text-[var(--primary)]'
+                                                : 'text-[var(--text)]'
                                             }`}
                                           >
                                             {item.name}

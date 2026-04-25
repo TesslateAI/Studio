@@ -88,6 +88,13 @@ interface ChatContainerProps {
   onEnvironmentStopped?: (reason: string) => void;
   onVolumeReady?: () => void;
   disabled?: boolean;
+  /**
+   * Deep-link target session. When set on mount, seeds `currentChatId` so
+   * the "load most recent session" effect doesn't override it. When the
+   * prop later changes (e.g. user clicks a different chat in the sidebar
+   * while the builder is already open), we swap to that session in place.
+   */
+  initialChatId?: string | null;
 }
 
 export function ChatContainer({
@@ -112,6 +119,7 @@ export function ChatContainer({
   onEnvironmentStopped,
   onVolumeReady,
   disabled: disabledProp,
+  initialChatId = null,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const { hasRole } = useAuth();
@@ -124,7 +132,7 @@ export function ChatContainer({
   const [messages, setMessages] = useState<Message[]>([]);
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
-  const [toolCallsCollapsed, setToolCallsCollapsed] = useState(false);
+  const [toolCallsCollapsed, setToolCallsCollapsed] = useState(true);
   const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>(
     []
   );
@@ -205,7 +213,10 @@ export function ChatContainer({
   // When docked, always show as expanded
   const effectiveIsExpanded = isDocked || isExpanded;
 
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  // Seed from initialChatId so the "load most recent session" fallback in
+  // loadSessions() (gated on `!currentChatId`) leaves the deep-linked
+  // session intact on first paint.
+  const [currentChatId, setCurrentChatId] = useState<string | null>(initialChatId ?? null);
   const [sessions, setSessions] = useState<
     {
       id: string;
@@ -236,6 +247,24 @@ export function ChatContainer({
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
+
+  // Sidebar deep-link reactor: when the user clicks a different project
+  // chat in the sidebar while this builder is already mounted, the parent
+  // re-renders with a new `initialChatId`. Mirror handleSelectSession so
+  // the swap looks identical to picking from the in-chat session popover.
+  // Deps intentionally exclude currentChatId — including it would let an
+  // internal session change (e.g. "New chat") trigger this effect and
+  // bounce us back to the stale prop value.
+  useEffect(() => {
+    if (initialChatId && initialChatId !== currentChatIdRef.current) {
+      setSessionTransitioning(true);
+      setMessages([]);
+      animatedMessagesRef.current.clear();
+      setCurrentChatId(initialChatId);
+      const t = setTimeout(() => setSessionTransitioning(false), 200);
+      return () => clearTimeout(t);
+    }
+  }, [initialChatId]);
 
   // Track mounted state to guard orphaned SSE callbacks after unmount
   useEffect(() => {

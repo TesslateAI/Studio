@@ -6,8 +6,6 @@ import {
   MagnifyingGlass,
   Cpu,
   Package,
-  Wrench,
-  Plug,
   Plugs,
   PaintBrush,
   CaretDown,
@@ -43,8 +41,6 @@ type ItemType =
   | 'agent'
   | 'base'
   | 'theme'
-  | 'tool'
-  | 'integration'
   | 'skill'
   | 'mcp_server';
 type SortOption =
@@ -288,8 +284,6 @@ export default function Marketplace() {
     { id: 'app', label: 'Apps', icon: <SquaresFour size={16} weight="fill" /> },
     { id: 'agent', label: 'Agents', icon: <Cpu size={16} /> },
     { id: 'base', label: 'Bases', icon: <Package size={16} /> },
-    { id: 'tool', label: 'Tools', icon: <Wrench size={16} /> },
-    { id: 'integration', label: 'Integrations', icon: <Plug size={16} /> },
     { id: 'theme', label: 'Themes', icon: <PaintBrush size={16} /> },
     { id: 'skill', label: 'Skills', icon: <Lightning size={16} /> },
     { id: 'mcp_server', label: 'Connectors', icon: <Plugs size={16} /> },
@@ -333,7 +327,7 @@ export default function Marketplace() {
       }
 
       try {
-        let data: MarketplaceItem[];
+        let data: MarketplaceItem[] = [];
 
         if (itemType === 'app') {
           const result = await marketplaceAppsApi.list({
@@ -429,9 +423,6 @@ export default function Marketplace() {
             ...server,
             item_type: 'mcp_server' as ItemType,
           }));
-        } else {
-          // Tools and integrations - coming soon
-          data = [];
         }
 
         setItems(data);

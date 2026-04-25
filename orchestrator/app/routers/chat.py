@@ -3145,21 +3145,19 @@ async def save_file(
     print(f"💾 Saving file: {file_path}")
 
     try:
-        # 1. Save to database (for backup/version history)
+        # 1. Save to database (for backup/version history).
+        #
+        # Agent runs are inherently concurrent — the old check-then-insert
+        # pattern raced under load and produced duplicate rows that later
+        # broke `scalar_one_or_none()`. Always go through
+        # upsert_project_file(), which is race-safe via
+        # uq_project_files_project_path + ON CONFLICT DO UPDATE.
         try:
-            result = await db.execute(
-                select(ProjectFile).where(
-                    ProjectFile.project_id == project_id, ProjectFile.file_path == file_path
-                )
+            from ..services.project_files import upsert_project_file
+
+            await upsert_project_file(
+                db, project_id=project_id, file_path=file_path, content=code
             )
-            db_file = result.scalar_one_or_none()
-
-            if db_file:
-                db_file.content = code
-            else:
-                db_file = ProjectFile(project_id=project_id, file_path=file_path, content=code)
-                db.add(db_file)
-
             await db.commit()
             print(f"[DB] Saved {file_path} to database")
         except Exception as e:

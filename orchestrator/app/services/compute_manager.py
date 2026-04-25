@@ -155,6 +155,38 @@ _DEV_CONTAINER_MEM_REQUEST = "256Mi"
 _EPHEMERAL_HEADROOM_CPU = "100m"
 _EPHEMERAL_HEADROOM_MEM = "512Mi"
 
+# Annotation that warm-start drift detection compares against the live Deployment
+# to decide whether a re-render is needed.
+SPEC_HASH_ANNOTATION = "tesslate.io/spec-hash"
+
+
+def compute_dev_container_spec_hash(
+    *,
+    startup_command: str,
+    image: str,
+    port: int,
+    working_directory: str,
+    extra_env: dict[str, str] | None,
+) -> str:
+    """Deterministic short hash of the runtime-affecting Container spec.
+
+    Stamped on the Deployment so warm-start can detect drift and fall through
+    to a cold render. Inputs are exactly the fields that flow into the dev
+    container's args/env — change the inputs and you change the rendered pod.
+    """
+    import hashlib
+    import json
+
+    payload = {
+        "startup_command": startup_command or "",
+        "image": image or "",
+        "port": int(port) if port is not None else 0,
+        "working_directory": working_directory or "",
+        "env": sorted((extra_env or {}).items()),
+    }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
 
 @dataclass(frozen=True, slots=True)
 class PlacementBudget:
@@ -1076,6 +1108,119 @@ class ComputeManager:
                 await _persist_failed_state(project.id, [c.id for c in containers])
                 raise
 
+    async def _compute_expected_spec_hashes(
+        self, project, containers: list, db: AsyncSession
+    ) -> dict[str, str]:
+        """Mirror the deploy-loop's input shaping to predict each dev
+        container's ``tesslate.io/spec-hash``. Used by warm-start drift
+        detection to decide whether the live Deployment is still in sync
+        with the Container model.
+
+        Keys are ``container_directory`` (matches the
+        ``tesslate.io/container-directory`` label on Deployments). Service
+        containers are excluded — they get a different deployment helper.
+        """
+        from ..config import get_settings
+        from .base_config_parser import get_node_modules_fix_prefix
+        from .secret_manager_env import build_env_overrides
+
+        settings = get_settings()
+        node_modules_prefix = get_node_modules_fix_prefix()
+
+        dev_containers = [
+            c for c in containers if getattr(c, "container_type", "base") != "service"
+        ]
+        env_overrides = await build_env_overrides(db, project.id, dev_containers)
+
+        out: dict[str, str] = {}
+        for container in dev_containers:
+            cdir = resolve_k8s_container_dir(container)
+            startup = container.startup_command or "sleep infinity"
+            startup = node_modules_prefix + startup
+            port = container.effective_port
+            working_dir = container.directory or "."
+
+            extra_env = dict(env_overrides.get(container.id, {}))
+            for sibling in dev_containers:
+                if sibling.id == container.id:
+                    continue
+                sib_name = sibling.name.upper().replace("-", "_")
+                sib_k8s = resolve_k8s_container_dir(sibling)
+                sib_port = sibling.effective_port
+                sib_url = f"http://dev-{sib_k8s}:{sib_port}"
+                extra_env.setdefault(f"{sib_name}_URL", sib_url)
+                extra_env.setdefault(f"VITE_{sib_name}_URL", sib_url)
+
+            container_env_dict = container.environment_vars or {}
+            legacy_env_image = container_env_dict.get("TSL_CONTAINER_IMAGE")
+            effective_image = (
+                container.image or legacy_env_image or settings.k8s_devserver_image
+            )
+            prefix = (settings.app_image_registry_prefix or "").strip()
+            if prefix and effective_image and "/" not in effective_image:
+                effective_image = f"{prefix.rstrip('/')}/{effective_image}"
+
+            out[cdir] = compute_dev_container_spec_hash(
+                startup_command=startup,
+                image=effective_image,
+                port=port,
+                working_directory=working_dir,
+                extra_env=extra_env,
+            )
+        return out
+
+    async def _detect_spec_drift(
+        self, project, containers: list, namespace: str, db: AsyncSession
+    ) -> bool:
+        """Return True if any live dev Deployment's ``tesslate.io/spec-hash``
+        annotation differs from what the Container model would now render.
+
+        On any error during the comparison (API failure, label miss, etc.)
+        return True — the safe fallback is to cold-render so the manifest
+        re-applies. Legacy Deployments without the annotation always count
+        as drift, which forces a one-time re-apply across upgraded clusters.
+        """
+        try:
+            v1 = self._api()
+            apps_v1 = k8s_client.AppsV1Api(v1.api_client)
+            live = await asyncio.to_thread(
+                apps_v1.list_namespaced_deployment,
+                namespace,
+                label_selector=_TIER2_DEV_LABEL_SELECTOR,
+            )
+            live_hashes: dict[str, str | None] = {}
+            for dep in live.items or []:
+                cdir = (dep.metadata.labels or {}).get(
+                    "tesslate.io/container-directory"
+                )
+                if not cdir:
+                    continue
+                live_hashes[cdir] = (dep.metadata.annotations or {}).get(
+                    SPEC_HASH_ANNOTATION
+                )
+
+            expected = await self._compute_expected_spec_hashes(
+                project, containers, db
+            )
+            for cdir, exp_hash in expected.items():
+                if live_hashes.get(cdir) != exp_hash:
+                    logger.info(
+                        "[COMPUTE-T2] Spec drift in %s for %s (live=%s expected=%s) — cold render",
+                        namespace,
+                        cdir,
+                        live_hashes.get(cdir),
+                        exp_hash,
+                    )
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(
+                "[COMPUTE-T2] Drift check failed in %s (%s) — cold render to be safe",
+                namespace,
+                e,
+            )
+            return True
+
     async def _start_environment_inner(
         self,
         project,
@@ -1206,6 +1351,19 @@ class ComputeManager:
                     raise
             else:
                 raise RuntimeError(f"Namespace {namespace} stuck Terminating — retry shortly")
+
+        if ns_phase == "active":
+            # Drift check: if the live Deployment's spec annotation no longer
+            # matches the Container model (config.json edits, image swap, env
+            # changes), skip warm-start and fall through to cold-render so
+            # the manifest is re-applied with the new spec.
+            drift = await self._detect_spec_drift(project, containers, namespace, db)
+            if drift:
+                ns_phase = None
+                logger.info(
+                    "[COMPUTE-T2] Skipping warm-start for %s — drift detected, cold-rendering",
+                    namespace,
+                )
 
         if ns_phase == "active":
             await send_progress("creating_namespace", "Waking environment...", 20)
@@ -1564,6 +1722,14 @@ class ComputeManager:
             except Exception as e:
                 logger.warning("secret propagation failed for project %s: %s", project.id, e)
 
+            spec_hash = compute_dev_container_spec_hash(
+                startup_command=startup_command,
+                image=effective_image,
+                port=port,
+                working_directory=working_directory,
+                extra_env=extra_env,
+            )
+
             deployment = create_v2_dev_deployment(
                 namespace=namespace,
                 project_id=project.id,
@@ -1579,6 +1745,7 @@ class ComputeManager:
                 image_pull_secret=settings.k8s_image_pull_secret or None,
                 extra_env=extra_env,
                 preferred_node=node_name,
+                spec_hash=spec_hash,
             )
             await k8s.create_deployment(deployment, namespace)
 

@@ -522,6 +522,16 @@ class DeploymentTargetConnection(Base):
 
 class ProjectFile(Base):
     __tablename__ = "project_files"
+    # Race-safety: every writer must go through services.project_files
+    # .upsert_project_file(), which relies on this unique constraint plus
+    # dialect-native ON CONFLICT DO UPDATE. Never `db.add(ProjectFile(...))`
+    # directly for an existing (project_id, file_path) — concurrent writes
+    # would collide. Migration 0072 backfills + adds this constraint.
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "file_path", name="uq_project_files_project_path"
+        ),
+    )
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)

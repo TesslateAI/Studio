@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, Folder, Loader2, MessageSquare, Plus } from 'lucide-react';
+import { ArrowRight, Folder, FolderOpen, Loader2, MessageSquare, Plus } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Tooltip } from './Tooltip';
 import {
   sidebarApi,
@@ -9,7 +10,7 @@ import {
   type SidebarTreeResponse,
 } from '../../lib/api';
 
-const EXPANDED_KEY = 'sidebarTree.expandedProjects';
+const COLLAPSED_KEY = 'sidebarTree.collapsedProjects';
 
 /**
  * Interval between refetches of the sidebar tree. The poll drives the
@@ -25,9 +26,9 @@ const POLL_INTERVAL_MS = 4000;
 /** Chat statuses that should render a running-spinner in the sidebar. */
 const RUNNING_STATUSES = new Set(['running', 'waiting_approval']);
 
-function loadExpanded(): Set<string> {
+function loadCollapsed(): Set<string> {
   try {
-    const raw = localStorage.getItem(EXPANDED_KEY);
+    const raw = localStorage.getItem(COLLAPSED_KEY);
     if (!raw) return new Set();
     const arr = JSON.parse(raw);
     if (Array.isArray(arr)) return new Set(arr.filter((x) => typeof x === 'string'));
@@ -37,9 +38,9 @@ function loadExpanded(): Set<string> {
   return new Set();
 }
 
-function saveExpanded(set: Set<string>) {
+function saveCollapsed(set: Set<string>) {
   try {
-    localStorage.setItem(EXPANDED_KEY, JSON.stringify(Array.from(set)));
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify(Array.from(set)));
   } catch {
     // ignore quota / disabled storage
   }
@@ -84,13 +85,12 @@ export function SidebarTree({
   const navigate = useNavigate();
   const [tree, setTree] = useState<SidebarTreeResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
+  const [collapsedSet, setCollapsedSet] = useState<Set<string>>(() => loadCollapsed());
   const inflightRef = useRef(false);
 
-  // Persist expansion state
   useEffect(() => {
-    saveExpanded(expanded);
-  }, [expanded]);
+    saveCollapsed(collapsedSet);
+  }, [collapsedSet]);
 
   const refreshTree = useCallback(async () => {
     if (inflightRef.current) return;
@@ -142,7 +142,7 @@ export function SidebarTree({
   }, [refreshTree]);
 
   const toggleProject = useCallback((id: string) => {
-    setExpanded((prev) => {
+    setCollapsedSet((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -150,9 +150,18 @@ export function SidebarTree({
     });
   }, []);
 
+  // Project-nested chats open in the project's builder view (with the
+  // chat preselected via route state). Root-level "loose" chats remain on
+  // /chat. Passing the slug — rather than re-deriving from chat.project_id —
+  // keeps this self-contained at the call site where we already iterate
+  // tree.projects[].chats.
   const openChat = useCallback(
-    (chat: SidebarChat) => {
-      navigate('/chat', { state: { sessionId: chat.id } });
+    (chat: SidebarChat, projectSlug?: string | null) => {
+      if (projectSlug) {
+        navigate(`/project/${projectSlug}/builder`, { state: { sessionId: chat.id } });
+      } else {
+        navigate('/chat', { state: { sessionId: chat.id } });
+      }
     },
     [navigate]
   );
@@ -164,10 +173,71 @@ export function SidebarTree({
     [navigate]
   );
 
+  /** Untitled / unnamed chats clutter the sidebar — typically the result of
+   * accidentally creating a chat without sending a first message. Hide them
+   * so the sidebar only surfaces conversations the user actually intended. */
+  const isMeaningfulChat = useCallback(
+    (chat: SidebarChat): boolean => {
+      const t = (chat.title || '').trim();
+      if (!t) return false;
+      if (t.toLowerCase() === 'untitled') return false;
+      // Always show the active chat even if untitled — the user is looking
+      // at it right now and removing it from the sidebar would be jarring.
+      if (activeChatId && chat.id === activeChatId) return true;
+      return true;
+    },
+    [activeChatId]
+  );
+
+  const recencyKey = (chat: SidebarChat): number => {
+    const ts = chat.updated_at || chat.created_at;
+    return ts ? new Date(ts).getTime() : 0;
+  };
+
+  const projectRecencyKey = (project: SidebarProject): number => {
+    let max = 0;
+    if (project.latest_activity_at) {
+      max = new Date(project.latest_activity_at).getTime();
+    }
+    if (project.updated_at) {
+      max = Math.max(max, new Date(project.updated_at).getTime());
+    }
+    for (const c of project.chats) {
+      max = Math.max(max, recencyKey(c));
+    }
+    return max;
+  };
+
+  /** Filter + sort the tree:
+   *  - Drop "Untitled" chats (so empty/abandoned chats don't pile up).
+   *  - Sort root chats by recency (newest first).
+   *  - Sort project chats by recency.
+   *  - Sort projects by recency, then float the currently-open project to
+   *    the top so the user's active context is always visible first. */
+  const visibleRootChats = useMemo(() => {
+    const chats = (tree?.rootChats ?? []).filter(isMeaningfulChat);
+    return [...chats].sort((a, b) => recencyKey(b) - recencyKey(a));
+  }, [tree?.rootChats, isMeaningfulChat]);
+
+  const orderedProjects = useMemo(() => {
+    const projects = (tree?.projects ?? []).map((p) => ({
+      ...p,
+      chats: [...p.chats]
+        .filter((c) => isMeaningfulChat(c) || c.id === activeChatId)
+        .sort((a, b) => recencyKey(b) - recencyKey(a)),
+    }));
+
+    projects.sort((a, b) => projectRecencyKey(b) - projectRecencyKey(a));
+
+    if (!activeProjectSlug) return projects;
+    const idx = projects.findIndex((p) => p.slug === activeProjectSlug);
+    if (idx <= 0) return projects;
+    return [projects[idx], ...projects.slice(0, idx), ...projects.slice(idx + 1)];
+  }, [tree?.projects, activeProjectSlug, isMeaningfulChat, activeChatId]);
+
   const hasContent = useMemo(() => {
-    if (!tree) return false;
-    return tree.rootChats.length > 0 || tree.projects.length > 0;
-  }, [tree]);
+    return visibleRootChats.length > 0 || orderedProjects.length > 0;
+  }, [visibleRootChats, orderedProjects]);
 
   /**
    * Total count of chats currently showing a running-agent spinner. Shown
@@ -197,7 +267,7 @@ export function SidebarTree({
     const tip =
       runningCount > 0
         ? `${runningCount} agent${runningCount === 1 ? '' : 's'} running`
-        : 'Projects & chats';
+        : 'Workspaces and Threads';
     return (
       <Tooltip content={tip} side="right" delay={200}>
         <button
@@ -219,36 +289,7 @@ export function SidebarTree({
 
   return (
     <>
-      <div className="h-px bg-[var(--sidebar-border)] my-1 mx-3 flex-shrink-0" />
-
-      {/* Section header with + affordance and a live "N running" counter */}
-      <div className="flex items-center h-7 pl-[7px] pr-1 gap-2">
-        <Folder size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
-        <span className="text-[11px] uppercase tracking-wide text-[var(--text-subtle)] flex-1">
-          Projects & chats
-        </span>
-        {runningCount > 0 && (
-          <Tooltip
-            content={`${runningCount} agent${runningCount === 1 ? '' : 's'} running`}
-            side="top"
-            delay={300}
-          >
-            <span className="flex items-center gap-1 text-[10px] text-[var(--accent)]">
-              <Loader2 size={10} className="animate-spin" aria-hidden="true" />
-              <span className="tabular-nums">{runningCount}</span>
-            </span>
-          </Tooltip>
-        )}
-        <Tooltip content="New project" side="top" delay={300}>
-          <button
-            onClick={onCreateProject}
-            aria-label="Create new project"
-            className="flex items-center justify-center h-5 w-5 rounded hover:bg-[var(--sidebar-hover)] text-[var(--text-muted)] hover:text-[var(--sidebar-text)] transition-colors"
-          >
-            <Plus size={12} />
-          </button>
-        </Tooltip>
-      </div>
+      <div className="h-px bg-[var(--sidebar-border)] my-2 mx-3 flex-shrink-0" />
 
       {loading && !tree ? (
         <div className="px-[7px] py-1 text-[11px] text-[var(--text-subtle)]">Loading…</div>
@@ -259,13 +300,14 @@ export function SidebarTree({
         >
           <Plus size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
           <span className="text-[12px] text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)] transition-colors">
-            Create your first project
+            Create your first workspace
           </span>
         </button>
       ) : (
         <div className="flex flex-col gap-0.5 mt-0.5">
-          {/* Root-level chats first — un-nested, the "loose" chats */}
-          {tree?.rootChats.map((chat) => (
+          {/* Root-level chats first — un-nested, the "loose" chats. Sorted by
+              recency, with untitled/empty chats hidden. */}
+          {visibleRootChats.map((chat) => (
             <ChatRow
               key={chat.id}
               chat={chat}
@@ -275,38 +317,43 @@ export function SidebarTree({
             />
           ))}
 
-          {/* Projects (folders) with their chats underneath */}
-          {tree?.projects.map((project) => {
-            const isOpen = expanded.has(project.id);
+          {/* Projects (folders) with their chats underneath. Active project
+              is hoisted to the top via `orderedProjects`. */}
+          {orderedProjects.map((project) => {
+            const isOpen = !collapsedSet.has(project.id);
             const isActive = activeProjectSlug === project.slug;
             const projRunning = projectRunningCount(project);
             return (
               <div key={project.id} className="flex flex-col gap-0.5">
-                <div className="group flex items-center h-7 w-full rounded-lg pl-[3px] pr-[7px] gap-1 hover:bg-[var(--sidebar-hover)]">
+                <div className="group flex items-center h-7 w-full rounded-lg pl-[7px] pr-[7px] gap-2 hover:bg-[var(--sidebar-hover)]">
                   <button
                     type="button"
                     onClick={() => toggleProject(project.id)}
-                    aria-label={isOpen ? 'Collapse project' : 'Expand project'}
-                    className="flex items-center justify-center h-5 w-5 flex-shrink-0 rounded hover:bg-[var(--sidebar-hover)] text-[var(--text-subtle)]"
-                  >
-                    <ChevronDown
-                      size={12}
-                      className={`transition-transform duration-150 ${isOpen ? '' : '-rotate-90'}`}
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openProject(project)}
+                    aria-expanded={isOpen}
+                    aria-label={isOpen ? `Collapse ${project.name}` : `Expand ${project.name}`}
                     className={`flex items-center gap-2 flex-1 min-w-0 text-left h-7 rounded transition-colors ${
                       isActive ? 'text-[var(--sidebar-text)]' : ''
                     }`}
                   >
-                    <Folder
-                      size={14}
-                      className={`flex-shrink-0 ${
-                        isActive ? 'text-[var(--sidebar-text)]' : 'text-[var(--text-muted)]'
-                      }`}
-                    />
+                    {isOpen ? (
+                      <FolderOpen
+                        size={14}
+                        className={`flex-shrink-0 transition-colors ${
+                          isActive
+                            ? 'text-[var(--sidebar-text)]'
+                            : 'text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)]'
+                        }`}
+                      />
+                    ) : (
+                      <Folder
+                        size={14}
+                        className={`flex-shrink-0 transition-colors ${
+                          isActive
+                            ? 'text-[var(--sidebar-text)]'
+                            : 'text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)]'
+                        }`}
+                      />
+                    )}
                     <span
                       className={`text-[13px] truncate flex-1 transition-colors ${
                         isActive
@@ -328,32 +375,56 @@ export function SidebarTree({
                         </span>
                       </Tooltip>
                     ) : project.chats.length > 0 ? (
-                      <span className="text-[10px] text-[var(--text-subtle)] tabular-nums flex-shrink-0">
+                      <span className="text-[10px] text-[var(--text-subtle)] tabular-nums flex-shrink-0 group-hover:hidden">
                         {project.chats.length}
                       </span>
                     ) : null}
                   </button>
+                  <Tooltip content="Open project" side="top" delay={300}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openProject(project);
+                      }}
+                      aria-label={`Open ${project.name}`}
+                      className="hidden group-hover:flex items-center justify-center h-5 w-5 flex-shrink-0 rounded hover:bg-[var(--sidebar-hover)] text-[var(--text-muted)] hover:text-[var(--sidebar-text)] transition-colors"
+                    >
+                      <ArrowRight size={12} />
+                    </button>
+                  </Tooltip>
                 </div>
 
-                {isOpen && (
-                  <div className="flex flex-col gap-0.5">
-                    {project.chats.length === 0 ? (
-                      <div className="pl-[34px] pr-[7px] h-6 flex items-center text-[11px] text-[var(--text-subtle)] italic">
-                        No chats yet
+                <AnimatePresence initial={false}>
+                  {isOpen && (
+                    <motion.div
+                      key={project.id}
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
+                      style={{ overflow: 'hidden' }}
+                    >
+                      <div className="flex flex-col gap-0.5">
+                        {project.chats.length === 0 ? (
+                          <div className="pl-[29px] pr-[7px] h-6 flex items-center text-[11px] text-[var(--text-subtle)] italic">
+                            No threads yet
+                          </div>
+                        ) : (
+                          project.chats.map((chat) => (
+                            <ChatRow
+                              key={chat.id}
+                              chat={chat}
+                              nested
+                              active={activeChatId === chat.id}
+                              onClick={() => openChat(chat, project.slug)}
+                            />
+                          ))
+                        )}
                       </div>
-                    ) : (
-                      project.chats.map((chat) => (
-                        <ChatRow
-                          key={chat.id}
-                          chat={chat}
-                          nested
-                          active={activeChatId === chat.id}
-                          onClick={() => openChat(chat)}
-                        />
-                      ))
-                    )}
-                  </div>
-                )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             );
           })}
@@ -371,7 +442,7 @@ interface ChatRowProps {
 }
 
 function ChatRow({ chat, nested, active, onClick }: ChatRowProps) {
-  const paddingLeft = nested ? 'pl-[34px]' : 'pl-[7px]';
+  const paddingLeft = nested ? 'pl-[29px]' : 'pl-[7px]';
   const isRunning = RUNNING_STATUSES.has(chat.status);
   const tooltip = isRunning
     ? chat.status === 'waiting_approval'

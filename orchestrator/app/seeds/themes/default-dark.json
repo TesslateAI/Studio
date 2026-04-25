@@ -8,6 +8,7 @@
   "category": "general",
   "tags": ["dark", "default", "neutral"],
   "icon": "moon",
+  "borderless": true,
 
   "colors": {
     "primary": "#F89521",

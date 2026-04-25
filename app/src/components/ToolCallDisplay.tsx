@@ -194,15 +194,15 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         <span className="text-xs font-semibold flex-1">{getToolLabel(name)}</span>
         {hasResult &&
           (success ? (
-            <CheckCircle size={14} className="text-green-500" />
+            <CheckCircle size={14} className="text-[var(--status-success)]" />
           ) : (
-            <XCircle size={14} className="text-red-500" />
+            <XCircle size={14} className="text-[var(--status-error)]" />
           ))}
         {(() => {
           const tier = (result?.result as Record<string, unknown>)?.tier;
           if (!tier) return null;
           return (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 ml-1">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(var(--status-info-rgb),0.1)] text-[var(--status-info)] ml-1">
               {(tier as string) === 'environment' ? 'Dev env' : 'Container'}
             </span>
           );
@@ -261,7 +261,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         <div className="border-t border-current/10">
           <div className="px-3 py-2 bg-[var(--text)]/5">
             <div
-              className={`text-sm ${success ? 'opacity-90' : 'text-red-600 dark:text-red-400 font-medium'}`}
+              className={`text-sm ${success ? 'opacity-90' : 'text-[var(--status-error)] font-medium'}`}
             >
               {output}
             </div>
@@ -274,15 +274,15 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
         <div className="border-t border-current/10">
           <div className="px-3 py-2 bg-[var(--text)]/5">
             <div className="text-xs font-medium opacity-70 mb-1">Changes</div>
-            <pre className="text-xs font-mono overflow-x-auto bg-gray-900 text-gray-100 dark:bg-gray-950 p-2 rounded">
+            <pre className="text-xs font-mono overflow-x-auto bg-[var(--code-block-bg)] text-[var(--code-block-text)] border border-[var(--code-block-border)] p-2 rounded">
               {diffPreview.split('\n').map((line, i) => {
                 let lineClass = 'opacity-60'; // Context lines
                 if (line.startsWith('+')) {
-                  lineClass = 'text-green-400 bg-green-500/10';
+                  lineClass = 'text-[var(--status-success)] bg-[rgba(var(--status-success-rgb),0.1)]';
                 } else if (line.startsWith('-')) {
-                  lineClass = 'text-red-400 bg-red-500/10';
+                  lineClass = 'text-[var(--status-error)] bg-[rgba(var(--status-error-rgb),0.1)]';
                 } else if (line.startsWith('@@')) {
-                  lineClass = 'text-blue-400 opacity-70';
+                  lineClass = 'text-[var(--status-info)] opacity-70';
                 }
                 return (
                   <div key={i} className={lineClass}>
@@ -335,7 +335,7 @@ export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
               )}
             </div>
             <pre
-              className={`text-xs font-mono overflow-x-auto ${success ? 'opacity-80' : 'text-red-600 dark:text-red-400'} ${shouldTruncate && !showFullOutput ? 'max-h-48' : 'max-h-96'} overflow-y-auto`}
+              className={`text-xs font-mono overflow-x-auto p-2 rounded bg-[var(--code-block-bg)] border border-[var(--code-block-border)] ${success ? 'text-[var(--code-block-text)] opacity-80' : 'text-[var(--status-error)]'} ${shouldTruncate && !showFullOutput ? 'max-h-48' : 'max-h-96'} overflow-y-auto`}
             >
               {displayAdditionalOutput.split('\n').map((line, i) => (
                 <div key={i}>

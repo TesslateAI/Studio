@@ -174,6 +174,7 @@ export const PreviewPane = forwardRef<HTMLIFrameElement, PreviewPaneProps>(
               id="preview-iframe"
               src={devServerUrlWithAuth || devServerUrl}
               className="w-full h-full"
+              style={{ colorScheme: 'normal' }}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
               title="Project preview"
             />

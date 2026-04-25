@@ -2329,6 +2329,12 @@ export interface Theme {
   typography: ThemeTypography;
   spacing: ThemeSpacing;
   animation: ThemeAnimation;
+  /**
+   * When true, all border CSS variables resolve to transparent. Lets
+   * any theme adopt the no-border treatment without rewriting every
+   * color value. Toggleable from the theme editor.
+   */
+  borderless?: boolean;
 }
 
 export interface ThemeListItem {

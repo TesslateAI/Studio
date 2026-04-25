@@ -58,7 +58,7 @@ export default function MarketplaceSuccess() {
         className="rounded-2xl shadow-2xl p-8 max-w-md w-full text-center"
         style={{
           backgroundColor: 'var(--surface)',
-          border: '1px solid rgba(255, 107, 0, 0.2)',
+          border: '1px solid var(--border)',
         }}
       >
         {/* Icon */}

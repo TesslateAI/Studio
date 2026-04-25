@@ -301,6 +301,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             ref={iframeRef}
             src={iframeSrc}
             className="w-full h-full border-0"
+            style={{ colorScheme: 'normal' }}
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
             onLoad={handleIframeLoad}
             title="Design Preview"

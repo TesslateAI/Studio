@@ -63,8 +63,11 @@ export default function Chat() {
   // Edit mode
   const [editMode, setEditMode] = useState<EditMode>('ask');
 
+  // Tool calls collapsed by default
+  const [toolCallsCollapsed, setToolCallsCollapsed] = useState(true);
+
   // Sidebar state
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Auto-close sidebar on mobile
   useEffect(() => {
@@ -311,24 +314,26 @@ export default function Chat() {
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
-      <div
-        className={`${isSidebarOpen ? 'fixed inset-y-0 left-0 z-30 md:relative md:inset-auto' : ''}`}
-      >
-        <ChatSessionSidebar
-          sessions={sessions}
-          currentSessionId={currentSessionId}
-          isOpen={isSidebarOpen}
-          onToggle={() => setIsSidebarOpen((v: boolean) => !v)}
-          onSelectSession={(id) => {
-            clearMessages();
-            switchSession(id);
-            if (window.innerWidth < 768) setIsSidebarOpen(false);
-          }}
-          onNewSession={handleNewSession}
-          onRenameSession={renameSession}
-          onDeleteSession={deleteSession}
-        />
-      </div>
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-y-0 left-0 z-30 md:relative md:inset-auto"
+        >
+          <ChatSessionSidebar
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            isOpen={isSidebarOpen}
+            onToggle={() => setIsSidebarOpen((v: boolean) => !v)}
+            onSelectSession={(id) => {
+              clearMessages();
+              switchSession(id);
+              if (window.innerWidth < 768) setIsSidebarOpen(false);
+            }}
+            onNewSession={handleNewSession}
+            onRenameSession={renameSession}
+            onDeleteSession={deleteSession}
+          />
+        </div>
+      )}
 
       {/* Main chat area */}
       <div key={teamSwitchKey} className="flex-1 flex flex-col min-w-0" style={{ animation: 'fade-in 0.25s ease-out' }}>
@@ -340,6 +345,7 @@ export default function Chat() {
           projectName={connectedProjectName}
           onConnectProject={handleConnectProject}
           onDisconnectProject={handleDisconnectProject}
+          onNewSession={handleNewSession}
         />
 
         {isLanding ? (
@@ -366,6 +372,8 @@ export default function Chat() {
                 onModelChange={handleModelChange}
                 currentModelSupportsVision={currentModelSupportsVision}
                 availableSkills={availableSkills}
+                toolCallsCollapsed={toolCallsCollapsed}
+                onToggleToolCallsCollapsed={() => setToolCallsCollapsed((v) => !v)}
                 prefillMessage={landingPrompt}
                 onPrefillConsumed={() => {}}
               />
@@ -391,6 +399,7 @@ export default function Chat() {
               messages={messages}
               isExecuting={isExecuting}
               onApproval={handleApprovalResponse}
+              toolCallsCollapsed={toolCallsCollapsed}
             />
             <div className="flex-shrink-0 border-t border-[var(--border)]">
               <ChatInput
@@ -409,6 +418,8 @@ export default function Chat() {
                 onModelChange={handleModelChange}
                 currentModelSupportsVision={currentModelSupportsVision}
                 availableSkills={availableSkills}
+                toolCallsCollapsed={toolCallsCollapsed}
+                onToggleToolCallsCollapsed={() => setToolCallsCollapsed((v) => !v)}
                 isDocked
               />
             </div>

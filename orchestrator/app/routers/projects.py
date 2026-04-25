@@ -1926,19 +1926,20 @@ async def save_project_file(
             except Exception as docker_error:
                 logger.warning(f"[FILE] ⚠️ Failed to write to shared volume: {docker_error}")
 
-        # 2. Update database record (for version history / backup)
-        result = await db.execute(
-            select(ProjectFile).where(
-                ProjectFile.project_id == project_id, ProjectFile.file_path == file_path
-            )
-        )
-        existing_file = result.scalar_one_or_none()
+        # 2. Update database record (for version history / backup).
+        #
+        # Race-safe via the uq_project_files_project_path unique constraint
+        # plus dialect-native ON CONFLICT DO UPDATE in the helper. Manual
+        # saves, agent saves, and (on supported frontend frameworks) the
+        # design-bridge installer all converge here; the design-bridge case
+        # in particular fires two writes back-to-back during view mount
+        # which used to race the old check-then-insert pattern into
+        # duplicate rows.
+        from ..services.project_files import upsert_project_file
 
-        if existing_file:
-            existing_file.content = content
-        else:
-            new_file = ProjectFile(project_id=project_id, file_path=file_path, content=content)
-            db.add(new_file)
+        await upsert_project_file(
+            db, project_id=project_id, file_path=file_path, content=content
+        )
 
         # Update project's updated_at timestamp
         from datetime import datetime
@@ -5947,6 +5948,13 @@ async def start_all_containers(
 
     await track_project_activity(project.id, db)
 
+    # Source-of-truth refresh: fold any edits to .tesslate/config.json into
+    # the Container graph before we render manifests. Non-blocking — falls
+    # back to existing DB state if the file is missing or invalid.
+    from ..services.config_sync import ensure_config_synced
+
+    await ensure_config_synced(db, project, current_user.id)
+
     try:
         # Get all containers and connections
         # Use selectinload to eagerly load the base relationship to avoid lazy loading errors
@@ -6353,6 +6361,13 @@ async def start_single_container(
             detail="Project is still being provisioned. Please wait for setup to complete.",
         )
 
+    # Source-of-truth refresh: fold any edits to .tesslate/config.json into
+    # the Container graph before we render manifests. Non-blocking — falls
+    # back to existing DB state if the file is missing or invalid.
+    from ..services.config_sync import ensure_config_synced
+
+    await ensure_config_synced(db, project, current_user.id)
+
     # Verify container exists and belongs to project
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
@@ -6698,6 +6713,16 @@ async def _restart_container_background_task(
 
         if not container or container.project_id != project.id:
             raise RuntimeError("Container not found")
+
+        # Source-of-truth refresh: fold any edits to .tesslate/config.json into
+        # the Container graph before we tear down + re-render. Non-blocking.
+        from ..services.config_sync import ensure_config_synced
+
+        await ensure_config_synced(db, project, user_id)
+        # Container row may have been replaced/updated; re-load before use.
+        container = await db.get(Container, container_id)
+        if not container or container.project_id != project.id:
+            raise RuntimeError("Container not found after config sync")
 
         orchestrator = get_orchestrator()
 

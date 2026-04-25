@@ -9,7 +9,6 @@ import { motion } from 'framer-motion';
 import {
   Home,
   FolderOpen,
-  Boxes,
   BookOpen,
   PanelLeft,
   ArrowUp,
@@ -69,12 +68,15 @@ interface NavigationSidebarProps {
   forceVisible?: boolean;
 }
 
-// Library sub-items for dropdown
-// MoodyFace replaces the Agents icon — inherits color via currentColor,
-// blinks gently on desktop, and respects prefers-reduced-motion.
+// Library sub-items for dropdown.
+// MoodyFace replaces the Agents icon. We keep it pinned to the brand
+// orange (var(--primary)) regardless of selection state — the eyes
+// already telegraph activity, so flipping the body color to the sidebar
+// foreground (white in dark mode) drained the personality. Selection is
+// expressed via opacity at the call site instead.
 type SidebarIconProps = { size?: number; className?: string };
 const AgentFaceIcon = ({ size, className }: SidebarIconProps) => (
-  <MoodyFace size={size ?? 14} className={className} animate />
+  <MoodyFace size={size ?? 14} className={className} animate trackPointer />
 );
 
 const LIBRARY_ITEMS: Array<{
@@ -82,7 +84,6 @@ const LIBRARY_ITEMS: Array<{
   label: string;
   icon: ComponentType<SidebarIconProps>;
 }> = [
-  { key: 'apps', label: 'Apps', icon: Boxes },
   { key: 'agents', label: 'Agents', icon: AgentFaceIcon },
   { key: 'bases', label: 'Bases', icon: Rocket },
   { key: 'skills', label: 'Skills', icon: Zap },
@@ -720,7 +721,16 @@ export function NavigationSidebar({
                 }
                 style={!canChat ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
               >
-                <MoodyFace size={16} animate className={iconClass(activePage === 'chat')} />
+                <MoodyFace
+                  size={16}
+                  animate
+                  trackPointer
+                  className={`text-[var(--primary)] transition-opacity ${
+                    activePage === 'chat'
+                      ? 'opacity-100'
+                      : 'opacity-70 group-hover:opacity-100'
+                  }`}
+                />
                 {isExpanded && (
                   <span className={`${labelClass(activePage === 'chat')} flex items-center gap-1`}>
                     Agents
@@ -782,9 +792,13 @@ export function NavigationSidebar({
 
             {/* Library — flyout (#307 follow-up). Hover OR click opens a
                 popover anchored to the right of the sidebar listing all
-                library tabs; the sidebar itself never expands inline. */}
+                library tabs; the sidebar itself never expands inline.
+                The wrapper is `flex flex-col` so the inline-block trigger
+                that Tooltip injects stretches to the sidebar width and
+                the icon centers like every other collapsed-mode item. */}
             <div
               ref={libraryButtonRef}
+              className="flex flex-col"
               onMouseEnter={openLibraryFlyout}
               onMouseLeave={scheduleLibraryClose}
             >
@@ -833,11 +847,13 @@ export function NavigationSidebar({
           </>
         )}
 
-        {/* Builder Section — injected when in builder view */}
-        {builderSection && (
-          <>
-            <div className="h-px bg-[var(--sidebar-border)] my-0.5 mx-3 flex-shrink-0" />
-            {builderSection({
+        {/* Builder Section — injected when in builder view. The render prop
+            may return null (e.g., when expanded the project page wants the
+            sidebar to look identical to the dashboard). Suppress the divider
+            when the section produces no content. */}
+        {builderSection &&
+          (() => {
+            const content = builderSection({
               isExpanded,
               navButtonClass,
               navButtonClassCollapsed,
@@ -847,9 +863,15 @@ export function NavigationSidebar({
               inactiveNavButtonCollapsed,
               inactiveIconClass,
               inactiveLabelClass,
-            })}
-          </>
-        )}
+            });
+            if (!content) return null;
+            return (
+              <>
+                <div className="h-px bg-[var(--sidebar-border)] my-0.5 mx-3 flex-shrink-0" />
+                {content}
+              </>
+            );
+          })()}
 
         {/* Spacer to push bottom items down */}
         <div className="flex-1" />
@@ -946,6 +968,15 @@ export function NavigationSidebar({
             </div>
             {LIBRARY_ITEMS.map(({ key, label, icon: Icon }) => {
               const isActive = activeLibraryTab === key;
+              // The agents row uses the moody face — keep it pinned to the
+              // brand orange and signal selection with opacity, matching
+              // the main sidebar Agents button.
+              const isAgents = key === 'agents';
+              const iconClassName = isAgents
+                ? `text-[var(--primary)] transition-opacity ${isActive ? 'opacity-100' : 'opacity-70'}`
+                : isActive
+                  ? 'text-[var(--text)]'
+                  : 'text-[var(--text-subtle)]';
               return (
                 <button
                   key={key}
@@ -959,10 +990,7 @@ export function NavigationSidebar({
                       : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                   }`}
                 >
-                  <Icon
-                    size={14}
-                    className={isActive ? 'text-[var(--text)]' : 'text-[var(--text-subtle)]'}
-                  />
+                  <Icon size={14} className={iconClassName} />
                   <span className="truncate">{label}</span>
                 </button>
               );

@@ -210,6 +210,7 @@ export function IframeAppHost({
       sandbox="allow-scripts allow-same-origin allow-forms"
       title="Tesslate App"
       className="w-full h-full border-0 rounded-xl bg-white"
+      style={{ colorScheme: 'normal' }}
       data-testid="iframe-app-host"
     />
   );

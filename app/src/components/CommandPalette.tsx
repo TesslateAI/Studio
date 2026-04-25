@@ -10,8 +10,6 @@ import {
   Storefront,
   Books,
   Gear,
-  Sun,
-  Moon,
   Plus,
   ArrowsClockwise,
   Clock,
@@ -25,7 +23,6 @@ import {
   TreeStructure,
   X,
 } from '@phosphor-icons/react';
-import { useTheme } from '../theme/ThemeContext';
 import { useCommands, type CommandHandlers } from '../contexts/CommandContext';
 import { getContextFromPath, modKey, type AppContext } from '../lib/keyboard-registry';
 
@@ -49,7 +46,6 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
   const [search, setSearch] = useState('');
   const location = useLocation();
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
   const { executeCommand, isCommandAvailable } = useCommands();
 
   // Track recent items in localStorage
@@ -147,16 +143,6 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
       },
 
       // Actions
-      {
-        id: 'toggle-theme',
-        label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-        icon: theme === 'dark' ? <Sun size={18} weight="fill" /> : <Moon size={18} weight="fill" />,
-        shortcut: [modKey, 'T'],
-        action: toggleTheme,
-        context: 'global',
-        keywords: ['dark', 'light', 'mode', 'appearance'],
-        group: 'Actions',
-      },
       {
         id: 'show-shortcuts',
         label: 'Show Keyboard Shortcuts',
@@ -291,7 +277,7 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
     ];
 
     return commands;
-  }, [navigate, theme, toggleTheme, onShowShortcuts, executeCommand]);
+  }, [navigate, onShowShortcuts, executeCommand]);
 
   // Map command IDs to their CommandContext handler names
   const commandToHandlerMap: Record<string, string> = useMemo(
@@ -407,39 +393,43 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
         aria-hidden="true"
       />
 
-      {/* Modal */}
+      {/* Modal — floating panel treatment: theme tokens, hairline border,
+          no shadow. Renders identically across light/dark/all theme presets
+          because every color resolves through CSS variables that the active
+          theme rebinds. */}
       <div className="fixed top-[15%] left-1/2 -translate-x-1/2 w-full max-w-xl px-4">
         <Command
-          className="bg-[var(--surface)] border border-white/10 rounded-xl shadow-2xl overflow-hidden"
+          className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden"
           loop
         >
-          {/* Search Input */}
-          <div className="flex items-center gap-3 border-b border-white/10 px-4">
-            <MagnifyingGlass size={20} className="text-white/40 shrink-0" />
+          {/* Search row — no border on focus, no ring; the row itself owns
+              the divider so the input stays visually flat. */}
+          <div className="flex items-center gap-3 border-b border-[var(--border)] px-4">
+            <MagnifyingGlass size={20} className="text-[var(--text-subtle)] shrink-0" />
             <Command.Input
               value={search}
               onValueChange={setSearch}
               placeholder="Type a command or search..."
-              className="flex-1 bg-transparent py-4 text-white text-base outline-none focus-visible:outline-none placeholder-white/40"
+              className="flex-1 bg-transparent py-4 text-[var(--text)] text-base outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus:border-transparent placeholder:text-[var(--text-subtle)] border-none shadow-none"
               autoFocus
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="p-1 rounded hover:bg-white/10 transition-colors"
+                className="p-1 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] transition-colors"
                 aria-label="Clear search"
               >
-                <X size={16} className="text-white/40" />
+                <X size={16} className="text-[var(--text-subtle)]" />
               </button>
             )}
-            <kbd className="hidden sm:flex px-2 py-1 text-xs bg-white/10 rounded text-white/50 font-mono">
+            <kbd className="hidden sm:flex px-2 py-1 text-xs bg-[var(--surface-hover)] rounded-[var(--radius-small)] text-[var(--text-muted)] font-mono">
               ESC
             </kbd>
           </div>
 
           {/* Results */}
           <Command.List className="max-h-[400px] overflow-y-auto p-2">
-            <Command.Empty className="py-8 text-center text-white/40">
+            <Command.Empty className="py-8 text-center text-[var(--text-subtle)]">
               No results found.
             </Command.Empty>
 
@@ -447,7 +437,7 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
             {recentCommands.length > 0 && !search && (
               <Command.Group
                 heading={
-                  <span className="flex items-center gap-2 text-xs font-medium text-white/50 uppercase tracking-wider px-2 py-2">
+                  <span className="flex items-center gap-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider px-2 py-2">
                     <Clock size={14} />
                     Recent
                   </span>
@@ -469,7 +459,7 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
               <Command.Group
                 key={group}
                 heading={
-                  <span className="text-xs font-medium text-white/50 uppercase tracking-wider px-2 py-2">
+                  <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider px-2 py-2">
                     {group}
                   </span>
                 }
@@ -482,20 +472,20 @@ export function CommandPalette({ onShowShortcuts }: CommandPaletteProps) {
           </Command.List>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-t border-white/10 text-xs text-white/40">
+          <div className="flex items-center justify-between px-4 py-2.5 border-t border-[var(--border)] text-xs text-[var(--text-subtle)]">
             <div className="flex items-center gap-4">
               <span className="flex items-center gap-1.5">
-                <kbd className="px-1.5 py-0.5 bg-white/10 rounded font-mono">↑</kbd>
-                <kbd className="px-1.5 py-0.5 bg-white/10 rounded font-mono">↓</kbd>
+                <kbd className="px-1.5 py-0.5 bg-[var(--surface-hover)] rounded-[var(--radius-small)] font-mono">↑</kbd>
+                <kbd className="px-1.5 py-0.5 bg-[var(--surface-hover)] rounded-[var(--radius-small)] font-mono">↓</kbd>
                 <span>Navigate</span>
               </span>
               <span className="flex items-center gap-1.5">
-                <kbd className="px-1.5 py-0.5 bg-white/10 rounded font-mono">↵</kbd>
+                <kbd className="px-1.5 py-0.5 bg-[var(--surface-hover)] rounded-[var(--radius-small)] font-mono">↵</kbd>
                 <span>Select</span>
               </span>
             </div>
             <span className="flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 bg-white/10 rounded font-mono">ESC</kbd>
+              <kbd className="px-1.5 py-0.5 bg-[var(--surface-hover)] rounded-[var(--radius-small)] font-mono">ESC</kbd>
               <span>Close</span>
             </span>
           </div>
@@ -519,11 +509,11 @@ function CommandItem({
     <Command.Item
       value={`${valuePrefix}${command.id}`}
       onSelect={() => onSelect(command)}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer
-                 text-white/80 transition-colors
-                 data-[selected=true]:bg-[var(--primary)] data-[selected=true]:text-white"
+      className="flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-small)] cursor-pointer
+                 text-[var(--text)] transition-colors
+                 data-[selected=true]:bg-[var(--surface-hover)] data-[selected=true]:text-[var(--text)]"
     >
-      <span className="shrink-0 w-6 h-6 flex items-center justify-center text-white/60 data-[selected=true]:text-white">
+      <span className="shrink-0 w-6 h-6 flex items-center justify-center text-[var(--text-muted)] data-[selected=true]:text-[var(--text)]">
         {command.icon}
       </span>
       <span className="flex-1 truncate">{command.label}</span>
@@ -532,7 +522,7 @@ function CommandItem({
           {command.shortcut.map((key, i) => (
             <kbd
               key={i}
-              className="px-1.5 py-0.5 text-xs bg-white/10 rounded text-white/50 font-mono"
+              className="px-1.5 py-0.5 text-xs bg-[var(--surface-hover)] rounded-[var(--radius-small)] text-[var(--text-muted)] font-mono"
             >
               {key}
             </kbd>

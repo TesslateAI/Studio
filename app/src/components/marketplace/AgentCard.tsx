@@ -12,7 +12,7 @@ export interface MarketplaceItem {
   description: string;
   long_description?: string;
   category: string;
-  item_type: 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
+  item_type: 'agent' | 'base' | 'theme' | 'skill' | 'mcp_server';
   mode?: string;
   agent_type?: string;
   model?: string;
@@ -140,7 +140,7 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
       {(['primary', 'background', 'surface', 'accent'] as const).map((key) => (
         <div
           key={key}
-          className="w-5 h-5 rounded-md border border-black/20"
+          className="w-5 h-5 rounded-md border border-[var(--border)]"
           style={{ backgroundColor: item.color_swatches?.[key] || '#333' }}
           title={key.charAt(0).toUpperCase() + key.slice(1)}
         />

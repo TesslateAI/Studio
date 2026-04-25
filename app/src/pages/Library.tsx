@@ -23,7 +23,7 @@ import type { LibraryAgent } from './library/types';
 import { LoadingSpinner } from '../components/PulsingGridSpinner';
 import { MobileMenu } from '../components/ui';
 import { type CustomProvider } from '../components/settings/CustomProviderComponents';
-import { marketplaceApi, secretsApi, billingApi, appInstallsApi, type AppInstance } from '../lib/api';
+import { marketplaceApi, secretsApi, billingApi } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useTheme } from '../theme/ThemeContext';
 
@@ -51,7 +51,7 @@ interface Provider {
   api_type?: string;
 }
 
-type TabType = 'apps' | 'agents' | 'bases' | 'skills' | 'mcp_servers' | 'themes' | 'models';
+type TabType = 'agents' | 'bases' | 'skills' | 'mcp_servers' | 'themes' | 'models';
 
 interface ModelInfo {
   id: string;
@@ -132,7 +132,7 @@ export default function Library() {
       ? 'models'
       : tabParam === 'connectors'
         ? 'mcp_servers'
-        : (tabParam as TabType) || 'apps';
+        : (tabParam as TabType) || 'agents';
   const [activeTab, setActiveTab] = useState<TabType>(normalizedTab);
 
   // Sync activeTab when URL search params change (e.g. sidebar navigation)
@@ -148,7 +148,6 @@ export default function Library() {
   const [byokEnabled, setByokEnabled] = useState<boolean | null>(null);
   const [skills, setSkills] = useState<LibrarySkill[]>([]);
   const [mcpServers, setMcpServers] = useState<InstalledMcpServer[]>([]);
-  const [installedApps, setInstalledApps] = useState<AppInstance[]>([]);
   const logout = () => {
     localStorage.removeItem('token');
     navigate('/login');
@@ -219,10 +218,7 @@ export default function Library() {
   const loadData = async () => {
     setLoading(true);
     try {
-      if (activeTab === 'apps') {
-        await loadInstalledApps();
-        setLoading(false);
-      } else if (activeTab === 'agents') {
+      if (activeTab === 'agents') {
         await loadLibraryAgents();
         setLoading(false);
       } else if (activeTab === 'bases') {
@@ -253,16 +249,6 @@ export default function Library() {
       }
     } catch {
       setLoading(false);
-    }
-  };
-
-  const loadInstalledApps = async () => {
-    try {
-      const data = await appInstallsApi.listMine({ limit: 200 });
-      setInstalledApps((data.items || []).filter((a) => a.state === 'installed'));
-    } catch (err) {
-      console.error('Failed to load installed apps:', err);
-      toast.error('Failed to load apps');
     }
   };
 
@@ -470,51 +456,6 @@ export default function Library() {
         className="flex-1 overflow-hidden flex flex-col"
         style={{ animation: 'fade-in 0.25s ease-out' }}
       >
-        {activeTab === 'apps' && (
-          <div className="flex-1 overflow-y-auto p-4">
-            {installedApps.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-                <p className="text-sm text-[var(--text-muted)]">No apps installed yet.</p>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => navigate('/apps')}
-                >
-                  Browse Apps Marketplace
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {installedApps.map((inst) => (
-                  <div
-                    key={inst.id}
-                    onDoubleClick={() => navigate(`/apps/installed/${inst.id}/workspace`)}
-                    className="flex flex-col gap-3 p-4 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] transition cursor-pointer"
-                    title="Double-click to run"
-                  >
-                    <div>
-                      <div className="text-sm font-semibold text-[var(--text)] mb-1">
-                        {inst.app_name || inst.app_slug || 'App'}
-                      </div>
-                      <div className="text-xs text-[var(--text-muted)]">
-                        v{inst.app_version || '?'} · installed{' '}
-                        {inst.installed_at ? new Date(inst.installed_at).toLocaleDateString() : '—'}
-                      </div>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/apps/installed/${inst.id}/workspace`);
-                      }}
-                      className="btn btn-primary btn-sm self-start"
-                    >
-                      Run
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
         {activeTab === 'agents' && (
           <AgentsPage
             agents={agents}

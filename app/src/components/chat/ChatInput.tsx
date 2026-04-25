@@ -771,34 +771,36 @@ export function ChatInput({
       {showSettings && (
         <div ref={settingsRef} className="absolute bottom-full right-0 mb-2 mr-3">
           <div className="bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1.5 shadow-lg min-w-[200px]">
-            {/* Compact-only items: collapse toggle + commands */}
+            {/* Tool calls collapse toggle — always shown */}
+            {onToggleToolCallsCollapsed && (
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleToolCallsCollapsed();
+                  setShowSettings(false);
+                }}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
+              >
+                <span
+                  className={
+                    toolCallsCollapsed ? 'text-[var(--primary)]' : 'text-[var(--text)]/60'
+                  }
+                >
+                  {toolCallsCollapsed ? (
+                    <ArrowsOutSimple size={16} weight="bold" />
+                  ) : (
+                    <ArrowsInSimple size={16} weight="bold" />
+                  )}
+                </span>
+                <span className="text-[var(--text)] text-sm">
+                  {toolCallsCollapsed ? 'Expand Tool Calls' : 'Collapse Tool Calls'}
+                </span>
+              </button>
+            )}
+
+            {/* Compact-only: commands shortcut */}
             {isCompact && (
               <>
-                {onToggleToolCallsCollapsed && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onToggleToolCallsCollapsed();
-                      setShowSettings(false);
-                    }}
-                    className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
-                  >
-                    <span
-                      className={
-                        toolCallsCollapsed ? 'text-[var(--primary)]' : 'text-[var(--text)]/60'
-                      }
-                    >
-                      {toolCallsCollapsed ? (
-                        <ArrowsOutSimple size={16} weight="bold" />
-                      ) : (
-                        <ArrowsInSimple size={16} weight="bold" />
-                      )}
-                    </span>
-                    <span className="text-[var(--text)] text-sm">
-                      {toolCallsCollapsed ? 'Expand Tool Calls' : 'Collapse Tool Calls'}
-                    </span>
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -971,25 +973,9 @@ export function ChatInput({
             </div>
           )}
 
-          {/* Desktop: 3 individual buttons */}
+          {/* Desktop: 2 individual buttons */}
           {!isCompact && (
             <>
-              {/* Collapse tool calls */}
-              {onToggleToolCallsCollapsed && (
-                <button
-                  type="button"
-                  onClick={onToggleToolCallsCollapsed}
-                  className={`btn btn-icon btn-sm ${toolCallsCollapsed ? 'btn-active' : ''}`}
-                  title={toolCallsCollapsed ? 'Expand tool calls' : 'Collapse tool calls'}
-                >
-                  {toolCallsCollapsed ? (
-                    <ArrowsOutSimple size={14} weight="bold" />
-                  ) : (
-                    <ArrowsInSimple size={14} weight="bold" />
-                  )}
-                </button>
-              )}
-
               {/* Settings gear */}
               <button
                 ref={settingsButtonRef}

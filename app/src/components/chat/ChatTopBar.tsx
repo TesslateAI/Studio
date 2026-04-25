@@ -1,5 +1,4 @@
-import { Link } from 'react-router-dom';
-import { PanelLeft, House } from 'lucide-react';
+import { PanelLeft, Plus } from 'lucide-react';
 import { ProjectConnector } from './ProjectConnector';
 
 interface ChatTopBarProps {
@@ -10,6 +9,7 @@ interface ChatTopBarProps {
   projectName: string | null;
   onConnectProject: (projectId: string, projectName: string) => void;
   onDisconnectProject: () => void;
+  onNewSession: () => void;
 }
 
 export function ChatTopBar({
@@ -20,6 +20,7 @@ export function ChatTopBar({
   projectName,
   onConnectProject,
   onDisconnectProject,
+  onNewSession,
 }: ChatTopBarProps) {
   return (
     <div
@@ -28,13 +29,13 @@ export function ChatTopBar({
     >
       {/* Left: sidebar toggle + title */}
       <div className="flex items-center gap-2 min-w-0">
-        <Link
-          to="/dashboard"
+        <button
+          onClick={onNewSession}
           className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
-          aria-label="Back to Dashboard"
+          aria-label="New chat"
         >
-          <House size={14} />
-        </Link>
+          <Plus size={14} />
+        </button>
         {!isSidebarOpen && (
           <button
             onClick={onToggleSidebar}

@@ -253,7 +253,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
     return (
       <div className="h-full flex flex-col bg-[var(--background)]">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-white/10">
+        <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-[var(--border)]">
           <div className="flex items-center gap-2">
             {/* Mobile Directory Toggle */}
             <button
@@ -274,12 +274,12 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
             className={`
               ${showDirectorySidebar ? 'absolute inset-y-0 left-0 z-10' : 'hidden'}
               md:relative md:block
-              w-64 border-r border-white/10 overflow-y-auto
+              w-64 border-r border-[var(--border)] overflow-y-auto
               bg-[var(--surface)] md:bg-transparent
             `}
           >
             {/* Mobile Close Button */}
-            <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-white/10">
+            <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
               <h3 className="text-sm font-semibold text-gray-300">Directories</h3>
               <button
                 onClick={() => setShowDirectorySidebar(false)}
@@ -313,7 +313,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
           <div className="flex-1 flex items-center justify-center p-4 md:p-8">
             <div className="text-center max-w-md">
               <div className="mb-6 flex justify-center">
-                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-orange-500/20 to-blue-500/20 flex items-center justify-center backdrop-blur-sm border border-white/15">
+                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-orange-500/20 to-blue-500/20 flex items-center justify-center backdrop-blur-sm border border-[var(--border)]">
                   <FolderOpen size={48} weight="duotone" className="text-orange-500" />
                 </div>
               </div>
@@ -331,7 +331,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
                     <button
                       key={dir}
                       onClick={() => handleCreateDirectory(dir.replace('/', ''))}
-                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-gray-300 border border-white/10 hover:border-orange-500/50 transition-all"
+                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-gray-300 border border-[var(--border)] hover:border-[var(--border-hover)] transition-all"
                     >
                       {dir}
                     </button>
@@ -348,7 +348,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
   return (
     <div className="h-full flex flex-col bg-[var(--background)]">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-white/10">
+      <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-[var(--border)]">
         <div className="flex items-center gap-2 md:gap-4 flex-1">
           {/* Mobile Directory Toggle */}
           <button
@@ -371,7 +371,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
               placeholder="Search assets..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-orange-500/50"
+              className="w-full pl-10 pr-4 py-2 bg-white/5 border border-[var(--border)] rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[var(--border-hover)]"
             />
           </div>
 
@@ -425,12 +425,12 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
           className={`
             ${showDirectorySidebar ? 'absolute inset-y-0 left-0 z-10' : 'hidden'}
             md:relative md:block
-            w-64 md:w-64 border-r border-white/10 overflow-y-auto
+            w-64 md:w-64 border-r border-[var(--border)] overflow-y-auto
             bg-[var(--surface)] md:bg-transparent
           `}
         >
           {/* Mobile Close Button */}
-          <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-white/10">
+          <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
             <h3 className="text-sm font-semibold text-gray-300">Directories</h3>
             <button
               onClick={() => setShowDirectorySidebar(false)}
@@ -477,7 +477,7 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
                 <div className="flex items-center justify-center h-64 text-center">
                   <div>
                     <div className="mb-4 flex justify-center">
-                      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500/10 to-blue-500/10 flex items-center justify-center border border-white/10">
+                      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500/10 to-blue-500/10 flex items-center justify-center border border-[var(--border)]">
                         <UploadSimple size={40} weight="duotone" className="text-gray-500" />
                       </div>
                     </div>
@@ -590,13 +590,13 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
       {/* Rename Modal */}
       {showRenameModal && selectedAsset && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--surface)] rounded-2xl border border-white/10 max-w-md w-full p-6">
+          <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] max-w-md w-full p-6">
             <h2 className="text-xl font-bold text-white mb-4">Rename Asset</h2>
             <input
               type="text"
               value={newFilename}
               onChange={(e) => setNewFilename(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-gray-200 focus:outline-none focus:border-orange-500/50 mb-4"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--border)] rounded-lg text-gray-200 focus:outline-none focus:border-[var(--border-hover)] mb-4"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleRename();
               }}
@@ -626,13 +626,13 @@ export function AssetsPanel({ projectSlug, readOnly = false }: AssetsPanelProps)
       {/* Move Modal */}
       {showMoveModal && selectedAsset && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-[var(--surface)] rounded-2xl border border-white/10 max-w-md w-full p-6">
+          <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border)] max-w-md w-full p-6">
             <h2 className="text-xl font-bold text-white mb-4">Move Asset</h2>
             <p className="text-gray-400 text-sm mb-4">Select target directory:</p>
             <select
               value={targetDirectory}
               onChange={(e) => setTargetDirectory(e.target.value)}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-gray-200 focus:outline-none focus:border-orange-500/50 mb-4"
+              className="w-full px-4 py-2 bg-white/5 border border-[var(--border)] rounded-lg text-gray-200 focus:outline-none focus:border-[var(--border-hover)] mb-4"
             >
               <option value="">-- Select Directory --</option>
               {directories
