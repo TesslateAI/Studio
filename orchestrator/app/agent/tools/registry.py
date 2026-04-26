@@ -219,6 +219,8 @@ class ToolRegistry:
         "kanban_move": "kanban.edit",
         "kanban_update": "kanban.edit",
         "kanban_comment": "kanban.edit",
+        # App actions — Phase 1 cross-app primitive
+        "invoke_app_action": "app.invoke",
     }
 
     # Tools that mutate state or reach out to the network — require approval
@@ -238,6 +240,11 @@ class ToolRegistry:
             "container_start",
             "container_stop",
             "container_restart",  # Container lifecycle (state-mutating)
+            # App actions — invoke_app_action runs an installed app's
+            # handler (HTTP POST / k8s Job / hosted agent), can mutate
+            # remote state and consume credits. Requires approval in
+            # ask mode and is blocked in plan mode.
+            "invoke_app_action",
             # 'todo_write', 'save_plan', 'update_plan' excluded - safe planning operations
         }
     )
@@ -396,6 +403,7 @@ def get_tool_registry() -> ToolRegistry:
 
 def _register_all_tools(registry: ToolRegistry):
     """Register all essential tools from modular structure."""
+    from .app_ops import register_all_app_ops_tools
     from .delegation_ops import register_delegation_ops_tools
     from .file_ops import register_all_file_tools
     from .git_ops import register_git_ops_tools
@@ -432,6 +440,8 @@ def _register_all_tools(registry: ToolRegistry):
     register_all_skill_tools(registry)
     # Node config ops: request_node_config, run_with_secrets
     register_all_node_config_tools(registry)
+    # App ops: invoke_app_action — call typed actions on installed Tesslate Apps
+    register_all_app_ops_tools(registry)
 
     logger.info(f"Registered {len(registry._tools)} tools total")
 

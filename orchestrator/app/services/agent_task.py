@@ -72,6 +72,19 @@ class AgentTaskPayload:
     # Desktop multi-agent ticket tracking (None = not ticket-bound)
     agent_task_id: str | None = None  # AgentTask UUID; worker atomically claims it on pickup
 
+    # Automation Runtime (Phase 1) — these flow through dispatcher.py when an
+    # AutomationRun spawns an agent.run action. Phase 1 just plumbs them
+    # through the worker (logged for traceability); Phase 2 wires the
+    # ContractGate / spend attribution / pause-for-approval semantics on top.
+    # Legacy callers (chat.py, channels, schedules, external_agent) leave
+    # these unset; ``from_dict`` silently accepts dicts without these keys.
+    automation_run_id: str | None = None  # AutomationRun UUID this invocation belongs to
+    automation_id: str | None = None      # AutomationDefinition UUID
+    contract: dict | None = None          # JSONB contract (allowed_tools, max_compute_tier, on_breach, ...)
+    trigger_kind: str | None = None       # e.g., "manual", "cron", "webhook", "app_event"
+    trigger_payload: dict | None = None   # the original event payload that fired the run
+    trigger_event_id: str | None = None   # AutomationEvent UUID
+
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""
         return asdict(self)

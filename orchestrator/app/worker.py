@@ -351,6 +351,21 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
     logger.info(f"[WORKER] Starting agent task {task_id} for project {project_id}")
 
+    # Phase 1 traceability: log the automation context if the dispatcher
+    # enqueued us. Phase 2 wires ContractGate enforcement; here we just
+    # surface the binding so logs/dashboards can correlate runs.
+    if payload.automation_run_id:
+        logger.info(
+            "[WORKER] task=%s bound to automation_run=%s automation=%s "
+            "trigger_kind=%s trigger_event=%s contract_keys=%s",
+            task_id,
+            payload.automation_run_id,
+            payload.automation_id,
+            payload.trigger_kind,
+            payload.trigger_event_id,
+            list((payload.contract or {}).keys()),
+        )
+
     async with AsyncSessionLocal() as db:
         try:
             # 0. Atomic ticket checkout (desktop multi-agent orchestration)
@@ -687,6 +702,16 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "active_compute_pod": project.active_compute_pod if project else None,
                 "environment_status": project.environment_status if project else None,
                 "containers": _tier_containers,
+                # Phase 1: forward automation binding into the agent context so
+                # tools / future ContractGate (Phase 2) can read it. Always
+                # present (None for non-automation invocations) so consumers
+                # can use a uniform ``context.get("automation_run_id")`` check.
+                "automation_run_id": payload.automation_run_id,
+                "automation_id": payload.automation_id,
+                "contract": payload.contract,
+                "trigger_kind": payload.trigger_kind,
+                "trigger_payload": payload.trigger_payload,
+                "trigger_event_id": payload.trigger_event_id,
             }
 
             # Inject MCP server configs so adapter executors can connect per-call
@@ -1154,6 +1179,57 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     project_id=payload.project_id or None,
                     task_id=task_id,
                 )
+
+
+async def dispatch_automation_task(
+    ctx: dict,
+    automation_id_str: str,
+    event_id_str: str,
+    worker_id: str,
+) -> dict:
+    """ARQ wrapper around ``services.automations.dispatcher.dispatch_automation``.
+
+    Idempotent — safe to enqueue multiple times for the same
+    ``(automation_id, event_id)`` pair. The dispatcher's internal status
+    branch table refuses to re-execute terminal/in-flight runs, so duplicate
+    deliveries from ARQ retries collapse to no-ops.
+
+    The dispatcher manages its own commits/rollbacks (Phase A through D each
+    end with ``await db.commit()``); we only own the session lifecycle and a
+    last-resort rollback if the dispatcher itself raises before its final
+    commit. Re-raise on failure so ARQ's ``max_tries``/backoff applies.
+    """
+    from .database import AsyncSessionLocal
+    from .services.automations.dispatcher import dispatch_automation
+
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await dispatch_automation(
+                db,
+                automation_id=UUID(automation_id_str),
+                event_id=UUID(event_id_str),
+                worker_id=worker_id,
+            )
+        except Exception:
+            logger.exception(
+                "[WORKER] dispatch_automation_task failed automation=%s event=%s",
+                automation_id_str,
+                event_id_str,
+            )
+            # Best-effort rollback in case the dispatcher raised mid-transaction
+            # before its own commit. Suppressed because the session may already
+            # be in an aborted/closed state.
+            with contextlib.suppress(Exception):
+                await db.rollback()
+            raise
+
+        status_value = result.status.value if hasattr(result.status, "value") else str(result.status)
+        return {
+            "run_id": str(result.run_id),
+            "status": status_value,
+            "run_status": result.run_status,
+            "reason": result.reason,
+        }
 
 
 async def send_webhook_callback(ctx: dict, url: str, payload: dict):
@@ -1728,6 +1804,7 @@ class WorkerSettings:
 
     functions = [
         execute_agent_task,
+        dispatch_automation_task,
         send_webhook_callback,
         reap_idle_session_keys,
         settle_invocation_key,

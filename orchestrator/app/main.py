@@ -23,6 +23,7 @@ from .routers import (
     admin_marketplace,
     agent,
     agents,
+    app_actions,
     app_billing,
     app_bundles,
     app_installs,
@@ -34,6 +35,7 @@ from .routers import (
     app_versions,
     app_yanks,
     auth,
+    automations,
     billing,
     channels,
     chat,
@@ -1248,6 +1250,10 @@ app.include_router(
 )  # /api/app-instances/{id}/trigger/{name} — HMAC auth
 app.include_router(admin_marketplace.router, prefix="/api/admin-marketplace", tags=["apps:admin"])
 app.include_router(app_bundles.router, prefix="/api/app-bundles", tags=["apps:bundles"])
+
+# --- Automation Runtime + typed App Actions (Phase 1) ----------------------
+app.include_router(automations.router)  # /api/automations - definitions, runs, artifacts
+app.include_router(app_actions.router)  # /api/apps/{instance}/actions/{name}
 
 # Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
 try:
