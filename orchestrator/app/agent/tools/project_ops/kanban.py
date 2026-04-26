@@ -900,6 +900,10 @@ def register_kanban_tools(registry):
             category=ToolCategory.PROJECT,
             parameters=parameters,
             executor=kanban_executor,
+            # Action + fields in, board/task dict out — JSON-clean.
+            state_serializable=True,
+            # KanbanBoard/Task DB rows; no in-tool persistent state.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "kanban", "parameters": {"action": "get_board"}}',
                 '{"tool_name": "kanban", "parameters": {"action": "create_task", "title": "Fix auth bug", "column": "To Do", "priority": "high", "point_value": 5}}',

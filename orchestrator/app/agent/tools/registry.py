@@ -14,6 +14,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+# Sentinel used to detect Tool instances that omit the required state-shape
+# annotations. Required because `Tool` is a dataclass instance (not a class
+# hierarchy), so we enforce annotations at construction time via __post_init__
+# instead of via a metaclass on a base class.
+#
+# This is the dataclass-pattern equivalent of the plan's `_ToolStateMeta`
+# metaclass: every Tool MUST declare its serialization story up front. See
+# Phase 1 §"Tool-state CI enforcement" in
+# /Users/smirk/.claude/plans/ultrathink-i-want-to-glittery-pond.md
+_TOOL_STATE_UNSET: Any = object()
+
+
 class ToolCategory(StrEnum):
     """Tool categories for organization."""
 
@@ -41,8 +53,26 @@ class Tool:
         parameters: JSON schema for parameters
         executor: Async function that executes the tool
         category: Tool category
+        state_serializable: Phase 2/Phase 6 checkpoint can serialize this
+            tool's input + output + partial state to JSON. Tools with
+            ``state_serializable=False`` opt out of mid-loop checkpointing
+            and force the run to either ``hard_stop`` on an approval
+            boundary or fall back to the per-pool wait-cap.
+        holds_external_state: Tool keeps state outside the agent run
+            (open sockets, MCP streams, persistent shells, PTYs). Used by
+            the Phase 2 non-blocking HITL pattern to decide whether the
+            in-flight tool can be cleanly cancelled or must be rolled back.
         examples: Example usage patterns
         system_prompt: Optional additional instructions for this tool
+
+    Enforcement:
+        Both ``state_serializable`` and ``holds_external_state`` are required
+        and validated in ``__post_init__``. Construction raises ``TypeError``
+        if either is omitted or is not a ``bool``. This is the dataclass-
+        instance equivalent of the metaclass enforcement described in the
+        Phase 1 plan; ``orchestrator/tests/agent/test_tool_annotations.py``
+        re-asserts the invariant at CI time across every registered tool so
+        new tools added in any future phase MUST declare or break the build.
     """
 
     name: str
@@ -50,8 +80,30 @@ class Tool:
     parameters: dict[str, Any]
     executor: Callable
     category: ToolCategory
+    state_serializable: bool = _TOOL_STATE_UNSET
+    holds_external_state: bool = _TOOL_STATE_UNSET
     examples: list[str] = field(default_factory=list)
     system_prompt: str = ""
+
+    def __post_init__(self):
+        # Enforce the Phase 1 tool-state annotation contract at construction
+        # time. Mirrors the plan's _ToolStateMeta semantics for the dataclass
+        # registration pattern actually used by this codebase.
+        for attr in ("state_serializable", "holds_external_state"):
+            value = getattr(self, attr)
+            if value is _TOOL_STATE_UNSET:
+                raise TypeError(
+                    f"Tool '{self.name}' must declare '{attr}: bool'. "
+                    f"Required for Phase 2 non-blocking HITL and Phase 6 "
+                    f"checkpointing — see Phase 1 §'Tool-state CI enforcement' "
+                    f"in the OpenSail Automation Runtime plan. Add a one-line "
+                    f"comment justifying the value."
+                )
+            if not isinstance(value, bool):
+                raise TypeError(
+                    f"Tool '{self.name}' attribute '{attr}' must be a bool, "
+                    f"got {type(value).__name__}."
+                )
 
     def to_prompt_format(self) -> str:
         """Convert tool to format suitable for LLM system prompt."""

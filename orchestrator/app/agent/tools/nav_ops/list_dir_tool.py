@@ -268,6 +268,10 @@ def register_list_dir_tool(registry) -> None:
             },
             executor=list_dir_tool,
             category=ToolCategory.NAV_OPS,
+            # Path + paging in, list of entries dict out — JSON-clean.
+            state_serializable=True,
+            # Stateless directory listing.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "list_dir", "parameters": {"dir_path": "."}}',
                 '{"tool_name": "list_dir", "parameters": {"dir_path": "src", "depth": 3, "limit": 50}}',

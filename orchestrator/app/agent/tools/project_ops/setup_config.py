@@ -128,6 +128,10 @@ def register_setup_config_tool(registry):
             category=ToolCategory.PROJECT,
             parameters=_PARAMETERS,
             executor=apply_setup_config_executor,
+            # Config dict in, container_ids dict out — JSON-clean.
+            state_serializable=True,
+            # Atomic DB+filesystem write; no in-tool persistent handle.
+            holds_external_state=False,
             examples=[
                 (
                     '{"tool_name": "apply_setup_config", "parameters": {"config": {'

@@ -263,6 +263,10 @@ def register_git_diff_tool(registry) -> None:
             },
             executor=git_diff_tool,
             category=ToolCategory.GIT_OPS,
+            # Diff filter params in, unified diff text out — JSON-clean.
+            state_serializable=True,
+            # Read-only git invocation.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "git_diff", "parameters": {}}',
                 '{"tool_name": "git_diff", "parameters": {"staged": true}}',

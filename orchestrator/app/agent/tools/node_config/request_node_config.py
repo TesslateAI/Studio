@@ -473,6 +473,12 @@ def register_node_config_tool(registry) -> None:
                 "required": ["node_name"],
             },
             executor=request_node_config_executor,
+            # Node spec in, non-secret config map dict out — JSON-clean.
+            state_serializable=True,
+            # Pauses on a DB-backed pending-input row; the wait state lives
+            # in the approval/HITL surface, not in this tool. Phase 2 HITL
+            # may treat this specially but the tool itself is checkpointable.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "request_node_config", "parameters": {"node_name": "supabase", "preset": "supabase"}}',
                 '{"tool_name": "request_node_config", "parameters": {"node_name": "payments", "preset": "rest_api", "field_overrides": [{"key": "PAYMENTS_API_KEY", "label": "Payments API Key", "type": "secret", "is_secret": true, "required": true}]}}',

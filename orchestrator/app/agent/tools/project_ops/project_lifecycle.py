@@ -194,6 +194,10 @@ def register_project_lifecycle_tools(registry):
             category=ToolCategory.PROJECT,
             parameters=_EMPTY_PARAMS,
             executor=_project_start_executor,
+            # No params in, status+container_count dict out — JSON-clean.
+            state_serializable=True,
+            # Synchronous orchestrator project bring-up; no in-tool handle.
+            holds_external_state=False,
             examples=['{"tool_name": "project_start", "parameters": {}}'],
         )
     )
@@ -208,6 +212,10 @@ def register_project_lifecycle_tools(registry):
             category=ToolCategory.PROJECT,
             parameters=_EMPTY_PARAMS,
             executor=_project_stop_executor,
+            # No params in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Synchronous orchestrator teardown; no in-tool handle retained.
+            holds_external_state=False,
             examples=['{"tool_name": "project_stop", "parameters": {}}'],
         )
     )
@@ -222,6 +230,10 @@ def register_project_lifecycle_tools(registry):
             category=ToolCategory.PROJECT,
             parameters=_EMPTY_PARAMS,
             executor=_project_restart_executor,
+            # No params in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Wraps stop+start; no in-tool persistent handle.
+            holds_external_state=False,
             examples=['{"tool_name": "project_restart", "parameters": {}}'],
         )
     )

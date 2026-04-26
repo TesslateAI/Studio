@@ -271,6 +271,10 @@ def register_glob_tool(registry) -> None:
             },
             executor=glob_tool,
             category=ToolCategory.NAV_OPS,
+            # Pattern + options in, list of paths out — JSON-clean.
+            state_serializable=True,
+            # Stateless directory traversal; no persistent index held.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "glob", "parameters": {"pattern": "**/*.py"}}',
                 '{"tool_name": "glob", "parameters": {"pattern": "*.ts", "path": "src", "recursive": false}}',

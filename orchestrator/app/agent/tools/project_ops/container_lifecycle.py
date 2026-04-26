@@ -325,6 +325,11 @@ def register_container_lifecycle_tools(registry):
             category=ToolCategory.PROJECT,
             parameters=_CONTAINER_NAME_PARAMS,
             executor=_container_start_executor,
+            # container_name in, status+url dict out — JSON-clean.
+            state_serializable=True,
+            # Mutates orchestrator state (containers) but the tool itself
+            # holds no in-flight handle; success returns immediately.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "container_start", "parameters": {"container_name": "frontend"}}'
             ],
@@ -340,6 +345,10 @@ def register_container_lifecycle_tools(registry):
             category=ToolCategory.PROJECT,
             parameters=_CONTAINER_NAME_PARAMS,
             executor=_container_stop_executor,
+            # container_name in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Synchronous orchestrator call; no in-tool persistent handle.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "container_stop", "parameters": {"container_name": "postgres"}}'
             ],
@@ -355,6 +364,10 @@ def register_container_lifecycle_tools(registry):
             category=ToolCategory.PROJECT,
             parameters=_CONTAINER_NAME_PARAMS,
             executor=_container_restart_executor,
+            # container_name in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Synchronous orchestrator call (stop+start); no in-tool handle.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "container_restart", "parameters": {"container_name": "frontend"}}'
             ],

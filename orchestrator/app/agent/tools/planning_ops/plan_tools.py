@@ -153,6 +153,10 @@ def register_plan_tools(registry):
             },
             executor=save_plan_tool,
             category=ToolCategory.PROJECT,
+            # Steps + files in, success dict out — JSON-clean.
+            state_serializable=True,
+            # DB-backed plan rows; no in-tool persistent state.
+            holds_external_state=False,
         )
     )
 
@@ -190,5 +194,9 @@ def register_plan_tools(registry):
             },
             executor=update_plan_tool,
             category=ToolCategory.PROJECT,
+            # Plan list in, success dict out — JSON-clean.
+            state_serializable=True,
+            # DB-backed plan rows; no in-tool persistent state.
+            holds_external_state=False,
         )
     )

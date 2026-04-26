@@ -205,6 +205,11 @@ def register_background_tools(registry) -> None:
                 "required": [],
             },
             executor=list_background_processes_tool,
+            # No params in, list of session metadata dicts out — JSON-clean.
+            state_serializable=True,
+            # Pure inspection over the background-session registry; the
+            # processes themselves are external state but this tool only reads.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "list_background_processes", "parameters": {}}',
             ],
@@ -242,6 +247,11 @@ def register_background_tools(registry) -> None:
                 "required": ["session_id"],
             },
             executor=read_background_output_tool,
+            # session_id + tail params in, output text dict out — JSON-clean.
+            state_serializable=True,
+            # Reads from the live PTY ringbuffer of an out-of-band background
+            # process; the underlying handle is external state.
+            holds_external_state=True,
             examples=[
                 '{"tool_name": "read_background_output", "parameters": {"session_id": "abc123"}}',
                 '{"tool_name": "read_background_output", "parameters": {"session_id": "abc123", "lines": 50, "delay_ms": 500}}',

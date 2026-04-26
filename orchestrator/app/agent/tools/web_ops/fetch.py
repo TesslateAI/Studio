@@ -144,6 +144,10 @@ def register_web_fetch_tool(registry) -> None:
             },
             executor=web_fetch_tool,
             category=ToolCategory.WEB,
+            # URL + timeout in, response body dict out (capped at 50KB) — JSON-clean.
+            state_serializable=True,
+            # One-shot HTTP request; no persistent connection pool exposed.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "web_fetch", "parameters": {"url": "https://example.com/api/docs"}}',
                 '{"tool_name": "web_fetch", "parameters": {"url": "https://example.com/page", "timeout": 15}}',

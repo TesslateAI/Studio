@@ -300,6 +300,11 @@ SHELL_TOOLS: list[Tool] = [
             "required": ["container_id"],
         },
         executor=graph_shell_open_executor,
+        # container_id + command in, session_id dict out — JSON-clean.
+        state_serializable=True,
+        # Spawns a persistent PTY in the container; the underlying file
+        # descriptor + child PID are external state owned by the session manager.
+        holds_external_state=True,
         examples=['{"tool_name": "graph_shell_open", "parameters": {"container_id": "abc-123"}}'],
     ),
     Tool(
@@ -319,6 +324,10 @@ SHELL_TOOLS: list[Tool] = [
             "required": ["container_id", "command"],
         },
         executor=graph_shell_exec_executor,
+        # container_id + command + timeout in, captured output dict out — JSON-clean.
+        state_serializable=True,
+        # One-shot exec into a container; waits to completion before returning.
+        holds_external_state=False,
         examples=[
             '{"tool_name": "graph_shell_exec", "parameters": {"container_id": "abc-123", "command": "npm install"}}',
             '{"tool_name": "graph_shell_exec", "parameters": {"container_id": "abc-123", "command": "npm run build", "timeout": 300}}',
@@ -336,6 +345,11 @@ SHELL_TOOLS: list[Tool] = [
             "required": ["session_id"],
         },
         executor=graph_shell_close_executor,
+        # session_id in, success dict out — JSON-clean.
+        state_serializable=True,
+        # Tears down the PTY/shell handle owned by graph_shell_open; operates
+        # on external session state.
+        holds_external_state=True,
         examples=[
             '{"tool_name": "graph_shell_close", "parameters": {"session_id": "sess-abc-123"}}'
         ],
