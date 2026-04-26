@@ -58,6 +58,7 @@ from .routers import (
     git_providers,
     github,
     internal,
+    internal_secrets,
     kanban,
     magic_link,
     marketplace,
@@ -1223,6 +1224,10 @@ app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoin
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 app.include_router(internal.router, prefix="/api")  # /api/internal - Cluster-internal endpoints
+# Shared-singleton apps' per-user secret fetcher. Mounted at /internal/* (no
+# /api prefix) so K8s NetworkPolicy can isolate the surface from external
+# traffic — see internal_secrets module docstring for the threat model.
+app.include_router(internal_secrets.router)  # /internal/secrets/{token}
 app.include_router(feature_flags.router, tags=["feature-flags"])  # /api/feature-flags
 app.include_router(
     version.router, prefix="/api", tags=["version"]

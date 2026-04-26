@@ -180,15 +180,21 @@ async def dispatch_via_link(
 
     1. Resolve the link by ``(parent_install_id, alias)`` — 404 on miss.
     2. Verify ``action_name`` is in ``link.granted_actions`` — 403 on miss.
-    3. Dispatch via :func:`action_dispatcher.dispatch_app_action` with the
-       child install id.
+    3. Resolve the parent's current ``InvocationSubject`` (the payer
+       envelope this dispatch should bill against). Mint a child subject
+       with ``payer_policy='parent_run', parent_run_id=<parent_run>``
+       so the child's spend rolls up to the parent's budget envelope —
+       the parent's wallet/credit source is debited atomically; the
+       child's wallet stays untouched.
+    4. Dispatch via :func:`action_dispatcher.dispatch_app_action` with the
+       child install id and the freshly-minted child subject id.
 
-    The plan calls for an ``InvocationSubject(payer_policy='parent_run')``
-    so the child's spend rolls up to the parent's budget envelope; that
-    routing is wired through ``action_dispatcher`` once the Phase 2
-    InvocationSubject FK lands. For now we plumb ``parent_run_id``
-    through to the dispatcher's ``run_id`` argument so spend records
-    carry the attribution column even without the InvocationSubject row.
+    When ``parent_run_id`` is None (out-of-band parent → child call from
+    the SDK rather than an automation run) we still dispatch — the
+    composition contract permits direct parent-to-child calls — but the
+    child subject is not minted; spend lands attributed to the child
+    install only. The plan's parent-budget rollup explicitly requires a
+    parent run as the rollup anchor.
     """
     link = await _resolve_link(
         db, parent_install_id=parent_install_id, alias=alias
@@ -200,14 +206,24 @@ async def dispatch_via_link(
             f"{parent_install_id} alias={alias!r} (granted: {granted})"
         )
 
+    child_subject_id: UUID | None = None
+    if parent_run_id is not None:
+        child_subject_id = await _mint_child_invocation_subject(
+            db,
+            parent_run_id=parent_run_id,
+            child_install_id=link.child_install_id,
+            action_name=action_name,
+        )
+
     logger.info(
         "composition.dispatch_via_link parent=%s alias=%s action=%s child=%s "
-        "parent_run=%s",
+        "parent_run=%s child_subject=%s",
         parent_install_id,
         alias,
         action_name,
         link.child_install_id,
         parent_run_id,
+        child_subject_id,
     )
 
     return await action_dispatcher.dispatch_app_action(
@@ -216,7 +232,78 @@ async def dispatch_via_link(
         action_name=action_name,
         input=input,
         run_id=parent_run_id,
+        invocation_subject_id=child_subject_id,
     )
+
+
+async def _mint_child_invocation_subject(
+    db: AsyncSession,
+    *,
+    parent_run_id: UUID,
+    child_install_id: UUID,
+    action_name: str,
+) -> UUID | None:
+    """Resolve the parent's ``InvocationSubject`` and mint the child's.
+
+    The child subject's ``payer_policy='parent_run'`` plus
+    ``parent_run_id=<parent_run>`` is what makes the rollup work — at
+    spend-write time, ``invocation_subject.record_spend_for_subject()``
+    sees ``parent_run`` and bumps the parent subject's
+    ``spent_so_far_usd`` instead of the child's wallet.
+
+    Best-effort: if no parent subject exists (out-of-band invocation, or
+    Phase 1 parents that predate the subject table), we return None and
+    the dispatch proceeds with no child subject. Callers in the
+    composition path should not raise on this — it represents a legacy
+    code path, not a contract violation.
+    """
+    from ...models_automations import AppInstance as ChildAppInstance
+    from ...models_automations import InvocationSubject
+
+    # Load the parent run's current subject. We only need the most recent
+    # subject row keyed to this run — InvocationSubject rows are a 1:1
+    # match in Phase 2 today (one per run).
+    parent_subject = (
+        await db.execute(
+            select(InvocationSubject)
+            .where(InvocationSubject.automation_run_id == parent_run_id)
+            .order_by(InvocationSubject.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if parent_subject is None:
+        return None
+
+    child_install = await db.get(ChildAppInstance, child_install_id)
+    if child_install is None:
+        return None
+
+    child_subject = InvocationSubject(
+        id=uuid4(),
+        automation_run_id=parent_run_id,
+        invoking_user_id=parent_subject.invoking_user_id,
+        team_id=parent_subject.team_id,
+        app_instance_id=child_install_id,
+        agent_id=parent_subject.agent_id,
+        payer_policy="parent_run",
+        parent_run_id=parent_run_id,
+        credit_source="parent_run",
+        credit_source_ref=str(parent_subject.id),
+        budget_envelope=parent_subject.budget_envelope or {},
+        spent_so_far_usd=0,
+        litellm_key_id=parent_subject.litellm_key_id,
+    )
+    db.add(child_subject)
+    await db.flush()
+    logger.debug(
+        "composition._mint_child_invocation_subject parent_subject=%s "
+        "child_subject=%s child_install=%s action=%s",
+        parent_subject.id,
+        child_subject.id,
+        child_install_id,
+        action_name,
+    )
+    return child_subject.id
 
 
 # ---------------------------------------------------------------------------

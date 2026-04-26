@@ -1,15 +1,21 @@
-"""Idle reaper for ``app_runtime_deployments`` (Phase 4).
+"""Idle reaper for ``app_runtime_deployments`` (legacy Phase 4 path).
+
+.. note::
+
+   **Superseded by :mod:`app.services.apps.idle_reaper`.** The new
+   reaper produces ``controller_intents(kind='scale_to_zero')`` rows
+   instead of patching K8s directly, so the controller plane owns
+   every mutation under one TOCTOU-safe contract.
+
+   This module is kept intact for backwards compatibility with the
+   gateway runner's reaper loop (``services/gateway/runner.py``) until
+   the dedicated ``automations-controller`` Deployment is wired in. New
+   call sites should use :func:`app.services.apps.idle_reaper.reap_idle_runtimes`.
 
 The reaper acts on :class:`AppRuntimeDeployment` rows — NOT on
 :class:`AppInstance` — so a shared-singleton runtime backing N installs is
 reaped exactly once per pass instead of N times. PVCs, namespaces and
 Secrets are preserved; only the pod ``replicas`` count drops to zero.
-
-Phase 4 placement note: per the plan, the controller plane lives in the
-gateway runner alongside the cron tick. The runner's existing single-firer
-file lock + ``replicas=1`` pinning keeps the loop safe-enough until the
-dedicated ``automations-controller`` Deployment lands. Wiring is in
-``services/gateway/runner.py``.
 
 Active-run check
 ----------------

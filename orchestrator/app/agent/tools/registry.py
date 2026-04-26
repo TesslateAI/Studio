@@ -589,6 +589,12 @@ def _register_all_tools(registry: ToolRegistry):
     register_all_node_config_tools(registry)
     # App ops: invoke_app_action — call typed actions on installed Tesslate Apps
     register_all_app_ops_tools(registry)
+    # Marketplace ops (Phase 5 agent-builder skill): create_agent, update_agent,
+    # assign_skill, assign_mcp, attach_schedule, request_grant. Gated on
+    # marketplace.author / automations.write scopes; depth-1 cap enforced
+    # inside the tool implementations.
+    from .marketplace_ops import register_all_marketplace_ops_tools
+    register_all_marketplace_ops_tools(registry)
 
     logger.info(f"Registered {len(registry._tools)} tools total")
 

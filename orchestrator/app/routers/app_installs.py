@@ -29,6 +29,7 @@ from ..services.apps.installer import (
     ConsentRejectedError,
     IncompatibleAppError,
     InstallError,
+    create_per_pod_signing_key,
     install_app,
     propagate_user_secrets_post_install,
 )
@@ -186,6 +187,30 @@ async def install_endpoint(
         logger.warning(
             "install_endpoint: user-secret propagation failed for instance=%s "
             "(install succeeded; user can resync credentials)",
+            result.app_instance_id,
+            exc_info=True,
+        )
+
+    # Best-effort: mint the per-pod HMAC signing key Secret + token used by
+    # the Connector Proxy. Failures here MUST NOT roll back the install —
+    # the proxy's deterministic-derivation fallback keeps auth working
+    # without the Secret; the operator sees a warning and can resync.
+    try:
+        env_overlay = await create_per_pod_signing_key(
+            app_instance_id=result.app_instance_id,
+            target_namespace=(
+                f"proj-{result.project_id}" if result.project_id else None
+            ),
+        )
+        if env_overlay:
+            logger.info(
+                "install_endpoint: minted per-pod token for instance=%s",
+                result.app_instance_id,
+            )
+    except Exception:
+        logger.warning(
+            "install_endpoint: per-pod signing-key creation failed instance=%s "
+            "(install succeeded; proxy auth uses fallback derivation)",
             result.app_instance_id,
             exc_info=True,
         )

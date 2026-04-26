@@ -323,7 +323,184 @@ async def webhook_inbound(
     try:
         payload = json.loads(body) if isinstance(body, bytes) else body
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload") from e
+        # Slack slash commands arrive as application/x-www-form-urlencoded,
+        # NOT JSON. Re-attempt as form bytes before failing.
+        if channel_type == "slack":
+            try:
+                from urllib.parse import parse_qs
+
+                form = parse_qs(body.decode("utf-8") if isinstance(body, bytes) else body)
+                payload = {k: (v[0] if v else "") for k, v in form.items()}
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid JSON payload") from e
+        else:
+            raise HTTPException(status_code=400, detail="Invalid JSON payload") from e
+
+    # ---- Phase 4 inbound discriminator -------------------------------------
+    # Branch BEFORE entering parse_inbound + chat session ordering for:
+    #   * Approval-card button clicks  (Slack block_actions, Telegram
+    #     callback_query, Discord message_component) — POST directly to
+    #     the local approval manager / Redis pubsub. NEVER queue.
+    #   * Slash commands  (Slack slash_commands, Discord slash interactions,
+    #     Telegram /-prefixed commands) — route to the gateway-trigger
+    #     dispatchers. NEVER queue.
+    # The chat-session queue is for raw conversational text only.
+
+    from ..services.channels._inbound_dispatch import (
+        post_approval_response_locally,
+    )
+
+    if channel_type == "slack":
+        from ..services.channels.slack import SlackChannel
+
+        # Slack interactive payloads (button clicks) arrive form-encoded
+        # with a single field ``payload`` whose value is the JSON blob.
+        interactive_payload: dict | None = None
+        if isinstance(payload, dict) and payload.get("payload"):
+            try:
+                interactive_payload = json.loads(payload["payload"])
+            except Exception:
+                interactive_payload = None
+
+        if interactive_payload and SlackChannel.is_approval_action_payload(
+            interactive_payload
+        ):
+            input_id, choice, slack_user_id = SlackChannel.parse_approval_action(
+                interactive_payload
+            )
+            if input_id and choice:
+                await post_approval_response_locally(
+                    input_id=input_id,
+                    choice=choice,
+                    platform="slack",
+                    platform_user_id=slack_user_id,
+                )
+            return Response(status_code=200)
+
+        # Slash command (form-encoded ``command=/automation&text=run X``).
+        if isinstance(payload, dict) and payload.get("command"):
+            from ..services.channels._inbound_dispatch import (
+                dispatch_gateway_command,
+            )
+            from ..services.gateway.triggers.slack_slash import (
+                handle_slash_command,
+            )
+
+            await dispatch_gateway_command(
+                payload=payload,
+                channel_config_id=str(config.id),
+                handler=handle_slash_command,
+            )
+            return Response(status_code=200)
+
+    elif channel_type == "telegram":
+        from ..services.channels.telegram import TelegramChannel
+
+        if isinstance(payload, dict) and TelegramChannel.is_approval_callback_payload(
+            payload
+        ):
+            input_id, choice, tg_user_id = TelegramChannel.parse_approval_callback(
+                payload
+            )
+            if input_id and choice:
+                await post_approval_response_locally(
+                    input_id=input_id,
+                    choice=choice,
+                    platform="telegram",
+                    platform_user_id=tg_user_id,
+                )
+            return Response(status_code=200)
+
+        # Slash command via webhook mode: payload.message.text starts with `/`.
+        msg = (payload or {}).get("message") if isinstance(payload, dict) else None
+        text = (msg or {}).get("text") if isinstance(msg, dict) else None
+        if msg and isinstance(text, str) and text.startswith("/"):
+            from ..services.channels._inbound_dispatch import (
+                dispatch_gateway_command,
+            )
+            from ..services.gateway.triggers.telegram_command import (
+                handle_telegram_command,
+            )
+
+            await dispatch_gateway_command(
+                payload=msg,
+                channel_config_id=str(config.id),
+                handler=handle_telegram_command,
+            )
+            return Response(status_code=200)
+
+    elif channel_type == "discord":
+        from ..services.channels.discord_bot import DiscordBotChannel
+
+        # Approval-card button click (interaction type=3).
+        if isinstance(payload, dict) and DiscordBotChannel.is_approval_interaction_payload(
+            payload
+        ):
+            input_id, choice, dc_user_id = DiscordBotChannel.parse_approval_interaction(
+                payload
+            )
+            if input_id and choice:
+                await post_approval_response_locally(
+                    input_id=input_id,
+                    choice=choice,
+                    platform="discord",
+                    platform_user_id=dc_user_id,
+                )
+            # Discord wants a response of type=6 (deferred update) so the
+            # button stops spinning.
+            return Response(
+                content=json.dumps({"type": 6}),
+                media_type="application/json",
+            )
+
+        # Discord slash command (interaction type=2).
+        if isinstance(payload, dict) and payload.get("type") == 2:
+            from ..services.channels._inbound_dispatch import (
+                dispatch_gateway_command,
+            )
+            from ..services.gateway.triggers.discord_slash import (
+                handle_discord_command,
+            )
+
+            data = payload.get("data") or {}
+            options_list = data.get("options") or []
+            opt_dict: dict[str, str] = {}
+            sub_name = ""
+            for opt in options_list:
+                if isinstance(opt, dict):
+                    if opt.get("type") in (1, 2) and opt.get("options"):
+                        # subcommand / subcommand_group
+                        sub_name = opt.get("name", "")
+                        for sub_opt in opt["options"]:
+                            if isinstance(sub_opt, dict):
+                                opt_dict[sub_opt.get("name", "")] = str(
+                                    sub_opt.get("value", "")
+                                )
+                    else:
+                        opt_dict[opt.get("name", "")] = str(opt.get("value", ""))
+            user = (payload.get("member") or {}).get("user") or payload.get("user") or {}
+            normalized = {
+                "command_name": data.get("name", ""),
+                "subcommand": sub_name,
+                "options": opt_dict,
+                "user_id": str(user.get("id") or ""),
+                "channel_id": str(payload.get("channel_id") or ""),
+                "guild_id": str(payload.get("guild_id") or ""),
+                "interaction_id": str(payload.get("id") or ""),
+                "interaction_token": payload.get("token") or "",
+            }
+            await dispatch_gateway_command(
+                payload=normalized,
+                channel_config_id=str(config.id),
+                handler=handle_discord_command,
+            )
+            # Type=5 (DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE) tells Discord
+            # we'll edit the original response later. Keeps within the
+            # 3-second budget.
+            return Response(
+                content=json.dumps({"type": 5}),
+                media_type="application/json",
+            )
 
     inbound = channel.parse_inbound(payload)
     if inbound is None:

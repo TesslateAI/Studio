@@ -150,12 +150,40 @@ def _build_job_manifest(
         )
         volume_mounts.append(k8s_client.V1VolumeMount(name="app-data", mount_path="/app"))
 
+    # Phase 4: every ephemeral / Tier-1 pod gets ``/tmp`` as a tmpfs
+    # ``emptyDir { medium: Memory, sizeLimit: 256Mi }``. Writes outside
+    # ``/tmp`` (and outside ``/app`` when a per-install volume is
+    # mounted) are NOT persisted — that's the documented stateless
+    # contract. The size cap protects the node from a runaway write
+    # filling RAM.
+    volumes.append(
+        k8s_client.V1Volume(
+            name="ephemeral-tmp",
+            empty_dir=k8s_client.V1EmptyDirVolumeSource(
+                medium="Memory", size_limit="256Mi"
+            ),
+        )
+    )
+    volume_mounts.append(
+        k8s_client.V1VolumeMount(name="ephemeral-tmp", mount_path="/tmp")
+    )
+
+    # Read-only root FS where compatible — most language runtimes accept
+    # it once /tmp is writable. We deliberately leave AllowPrivilegeEscalation
+    # and capabilities defaults alone; the platform-wide PodSecurityPolicy
+    # / Pod Security Standard owns those.
+    sec_ctx = k8s_client.V1SecurityContext(
+        read_only_root_filesystem=True,
+        allow_privilege_escalation=False,
+    )
+
     container = k8s_client.V1Container(
         name="runner",
         image=image,
         command=["sh", "-c", command],
         env=env_vars,
         volume_mounts=volume_mounts,
+        security_context=sec_ctx,
     )
     pod_spec = k8s_client.V1PodSpec(
         restart_policy="Never",

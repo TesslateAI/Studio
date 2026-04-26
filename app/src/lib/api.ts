@@ -4644,6 +4644,7 @@ export const appBundlesApi = {
 
 import type {
   AppActionListResponse,
+  AppActionRow,
   ApprovalRequest,
   ApprovalResponse,
   AutomationDefinitionIn,
@@ -4659,6 +4660,14 @@ import type {
   CommunicationDestinationCreate,
   CommunicationDestinationUpdate,
 } from '../types/automations';
+
+// Re-export so page-level imports can pull these from `lib/api` uniformly.
+export type {
+  AppActionListResponse,
+  AppActionRow,
+  AutomationDefinitionSummary,
+  AutomationRunSummary,
+};
 
 export interface ListAutomationsParams {
   is_active?: boolean;
@@ -4813,6 +4822,40 @@ export const appActionsApi = {
   async list(appInstanceId: string): Promise<AppActionListResponse> {
     const response = await api.get(`/api/apps/${appInstanceId}/actions`);
     return response.data;
+  },
+};
+
+/**
+ * Phase 5 — read-only listing of an install's outbound app dependency
+ * links (the alias → child install map persisted on
+ * ``app_instance_links``). The Modules tab in the App Workspace drawer
+ * uses this to render the recursive dependency tree.
+ *
+ * Backend route lives at
+ * ``GET /api/v1/composition/installs/{install_id}/links``. Returns an
+ * empty list when the install has no outbound links — never null.
+ */
+export interface AppCompositionLink {
+  alias: string;
+  child_install_id: string;
+  child_app_id: string;
+  child_app_slug: string | null;
+  child_app_name: string | null;
+  required: boolean;
+}
+
+export const appCompositionApi = {
+  async listLinks(installId: string): Promise<AppCompositionLink[]> {
+    try {
+      const response = await api.get(
+        `/api/v1/composition/installs/${installId}/links`
+      );
+      return Array.isArray(response.data) ? response.data : [];
+    } catch {
+      // Endpoint is wired in Phase 5; defensive empty-list fallback so
+      // the drawer never crashes when the backend isn't deployed yet.
+      return [];
+    }
   },
 };
 

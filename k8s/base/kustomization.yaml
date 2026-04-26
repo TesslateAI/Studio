@@ -27,6 +27,13 @@ resources:
   - core/snapshot-cleanup-cronjob.yaml
   - core/namespace-reaper-cronjob.yaml
 
+  # Controller plane (Phase 4 — leader-elected cron + reconciler).
+  # Replicas=2 active/passive via lease backend
+  # (CONTROLLER_LEASE_BACKEND=db|redis|k8s, default db).
+  - automations-controller/serviceaccount.yaml
+  - automations-controller/rbac.yaml
+  - automations-controller/deployment.yaml
+
   # Redis (distributed backplane for horizontal scaling)
   - redis/
 

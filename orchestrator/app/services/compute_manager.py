@@ -895,15 +895,36 @@ class ComputeManager:
         image: str,
         timeout: int = 120,
         pvc_name: str | None = None,
+        state_model: str = "per_install_volume",
     ) -> k8s_client.V1Pod:
-        """Build the ephemeral pod manifest (CSI PVC volume, PSA restricted)."""
+        """Build the ephemeral pod manifest (CSI PVC volume, PSA restricted).
+
+        Tier-1 hardening (Phase 4 bridge):
+
+        * **tmpfs at ``/tmp``** (``emptyDir{medium: Memory, sizeLimit: 256Mi}``)
+          is always mounted. Tools that scribble to ``/tmp`` (the universal
+          escape valve) land in memory and vanish on pod terminate. Bounded
+          to 256Mi so a misbehaving tool can't pin all of node RAM.
+        * **``readOnlyRootFilesystem: true``** is set ONLY when the manifest's
+          ``runtime.state_model='stateless'``. Apps with declared write
+          scopes (per_install_volume, service_pvc, shared_volume, external)
+          legitimately write outside ``/tmp`` to mounted volumes — RO root
+          would break them. Stateless apps have no such write contract, so
+          RO root catches the silent-write class loudly.
+        """
         pvc_name = pvc_name or f"compute-pvc-{pod_name}"
+        # See state_model gating above. We only flip readOnlyRootFilesystem
+        # for stateless contracts — anything else has a declared write
+        # surface that RO root would break.
+        read_only_root = state_model == "stateless"
+
         return k8s_client.V1Pod(
             metadata=k8s_client.V1ObjectMeta(
                 name=pod_name,
                 namespace=namespace,
                 labels={
                     "tesslate.io/tier": "1",
+                    "tesslate.io/state-model": state_model,
                     "app.kubernetes.io/part-of": "tesslate",
                 },
             ),
@@ -932,6 +953,13 @@ class ComputeManager:
                                 name="project-source",
                                 mount_path="/app",
                             ),
+                            # tmpfs scratch for /tmp writes. Always mounted
+                            # so tools have a known-safe write target even
+                            # when readOnlyRootFilesystem is on.
+                            k8s_client.V1VolumeMount(
+                                name="tmp",
+                                mount_path="/tmp",
+                            ),
                         ],
                         resources=k8s_client.V1ResourceRequirements(
                             requests={
@@ -947,6 +975,7 @@ class ComputeManager:
                             run_as_user=_COMPUTE_RUN_AS_UID,
                             run_as_group=_COMPUTE_RUN_AS_UID,
                             allow_privilege_escalation=False,
+                            read_only_root_filesystem=read_only_root,
                             capabilities=k8s_client.V1Capabilities(drop=["ALL"]),
                             seccomp_profile=k8s_client.V1SeccompProfile(type="RuntimeDefault"),
                         ),
@@ -957,6 +986,13 @@ class ComputeManager:
                         name="project-source",
                         persistent_volume_claim=k8s_client.V1PersistentVolumeClaimVolumeSource(
                             claim_name=pvc_name,
+                        ),
+                    ),
+                    k8s_client.V1Volume(
+                        name="tmp",
+                        empty_dir=k8s_client.V1EmptyDirVolumeSource(
+                            medium="Memory",
+                            size_limit="256Mi",
                         ),
                     ),
                 ],

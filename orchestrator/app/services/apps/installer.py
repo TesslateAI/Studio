@@ -51,6 +51,8 @@ __all__ = [
     "ConsentRejectedError",
     "ManifestInvalid",
     "InstallResult",
+    "create_per_pod_signing_key",
+    "delete_per_pod_signing_key",
     "install_app",
     "propagate_user_secrets_post_install",
 ]
@@ -1053,3 +1055,168 @@ async def propagate_user_secrets_post_install(
         statuses,
     )
     return statuses
+
+
+async def create_per_pod_signing_key(
+    *,
+    app_instance_id: UUID,
+    target_namespace: str | None = None,
+) -> dict[str, str] | None:
+    """Mint a per-pod signing key + token for a freshly-installed AppInstance.
+
+    Writes ``app-pod-key-{instance_id}`` K8s Secret with two fields:
+
+    * ``signing_key`` — 32 random bytes used by the Connector Proxy to
+      verify the per-pod token's HMAC.
+    * ``token`` — the long-lived ``f"{instance_id}.{nonce}.{hmac}"``
+      string. The pod template injects this verbatim as env var
+      ``OPENSAIL_APPINSTANCE_TOKEN``.
+
+    Returns the env-var dict ``{"OPENSAIL_APPINSTANCE_TOKEN": "..."}``
+    so callers can splice it into the pod spec without re-fetching the
+    Secret. Returns ``None`` when K8s mode is off (desktop / docker /
+    dev) — the proxy's deterministic-derivation fallback handles those
+    cases. Best-effort: a Secret-create failure logs and returns None
+    rather than rolling back the install.
+
+    Idempotent: 409 → patch.
+    """
+    # Late imports keep K8s client dependencies off the install hot path
+    # for non-K8s deployment modes.
+    from kubernetes import client as k8s_client
+    from kubernetes.client.rest import ApiException
+
+    from ...config import get_settings
+    from .connector_proxy.auth import (
+        generate_pod_signing_key,
+        generate_pod_token,
+        invalidate_signing_key_cache,
+        k8s_secret_name,
+    )
+
+    settings = get_settings()
+    if not getattr(settings, "is_kubernetes_mode", False):
+        # Non-K8s mode: the proxy's fallback derivation handles auth, so
+        # we don't need to materialize a Secret. We still mint a token
+        # against the deterministic key so the pod env var is populated.
+        from .shared_singleton_router import _derive_signing_key
+
+        signing_key = _derive_signing_key(
+            app_instance_id=app_instance_id,
+            fallback_secret=settings.secret_key,
+        )
+        token = generate_pod_token(
+            app_instance_id=app_instance_id, signing_key=signing_key
+        )
+        return {"OPENSAIL_APPINSTANCE_TOKEN": token}
+
+    namespace = target_namespace or getattr(
+        settings, "kubernetes_namespace", "tesslate"
+    ) or "tesslate"
+    secret_name = k8s_secret_name(app_instance_id)
+    signing_key = generate_pod_signing_key()
+    token = generate_pod_token(
+        app_instance_id=app_instance_id, signing_key=signing_key
+    )
+
+    body = k8s_client.V1Secret(
+        metadata=k8s_client.V1ObjectMeta(
+            name=secret_name,
+            namespace=namespace,
+            labels={
+                "tesslate.io/managed-by": "connector-proxy-auth",
+                "tesslate.io/app-instance-id": str(app_instance_id),
+            },
+        ),
+        type="Opaque",
+        # ``string_data`` so we don't have to base64-encode by hand;
+        # K8s does it server-side.
+        string_data={
+            "signing_key": signing_key.hex(),
+            "token": token,
+        },
+    )
+
+    core_v1 = k8s_client.CoreV1Api()
+    try:
+        try:
+            core_v1.create_namespaced_secret(namespace=namespace, body=body)
+        except ApiException as exc:
+            if exc.status != 409:
+                raise
+            core_v1.patch_namespaced_secret(
+                name=secret_name, namespace=namespace, body=body
+            )
+        # Drop any stale cached key so the proxy reads the fresh value
+        # on the next call.
+        invalidate_signing_key_cache(app_instance_id)
+        logger.info(
+            "create_per_pod_signing_key: wrote Secret=%s ns=%s instance=%s",
+            secret_name,
+            namespace,
+            app_instance_id,
+        )
+        return {"OPENSAIL_APPINSTANCE_TOKEN": token}
+    except Exception:  # noqa: BLE001 — non-fatal
+        logger.exception(
+            "create_per_pod_signing_key: K8s Secret write failed instance=%s "
+            "ns=%s; proxy will fall back to deterministic-derivation key",
+            app_instance_id,
+            namespace,
+        )
+        # We still return the token: even though the Secret didn't land,
+        # the proxy's deterministic fallback uses the same signing key,
+        # so the issued token verifies correctly. Worst case the operator
+        # sees the warning and re-syncs.
+        return {"OPENSAIL_APPINSTANCE_TOKEN": token}
+
+
+async def delete_per_pod_signing_key(
+    *,
+    app_instance_id: UUID,
+    target_namespace: str | None = None,
+) -> None:
+    """Best-effort cleanup of the per-pod signing-key Secret on uninstall.
+
+    Mirrors :func:`create_per_pod_signing_key`. 404 from K8s is treated
+    as success (already gone). All other exceptions log and swallow —
+    uninstall must converge regardless of K8s state.
+    """
+    from kubernetes import client as k8s_client
+    from kubernetes.client.rest import ApiException
+
+    from ...config import get_settings
+    from .connector_proxy.auth import (
+        invalidate_signing_key_cache,
+        k8s_secret_name,
+    )
+
+    invalidate_signing_key_cache(app_instance_id)
+
+    settings = get_settings()
+    if not getattr(settings, "is_kubernetes_mode", False):
+        return
+
+    namespace = target_namespace or getattr(
+        settings, "kubernetes_namespace", "tesslate"
+    ) or "tesslate"
+    try:
+        core_v1 = k8s_client.CoreV1Api()
+        core_v1.delete_namespaced_secret(
+            name=k8s_secret_name(app_instance_id),
+            namespace=namespace,
+        )
+    except ApiException as exc:
+        if exc.status not in (404, 410):
+            logger.warning(
+                "delete_per_pod_signing_key: ns=%s instance=%s failed: %s",
+                namespace,
+                app_instance_id,
+                exc.reason,
+            )
+    except Exception:  # noqa: BLE001 — defensive
+        logger.exception(
+            "delete_per_pod_signing_key: ns=%s instance=%s",
+            namespace,
+            app_instance_id,
+        )

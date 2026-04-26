@@ -51,7 +51,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models import AppVersion, Container, Project
-from ...models_automations import AppAction, AppInstance, AutomationRunArtifact
+from ...models_automations import AppAction, AppInstance
 from . import billing_dispatcher
 from .runtime_urls import container_url
 from .template_render import RenderError, get_render_client
@@ -326,9 +326,20 @@ async def _persist_artifacts(
     outside a run (e.g. agent tool ad-hoc call before Phase 1's automation
     worker is wired through), we skip artifact persistence rather than
     fabricate a synthetic run row. Returns the empty list in that case.
+
+    Storage routing is delegated to
+    :func:`services.automations.artifacts.create_artifact`, which routes
+    inline ↔ CAS based on payload size and writes the canonical preview.
+    The dispatcher loop only owns the manifest-spec → content extraction
+    here (``from`` dot-path resolution, default-to-whole-output behavior).
     """
     if not artifacts_spec or run_id is None:
         return []
+
+    # Local import keeps the artifacts module off the hot path for callers
+    # that never produce artifacts (e.g., http_post handlers with empty
+    # ``actions[].artifacts``).
+    from ..automations.artifacts import create_artifact
 
     ids: list[UUID] = []
     root = {"output": output, "input": input_value}
@@ -355,44 +366,25 @@ async def _persist_artifacts(
             )
             continue
 
-        # Phase 1: inline only. CAS routing lands Phase 3.
-        if isinstance(value, str):
-            payload = value
-        else:
-            try:
-                payload = json.dumps(value, default=str)
-            except (TypeError, ValueError):
-                payload = str(value)
-
-        size_bytes = len(payload.encode("utf-8"))
-        truncated = False
-        if size_bytes > _INLINE_MAX_BYTES:
-            payload = payload[:_INLINE_MAX_BYTES] + "\n[truncated — Phase 3 routes via CAS]"
-            truncated = True
-            logger.warning(
-                "action_dispatcher: inline-truncated artifact name=%s size=%d > cap=%d",
-                name,
-                size_bytes,
-                _INLINE_MAX_BYTES,
+        try:
+            row = await create_artifact(
+                db,
+                run_id=run_id,
+                kind=kind,
+                name=name,
+                mime_type=mime_type,
+                content=value,
+                metadata={"from": from_path} if from_path else None,
             )
-
-        row = AutomationRunArtifact(
-            id=uuid4(),
-            run_id=run_id,
-            kind=kind,
-            name=name,
-            mime_type=mime_type,
-            storage_mode="inline",
-            storage_ref=payload,
-            preview_text=payload[:1024],
-            size_bytes=size_bytes,
-            meta={"from": from_path, "truncated": truncated},
-        )
-        db.add(row)
+        except Exception as exc:  # noqa: BLE001 — artifact must never fail dispatch
+            logger.warning(
+                "action_dispatcher: artifact persist failed name=%s err=%r",
+                name,
+                exc,
+            )
+            continue
         ids.append(row.id)
 
-    if ids:
-        await db.flush()
     return ids
 
 
@@ -402,12 +394,19 @@ async def _record_spend_safe(
     instance: AppInstance,
     run_id: UUID | None,
     duration_seconds: float,
+    invocation_subject_id: UUID | None = None,
 ) -> Decimal:
     """Emit a SpendRecord attribution row for this dispatch.
 
     Phase 1 records ``$0`` against ``ai_compute`` (mirrors the existing
     ``app_invocations.py`` ledger pattern). Phase 2 fills in actual cost
     from the InvocationSubject; Phase 3 splits across dimensions.
+
+    All three Automation Runtime attribution columns
+    (``automation_run_id``, ``invocation_subject_id``, ``agent_id``) flow
+    through the widened ``billing_dispatcher.record_spend()`` signature
+    rather than a post-hoc UPDATE — closes the brief race window where
+    a row could be queried before the FK columns landed.
 
     Wrapped in a try/except so a billing write failure NEVER fails an
     otherwise successful dispatch — billing is async accounting, not part
@@ -429,18 +428,9 @@ async def _record_spend_safe(
             dimension="ai_compute",
             amount_usd=Decimal("0"),
             meta=meta,
+            automation_run_id=run_id,
+            invocation_subject_id=invocation_subject_id,
         )
-        # Backfill the typed automation_run_id column on the SpendRecord row
-        # itself — billing_dispatcher.record_spend doesn't accept the kwarg
-        # yet (Phase 2 widens its signature). Until then, an UPDATE keeps
-        # the FK column populated for run-history joins.
-        if run_id is not None:
-            from ...models import SpendRecord
-
-            row = await db.get(SpendRecord, outcome.spend_record_id)
-            if row is not None:
-                row.automation_run_id = run_id
-                await db.flush()
         return outcome.amount_usd
     except Exception:  # noqa: BLE001 — billing write must never fail dispatch
         logger.exception(
@@ -484,6 +474,43 @@ async def _dispatch_http_post(
         headers["X-OpenSail-Run-Id"] = str(run_id)
     headers["X-OpenSail-Instance-Id"] = str(instance.id)
 
+    # Phase 3 cold-start wake. If the AppRuntimeDeployment is scaled to
+    # zero, ask wake.provision_for_run() to scale it up and wait for
+    # readiness BEFORE the HTTP POST. Bounded readiness timeout inside
+    # provision_for_run; on failure, surface a clean ActionDispatchFailed
+    # with paused_reason hint instead of a vague httpx ConnectError.
+    runtime_deployment = getattr(instance, "runtime_deployment", None)
+    if (
+        run_id is not None
+        and runtime_deployment is not None
+        and runtime_deployment.scaled_to_zero_at is not None
+    ):
+        from ..automations.wake import provision_for_run as _wake
+
+        logger.info(
+            "action_dispatcher.http_post: cold-start wake instance=%s deployment=%s",
+            instance.id,
+            runtime_deployment.id,
+        )
+        try:
+            from ..k8s_client import get_k8s_client
+            k8s = get_k8s_client()
+        except Exception:  # noqa: BLE001 — wake handles None client gracefully
+            k8s = None
+
+        result = await _wake(
+            run_id,
+            db,
+            k8s,
+            deployment_override=runtime_deployment,
+        )
+        if not result.ready:
+            raise ActionDispatchFailed(
+                f"cold-start wake failed: reason={result.reason}",
+                status=None,
+                body=None,
+            )
+
     logger.info(
         "action_dispatcher.http_post target=%s instance=%s run=%s",
         target,
@@ -495,8 +522,6 @@ async def _dispatch_http_post(
         async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             resp = await client.post(target, json=input_value, headers=headers)
     except httpx.HTTPError as exc:
-        # Phase 3 will turn ConnectError on a scaled-to-zero pod into a
-        # cold-start wake; Phase 1 lets the request fail through.
         raise ActionDispatchFailed(
             f"http_post transport error: {exc!r}",
             status=None,
@@ -680,12 +705,33 @@ async def _dispatch_k8s_job(
             k8s_client_lib.V1VolumeMount(name="app-data", mount_path=mount_path)
         )
 
+    # Phase 4: tmpfs at /tmp + read-only root for ephemeral / Tier-1
+    # action runs. See ``app_invocations.py`` for the same pattern. Any
+    # write outside /tmp / the per-install volume vanishes when the pod
+    # terminates — that's the documented stateless contract.
+    volumes.append(
+        k8s_client_lib.V1Volume(
+            name="ephemeral-tmp",
+            empty_dir=k8s_client_lib.V1EmptyDirVolumeSource(
+                medium="Memory", size_limit="256Mi"
+            ),
+        )
+    )
+    volume_mounts.append(
+        k8s_client_lib.V1VolumeMount(name="ephemeral-tmp", mount_path="/tmp")
+    )
+    _ephemeral_sec_ctx = k8s_client_lib.V1SecurityContext(
+        read_only_root_filesystem=True,
+        allow_privilege_escalation=False,
+    )
+
     job_container = k8s_client_lib.V1Container(
         name="action",
         image=image,
         command=["sh", "-c", command],
         env=env_vars,
         volume_mounts=volume_mounts,
+        security_context=_ephemeral_sec_ctx,
     )
     pod_spec = k8s_client_lib.V1PodSpec(
         restart_policy="Never",
@@ -940,6 +986,7 @@ async def dispatch_app_action(
         instance=instance,
         run_id=run_id,
         duration_seconds=duration_seconds,
+        invocation_subject_id=invocation_subject_id,
     )
 
     logger.info(

@@ -725,6 +725,72 @@ async def dispatch_automation(
             paused_status=DispatchStatus.FAILED,
         )
 
+    # ---- Phase B.1: parent-contract inheritance defense in depth -------
+    # ``attach_schedule`` validates the child contract at create time,
+    # but we re-check here in case a backfill, admin edit, or out-of-band
+    # mutation slipped a non-positive-list scope onto the row. Catches
+    # the bypass before any executor runs.
+    if automation.parent_automation_id is not None:
+        from .contract import ContractInheritanceError, validate_child_contract
+
+        parent_def = (
+            await db.execute(
+                select(AutomationDefinition).where(
+                    AutomationDefinition.id == automation.parent_automation_id
+                )
+            )
+        ).scalar_one_or_none()
+        if parent_def is not None and isinstance(parent_def.contract, dict):
+            try:
+                validate_child_contract(
+                    parent_def.contract,
+                    automation.contract,
+                    parent_remaining_daily_usd=None,
+                )
+            except ContractInheritanceError as exc:
+                return await _mark_failed_preflight(
+                    db,
+                    run=run,
+                    reason=f"contract inheritance violation: {exc.code}: {exc}",
+                    paused_status=DispatchStatus.FAILED,
+                )
+
+    # ---- Phase B.2: lazy workspace resolution --------------------------
+    # When workspace_scope='user_automation_workspace' and no project is
+    # bound yet, lazily create / look up the user's ~automations~ project
+    # so the run has somewhere to attribute artifacts + spend. Only the
+    # first eligible run triggers the create — subsequent runs hit the
+    # idempotent fast path.
+    if (
+        automation.workspace_scope == "user_automation_workspace"
+        and automation.workspace_project_id is None
+    ):
+        from .lazy_workspace import ensure_user_automation_workspace
+
+        try:
+            workspace_project = await ensure_user_automation_workspace(
+                automation.owner_user_id, db
+            )
+            automation.workspace_project_id = workspace_project.id
+            await db.commit()
+        except LookupError as exc:
+            return await _mark_failed_preflight(
+                db,
+                run=run,
+                reason=f"lazy workspace creation failed: {exc}",
+                paused_status=DispatchStatus.FAILED,
+            )
+        except Exception as exc:
+            logger.exception(
+                "dispatcher.lazy_workspace_failed automation=%s", automation_id
+            )
+            return await _mark_failed_preflight(
+                db,
+                run=run,
+                reason=f"lazy workspace creation crashed: {exc!r}",
+                paused_status=DispatchStatus.FAILED,
+            )
+
     # Transition queued -> preflight -> running. Two updates so the
     # state-machine is auditable; cheap on Postgres + SQLite.
     await db.execute(

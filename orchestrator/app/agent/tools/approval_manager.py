@@ -317,6 +317,47 @@ class PendingUserInputManager:
         self._deliver(input_id, "__cancelled__")
         return True
 
+    # ------------------- Phase 4: gateway delivery -------------------
+
+    async def send_to_gateway(
+        self,
+        approval_request_id,
+        *,
+        db,
+        gateway_client=None,
+    ):
+        """Deliver an approval card via the Phase 4 fallback chain.
+
+        Replaces the old "raw XADD to gateway_delivery_stream" pattern.
+        The fallback chain (paired Slack DM → paired Telegram DM →
+        transactional email → web badge → hard-fail with
+        ``paused_reason='no_delivery_channel'``) lives in
+        ``services/automations/delivery_fallback.send_with_fallback``.
+
+        ``approval_request_id`` is the UUID of the
+        ``automation_approval_requests`` row to deliver. ``db`` is an
+        ``AsyncSession`` the caller already owns. ``gateway_client`` is
+        injectable for unit tests; in production it's the
+        ``GatewayDeliveryClient`` singleton that knows how to hit the
+        gateway delivery stream.
+        """
+        from ...services.automations.delivery_fallback import (
+            send_with_fallback,
+        )
+
+        result = await send_with_fallback(
+            approval_request_id, db, gateway_client
+        )
+        logger.info(
+            "[PendingUserInputManager] send_to_gateway approval=%s -> kind=%s "
+            "surface=%s attempts=%d",
+            approval_request_id,
+            result.kind,
+            result.surface,
+            len(result.attempts),
+        )
+        return result
+
 
 # ---------------------------------------------------------------------------
 # Back-compat shim
