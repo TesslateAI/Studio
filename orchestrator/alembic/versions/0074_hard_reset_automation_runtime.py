@@ -1,7 +1,7 @@
 """Hard reset for the OpenSail Automation Runtime + App Runtime Contract.
 
-Revision ID: 0074_hard_reset_automation_runtime
-Revises: 0073_spend_record_attribution_columns
+Revision ID: 0074_hard_reset
+Revises: 0073_spend_attribution
 Create Date: 2026-04-26
 
 Phase 1 of the OpenSail Automation Runtime rollout.
@@ -45,8 +45,8 @@ from sqlalchemy.dialects import postgresql
 from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
-revision: str = "0074_hard_reset_automation_runtime"
-down_revision: str | Sequence[str] | None = "0073_spend_record_attribution_columns"
+revision: str = "0074_hard_reset"
+down_revision: str | Sequence[str] | None = "0073_spend_attribution"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

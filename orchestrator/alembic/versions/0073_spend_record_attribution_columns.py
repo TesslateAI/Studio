@@ -1,6 +1,6 @@
 """SpendRecord attribution columns for the Automation Runtime.
 
-Revision ID: 0073_spend_record_attribution_columns
+Revision ID: 0073_spend_attribution
 Revises: 0072_dedupe_project_files, 0072_is_system_agent_flag
 Create Date: 2026-04-26
 
@@ -32,7 +32,7 @@ from alembic import op
 from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
-revision: str = "0073_spend_record_attribution_columns"
+revision: str = "0073_spend_attribution"
 down_revision: str | Sequence[str] | None = (
     "0072_dedupe_project_files",
     "0072_is_system_agent_flag",
