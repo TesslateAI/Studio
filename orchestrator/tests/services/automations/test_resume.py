@@ -141,10 +141,19 @@ def stub_app_action_dispatcher(monkeypatch: pytest.MonkeyPatch):
 
     fake = types.SimpleNamespace(dispatch=_dispatch)
     # Patch the import target — dispatcher does ``from ..apps import action_dispatcher``.
-    # Easiest patch: mutate sys.modules so the lazy import resolves to the fake.
+    # Two levels of cache to clobber:
+    #   * ``sys.modules["app.services.apps.action_dispatcher"]`` for any code
+    #     path that does ``import ...action_dispatcher`` directly.
+    #   * The ``action_dispatcher`` attribute on the parent package — the
+    #     ``from ..apps import action_dispatcher`` form returns the cached
+    #     attribute when the real module has already been imported by an
+    #     earlier test in the same session, ignoring sys.modules entirely.
     monkeypatch.setitem(
         sys.modules, "app.services.apps.action_dispatcher", fake
     )
+    import app.services.apps as _apps_pkg
+
+    monkeypatch.setattr(_apps_pkg, "action_dispatcher", fake, raising=False)
     return captured
 
 

@@ -181,7 +181,8 @@ async def _seed_slack_identity(
             user_id=user_id,
             platform="slack",
             platform_user_id=slack_user_id,
-            verified_at=datetime.now(UTC),
+            is_verified=True,
+            paired_at=datetime.now(UTC),
         )
     )
     await db.flush()

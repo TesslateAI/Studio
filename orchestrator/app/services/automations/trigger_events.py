@@ -35,6 +35,7 @@ __all__ = [
     "ingest_trigger_event",
     "mark_dispatched",
     "mark_failed",
+    "mark_processed",
 ]
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,22 @@ async def mark_dispatched(db: AsyncSession, event_id: UUID) -> None:
         update(AutomationEvent)
         .where(AutomationEvent.id == event_id)
         .values(dispatched_at=datetime.now(tz=UTC))
+    )
+
+
+async def mark_processed(db: AsyncSession, event_id: UUID) -> None:
+    """Stamp ``processed_at`` after the run reaches a terminal state.
+
+    The dispatcher calls this from the success path so the event row's
+    state machine reflects ``received → dispatched → processed``. Recovery
+    sweeps treat ``processed_at IS NOT NULL`` as the strongest "done"
+    signal — the dispatched-but-not-processed window is the only spot a
+    sweep needs to revisit.
+    """
+    await db.execute(
+        update(AutomationEvent)
+        .where(AutomationEvent.id == event_id)
+        .values(processed_at=datetime.now(tz=UTC))
     )
 
 

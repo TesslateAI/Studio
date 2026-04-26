@@ -155,6 +155,7 @@ async def _seed_app_install_with_slack_grant(
     # Minimal MarketplaceApp + AppVersion to satisfy FKs on AppInstance.
     from app.models import (
         AppVersion,
+        MarketplaceAgent,
         MarketplaceApp,
         UserMcpConfig,
     )
@@ -163,6 +164,25 @@ async def _seed_app_install_with_slack_grant(
         AppConnectorRequirement,
         AppInstance,
     )
+
+    # Seed a marketplace MCP server row so UserMcpConfig.marketplace_agent_id
+    # has a valid FK target. The DB-level NOT NULL on this column predates
+    # the model declaration, which is why the test must seed one.
+    mcp_agent_id = uuid.uuid4()
+    db.add(
+        MarketplaceAgent(
+            id=mcp_agent_id,
+            name="Slack",
+            slug=f"slack-mcp-{uuid.uuid4().hex[:6]}",
+            description="test",
+            category="connectors",
+            item_type="mcp_server",
+            pricing_type="free",
+            created_by_user_id=owner_user_id,
+            is_published=True,
+        )
+    )
+    await db.flush()
 
     app_id = uuid.uuid4()
     db.add(
@@ -174,7 +194,7 @@ async def _seed_app_install_with_slack_grant(
             description="test",
             category="productivity",
             state="published",
-            creator_id=owner_user_id,
+            creator_user_id=owner_user_id,
         )
     )
 
@@ -184,8 +204,11 @@ async def _seed_app_install_with_slack_grant(
             id=app_version_id,
             app_id=app_id,
             version="0.1.0",
+            manifest_schema_version="2026-05",
             manifest_json={},
-            bundle_address="cas://test",
+            manifest_hash="sha256:test",
+            feature_set_hash="sha256:fs",
+            bundle_hash="cas://test",
             approval_state="approved",
         )
     )
@@ -223,9 +246,9 @@ async def _seed_app_install_with_slack_grant(
         UserMcpConfig(
             id=user_mcp_config_id,
             user_id=owner_user_id,
-            server_id="slack",
-            server_name="Slack",
-            is_enabled=True,
+            marketplace_agent_id=mcp_agent_id,
+            scope_level="user",
+            is_active=True,
         )
     )
     await db.flush()
@@ -350,10 +373,12 @@ async def test_proxy_call_succeeds_without_app_seeing_token(
                 },
             )
 
-    monkeypatch.setattr(
-        "app.services.apps.connector_proxy.router.httpx.AsyncClient",
-        _MockClient,
+    import importlib
+
+    _router_mod = importlib.import_module(
+        "app.services.apps.connector_proxy.router"
     )
+    monkeypatch.setattr(_router_mod.httpx, "AsyncClient", _MockClient)
 
     # 4. Build the test client and POST to the proxy.
     try:

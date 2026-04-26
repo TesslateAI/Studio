@@ -74,7 +74,7 @@ from ...models_automations import (
     AutomationRun,
     AutomationRunArtifact,
 )
-from . import approval_pressure
+from . import approval_pressure, trigger_events
 from .checkpoint import (
     ResumeStrategy,
     RunCheckpoint,
@@ -1049,6 +1049,7 @@ async def dispatch_automation(
             raw_output=_safe_json(action_result),
         )
     )
+    await trigger_events.mark_processed(db, event_id)
     await db.commit()
 
     return DispatchResult(
