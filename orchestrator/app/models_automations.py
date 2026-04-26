@@ -696,6 +696,102 @@ class AppInstance(Base):
     )
 
 
+class InvocationSubject(Base):
+    """Unified billing + token identity attached to every AutomationRun.
+
+    Phase 2 primitive (see ``/Users/smirk/.claude/plans/ultrathink-i-want-to-glittery-pond.md``
+    section "InvocationSubject — unified billing and token identity").
+
+    Today three separate code paths handle billing routing: ``wallet_mix``
+    settlement (apps), ``credit_service`` (user OpenSail credits), and
+    ``key_lifecycle`` (LiteLLM key minting). ``InvocationSubject`` collapses
+    them into a single resolved decision per run. After this lands, every
+    ``SpendRecord`` and ``LiteLLMKeyLedger`` row carries
+    ``invocation_subject_id`` — joining spend back to billable identity is
+    one column, not three lookups.
+
+    The FK constraints from ``spend_records.invocation_subject_id`` and
+    ``litellm_key_ledger.invocation_subject_id`` are added in alembic
+    ``0075_invocation_subjects`` (Phase 2). The columns themselves were
+    added in Phase 0 (spend_records) and the same Phase 2 migration
+    (litellm_key_ledger).
+    """
+
+    __tablename__ = "invocation_subjects"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+
+    # Optional anchors. Direct manual invocations have no ``automation_run_id``.
+    automation_run_id = Column(
+        GUID(),
+        ForeignKey("automation_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    invoking_user_id = Column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    team_id = Column(
+        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+    )
+    app_instance_id = Column(
+        GUID(),
+        ForeignKey("app_instances.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    app_action_id = Column(
+        GUID(),
+        ForeignKey("app_actions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    agent_id = Column(
+        GUID(),
+        ForeignKey("marketplace_agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # installer | creator | team | platform | byok | parent_run
+    payer_policy = Column(String(32), nullable=False)
+    parent_run_id = Column(
+        GUID(),
+        ForeignKey("automation_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # opensail_credits | scoped_litellm_key | byok_litellm_key |
+    # creator_wallet | team_credits | platform_budget | parent_run
+    credit_source = Column(String(48), nullable=False)
+    credit_source_ref = Column(Text, nullable=True)
+
+    # {max_usd_per_run, max_usd_per_day} — enforced by ContractGate / dispatcher.
+    budget_envelope = Column(JSON, nullable=False, default=dict, server_default="{}")
+    spent_so_far_usd = Column(
+        Numeric(12, 4), nullable=False, default=0, server_default="0"
+    )
+    litellm_key_id = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "payer_policy IN ('installer', 'creator', 'team', 'platform', "
+            "'byok', 'parent_run')",
+            name="ck_invocation_subjects_payer_policy",
+        ),
+        CheckConstraint(
+            "credit_source IN ('opensail_credits', 'scoped_litellm_key', "
+            "'byok_litellm_key', 'creator_wallet', 'team_credits', "
+            "'platform_budget', 'parent_run')",
+            name="ck_invocation_subjects_credit_source",
+        ),
+    )
+
+
 class AppInstallAttempt(Base):
     """Saga ledger for the apps installer, recreated under the hard reset.
 
@@ -758,4 +854,5 @@ __all__ = [
     "AppAutomationTemplate",
     "AppInstance",
     "AppInstallAttempt",
+    "InvocationSubject",
 ]

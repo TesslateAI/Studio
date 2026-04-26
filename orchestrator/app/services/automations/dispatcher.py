@@ -323,6 +323,7 @@ async def _dispatch_agent_run(
     automation: AutomationDefinition,
     action: AutomationAction,
     event_payload: dict[str, Any],
+    budget_allocation: Any | None = None,
 ) -> dict[str, Any]:
     """Enqueue ``execute_agent_task`` against the existing worker pipeline.
 
@@ -332,6 +333,13 @@ async def _dispatch_agent_run(
     write status transitions to ``automation_runs``. The agent payload
     builder lives in ``services.agent_context`` and is touched in a
     sibling wave; here we only assemble the minimal envelope.
+
+    Phase 2: when a :class:`BudgetAllocation` was minted in preflight we
+    plumb the LiteLLM key id + value through the payload so the worker
+    can inject them into LiteLLM HTTP calls. The agent loop in
+    ``packages/tesslate-agent`` consumes ``litellm_key_value`` as the
+    bearer for model calls and surfaces 429s as
+    :class:`BudgetExhaustedError`.
     """
     # Lazy import to avoid pulling the worker module at dispatcher import
     # time (worker pulls heavy deps -- model adapters, kubernetes clients).
@@ -355,6 +363,15 @@ async def _dispatch_agent_run(
         "automation_id": str(automation.id),
         "contract": automation.contract,
     }
+
+    if budget_allocation is not None:
+        payload["budget"] = {
+            "litellm_key_id": budget_allocation.litellm_key_id,
+            "litellm_key_value": budget_allocation.litellm_key_value,
+            "max_usd_per_run": str(budget_allocation.max_usd_per_run),
+            "daily_remaining_usd": str(budget_allocation.daily_remaining_usd),
+            "is_extension": budget_allocation.is_extension,
+        }
 
     queue = get_task_queue()
     await queue.enqueue("execute_agent_task", payload)
@@ -751,6 +768,72 @@ async def dispatch_automation(
 
     action = actions[0]
 
+    # ---- Phase B.5: budget allocation (Phase 2) ------------------------
+    # Mint a single-use LiteLLM key with budget=contract.max_spend_per_run_usd
+    # and atomically reserve daily budget against the automation + every
+    # parent in its chain. If the daily counter would go negative we fail
+    # preflight with a clear reason; the dispatcher's caller (router or
+    # ApprovalManager) is responsible for surfacing the "extend daily
+    # budget?" card.
+    #
+    # Skipped when (a) ``contract.max_spend_per_run_usd`` is unset (e.g.,
+    # Tier 0 control-plane runs), or (b) the action does not drive a
+    # model loop (``app.invoke``/``gateway.send`` — those don't consume
+    # the per-run LiteLLM key). For ``agent.run`` we always allocate;
+    # the daily-budget refund on no-spend keeps the cap honest.
+    budget_allocation = None
+    if (
+        action.action_type == "agent.run"
+        and automation.contract.get("max_spend_per_run_usd") is not None
+    ):
+        from . import budget as budget_mod
+
+        try:
+            budget_allocation = await budget_mod.allocate_run_budget(
+                db,
+                run_id=run.id,
+                automation_id=automation_id,
+                contract=automation.contract,
+                parent_automation_id=automation.parent_automation_id,
+            )
+            await db.commit()
+        except budget_mod.DailyBudgetExceeded as exc:
+            return await _mark_failed_preflight(
+                db,
+                run=run,
+                reason=(
+                    f"daily budget exceeded for automation {exc.automation_id}: "
+                    f"requested ${exc.requested_usd}, remaining ${exc.remaining_usd}"
+                ),
+                paused_status=DispatchStatus.PAUSED,
+            )
+        except budget_mod.CycleDetected as exc:
+            return await _mark_failed_preflight(
+                db,
+                run=run,
+                reason=f"cycle in parent_automation chain: {exc.chain}",
+                paused_status=DispatchStatus.FAILED,
+            )
+        except ValueError as exc:
+            return await _mark_failed_preflight(
+                db,
+                run=run,
+                reason=f"budget allocation invalid: {exc}",
+                paused_status=DispatchStatus.FAILED,
+            )
+        except Exception as exc:
+            logger.exception(
+                "dispatcher.budget_allocation_failed automation=%s run=%s",
+                automation_id,
+                run.id,
+            )
+            return await _mark_failed_preflight(
+                db,
+                run=run,
+                reason=f"budget allocation failed: {exc!r}",
+                paused_status=DispatchStatus.FAILED,
+            )
+
     # Mark running before we route -- the executor may take a while and we
     # want the row to reflect that we're past preflight.
     started_at = datetime.now(tz=UTC)
@@ -780,6 +863,7 @@ async def dispatch_automation(
                 automation=automation,
                 action=action,
                 event_payload=event_payload,
+                budget_allocation=budget_allocation,
             )
         elif action.action_type == "app.invoke":
             action_result = await _dispatch_app_action(
