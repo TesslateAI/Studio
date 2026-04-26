@@ -224,6 +224,21 @@ async def install_app(
             "wallet_mix_consent missing dimensions required by manifest.billing"
         )
 
+    # 4a) Regenerate the manifest 2026-05 projection rows
+    # (app_actions/views/data_resources/dependencies/connector_requirements/
+    # automation_templates). No-op for older manifest schemas. We run BEFORE
+    # the Hub volume is materialized so a projection failure short-circuits
+    # without leaking a volume; the inner savepoint owned by the projector
+    # plays nicely with the install transaction the caller commits below.
+    from . import projection as _projection
+
+    try:
+        await _projection.regenerate_projection(db, app_version_id=av.id)
+    except _projection.ProjectionError as e:
+        raise IncompatibleAppError(
+            f"AppVersion {app_version_id} projection failed: {e}"
+        ) from e
+
     # 5) Restore the bundle to a new volume on some node.
     if not av.bundle_hash:
         raise IncompatibleAppError(
