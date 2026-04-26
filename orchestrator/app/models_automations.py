@@ -38,6 +38,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.types.guid import GUID
@@ -822,6 +823,20 @@ class AppInstance(Base):
         nullable=False,
     )
 
+    # Reverse relationships for back_populates declared on the legacy
+    # MarketplaceApp / AppVersion / McpConsentRecord side. Without these
+    # SQLAlchemy mapper config raises ArgumentError the first time models
+    # are loaded.
+    app = relationship("MarketplaceApp", back_populates="instances", foreign_keys=[app_id])
+    app_version = relationship("AppVersion", back_populates="instances", foreign_keys=[app_version_id])
+    installer = relationship("User", foreign_keys=[installer_user_id])
+    project = relationship("Project", foreign_keys=[project_id])
+    consents = relationship(
+        "McpConsentRecord",
+        back_populates="app_instance",
+        cascade="all, delete-orphan",
+    )
+
 
 class InvocationSubject(Base):
     """Unified billing + token identity attached to every AutomationRun.
@@ -1075,6 +1090,120 @@ class ConnectorProxyCall(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# App Composition — Phase 3 primitives (alembic 0078_app_composition).
+#
+# Composition contract (load-bearing):
+#   parent → child action  via dispatch_app_action gated by app_instance_links
+#   parent → child view    via signed JWT minted from app_instance_links + app_embeds
+#   parent → child data    via dispatch_app_action on the resource's backed_by_action
+#
+# There is NO path where a parent reaches into a child's storage, K8s
+# namespace, or process. Everything else (billing, auditing, permissions)
+# follows from this single rule.
+# ---------------------------------------------------------------------------
+
+
+class AppInstanceLink(Base):
+    """Install-time wiring from a parent app install to a child app install.
+
+    One row per ``(parent_install_id, alias)``. Granted scope arrays are
+    positive lists drawn from ``manifest.dependencies[].needs`` — the
+    parent only gets what it explicitly asked for. Anything outside the
+    positive list is rejected at the composition runtime with 403.
+
+    Revocation is a soft-delete: ``UPDATE app_instance_links SET
+    revoked_at=now()``. The composition runtime treats a non-NULL
+    ``revoked_at`` as alias-not-found (the link is gone from the parent's
+    perspective; auditing the historical row is still possible).
+    """
+
+    __tablename__ = "app_instance_links"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    parent_install_id = Column(
+        GUID(),
+        ForeignKey("app_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    child_install_id = Column(
+        GUID(),
+        ForeignKey("app_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    alias = Column(String(64), nullable=False)
+
+    granted_actions = Column(JSON, nullable=False, default=list, server_default="[]")
+    granted_views = Column(JSON, nullable=False, default=list, server_default="[]")
+    granted_data_resources = Column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "parent_install_id",
+            "alias",
+            name="uq_app_instance_links_parent_alias",
+        ),
+        Index("ix_ail_child_install_id", "child_install_id"),
+        Index("ix_ail_parent_install_id", "parent_install_id"),
+    )
+
+
+class AppEmbed(Base):
+    """Saved view-embed instance.
+
+    When a user drops a CRM ``account_card`` into a dashboard slot, we
+    persist a row here with the bound ``input`` and ``layout_position``.
+    The parent dashboard reads its rows at render time, mints a signed
+    JWT per row via :mod:`app.services.apps.embed_token`, and renders an
+    iframe per token.
+
+    Mint-time validation is run against the matching ``app_instance_links``
+    row (alias resolution + ``view_name in granted_views``); the embed
+    row itself is just persistent layout state.
+    """
+
+    __tablename__ = "app_embeds"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    parent_install_id = Column(
+        GUID(),
+        ForeignKey("app_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    child_install_id = Column(
+        GUID(),
+        ForeignKey("app_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    view_name = Column(String(128), nullable=False)
+
+    # Bound input (e.g., {"account_id": "1234"}) — included verbatim in
+    # the signed embed token at mint time.
+    input = Column(JSON, nullable=False, default=dict, server_default="{}")
+
+    # Optional grid placement: { row, col, w, h }. NULL when the embed is
+    # rendered without a saved layout (e.g., one-off ad-hoc).
+    layout_position = Column(JSON, nullable=True)
+
+    created_by_user_id = Column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_ae_parent_install_id", "parent_install_id"),
+    )
+
+
 __all__ = [
     "AutomationDefinition",
     "AutomationTrigger",
@@ -1096,4 +1225,6 @@ __all__ = [
     "InvocationSubject",
     "AppConnectorGrant",
     "ConnectorProxyCall",
+    "AppInstanceLink",
+    "AppEmbed",
 ]

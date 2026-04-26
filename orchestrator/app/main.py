@@ -26,6 +26,7 @@ from .routers import (
     app_actions,
     app_billing,
     app_bundles,
+    app_composition,
     app_installs,
     app_runtime,
     app_runtime_status,
@@ -1254,6 +1255,11 @@ app.include_router(app_bundles.router, prefix="/api/app-bundles", tags=["apps:bu
 # --- Automation Runtime + typed App Actions (Phase 1) ----------------------
 app.include_router(automations.router)  # /api/automations - definitions, runs, artifacts
 app.include_router(app_actions.router)  # /api/apps/{instance}/actions/{name}
+
+# --- App Composition (Phase 3) ---------------------------------------------
+# Parent → child action / view / data-resource calls, gated by
+# app_instance_links positive-list grants. See services/apps/composition.py.
+app.include_router(app_composition.router)  # /api/v1/composition/installs/...
 
 # --- Connector Proxy (Phase 3) ---------------------------------------------
 # Mounted on the orchestrator for Phase 3; Phase 4 lifts this into a

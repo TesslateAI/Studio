@@ -30,7 +30,9 @@ from ..services.apps.installer import (
     IncompatibleAppError,
     InstallError,
     install_app,
+    propagate_user_secrets_post_install,
 )
+from ..services.apps.user_secret_propagator import delete_user_secrets
 from ..services.hub_client import HubClient
 from ..users import current_active_user
 
@@ -167,6 +169,26 @@ async def install_endpoint(
                 await close()
             except Exception:  # pragma: no cover
                 logger.debug("hub_client close failed", exc_info=True)
+
+    # Best-effort: materialize per-user OAuth/API-key Secrets for any
+    # ``exposure='env'`` connector grants. Failures here MUST NOT roll back
+    # the install — the user can re-trigger via "Resync credentials"
+    # (Phase 5 UI), and the app pod's startup will name any missing env
+    # vars explicitly. The ``exposure='proxy'`` grants are handled by the
+    # Connector Proxy at request time and need nothing here.
+    try:
+        await propagate_user_secrets_post_install(
+            db,
+            app_instance_id=result.app_instance_id,
+            project_id=result.project_id,
+        )
+    except Exception:
+        logger.warning(
+            "install_endpoint: user-secret propagation failed for instance=%s "
+            "(install succeeded; user can resync credentials)",
+            result.app_instance_id,
+            exc_info=True,
+        )
 
     return InstallResponse(
         app_instance_id=result.app_instance_id,
@@ -437,6 +459,25 @@ async def uninstall_endpoint(
     # orphan-namespace reaper will eventually clean up. Non-blocking so a
     # slow K8s API doesn't block the user's uninstall click.
     if project_id_for_cleanup is not None:
+        # Drop the per-install user-credentials Secret BEFORE the namespace
+        # delete. Both calls are best-effort: namespace delete cascades
+        # Secrets too, so a failure here is purely a defense-in-depth no-op.
+        try:
+            from kubernetes import client as k8s_client
+
+            await delete_user_secrets(
+                k8s_client.CoreV1Api(),
+                app_instance_id=inst.id,
+                target_namespace=f"proj-{project_id_for_cleanup}",
+            )
+        except Exception:
+            logger.warning(
+                "uninstall: user-secret cleanup failed for instance=%s "
+                "(namespace delete will sweep it)",
+                inst.id,
+                exc_info=True,
+            )
+
         try:
             from ..services.orchestration import get_orchestrator
 

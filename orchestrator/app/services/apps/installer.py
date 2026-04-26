@@ -52,6 +52,7 @@ __all__ = [
     "ManifestInvalid",
     "InstallResult",
     "install_app",
+    "propagate_user_secrets_post_install",
 ]
 
 logger = logging.getLogger(__name__)
@@ -833,6 +834,51 @@ async def install_app(
             )
         )
 
+    # 9.5) Wire app_instance_links rows for manifest.dependencies[] (Phase 3).
+    #
+    # Phase 3 simplification: this does NOT auto-install missing
+    # dependencies. If a `required: true` dep has no installed instance for
+    # this user, we raise MissingDependencyError and the caller (UI / Phase
+    # 5's Install Modal) is responsible for walking the user through the
+    # recursive install. Optional deps are silently skipped — the runtime
+    # surfaces them as AliasNotFound at call time.
+    if (manifest_json.get("manifest_schema_version") == "2026-05"
+            and manifest_json.get("dependencies")):
+        from .app_manifest import AppManifest2026_05
+        from .composition import (
+            MissingDependencyError,
+            resolve_dependency_installs,
+            wire_install_links,
+        )
+
+        try:
+            parsed_manifest = AppManifest2026_05.model_validate(manifest_json)
+        except Exception as exc:  # noqa: BLE001 — manifest already passed publish
+            # If the manifest doesn't even parse here, the projection layer
+            # already raised earlier — defense in depth.
+            raise IncompatibleAppError(
+                f"manifest parse failed during link wiring: {exc}"
+            ) from exc
+
+        if parsed_manifest.dependencies:
+            child_installs_by_app_id = await resolve_dependency_installs(
+                db,
+                installer_user_id=installer_user_id,
+                parent_manifest=parsed_manifest,
+            )
+            try:
+                await wire_install_links(
+                    db,
+                    parent_install=instance,
+                    parent_manifest=parsed_manifest,
+                    child_installs_by_app_id=child_installs_by_app_id,
+                )
+            except MissingDependencyError as exc:
+                # Translate to InstallError so the router maps to a clean
+                # 4xx. Phase 5's Install Modal catches this and prompts
+                # the user to install the missing child first.
+                raise IncompatibleAppError(str(exc)) from exc
+
     await db.flush()
 
     logger.info(
@@ -942,3 +988,68 @@ async def _mark_attempt_committed(
             "install_app: failed to mark install attempt committed (attempt_id=%s)",
             attempt_id,
         )
+
+
+async def propagate_user_secrets_post_install(
+    db: AsyncSession,
+    *,
+    app_instance_id: UUID,
+    project_id: UUID | None,
+) -> dict[str, str] | None:
+    """Best-effort: materialize per-user OAuth/API-key Secrets for the install.
+
+    Called by the install router AFTER the install transaction commits and
+    AFTER the namespace exists. Wrapped in try/except by the caller — a
+    propagation failure must NOT roll back the install. The user can
+    re-trigger via "Resync credentials" (Phase 5 UI). The app pod will
+    fail to start with a clear "missing env" error if credentials never
+    land, which is recoverable.
+
+    Returns:
+        ``{connector_id: status}`` from ``propagate_user_secrets`` if any
+        env-exposure grants exist; ``None`` if there are no env grants
+        (or if the install has no project — per-invocation installs).
+    """
+    if project_id is None:
+        return None
+
+    # Lazy imports: this module is in a hot path and the K8s client +
+    # propagator pull in a chain of dependencies (cryptography, kubernetes
+    # client) we don't want at install_app's import time.
+    from kubernetes import client as k8s_client
+
+    from .user_secret_propagator import (
+        _load_env_grants_for_install,  # type: ignore[attr-defined]
+        propagate_user_secrets,
+    )
+
+    instance = await db.get(AppInstance, app_instance_id)
+    if instance is None:
+        logger.warning(
+            "propagate_user_secrets_post_install: instance=%s not found; skipping",
+            app_instance_id,
+        )
+        return None
+
+    # Cheap pre-check: if the install has no env grants, skip the K8s
+    # client creation entirely. Avoids spinning up a CoreV1Api against
+    # a deployment that doesn't need one.
+    pairs = await _load_env_grants_for_install(db, instance.id)
+    if not pairs:
+        return None
+
+    target_namespace = f"proj-{project_id}"
+    core_v1 = k8s_client.CoreV1Api()
+    statuses = await propagate_user_secrets(
+        db,
+        core_v1,
+        app_instance=instance,
+        target_namespace=target_namespace,
+    )
+    logger.info(
+        "propagate_user_secrets_post_install: instance=%s ns=%s statuses=%s",
+        instance.id,
+        target_namespace,
+        statuses,
+    )
+    return statuses
