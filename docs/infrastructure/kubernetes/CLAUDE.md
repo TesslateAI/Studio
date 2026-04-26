@@ -42,7 +42,7 @@ kubectl config set-context ...    # BANNED
 ```bash
 # Build and load image (CRITICAL: Delete first!)
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 kubectl delete pod -n tesslate -l app=tesslate-backend
 
@@ -58,7 +58,7 @@ kubectl port-forward -n tesslate svc/tesslate-frontend-service 5000:80
 ```bash
 # Build and push
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 

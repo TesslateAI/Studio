@@ -203,7 +203,7 @@ if [[ "$DEV_MODE" == "docker" ]]; then
   success "All Docker Compose images built"
 else
   info "Building backend image..."
-  docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+  docker build -t tesslate-backend:latest -f orchestrator/Dockerfile .
   success "Backend image built"
 
   info "Building frontend image..."

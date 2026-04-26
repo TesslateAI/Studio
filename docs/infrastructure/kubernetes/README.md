@@ -450,13 +450,13 @@ minikube start -p tesslate --driver=docker --memory=4096 --cpus=2
 minikube -p tesslate addons enable ingress
 
 # 3. Build and load images
-docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 
 docker build -t tesslate-frontend:latest -f app/Dockerfile.prod app/
 minikube -p tesslate image load tesslate-frontend:latest
 
-docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver .
 minikube -p tesslate image load tesslate-devserver:latest
 
 # 4. Create secrets
@@ -501,7 +501,7 @@ kubectl create secret generic tesslate-app-secrets -n tesslate \
 # 4. Build and push images
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
 
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 # Repeat for frontend and devserver
@@ -521,7 +521,7 @@ kubectl get ingress -n tesslate
 **Code changes**:
 ```bash
 # 1. Build new image (ALWAYS use --no-cache)
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 
 # 2. Push (Minikube: load, AWS: push to ECR)
 # Minikube:
