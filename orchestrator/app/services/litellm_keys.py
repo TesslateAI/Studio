@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -84,6 +85,26 @@ class LiteLLMDelegate:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class MintResult:
+    """Return value of :func:`mint_with_secret`.
+
+    Carries both the persisted ledger row (whose ``meta`` contains only
+    the 8-char ``api_key_preview``, never the full secret) and the full
+    ``api_key`` string returned by the LiteLLM proxy on mint.
+
+    The full ``api_key`` is the caller's responsibility — it is NOT
+    persisted anywhere in the orchestrator DB. Callers that need it for
+    HTTP-header injection (e.g. ``services.automations.budget``) should
+    plumb it through their in-memory payload (e.g. AgentTaskPayload via
+    Redis, which is explicitly transient) and NEVER write it to a
+    durable store.
+    """
+
+    ledger: LiteLLMKeyLedger
+    api_key: str
+
+
 async def _compute_ancestor_chain_len(db: AsyncSession, parent_key_id: str) -> int:
     """Walk the ancestor chain; returns 1 if parent has no parent, 2 if it does, etc."""
     depth = 0
@@ -100,7 +121,7 @@ async def _compute_ancestor_chain_len(db: AsyncSession, parent_key_id: str) -> i
     return depth
 
 
-async def mint(
+async def mint_with_secret(
     db: AsyncSession,
     *,
     delegate: LiteLLMDelegate,
@@ -112,12 +133,18 @@ async def mint(
     parent_key_id: str | None = None,
     ttl_seconds: int | None = None,
     meta: dict[str, Any] | None = None,
-) -> LiteLLMKeyLedger:
-    """Mint a new key. Validates tier/depth/budget, calls LiteLLM, inserts row.
+) -> MintResult:
+    """Mint a new key and return both the ledger row and the full secret.
 
-    Rollback: if the DB insert fails after LiteLLM mint, we try best-effort
-    revoke at the proxy and re-raise. If the LiteLLM call fails, no row is
-    written.
+    Same validation + rollback semantics as :func:`mint`. The only
+    difference is the return shape: this function returns a
+    :class:`MintResult` so the caller can inject the full ``api_key``
+    into outbound HTTP headers (e.g. agent worker ``Authorization``).
+
+    The ledger row's ``meta`` keeps only the 8-char ``api_key_preview``,
+    matching the existing security policy: the full secret is NEVER
+    persisted in the DB. The caller owns the lifetime of the returned
+    ``api_key`` string.
 
     Raises:
         KeyMintError: invariant violation (tier mismatch, depth exceeded,
@@ -174,6 +201,7 @@ async def mint(
         raise
 
     key_id = resp["key_id"]
+    api_key = resp.get("api_key") or ""
 
     row = LiteLLMKeyLedger(
         id=uuid.uuid4(),
@@ -187,7 +215,7 @@ async def mint(
         spent_usd=Decimal("0"),
         ttl_at=ttl_at,
         state=KeyState.ACTIVE.value,
-        meta={**call_meta, "api_key_preview": (resp.get("api_key") or "")[:8]},
+        meta={**call_meta, "api_key_preview": api_key[:8]},
     )
     db.add(row)
     try:
@@ -200,7 +228,50 @@ async def mint(
             logger.exception("litellm_keys.mint: best-effort revoke also failed")
         raise
 
-    return row
+    return MintResult(ledger=row, api_key=api_key)
+
+
+async def mint(
+    db: AsyncSession,
+    *,
+    delegate: LiteLLMDelegate,
+    tier: KeyTier | str,
+    user_id: UUID | None,
+    budget_usd: Decimal,
+    session_id: UUID | None = None,
+    app_instance_id: UUID | None = None,
+    parent_key_id: str | None = None,
+    ttl_seconds: int | None = None,
+    meta: dict[str, Any] | None = None,
+) -> LiteLLMKeyLedger:
+    """Mint a new key. Validates tier/depth/budget, calls LiteLLM, inserts row.
+
+    Returns the persisted :class:`LiteLLMKeyLedger` row only — the full
+    ``api_key`` is dropped after the ledger is written. Callers that
+    need the secret (e.g. for HTTP injection into the agent worker)
+    should call :func:`mint_with_secret` instead.
+
+    Rollback: if the DB insert fails after LiteLLM mint, we try best-effort
+    revoke at the proxy and re-raise. If the LiteLLM call fails, no row is
+    written.
+
+    Raises:
+        KeyMintError: invariant violation (tier mismatch, depth exceeded,
+            over-budget nested, non-active parent).
+    """
+    result = await mint_with_secret(
+        db,
+        delegate=delegate,
+        tier=tier,
+        user_id=user_id,
+        budget_usd=budget_usd,
+        session_id=session_id,
+        app_instance_id=app_instance_id,
+        parent_key_id=parent_key_id,
+        ttl_seconds=ttl_seconds,
+        meta=meta,
+    )
+    return result.ledger
 
 
 # ---------------------------------------------------------------------------

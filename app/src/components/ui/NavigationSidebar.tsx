@@ -38,6 +38,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../contexts/TeamContext';
 import { modKey } from '../../lib/keyboard-registry';
 import type { CreditBalanceResponse } from '../../types/billing';
+import { usePendingApprovals } from '../../hooks/usePendingApprovals';
 
 interface NavigationSidebarProps {
   activePage:
@@ -200,7 +201,15 @@ export function NavigationSidebar({
     activePage === 'library' ? new URLSearchParams(location.search).get('tab') || 'agents' : null;
 
   // Team + user profile state
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated } = useAuth();
+
+  // Pending approvals — drives the badge on the Automations nav item.
+  // The hook polls every 30s and is shared with /automations/approvals so
+  // the two surfaces stay in lockstep without extra coordination.
+  const { count: pendingApprovalsCount } = usePendingApprovals({
+    pollMs: 30_000,
+    enabled: isAuthenticated,
+  });
   const { activeTeam, teams, switchTeam, refreshTeams, can, teamSwitchKey } = useTeam();
   const canChat = can('chat.send');
   const subscriptionTier = activeTeam?.subscription_tier || 'free';
@@ -760,7 +769,15 @@ export function NavigationSidebar({
               </button>
             </Tooltip>
 
-            <Tooltip content="Automations" side="right" delay={200}>
+            <Tooltip
+              content={
+                pendingApprovalsCount > 0
+                  ? `Automations · ${pendingApprovalsCount} pending approval${pendingApprovalsCount === 1 ? '' : 's'}`
+                  : 'Automations'
+              }
+              side="right"
+              delay={200}
+            >
               <button
                 onClick={() => navigate('/automations')}
                 className={
@@ -769,9 +786,35 @@ export function NavigationSidebar({
                     : navButtonClassCollapsed(activePage === 'automations')
                 }
               >
-                <Workflow size={16} className={iconClass(activePage === 'automations')} />
+                <span className="relative inline-flex flex-shrink-0">
+                  <Workflow size={16} className={iconClass(activePage === 'automations')} />
+                  {!isExpanded && pendingApprovalsCount > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[var(--primary)] ring-2 ring-[var(--sidebar-bg)]"
+                      aria-hidden="true"
+                    />
+                  )}
+                </span>
                 {isExpanded && (
-                  <span className={labelClass(activePage === 'automations')}>Automations</span>
+                  <span
+                    className={`${labelClass(activePage === 'automations')} flex items-center gap-2 flex-1 min-w-0`}
+                  >
+                    <span className="truncate">Automations</span>
+                    {pendingApprovalsCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate('/automations/approvals');
+                        }}
+                        className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--primary)] text-[10px] font-semibold text-black tabular-nums"
+                        aria-label={`${pendingApprovalsCount} pending approvals`}
+                        title="View pending approvals"
+                      >
+                        {pendingApprovalsCount > 99 ? '99+' : pendingApprovalsCount}
+                      </button>
+                    )}
+                  </span>
                 )}
               </button>
             </Tooltip>

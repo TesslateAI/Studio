@@ -54,7 +54,7 @@ from __future__ import annotations
 import logging
 import socket
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -65,12 +65,21 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...agent.tools.contract_gate import ContractBreachException
 from ...models_automations import (
     AutomationAction,
+    AutomationApprovalRequest,
     AutomationDefinition,
     AutomationDeliveryTarget,
     AutomationRun,
     AutomationRunArtifact,
+)
+from . import approval_pressure
+from .checkpoint import (
+    ResumeStrategy,
+    RunCheckpoint,
+    hydrate_checkpoint,
+    serialize_checkpoint,
 )
 
 logger = logging.getLogger(__name__)
@@ -885,6 +894,46 @@ async def dispatch_automation(
             raise ActionDispatchFailed(
                 f"unknown action_type {action.action_type!r}"
             )
+    except ContractBreachException as exc:
+        # Non-blocking HITL: write an approval row + checkpoint, transition
+        # status to 'waiting_approval', commit, and return cleanly. The
+        # worker exits — the resume_automation_run task picks the run back
+        # up after the user resolves the approval card.
+        try:
+            return await _checkpoint_and_pause(
+                db,
+                run=run,
+                automation=automation,
+                action=action,
+                event_payload=event_payload,
+                breach=exc,
+                budget_allocation=budget_allocation,
+            )
+        except Exception as checkpoint_exc:
+            # Defensive: Wave 2A's checkpoint module failed to build a
+            # resumable snapshot. Falling back to block-and-wait would
+            # starve an ARQ slot for up to 15 minutes per stuck run; the
+            # Phase-2 stopgap rate-limits this with a per-pool cap.
+            #
+            # Acquire a pressure slot atomically. If granted, we still
+            # have to fail this dispatch (we can't actually checkpoint),
+            # but we've consumed the cap so concurrent failures defer.
+            # If denied, schedule a jittered retry — the user sees a
+            # "deferred — capacity" message instead of a hard failure.
+            logger.exception(
+                "dispatcher.checkpoint_failed automation=%s run=%s — "
+                "engaging approval-pressure fallback",
+                automation_id,
+                run.id,
+            )
+            return await _handle_checkpoint_pressure_fallback(
+                db,
+                run=run,
+                automation_id=automation_id,
+                event_id=event_id,
+                worker_id=worker_id,
+                checkpoint_error=checkpoint_exc,
+            )
     except NotImplementedError as exc:
         # app.invoke stub path while Wave 2B is in flight.
         return await _finalize_failure(
@@ -944,8 +993,727 @@ async def dispatch_automation(
 
 
 # ---------------------------------------------------------------------------
+# Non-blocking HITL — checkpoint + pause + resume
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_APPROVAL_TIMEOUT_SECONDS = 900  # 15 minutes — matches plan default.
+
+# Standard option set surfaced on every contract-breach approval card. Special
+# values get appended below when the resume strategy is restart_from_checkpoint
+# (no replay possible).
+_BASE_APPROVAL_OPTIONS = (
+    "allow_once",
+    "allow_for_run",
+    "allow_for_automation",
+    "deny",
+    "deny_and_disable_automation",
+)
+_RESTART_ONLY_OPTIONS = ("cancel_run", "restart_from_last_checkpoint")
+
+
+def _build_action_state(
+    *,
+    action_type: str,
+    action: AutomationAction,
+    event_payload: dict[str, Any],
+    breach: ContractBreachException,
+    run: AutomationRun,
+) -> dict[str, Any]:
+    """Snapshot the action's input + (for agent.run) the in-flight tool surface.
+
+    Phase 2 keeps the surface intentionally minimal — full agent state
+    (open MCP streams, mid-flight tool sub-calls) is Phase 6 work. For
+    ``agent.run`` we capture:
+
+    * ``message_history`` snapshot from the agent context dict (best-effort —
+      the live agent loop runs in the worker process and will hydrate from
+      its own per-step append-only log on resume; this field is for
+      debuggability),
+    * ``tool_result_trail`` placeholder (populated by the agent runtime
+      when it ships its serialization adapters in Phase 6),
+    * ``current_step`` (best-effort from breach context),
+    * ``in_flight_non_serializable_tools`` — the load-bearing field. The
+      ContractBreachException carries the tool name that triggered the
+      breach; we mark it non-serializable when the Tool class declares
+      ``state_serializable=False``. Phase 1's metaclass enforcement
+      guarantees the attribute is always set.
+    """
+    config = dict(action.config or {})
+
+    if action_type == "agent.run":
+        non_serializable = _detect_non_serializable_tools(breach)
+        message_history = config.get("message_history") or event_payload.get(
+            "message_history"
+        ) or []
+        return {
+            "message": config.get("message") or event_payload.get("message", ""),
+            "message_history": list(message_history),
+            "tool_result_trail": list(
+                config.get("tool_result_trail") or []
+            ),
+            "current_step": int(config.get("current_step", 0) or 0),
+            "in_flight_non_serializable_tools": non_serializable,
+            "breach_tool_name": breach.tool_name,
+            "breach_tool_params": _safe_json(
+                getattr(breach, "tool_call_params", {}) or {}
+            ),
+            "agent_id": config.get("agent_id"),
+            "model_name": config.get("model_name"),
+            "view_context": config.get("view_context"),
+        }
+
+    if action_type == "app.invoke":
+        return {
+            "input": _safe_json(config.get("input", event_payload)),
+            "app_action_id": (
+                str(action.app_action_id) if action.app_action_id else None
+            ),
+            "partial_output": _safe_json(config.get("partial_output")),
+        }
+
+    if action_type == "gateway.send":
+        template = config.get("body_template") or config.get("body") or ""
+        return {
+            "body_template": template,
+            "body": _render_simple_template(template, event_payload),
+            "destination_id": str(config.get("channel_config_id", "") or ""),
+            "session_key": str(config.get("session_key", "") or ""),
+            "event_payload": _safe_json(event_payload),
+        }
+
+    return {"raw_action_type": action_type}
+
+
+def _detect_non_serializable_tools(breach: ContractBreachException) -> list[str]:
+    """Return the list of in-flight tools that opt out of serialization.
+
+    Phase 1's metaclass enforcement (``Tool.state_serializable``) makes the
+    set knowable up front. The breach exception carries the offending tool
+    name; we look it up in the registry and inspect the class attribute.
+
+    Defensive: if registry lookup fails we treat the tool as
+    *non*-serializable so we err on the side of restart_from_checkpoint
+    (loses replay but is honest about the boundary).
+    """
+    tool_name = getattr(breach, "tool_name", None)
+    if not tool_name:
+        return []
+
+    try:
+        # Lazy import — the tool registry pulls heavy deps and we don't want
+        # this code path to load them in unrelated dispatcher tests.
+        from ...agent.tools.registry import get_tool_registry
+
+        registry = get_tool_registry()
+        tool = registry.get(tool_name) if hasattr(registry, "get") else None
+        if tool is None:
+            return [tool_name]
+        if getattr(tool, "state_serializable", True) is False:
+            return [tool_name]
+        return []
+    except Exception:  # pragma: no cover - defensive
+        logger.debug(
+            "[dispatcher] non-serializable detection fell back for tool=%s",
+            tool_name,
+        )
+        return [tool_name]
+
+
+async def _checkpoint_and_pause(
+    db: AsyncSession,
+    *,
+    run: AutomationRun,
+    automation: AutomationDefinition,
+    action: AutomationAction,
+    event_payload: dict[str, Any],
+    breach: ContractBreachException,
+    budget_allocation: Any | None,
+) -> DispatchResult:
+    """Persist an :class:`AutomationApprovalRequest` + checkpoint, then return
+    cleanly so the worker exits.
+
+    The dispatcher MUST NOT re-raise here — ARQ would treat the exception as
+    a job failure and burn a retry. The non-blocking pattern depends on a
+    clean return.
+    """
+    now = datetime.now(tz=UTC)
+    contract = dict(automation.contract or {})
+    timeout_seconds = int(
+        contract.get("approval_timeout_seconds", _DEFAULT_APPROVAL_TIMEOUT_SECONDS)
+    )
+
+    action_state = _build_action_state(
+        action_type=action.action_type,
+        action=action,
+        event_payload=event_payload,
+        breach=breach,
+        run=run,
+    )
+
+    decision = getattr(breach, "decision", None)
+    breach_kind = getattr(decision, "breach_kind", None) or "contract_violation"
+    estimate_usd = getattr(decision, "estimate_usd", None)
+    breach_reason = getattr(decision, "reason", None) or str(breach)
+
+    checkpoint = await serialize_checkpoint(
+        db,
+        run=run,
+        action_type=action.action_type,
+        action_state=action_state,
+        pause_reason=breach_reason,
+        contract_snapshot=contract,
+        budget_allocation=budget_allocation,
+    )
+
+    options = list(_BASE_APPROVAL_OPTIONS)
+    if checkpoint.resume_strategy == ResumeStrategy.RESTART_FROM_CHECKPOINT:
+        # When we can't replay the in-flight tool, the only honest
+        # resolutions are cancel or restart from the last completed step.
+        options = list(_RESTART_ONLY_OPTIONS) + [
+            o for o in options if o.startswith("deny")
+        ]
+
+    approval_context: dict[str, Any] = {
+        "tool_name": getattr(breach, "tool_name", None),
+        "tool_call_params": _safe_json(
+            getattr(breach, "tool_call_params", {}) or {}
+        ),
+        "summary": breach_reason,
+        "breach_kind": breach_kind,
+        "current_spend_usd": str(run.spend_usd or Decimal(0)),
+        "resume_strategy": checkpoint.resume_strategy,
+        "in_flight_non_serializable_tools": list(
+            action_state.get("in_flight_non_serializable_tools") or []
+        ),
+    }
+    if estimate_usd is not None:
+        approval_context["estimate_usd"] = str(estimate_usd)
+
+    request = AutomationApprovalRequest(
+        id=uuid4(),
+        run_id=run.id,
+        requested_at=now,
+        expires_at=now + timedelta(seconds=timeout_seconds),
+        reason=breach_kind,
+        context=_safe_json(approval_context),
+        options=options,
+        delivered_to=[],
+    )
+    db.add(request)
+
+    pause_label = (
+        f"{breach_kind}: {breach_reason}"
+        if breach_kind != breach_reason
+        else breach_kind
+    )
+
+    await db.execute(
+        update(AutomationRun)
+        .where(AutomationRun.id == run.id)
+        .values(
+            status="waiting_approval",
+            paused_reason=pause_label,
+            heartbeat_at=now,
+            contract_breaches=AutomationRun.contract_breaches + 1,
+        )
+    )
+    await db.commit()
+
+    logger.info(
+        "[dispatcher] paused for approval automation=%s run=%s tool=%s "
+        "strategy=%s",
+        automation.id,
+        run.id,
+        getattr(breach, "tool_name", None),
+        checkpoint.resume_strategy,
+    )
+
+    return DispatchResult(
+        status=DispatchStatus.PAUSED,
+        run_id=run.id,
+        run_status="waiting_approval",
+        reason=breach_reason,
+    )
+
+
+async def resume_run(
+    db: AsyncSession,
+    *,
+    checkpoint: RunCheckpoint,
+) -> DispatchResult:
+    """Continue a paused run from its serialized checkpoint.
+
+    Branches on :attr:`RunCheckpoint.resume_strategy`:
+
+    * ``redispatch`` — re-call :func:`_dispatch_app_action` /
+      :func:`_dispatch_gateway_send` with the saved input. Both are
+      idempotent on the input.
+    * ``agent_continue`` — re-instantiate the agent context from the saved
+      message_history + tool_result_trail and re-enqueue
+      ``execute_agent_task`` so the agent loop continues in the worker.
+    * ``restart_from_checkpoint`` — kick off a fresh agent run; the in-flight
+      non-serializable tool was cancelled at pause time so we cannot replay.
+
+    Caller (the resume worker task) owns the session lifecycle and the final
+    commit. We commit the status transition here so concurrent observers see
+    'running' immediately, but the caller should still ``await db.commit()``
+    to flush any session-bound rows it added.
+    """
+    run = (
+        await db.execute(
+            select(AutomationRun).where(AutomationRun.id == checkpoint.run_id)
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise DispatcherError(
+            f"resume_run: AutomationRun {checkpoint.run_id} not found"
+        )
+
+    if run.status not in {"waiting_approval", "queued", "paused"}:
+        # Defensive: an admin or sweep may have already terminalized the run.
+        return DispatchResult(
+            status=DispatchStatus.NOOP_TERMINAL,
+            run_id=run.id,
+            run_status=run.status,
+            reason=f"run already in status={run.status!r}",
+        )
+
+    automation = (
+        await db.execute(
+            select(AutomationDefinition).where(
+                AutomationDefinition.id == checkpoint.automation_id
+            )
+        )
+    ).scalar_one_or_none()
+    if automation is None:
+        return await _finalize_failure(
+            db, run=run, reason="automation definition removed during pause"
+        )
+
+    action = (
+        await db.execute(
+            select(AutomationAction)
+            .where(AutomationAction.automation_id == checkpoint.automation_id)
+            .order_by(AutomationAction.ordinal.asc())
+        )
+    ).scalars().first()
+    if action is None:
+        return await _finalize_failure(
+            db, run=run, reason="automation has no actions on resume"
+        )
+
+    now = datetime.now(tz=UTC)
+    await db.execute(
+        update(AutomationRun)
+        .where(AutomationRun.id == run.id)
+        .values(status="running", heartbeat_at=now)
+    )
+    await db.commit()
+
+    # Re-fetch so we hand a fresh row to the executor branches.
+    run = (
+        await db.execute(select(AutomationRun).where(AutomationRun.id == run.id))
+    ).scalar_one()
+
+    strategy = checkpoint.resume_strategy
+    state = checkpoint.action_state or {}
+
+    try:
+        if strategy == ResumeStrategy.REDISPATCH:
+            action_result = await _resume_redispatch(
+                db,
+                run=run,
+                automation=automation,
+                action=action,
+                checkpoint=checkpoint,
+            )
+        elif strategy == ResumeStrategy.AGENT_CONTINUE:
+            action_result = await _resume_agent_continue(
+                db,
+                run=run,
+                automation=automation,
+                action=action,
+                checkpoint=checkpoint,
+            )
+        elif strategy == ResumeStrategy.RESTART_FROM_CHECKPOINT:
+            action_result = await _resume_agent_restart(
+                db,
+                run=run,
+                automation=automation,
+                action=action,
+                checkpoint=checkpoint,
+            )
+        else:
+            return await _finalize_failure(
+                db,
+                run=run,
+                reason=f"unknown resume_strategy={strategy!r}",
+            )
+    except ContractBreachException as exc:
+        # The same breach (or a fresh one) fired again — checkpoint and
+        # pause for another approval round.
+        return await _checkpoint_and_pause(
+            db,
+            run=run,
+            automation=automation,
+            action=action,
+            event_payload=_safe_json(state),
+            breach=exc,
+            budget_allocation=checkpoint.budget_allocation,
+        )
+    except DispatcherError as exc:
+        return await _finalize_failure(db, run=run, reason=str(exc))
+    except Exception as exc:
+        logger.exception(
+            "[dispatcher] resume_run failed automation=%s run=%s",
+            checkpoint.automation_id,
+            run.id,
+        )
+        return await _finalize_failure(db, run=run, reason=repr(exc)[:1000])
+
+    # For redispatch app.invoke / gateway.send paths the action completes
+    # synchronously here; finalize as success. Agent flows kick a worker
+    # task and are finalized by the agent worker on its own commit cycle —
+    # we leave the run in 'running' for those.
+    if strategy == ResumeStrategy.REDISPATCH:
+        try:
+            await _deliver_and_finalize(
+                db, run=run, automation=automation, action_result=action_result
+            )
+        except Exception as exc:
+            logger.exception(
+                "[dispatcher] resume delivery failed run=%s", run.id
+            )
+            return await _finalize_failure(
+                db, run=run, reason=f"delivery failed on resume: {exc!r}"
+            )
+
+        ended_at = datetime.now(tz=UTC)
+        await db.execute(
+            update(AutomationRun)
+            .where(AutomationRun.id == run.id)
+            .values(
+                status="succeeded",
+                ended_at=ended_at,
+                heartbeat_at=ended_at,
+                raw_output=_safe_json(action_result),
+            )
+        )
+        await db.commit()
+        return DispatchResult(
+            status=DispatchStatus.SUCCEEDED,
+            run_id=run.id,
+            run_status="succeeded",
+        )
+
+    # Agent paths: enqueue happened, run remains in 'running'. The agent
+    # worker writes the terminal status when it's done.
+    return DispatchResult(
+        status=DispatchStatus.SUCCEEDED,
+        run_id=run.id,
+        run_status=run.status,
+        reason=f"resumed via {strategy}",
+    )
+
+
+async def _resume_redispatch(
+    db: AsyncSession,
+    *,
+    run: AutomationRun,
+    automation: AutomationDefinition,
+    action: AutomationAction,
+    checkpoint: RunCheckpoint,
+) -> dict[str, Any]:
+    """Re-call the action dispatcher with the input captured at pause time."""
+    state = checkpoint.action_state or {}
+
+    if action.action_type == "app.invoke":
+        # The dispatcher reads ``action.config['input']`` if present, else
+        # falls back to event_payload. Forward the saved input as the
+        # event_payload so we don't have to mutate the persisted action row.
+        saved_input = state.get("input") or {}
+        if not isinstance(saved_input, dict):
+            saved_input = {}
+        return await _dispatch_app_action(
+            db,
+            run=run,
+            automation=automation,
+            action=action,
+            event_payload=saved_input,
+        )
+
+    if action.action_type == "gateway.send":
+        return await _dispatch_gateway_send(
+            db,
+            run=run,
+            automation=automation,
+            action=action,
+            event_payload=state.get("event_payload") or {},
+        )
+
+    raise DispatcherError(
+        f"_resume_redispatch: unsupported action_type={action.action_type!r}"
+    )
+
+
+async def _resume_agent_continue(
+    db: AsyncSession,
+    *,
+    run: AutomationRun,
+    automation: AutomationDefinition,
+    action: AutomationAction,
+    checkpoint: RunCheckpoint,
+) -> dict[str, Any]:
+    """Re-enqueue ``execute_agent_task`` with the saved message_history.
+
+    The agent runtime in :mod:`packages.tesslate-agent` handles its own
+    per-step append-only log; we plumb the saved trail through the payload
+    so the loop picks up where it left off.
+    """
+    from ..task_queue import get_task_queue
+
+    state = checkpoint.action_state or {}
+    config = action.config or {}
+
+    payload: dict[str, Any] = {
+        "task_id": str(run.id),
+        "user_id": str(automation.owner_user_id),
+        "chat_id": config.get("chat_id", ""),
+        "message": state.get("message") or config.get("message", ""),
+        "project_id": (
+            str(automation.target_project_id)
+            if automation.target_project_id
+            else ""
+        ),
+        "agent_id": state.get("agent_id") or config.get("agent_id"),
+        "model_name": state.get("model_name") or config.get("model_name", ""),
+        "view_context": state.get("view_context") or config.get("view_context"),
+        "automation_run_id": str(run.id),
+        "automation_id": str(automation.id),
+        "contract": automation.contract,
+        # Resume-only fields — the agent loop hydrates from these when
+        # present, otherwise starts a fresh history.
+        "resume": True,
+        "resume_strategy": checkpoint.resume_strategy,
+        "message_history": state.get("message_history") or [],
+        "tool_result_trail": state.get("tool_result_trail") or [],
+        "current_step": state.get("current_step", 0),
+    }
+
+    if checkpoint.budget_allocation:
+        payload["budget"] = dict(checkpoint.budget_allocation)
+
+    queue = get_task_queue()
+    await queue.enqueue("execute_agent_task", payload)
+    return {
+        "action_type": "agent.run",
+        "task_id": str(run.id),
+        "enqueued": True,
+        "resume_strategy": checkpoint.resume_strategy,
+    }
+
+
+async def _resume_agent_restart(
+    db: AsyncSession,
+    *,
+    run: AutomationRun,
+    automation: AutomationDefinition,
+    action: AutomationAction,
+    checkpoint: RunCheckpoint,
+) -> dict[str, Any]:
+    """Restart the agent loop fresh — used when a non-serializable tool was
+    in flight at pause time and we cannot replay it.
+
+    Same payload shape as :func:`_resume_agent_continue` minus the
+    message_history / tool_result_trail (the agent starts a fresh loop and
+    will read the per-step append-only log itself if it wants to recover
+    earlier context).
+    """
+    from ..task_queue import get_task_queue
+
+    state = checkpoint.action_state or {}
+    config = action.config or {}
+
+    payload: dict[str, Any] = {
+        "task_id": str(run.id),
+        "user_id": str(automation.owner_user_id),
+        "chat_id": config.get("chat_id", ""),
+        "message": state.get("message") or config.get("message", ""),
+        "project_id": (
+            str(automation.target_project_id)
+            if automation.target_project_id
+            else ""
+        ),
+        "agent_id": state.get("agent_id") or config.get("agent_id"),
+        "model_name": state.get("model_name") or config.get("model_name", ""),
+        "view_context": state.get("view_context") or config.get("view_context"),
+        "automation_run_id": str(run.id),
+        "automation_id": str(automation.id),
+        "contract": automation.contract,
+        "resume": True,
+        "resume_strategy": checkpoint.resume_strategy,
+        "restart_reason": checkpoint.pause_reason,
+    }
+    if checkpoint.budget_allocation:
+        payload["budget"] = dict(checkpoint.budget_allocation)
+
+    queue = get_task_queue()
+    await queue.enqueue("execute_agent_task", payload)
+    return {
+        "action_type": "agent.run",
+        "task_id": str(run.id),
+        "enqueued": True,
+        "resume_strategy": checkpoint.resume_strategy,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Internal finalization helpers
 # ---------------------------------------------------------------------------
+
+
+async def _handle_checkpoint_pressure_fallback(
+    db: AsyncSession,
+    *,
+    run: AutomationRun,
+    automation_id: UUID,
+    event_id: UUID,
+    worker_id: str,
+    checkpoint_error: Exception,
+) -> DispatchResult:
+    """Defensive backpressure for the unresumable approval path.
+
+    Invoked when ``_checkpoint_and_pause`` raises (Wave 2A's serializer
+    couldn't build a usable snapshot). The pressure cap is the
+    Phase 2 stopgap for the genuinely unresumable subset; in normal
+    operation it never fires.
+
+    Three outcomes:
+
+    * **Slot acquired**: we've reserved a slice of the pool's
+      attention budget; persist a clear failure with the checkpoint
+      error so the user sees what happened and the slot is released
+      immediately (the long human-wait it was guarding never starts).
+    * **Cap breached, defer succeeded**: enqueue a jittered retry,
+      bump ``retry_count``, leave the run in ``queued`` so the next
+      dispatch picks it up after the backoff window.
+    * **Cap breached, max retries**: fail the run with
+      ``approval_capacity_exceeded_max_retries``. The Phase 4
+      controller sweep + delivery layer surface the failure.
+    """
+    # Resolve ARQ pool size from settings — falls back to a sensible
+    # default for desktop / single-replica deployments.
+    from ...config import get_settings
+
+    settings = get_settings()
+    arq_pool_size = int(getattr(settings, "worker_max_jobs", 10) or 10)
+
+    token = await approval_pressure.try_acquire_pressure_slot(
+        arq_pool_size=arq_pool_size,
+    )
+
+    if token is None:
+        # Cap exceeded — try to defer. retry_count tracks how many
+        # times this run has been re-queued; we map it directly to
+        # the deferred-retry attempt counter.
+        attempt = int(run.retry_count or 0)
+        from ..task_queue import get_task_queue
+
+        try:
+            pool = await _resolve_arq_pool(get_task_queue())
+        except Exception:
+            logger.exception(
+                "dispatcher.pressure_fallback: failed to resolve ARQ pool "
+                "for deferred retry; failing run=%s",
+                run.id,
+            )
+            pool = None
+
+        deferred = False
+        if pool is not None:
+            try:
+                deferred = await approval_pressure.schedule_deferred_retry(
+                    pool=pool,
+                    automation_id=automation_id,
+                    event_id=event_id,
+                    worker_id=worker_id,
+                    attempt=attempt,
+                )
+            except Exception:
+                logger.exception(
+                    "dispatcher.pressure_fallback: schedule_deferred_retry "
+                    "raised for run=%s",
+                    run.id,
+                )
+
+        if deferred:
+            ended_at = datetime.now(tz=UTC)
+            await db.execute(
+                update(AutomationRun)
+                .where(AutomationRun.id == run.id)
+                .values(
+                    status="queued",
+                    paused_reason=f"approval_capacity_exceeded (attempt {attempt})",
+                    retry_count=AutomationRun.retry_count + 1,
+                    heartbeat_at=ended_at,
+                )
+            )
+            await db.commit()
+            return DispatchResult(
+                status=DispatchStatus.PAUSED,
+                run_id=run.id,
+                run_status="queued",
+                reason=f"approval_capacity_exceeded (attempt {attempt})",
+            )
+
+        # Couldn't defer — exhausted retries or pool unavailable.
+        return await _finalize_failure(
+            db,
+            run=run,
+            reason="approval_capacity_exceeded_max_retries",
+        )
+
+    # Slot acquired. The checkpoint flow still failed, so this dispatch
+    # cannot resume; release the slot immediately (we're not actually
+    # going to block-and-wait) and surface the original checkpoint
+    # error to the user via the normal failure path. Holding the slot
+    # for the duration of `_finalize_failure` is symmetric with the
+    # normal Wave-2A path where the slot covers only the brief
+    # checkpoint-write window.
+    try:
+        return await _finalize_failure(
+            db,
+            run=run,
+            reason=(
+                f"checkpoint_unavailable: {checkpoint_error!r}"[:1000]
+            ),
+        )
+    finally:
+        try:
+            await approval_pressure.release_pressure_slot(token)
+        except Exception:  # pragma: no cover — defensive
+            logger.exception(
+                "dispatcher.pressure_fallback: release_pressure_slot raised "
+                "for run=%s (token already idempotent)",
+                run.id,
+            )
+
+
+async def _resolve_arq_pool(task_queue: Any) -> Any | None:
+    """Return the underlying ARQ pool from the TaskQueue, or ``None``.
+
+    The pressure-cap deferred retry path requires the ARQ pool's
+    ``enqueue_job`` (``_defer_by`` + ``_job_id`` are ARQ-native kwargs).
+    On desktop / no-Redis deployments there is no ARQ pool — the
+    dispatcher fails the run instead of deferring, which matches the
+    desktop-shell semantics (no horizontal pool to defer into).
+    """
+    # The cloud TaskQueue is ArqTaskQueue; reach into its lazy pool.
+    get_pool = getattr(task_queue, "_get_pool", None)
+    if get_pool is None:
+        return None
+    return await get_pool()
 
 
 async def _mark_failed_preflight(

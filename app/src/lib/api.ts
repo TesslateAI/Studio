@@ -4620,6 +4620,8 @@ export const appBundlesApi = {
 
 import type {
   AppActionListResponse,
+  ApprovalRequest,
+  ApprovalResponse,
   AutomationDefinitionIn,
   AutomationDefinitionOut,
   AutomationDefinitionSummary,
@@ -4722,6 +4724,60 @@ export const automationsApi = {
    */
   artifactDownloadUrl(id: string, runId: string, artifactId: string): string {
     return `${API_URL}/api/automations/${id}/runs/${runId}/artifacts/${artifactId}`;
+  },
+
+  /**
+   * HITL approval surface. Phase 2 ships these endpoints alongside the
+   * Wave 2A response handler:
+   *
+   * - ``GET /api/automations/approvals/pending`` — cross-automation list
+   *   for the badge + ApprovalsPage.
+   * - ``GET /api/automations/{id}/approvals/{request_id}`` — single
+   *   request fetch (drawer hydration).
+   * - ``POST /api/automations/{id}/approvals/{request_id}/respond`` —
+   *   submit a resolution. Owned by Wave 2A; this client just calls it.
+   */
+  approvals: {
+    /** Cross-automation pending list. Used by the badge + ApprovalsPage. */
+    async listPending(): Promise<ApprovalRequest[]> {
+      const response = await api.get('/api/automations/approvals/pending');
+      // Backend may shape this as either a bare list or { items: [...] }.
+      const data = response.data;
+      if (Array.isArray(data)) return data as ApprovalRequest[];
+      if (Array.isArray(data?.items)) return data.items as ApprovalRequest[];
+      return [];
+    },
+
+    /** Pending count — convenience wrapper for the sidebar badge. */
+    async pendingCount(): Promise<number> {
+      try {
+        const list = await this.listPending();
+        return list.length;
+      } catch {
+        return 0;
+      }
+    },
+
+    /** Single approval fetch — drawer hydration. */
+    async get(automationId: string, requestId: string): Promise<ApprovalRequest> {
+      const response = await api.get(
+        `/api/automations/${automationId}/approvals/${requestId}`
+      );
+      return response.data;
+    },
+
+    /** Submit a resolution (allow/deny/request_changes). */
+    async respond(
+      automationId: string,
+      requestId: string,
+      payload: ApprovalResponse
+    ): Promise<ApprovalRequest> {
+      const response = await api.post(
+        `/api/automations/${automationId}/approvals/${requestId}/respond`,
+        payload
+      );
+      return response.data;
+    },
   },
 };
 

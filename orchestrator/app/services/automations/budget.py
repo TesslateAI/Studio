@@ -60,8 +60,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models_automations import AutomationDefinition
-from ..litellm_keys import LiteLLMDelegate
-from ..litellm_keys import mint as litellm_mint
+from ..litellm_keys import LiteLLMDelegate, mint_with_secret as litellm_mint_with_secret
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..apps.key_lifecycle import KeyTier as _KeyTier
@@ -93,6 +92,18 @@ class BudgetAllocation:
     max_usd_per_run: Decimal
     daily_remaining_usd: Decimal
     is_extension: bool = False
+
+    def __repr__(self) -> str:  # pragma: no cover — defensive log-leak guard
+        masked = (
+            f"{self.litellm_key_value[:6]}…(len={len(self.litellm_key_value)})"
+            if self.litellm_key_value
+            else "<empty>"
+        )
+        return (
+            f"BudgetAllocation(litellm_key_id={self.litellm_key_id!r}, "
+            f"litellm_key_value={masked}, max_usd_per_run={self.max_usd_per_run}, "
+            f"daily_remaining_usd={self.daily_remaining_usd}, is_extension={self.is_extension})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +499,7 @@ async def allocate_run_budget(
     from ..apps.key_lifecycle import KeyTier
 
     try:
-        ledger_row = await litellm_mint(
+        mint_result = await litellm_mint_with_secret(
             db,
             delegate=delegate,
             tier=KeyTier.INVOCATION,
@@ -512,35 +523,15 @@ async def allocate_run_budget(
                 await _refund_daily(redis_client, member, max_per_run)
         raise
 
-    # The mint stashes the API-key preview in meta; the actual secret is
-    # only available on the immediate response from LiteLLM. We need to
-    # return it to the caller for HTTP injection. Reach into the ledger
-    # row's meta — :func:`litellm_keys.mint` writes the first 8 chars as
-    # ``api_key_preview`` and the delegate returned the full value.
-    #
-    # NOTE: the existing :mod:`litellm_keys.mint` does NOT propagate the
-    # full secret back through its return type — it deliberately scrubs
-    # it to the preview. We therefore mint by calling the delegate
-    # directly and re-using the same ledger insert path is overkill for
-    # Phase 2; instead we pull the secret from a fresh delegate call and
-    # treat the existing mint as the canonical record. To avoid double-
-    # minting we use a lighter direct path: see implementation note in
-    # the report. Here we re-fetch the meta and accept that the caller
-    # reads the secret from the delegate response (passed via the
-    # ledger.meta ``api_key_full`` field that we stamp).
-    api_key_full: str = ""
-    if isinstance(ledger_row.meta, dict):
-        # If a downstream wrapper has stashed the full secret in meta,
-        # use it. Otherwise the caller must pass a delegate that exposes
-        # the secret out-of-band. The default ``litellm_service``
-        # delegate returns the secret in ``create_scoped_key`` but
-        # ``litellm_keys.mint`` only stashes the preview — Phase 2 polish
-        # plumbs the full secret through (see report).
-        api_key_full = (
-            ledger_row.meta.get("api_key_full")
-            or ledger_row.meta.get("api_key_preview")
-            or ""
-        )
+    # The ledger row only stores an 8-char ``api_key_preview`` (security
+    # policy: full secret is never persisted in the DB). The full secret
+    # comes back through ``mint_result.api_key`` and we hand it off to
+    # the caller for HTTP injection into the agent worker. The agent
+    # worker carries it via ``AgentTaskPayload`` in Redis (transient) —
+    # never written to durable storage. See
+    # :class:`services.litellm_keys.MintResult` for the policy contract.
+    ledger_row = mint_result.ledger
+    api_key_full = mint_result.api_key
 
     return BudgetAllocation(
         litellm_key_id=ledger_row.key_id,

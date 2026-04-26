@@ -327,6 +327,19 @@ def test_allocate_run_budget_happy_path(session_maker) -> None:
     assert len(delegate.minted) == 1
     assert delegate.minted[0]["budget_usd"] == Decimal("0.10")
 
+    # Critical: the allocation must carry the FULL ``sk-...`` secret so
+    # the agent worker can inject it into LiteLLM ``Authorization``
+    # headers. The 8-char preview that's persisted in
+    # ``LiteLLMKeyLedger.meta.api_key_preview`` (security policy) is
+    # NOT sufficient — auth would fail on the first request. See
+    # :class:`services.litellm_keys.MintResult` for the contract.
+    expected_secret = delegate.minted[0]["api_key"]
+    assert allocation.litellm_key_value == expected_secret
+    assert allocation.litellm_key_value.startswith("sk-")
+    # Guard against regression to the 8-char preview.
+    assert len(allocation.litellm_key_value) > 8
+    assert allocation.litellm_key_value != expected_secret[:8]
+
 
 @pytest.mark.unit
 def test_allocate_raises_when_daily_exceeded(session_maker) -> None:

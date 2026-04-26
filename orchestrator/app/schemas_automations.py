@@ -293,6 +293,72 @@ class AutomationApprovalRequestOut(BaseModel):
     response: dict[str, Any] | None
 
 
+_APPROVAL_CHOICES = frozenset(
+    {
+        "allow_once",
+        "allow_for_run",
+        "allow_for_automation",
+        "deny",
+        "deny_and_disable_automation",
+        "cancel_run",
+        "restart_from_last_checkpoint",
+    }
+)
+
+
+class ApprovalResponseIn(BaseModel):
+    """Body of ``POST /api/automations/{id}/approvals/{request_id}/respond``.
+
+    ``choice`` is one of:
+    * ``allow_once`` — let this single tool call through; future calls
+      re-enter the gate.
+    * ``allow_for_run`` — exempt the same tool/MCP/skill identifier for the
+      remainder of this run only.
+    * ``allow_for_automation`` — merge ``scope_modifications`` into the
+      :attr:`AutomationDefinition.contract`. The merge happens in the
+      router; the dispatcher reloads the contract on resume.
+    * ``deny`` — terminate this run as ``failed``.
+    * ``deny_and_disable_automation`` — also flip
+      ``AutomationDefinition.is_active=False`` so future events don't fire.
+    * ``cancel_run`` — restart-only-options resolution; mark the run
+      cancelled.
+    * ``restart_from_last_checkpoint`` — restart-only-options resolution;
+      relaunch the agent from a clean history.
+    """
+
+    choice: str = Field(..., description="One of the approval option strings")
+    notes: str | None = Field(default=None, max_length=2000)
+    scope_modifications: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional contract delta merged into AutomationDefinition.contract "
+            "when choice='allow_for_automation'. Top-level keys are merged "
+            "shallowly; list values replace whole-list."
+        ),
+    )
+
+    @field_validator("choice")
+    @classmethod
+    def _validate_choice(cls, v: str) -> str:
+        if v not in _APPROVAL_CHOICES:
+            raise ValueError(
+                f"choice must be one of {sorted(_APPROVAL_CHOICES)!r}, got {v!r}"
+            )
+        return v
+
+
+class ApprovalResponseOut(BaseModel):
+    """Returned by the approval-response endpoint."""
+
+    request_id: UUID
+    run_id: UUID
+    automation_id: UUID
+    choice: str
+    resolved_at: datetime
+    resume_enqueued: bool
+    run_status: str
+
+
 class AutomationRunSummary(BaseModel):
     """Lightweight list-row projection of an AutomationRun."""
 
@@ -378,6 +444,8 @@ __all__ = [
     "AutomationRunDetail",
     "AutomationRunArtifactOut",
     "AutomationApprovalRequestOut",
+    "ApprovalResponseIn",
+    "ApprovalResponseOut",
     "AppActionInvokeRequest",
     "AppActionInvokeResponse",
     "AppActionRow",

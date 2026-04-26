@@ -178,6 +178,98 @@ export interface AutomationRunArtifactOut {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Approvals (Phase 2 HITL)
+// ---------------------------------------------------------------------------
+
+/**
+ * Why the runtime paused for a human. Mirrors the backend
+ * ``ApprovalReason`` enum on :class:`AutomationApprovalRequest`.
+ */
+export type ApprovalReason =
+  | 'contract_violation'
+  | 'budget_exhausted'
+  | 'tier_escalation'
+  | 'credential_missing'
+  | 'manual';
+
+/**
+ * The set of resolutions a user may choose when answering an approval.
+ * The backend accepts the same enum values from any HITL surface
+ * (web, Slack, Telegram, …).
+ */
+export type ApprovalChoice =
+  | 'allow_once'
+  | 'allow_for_run'
+  | 'allow_for_automation'
+  | 'allow_for_app_or_agent'
+  | 'deny'
+  | 'deny_and_disable_automation'
+  | 'request_changes';
+
+/** Per-destination delivery receipt — Phase 4 will hydrate these. */
+export interface ApprovalDeliveryReceipt {
+  destination_id: string;
+  sent_at: string;
+}
+
+/**
+ * Detailed shape of the JSON ``context`` blob the runtime stamps onto a
+ * pending approval. All fields are optional: different reasons populate
+ * different keys (budget vs. contract vs. credential).
+ */
+export interface ApprovalContext {
+  tool_name?: string;
+  tool_call_params?: Record<string, unknown>;
+  summary: string;
+  current_spend_usd?: string;
+  requested_extension_usd?: string;
+  [k: string]: unknown;
+}
+
+/**
+ * Strongly-typed Approval shape used by the Phase 2 web UI (list +
+ * drawer). ``AutomationApprovalRequestOut`` is the looser legacy shape
+ * embedded inside :type:`AutomationRunDetail` — keep both around so
+ * existing callers keep compiling while new screens use this one.
+ */
+export interface ApprovalRequest {
+  id: string;
+  run_id: string;
+  /** Convenience: cross-automation list views need the parent id. */
+  automation_id: string;
+  /** Convenience: human-readable name for the cards. */
+  automation_name: string;
+  requested_at: string;
+  expires_at: string | null;
+  resolved_at: string | null;
+  resolved_by_user_id: string | null;
+  reason: ApprovalReason;
+  context: ApprovalContext;
+  /** UUIDs of artefacts the runtime captured for this decision. */
+  context_artifacts: string[];
+  /** Allowed resolutions for this specific request. */
+  options: ApprovalChoice[];
+  delivered_to: ApprovalDeliveryReceipt[];
+  response:
+    | {
+        choice: ApprovalChoice;
+        notes?: string;
+        scope_modifications?: Record<string, unknown>;
+      }
+    | null;
+}
+
+export interface ApprovalResponse {
+  choice: ApprovalChoice;
+  notes?: string;
+  scope_modifications?: Record<string, unknown>;
+}
+
+/**
+ * Legacy shape — embedded in :type:`AutomationRunDetail`. Retained for
+ * backward-compat; new code should prefer :type:`ApprovalRequest`.
+ */
 export interface AutomationApprovalRequestOut {
   id: string;
   run_id: string;

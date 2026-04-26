@@ -55,6 +55,8 @@ from ..models_automations import (
 )
 from ..permissions import Permission, get_team_membership
 from ..schemas_automations import (
+    ApprovalResponseIn,
+    ApprovalResponseOut,
     AutomationApprovalRequestOut,
     AutomationActionIn,
     AutomationActionOut,
@@ -827,6 +829,185 @@ async def download_artifact(
     raise HTTPException(
         status_code=500,
         detail=f"unsupported storage_mode={mode!r}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Non-blocking HITL — approval response (Phase 2 Wave 2A)
+# ---------------------------------------------------------------------------
+
+
+def _merge_scope_modifications(
+    contract: dict[str, Any], delta: dict[str, Any]
+) -> dict[str, Any]:
+    """Shallow-merge ``delta`` into ``contract``.
+
+    Top-level keys overwrite; list values replace whole-list (no append),
+    matching the plan's "scope_modifications" semantics. We deliberately do
+    NOT deep-merge — a runaway agent could otherwise persist arbitrary
+    nested keys via a benign-looking approval response.
+    """
+    merged = dict(contract or {})
+    for k, v in (delta or {}).items():
+        if isinstance(v, list):
+            merged[k] = list(v)
+        elif isinstance(v, dict):
+            merged[k] = dict(v)
+        else:
+            merged[k] = v
+    return merged
+
+
+@router.post(
+    "/{automation_id}/approvals/{request_id}/respond",
+    response_model=ApprovalResponseOut,
+)
+async def respond_to_approval(
+    automation_id: UUID,
+    request_id: UUID,
+    body: ApprovalResponseIn,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApprovalResponseOut:
+    """Resolve an :class:`AutomationApprovalRequest` and (when allowed)
+    enqueue ``resume_automation_run`` to continue the paused run.
+
+    Concurrent resolutions are guarded by the ``resolved_at`` IS NOT NULL
+    check — the second caller gets a 409. Resolutions are recorded as the
+    canonical audit row on the request itself; the resume worker reads
+    the response from the resolved row before re-entering the dispatcher.
+    """
+    automation = await _load_definition_or_404(db, automation_id)
+    # Write access required — viewers can see approvals but not resolve them.
+    await _authorize_definition(db, automation, user, write=True)
+
+    request = (
+        await db.execute(
+            select(AutomationApprovalRequest).where(
+                AutomationApprovalRequest.id == request_id
+            )
+        )
+    ).scalar_one_or_none()
+    if request is None:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+
+    # Defence against cross-automation request_id lookups.
+    run = (
+        await db.execute(
+            select(AutomationRun).where(AutomationRun.id == request.run_id)
+        )
+    ).scalar_one_or_none()
+    if run is None or run.automation_id != automation_id:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+
+    if request.resolved_at is not None:
+        raise HTTPException(
+            status_code=409, detail="Approval request already resolved"
+        )
+
+    if body.choice not in (request.options or []):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"choice {body.choice!r} not in offered options "
+                f"{request.options!r}"
+            ),
+        )
+
+    now = datetime.now(tz=UTC)
+    request.resolved_at = now
+    request.resolved_by_user_id = user.id
+    request.response = {
+        "choice": body.choice,
+        "notes": body.notes,
+        "scope_modifications": body.scope_modifications,
+    }
+
+    resume_enqueued = False
+    new_run_status = run.status
+
+    if body.choice == "allow_for_automation" and body.scope_modifications:
+        automation.contract = _merge_scope_modifications(
+            automation.contract or {}, body.scope_modifications
+        )
+
+    if body.choice in {
+        "allow_once",
+        "allow_for_run",
+        "allow_for_automation",
+        "restart_from_last_checkpoint",
+    }:
+        # Flag the run as queued so concurrent observers see the transition;
+        # the resume worker flips it back to 'running' after hydrating.
+        run.status = "queued"
+        run.heartbeat_at = now
+        run.paused_reason = None
+        new_run_status = "queued"
+    elif body.choice == "cancel_run":
+        run.status = "cancelled"
+        run.paused_reason = "cancelled via approval response"
+        run.ended_at = now
+        run.heartbeat_at = now
+        new_run_status = "cancelled"
+    elif body.choice == "deny":
+        run.status = "failed"
+        run.paused_reason = "denied via approval response"
+        run.ended_at = now
+        run.heartbeat_at = now
+        new_run_status = "failed"
+    elif body.choice == "deny_and_disable_automation":
+        run.status = "failed"
+        run.paused_reason = "denied + automation disabled"
+        run.ended_at = now
+        run.heartbeat_at = now
+        automation.is_active = False
+        automation.paused_reason = (
+            f"disabled via approval response by user {user.id}"
+        )
+        new_run_status = "failed"
+
+    await db.commit()
+
+    if body.choice in {
+        "allow_once",
+        "allow_for_run",
+        "allow_for_automation",
+        "restart_from_last_checkpoint",
+    }:
+        try:
+            from ..services.task_queue import get_task_queue
+
+            await get_task_queue().enqueue(
+                "resume_automation_run", str(run.id)
+            )
+            resume_enqueued = True
+        except Exception as exc:  # noqa: BLE001 — enqueue must never fail the resolve
+            logger.warning(
+                "[AUTOMATIONS] resume enqueue failed run=%s err=%r — "
+                "request resolved; controller / cron sweep will retry",
+                run.id,
+                exc,
+            )
+
+    logger.info(
+        "[AUTOMATIONS] approval resolved automation=%s run=%s request=%s "
+        "choice=%s by user=%s resume_enqueued=%s",
+        automation.id,
+        run.id,
+        request.id,
+        body.choice,
+        user.id,
+        resume_enqueued,
+    )
+
+    return ApprovalResponseOut(
+        request_id=request.id,
+        run_id=run.id,
+        automation_id=automation.id,
+        choice=body.choice,
+        resolved_at=now,
+        resume_enqueued=resume_enqueued,
+        run_status=new_run_status,
     )
 
 

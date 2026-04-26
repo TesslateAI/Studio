@@ -1232,6 +1232,68 @@ async def dispatch_automation_task(
         }
 
 
+async def resume_automation_run(ctx: dict, run_id_str: str) -> dict:
+    """ARQ task: hydrate a paused AutomationRun's checkpoint and continue.
+
+    Called from the approval-response endpoint when the user picks an
+    ``allow_*`` option (or ``restart_from_last_checkpoint``). We:
+
+    1. Load the serialized checkpoint from ``automation_runs.checkpoint``.
+    2. Branch on its :attr:`RunCheckpoint.resume_strategy`:
+       * ``redispatch`` — re-call the action dispatcher with the saved input
+         (idempotent for ``app.invoke`` / ``gateway.send``).
+       * ``agent_continue`` — re-enqueue ``execute_agent_task`` with the
+         saved message history.
+       * ``restart_from_checkpoint`` — re-enqueue with a clean message
+         history (the in-flight non-serializable tool was cancelled at
+         pause time).
+
+    Failure modes are bounded:
+
+    * No checkpoint row → log + return ``{"status": "no_checkpoint"}``. Not
+      raised so ARQ doesn't burn retries on a row a sweep already cleaned.
+    * Dispatcher errors propagate as exceptions so ARQ's max_tries +
+      backoff kick in.
+
+    Mirrors the lifecycle of :func:`dispatch_automation_task` — owns the
+    DB session, defers commits to :func:`resume_run`, last-resort rollback
+    on unexpected exceptions.
+    """
+    from .database import AsyncSessionLocal
+    from .services.automations.checkpoint import hydrate_checkpoint
+    from .services.automations.dispatcher import resume_run
+
+    async with AsyncSessionLocal() as db:
+        try:
+            checkpoint = await hydrate_checkpoint(db, run_id=UUID(run_id_str))
+            if checkpoint is None:
+                logger.warning(
+                    "[WORKER] resume_automation_run: no checkpoint for run=%s",
+                    run_id_str,
+                )
+                return {"status": "no_checkpoint", "run_id": run_id_str}
+
+            result = await resume_run(db, checkpoint=checkpoint)
+            await db.commit()
+        except Exception:
+            logger.exception(
+                "[WORKER] resume_automation_run failed run=%s", run_id_str
+            )
+            with contextlib.suppress(Exception):
+                await db.rollback()
+            raise
+
+        status_value = (
+            result.status.value if hasattr(result.status, "value") else str(result.status)
+        )
+        return {
+            "run_id": str(result.run_id),
+            "status": status_value,
+            "run_status": result.run_status,
+            "reason": result.reason,
+        }
+
+
 async def send_webhook_callback(ctx: dict, url: str, payload: dict):
     """
     Send webhook callback to external client.
@@ -1805,6 +1867,7 @@ class WorkerSettings:
     functions = [
         execute_agent_task,
         dispatch_automation_task,
+        resume_automation_run,
         send_webhook_callback,
         reap_idle_session_keys,
         settle_invocation_key,

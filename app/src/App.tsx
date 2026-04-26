@@ -77,6 +77,7 @@ import AutomationsListPage from './pages/automations/AutomationsListPage';
 import AutomationCreatePage from './pages/automations/AutomationCreatePage';
 import AutomationDetailPage from './pages/automations/AutomationDetailPage';
 import RunDetailPage from './pages/automations/RunDetailPage';
+import ApprovalsPage from './pages/automations/ApprovalsPage';
 
 const IS_TAURI = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
 
@@ -366,6 +367,9 @@ function AppContent() {
           {/* Automations (Phase 1) — list + create + detail + run-detail */}
           <Route path="/automations" element={<AutomationsListPage />} />
           <Route path="/automations/new" element={<AutomationCreatePage />} />
+          {/* Phase 2 HITL — cross-automation pending-approvals inbox.
+              Defined before "/automations/:id" so the literal segment wins. */}
+          <Route path="/automations/approvals" element={<ApprovalsPage />} />
           <Route path="/automations/:id" element={<AutomationDetailPage />} />
           <Route
             path="/automations/:id/runs/:run_id"
