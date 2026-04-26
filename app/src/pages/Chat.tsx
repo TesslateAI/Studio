@@ -127,7 +127,9 @@ export default function Chat() {
 
   // Deep-link: if navigated with a specific sessionId (e.g. from sidebar Recent), switch to it
   useEffect(() => {
-    const targetSessionId = (location.state as Record<string, unknown>)?.sessionId as string | undefined;
+    const targetSessionId = (location.state as Record<string, unknown>)?.sessionId as
+      | string
+      | undefined;
     if (targetSessionId && targetSessionId !== currentSessionId) {
       clearMessages();
       switchSession(targetSessionId);
@@ -143,7 +145,7 @@ export default function Chat() {
         if (cancelled) return;
         const enabledAgents = (libraryData.agents || []).filter(
           (agent: Record<string, unknown>) =>
-            agent.is_enabled && !agent.is_admin_disabled && agent.slug !== 'librarian'
+            agent.is_enabled && !agent.is_admin_disabled && !agent.is_system
         );
         const agentList: ChatAgent[] = enabledAgents.map((agent: Record<string, unknown>) => ({
           id: agent.slug as string,
@@ -399,7 +401,11 @@ export default function Chat() {
       )}
 
       {/* Main chat area */}
-      <div key={teamSwitchKey} className="flex-1 flex flex-col min-w-0" style={{ animation: 'fade-in 0.25s ease-out' }}>
+      <div
+        key={teamSwitchKey}
+        className="flex-1 flex flex-col min-w-0"
+        style={{ animation: 'fade-in 0.25s ease-out' }}
+      >
         <ChatTopBar
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={() => setIsSidebarOpen(true)}

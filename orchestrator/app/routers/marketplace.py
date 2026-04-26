@@ -458,6 +458,7 @@ async def get_marketplace_agents(
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.is_system.isnot(True),
             MarketplaceAgent.item_type.notin_(
                 ["skill", "subagent", "mcp_server", "deployment_target"]
             ),
@@ -1588,6 +1589,7 @@ async def get_user_agents(
             MarketplaceAgent.item_type.notin_(
                 ["skill", "subagent", "mcp_server", "deployment_target"]
             ),
+            MarketplaceAgent.is_system.isnot(True),
         )
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .order_by(UserPurchasedAgent.purchase_date.desc())
@@ -1648,6 +1650,7 @@ async def get_user_agents(
                 if agent.forked_by_user_id
                 else None,
                 "is_admin_disabled": not agent.is_active,
+                "is_system": agent.is_system,
             }
         )
 

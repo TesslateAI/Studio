@@ -201,7 +201,11 @@ async def _list_marketplace_agents(
     to_dict=_agent_to_dict,
 ) -> dict:
     """Shared list logic for MarketplaceAgent-backed item types."""
-    filters = [MarketplaceAgent.is_active.is_(True), type_filter]
+    filters = [
+        MarketplaceAgent.is_active.is_(True),
+        MarketplaceAgent.is_system.isnot(True),
+        type_filter,
+    ]
     if category:
         filters.append(MarketplaceAgent.category == category)
     if pricing_type:

@@ -1185,6 +1185,11 @@ class MarketplaceAgent(Base):
     # of AgentSkillAssignment. See services/skill_discovery.py + seeds/skills.py.
     is_builtin = Column(Boolean, nullable=False, server_default="false", default=False)
 
+    # System agents run automatically by the platform (e.g. Librarian on import).
+    # They are hidden from all user-facing agent selection UIs and cannot be
+    # manually invoked by users. Set only via seed code.
+    is_system = Column(Boolean, nullable=False, server_default="false", default=False)
+
 
 class AgentSkillAssignment(Base):
     """Tracks which skills are attached to which agents per user."""

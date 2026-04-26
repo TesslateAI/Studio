@@ -213,10 +213,10 @@ def _record_event_for_trajectory(recorder: Any, event: dict[str, Any]) -> None:
             result_text = str(result_payload or "")
         recorder.record_tool_result(tc_id, result_text)
 
-    elif etype == "complete":
-        final = (data or {}).get("final_response") or ""
-        if final:
-            recorder.record_assistant(content=final)
+    # `complete` is intentionally not recorded here: the agent always emits
+    # an agent_step (with is_complete=True) before the complete event, so
+    # the final assistant turn is already in the trajectory. Recording it
+    # again from `complete` would create a duplicate ATIF entry.
 
 
 async def _deliver_pending_messages(agent_id: str, child_context: dict[str, Any]) -> None:

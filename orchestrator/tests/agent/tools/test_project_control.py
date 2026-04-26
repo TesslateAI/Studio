@@ -805,3 +805,119 @@ class TestProjectArchitectureSkillSeed:
         assert 'action="restart_container"' not in body
         assert 'action="restart_all"' not in body
         assert 'action="reload_config"' not in body
+
+
+# ---------------------------------------------------------------------------
+# Registry scope enforcement — Bug #206
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestContainerLifecycleScopeAndDangerousGates:
+    """container_start / container_stop / container_restart must have correct
+    scope requirements and be treated as dangerous tools so that plan mode
+    blocks them and ask mode requires approval."""
+
+    def _registry(self):
+        from app.agent.tools.registry import ToolRegistry
+
+        r = ToolRegistry()
+        register_container_lifecycle_tools(r)
+        return r
+
+    # --- Scope enforcement ---
+
+    def test_container_start_requires_start_stop_scope(self):
+        r = self._registry()
+        assert "container_start" in r.TOOL_REQUIRED_SCOPES
+        assert r.TOOL_REQUIRED_SCOPES["container_start"] == "container.start_stop"
+
+    def test_container_stop_requires_start_stop_scope(self):
+        r = self._registry()
+        assert "container_stop" in r.TOOL_REQUIRED_SCOPES
+        assert r.TOOL_REQUIRED_SCOPES["container_stop"] == "container.start_stop"
+
+    def test_container_restart_requires_start_stop_scope(self):
+        r = self._registry()
+        assert "container_restart" in r.TOOL_REQUIRED_SCOPES
+        assert r.TOOL_REQUIRED_SCOPES["container_restart"] == "container.start_stop"
+
+    # --- Dangerous tool classification ---
+
+    def test_container_start_is_dangerous(self):
+        r = self._registry()
+        assert "container_start" in r.DANGEROUS_TOOLS
+
+    def test_container_stop_is_dangerous(self):
+        r = self._registry()
+        assert "container_stop" in r.DANGEROUS_TOOLS
+
+    def test_container_restart_is_dangerous(self):
+        r = self._registry()
+        assert "container_restart" in r.DANGEROUS_TOOLS
+
+    # --- Plan mode blocks ---
+
+    @pytest.mark.asyncio
+    async def test_container_start_blocked_in_plan_mode(self):
+        r = self._registry()
+        result = await r.execute(
+            "container_start",
+            {"container_name": "frontend"},
+            {"edit_mode": "plan"},
+        )
+        assert result["success"] is False
+        assert "Plan mode" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_container_stop_blocked_in_plan_mode(self):
+        r = self._registry()
+        result = await r.execute(
+            "container_stop",
+            {"container_name": "frontend"},
+            {"edit_mode": "plan"},
+        )
+        assert result["success"] is False
+        assert "Plan mode" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_container_restart_blocked_in_plan_mode(self):
+        r = self._registry()
+        result = await r.execute(
+            "container_restart",
+            {"container_name": "frontend"},
+            {"edit_mode": "plan"},
+        )
+        assert result["success"] is False
+        assert "Plan mode" in result["error"]
+
+    # --- Scope rejection ---
+
+    @pytest.mark.asyncio
+    async def test_container_start_rejected_without_scope(self):
+        r = self._registry()
+        result = await r.execute(
+            "container_start",
+            {"container_name": "frontend"},
+            {"api_key_scopes": ["file.read"]},  # no container.start_stop
+        )
+        assert result["success"] is False
+        assert "container.start_stop" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_container_start_allowed_with_correct_scope(self):
+        """With the right scope and auto mode the tool must at least attempt
+        execution (fail due to missing context, NOT scope rejection)."""
+        r = self._registry()
+        result = await r.execute(
+            "container_start",
+            {"container_name": "frontend"},
+            {
+                "api_key_scopes": ["container.start_stop"],
+                "edit_mode": "auto",
+                "skip_approval_check": True,
+            },
+        )
+        # Should fail on missing project context, not on scope enforcement.
+        assert result["success"] is False
+        assert "container.start_stop" not in (result.get("error") or "")
