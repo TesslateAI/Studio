@@ -139,18 +139,22 @@ async def _heartbeat_lock(pubsub, chat_id: str, task_id: str):
         pass
 
 
-def _build_submodule_registry(in_tree_registry):
+def _build_submodule_registry(in_tree_registry, approval_handler=None):
     """Transfer tools from an in-tree ToolRegistry to a submodule ToolRegistry.
 
     Both registries store tools in a ``_tools`` dict keyed by tool name. The
     in-tree Tool objects are structurally identical to the submodule's Tool
     (same dataclass fields), so they can be registered directly without
     conversion. Category comparisons are string-name-based at execution time.
+
+    ``approval_handler`` is an optional async callable injected into the
+    submodule registry so the orchestrator's interactive approval flow (Redis
+    pub/sub + frontend dialog) is used instead of the env-var-based fallback.
     """
     try:
         from tesslate_agent.agent.tools.registry import ToolRegistry as SubmoduleRegistry
 
-        sub = SubmoduleRegistry()
+        sub = SubmoduleRegistry(approval_handler=approval_handler)
         for tool in in_tree_registry._tools.values():
             sub.register(tool)
         return sub
@@ -159,7 +163,9 @@ def _build_submodule_registry(in_tree_registry):
         return None
 
 
-async def _create_agent_runner(agent_model, model_adapter, tools_override, settings):
+async def _create_agent_runner(
+    agent_model, model_adapter, tools_override, settings, approval_handler=None
+):
     """Return an object with a ``.run(message, context)`` async-generator method.
 
     Uses the submodule's TesslateAgent runner via TesslateAgentAdapter.
@@ -168,11 +174,13 @@ async def _create_agent_runner(agent_model, model_adapter, tools_override, setti
     from .services.tesslate_agent_adapter import TesslateAgentAdapter
 
     if tools_override is not None:
-        sub_registry = _build_submodule_registry(tools_override)
+        sub_registry = _build_submodule_registry(tools_override, approval_handler=approval_handler)
     else:
         from .agent.tools.registry import get_tool_registry
 
-        sub_registry = _build_submodule_registry(get_tool_registry())
+        sub_registry = _build_submodule_registry(
+            get_tool_registry(), approval_handler=approval_handler
+        )
 
     if sub_registry is None:
         raise RuntimeError("tesslate-agent submodule is unavailable; cannot create agent runner")
@@ -201,8 +209,7 @@ async def _create_agent_runner(agent_model, model_adapter, tools_override, setti
         model=model_adapter,
         compaction_adapter=compaction_adapter,
     )
-    # Return the inner submodule agent — it has the .run() + .tools interface.
-    return adapter.inner
+    return adapter
 
 
 async def execute_agent_task(ctx: dict, payload_dict: dict):
@@ -378,11 +385,62 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     )
 
             # 7. Create agent via adapter (submodule runner)
+            #
+            # Build an async approval handler that suspends until the user
+            # responds via the frontend dialog (Allow / Deny).  This replaces
+            # the submodule's env-var ApprovalManager (which defaults to
+            # "allow" and never shows the user anything) with the orchestrator's
+            # PendingUserInputManager backed by Redis pub/sub.
+            from .agent.tools.approval_manager import (
+                get_pending_input_manager,
+                wait_for_approval_or_cancel,
+            )
+
+            _pending_mgr = get_pending_input_manager()
+
+            async def _approval_handler(tool_name: str, parameters: dict, session_id: str) -> str:
+                # Already approved for this session (user clicked "Allow All").
+                if _pending_mgr.is_tool_approved(session_id, tool_name):
+                    return "allow_once"
+
+                approval_id, request = await _pending_mgr.request_approval(
+                    tool_name, parameters, session_id
+                )
+                logger.info(
+                    "[WORKER] Approval gate opened for %s (approval_id=%s)",
+                    tool_name,
+                    approval_id,
+                )
+
+                # Notify the frontend so it can show the approval dialog.
+                # Serialize UUIDs in parameters so the event is JSON-safe.
+                if pubsub:
+                    await pubsub.publish_agent_event(
+                        task_id,
+                        {
+                            "type": "approval_required",
+                            "data": {
+                                "approval_id": approval_id,
+                                "tool": tool_name,
+                                "parameters": _convert_uuids_to_strings(parameters),
+                                "session_id": str(session_id),
+                            },
+                        },
+                    )
+
+                # Block until the user approves/denies or the task is cancelled.
+                response = await wait_for_approval_or_cancel(
+                    request, task_id=task_id, timeout_seconds=300.0
+                )
+                logger.info("[WORKER] Approval resolved for %s: %s", tool_name, response)
+                return response or "stop"
+
             agent_run_obj = await _create_agent_runner(
                 agent_model=agent_model,
                 model_adapter=model_adapter,
                 tools_override=tools_override,
                 settings=settings,
+                approval_handler=_approval_handler,
             )
 
             # 7b. Load MCP tools for this user/agent and inject into tool registry
@@ -632,10 +690,40 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             completion_reason = "task_complete"
             session_id = None
             event_count = 0
-            step_index = 0
+
+            # AgentStep sink: called by run_turn() for every agent_step event so
+            # the worker loop only handles cancellation, pubsub, and completion.
+            _step_idx = 0
+
+            async def _step_sink(event: dict) -> None:
+                nonlocal _step_idx
+                if event.get("type") != "agent_step":
+                    return
+                step_data = event.get("data", {})
+                normalized = _build_step_dict(step_data, _convert_uuids_to_strings)
+                db.add(
+                    AgentStep(
+                        message_id=message_id,
+                        chat_id=UUID(payload.chat_id),
+                        step_index=_step_idx,
+                        step_data=normalized,
+                    )
+                )
+                await db.commit()
+                _step_idx += 1
+
+            from .services.tesslate_agent_adapter import AgentAdapterContext
+
+            adapter_ctx = AgentAdapterContext(
+                project_id=str(project_id) if project_id else "",
+                user_id=payload.user_id,
+                extra=context,
+            )
 
             try:
-                async for event in agent_run_obj.run(payload.message, context):
+                async for event in agent_run_obj.run_turn(
+                    payload.message, adapter_ctx, event_sink=_step_sink
+                ):
                     event_count += 1
                     event_type = event.get("type", "unknown")
 
@@ -671,21 +759,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         )
                         break
 
-                    # Progressive step persistence: INSERT AgentStep row per step
-                    if event_type == "agent_step":
-                        step_data = event.get("data", {})
-                        normalized = _build_step_dict(step_data, _convert_uuids_to_strings)
-                        agent_step = AgentStep(
-                            message_id=message_id,
-                            chat_id=UUID(payload.chat_id),
-                            step_index=step_index,
-                            step_data=normalized,
-                        )
-                        db.add(agent_step)
-                        await db.commit()
-                        step_index += 1
-
-                    elif event_type == "complete":
+                    if event_type == "complete":
                         complete_data = event.get("data", {})
                         final_response = complete_data.get("final_response", "")
                         iterations = complete_data.get("iterations", iterations)
