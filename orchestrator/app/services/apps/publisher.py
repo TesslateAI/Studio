@@ -34,6 +34,7 @@ from ..hub_client import HubClient
 from . import compatibility
 from .manifest_parser import ManifestValidationError
 from .manifest_parser import parse as parse_manifest
+from .manifest_parser import validate_result_templates
 
 __all__ = [
     "PublishError",
@@ -91,6 +92,15 @@ async def publish_version(
         parsed = parse_manifest(manifest_source)
     except ManifestValidationError:
         logger.info("publish_version: manifest validation failed")
+        raise
+    # Dry-render every action.result_template against the sandboxed
+    # render worker. Catches RCE patterns (e.g. dunder-walks via
+    # __class__.__mro__), unsafe filters/globals, syntax errors,
+    # and runaway loops at publish time rather than at first invocation.
+    try:
+        await validate_result_templates(parsed)
+    except ManifestValidationError:
+        logger.info("publish_version: result_template validation failed")
         raise
     manifest = parsed.manifest
     # For schema versions without a typed Pydantic mirror (e.g. 2025-02),

@@ -8,6 +8,12 @@ canonical state machine.
 
 This module MUST NOT import the LiteLLM HTTP client directly — callers inject
 a `LiteLLMDelegate` (see `services.litellm_keys.LiteLLMDelegate`).
+
+Phase 4 note (idle reaper): the Phase 4 controller's idle reaper will
+sweep ``app_runtime_deployments`` (not ``app_instances``) so reaping
+shared-singleton apps scales every install's view simultaneously. This
+module's session-mint path stays installer-scoped — the reaper acts on
+the shared deployment row above it.
 """
 
 from __future__ import annotations

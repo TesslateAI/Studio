@@ -27,9 +27,12 @@ Phase 1 simplifications (called out so Phase 3 doesn't have to grep):
   same handler shape only when Phase 4 wires Docker job execution.
 * Connector Proxy injection is Phase 3 — the dispatcher does not append
   any ``X-OpenSail-*`` headers beyond invocation correlation.
-* Result template rendering is Phase 3's render-worker concern; this
-  dispatcher only persists the typed ``output`` and any declared artifact
-  values, never strings rendered from a template.
+* ``result_template`` rendering is dispatched to the long-lived sandboxed
+  render worker (:mod:`app.services.apps.template_render`) when an action
+  declares one. The rendered string is surfaced on
+  :class:`ActionDispatchResult.rendered` for delivery hops to consume; a
+  render failure logs and leaves the field ``None`` so the action still
+  returns its typed ``output`` (delivery falls back to JSON dump).
 """
 
 from __future__ import annotations
@@ -51,6 +54,7 @@ from ...models import AppVersion, Container, Project
 from ...models_automations import AppAction, AppInstance, AutomationRunArtifact
 from . import billing_dispatcher
 from .runtime_urls import container_url
+from .template_render import RenderError, get_render_client
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +130,11 @@ class ActionDispatchResult:
     spend_usd: Decimal = field(default_factory=lambda: Decimal("0"))
     duration_seconds: float = 0.0
     error: str | None = None
+    # Rendered ``result_template`` body (sandboxed Jinja, output-capped). None
+    # if the action did not declare a template, or if rendering failed (the
+    # dispatcher logs and leaves the field None rather than failing the
+    # whole action — delivery hops fall back to the typed ``output``).
+    rendered: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -900,6 +909,29 @@ async def dispatch_app_action(
         input_value=input,
     )
 
+    # Step 5b — render `result_template` via the sandboxed worker.
+    # Failures here log + degrade to ``rendered=None`` rather than failing
+    # the action: the typed ``output`` already validated, the artifacts are
+    # persisted, and a delivery hop can fall back to ``json.dumps(output)``.
+    rendered: str | None = None
+    template_str = getattr(action, "result_template", None)
+    if isinstance(template_str, str) and template_str.strip():
+        try:
+            rendered = await get_render_client().render(
+                template_str,
+                {"input": input, "output": output},
+            )
+        except RenderError as exc:
+            logger.warning(
+                "action_dispatcher: result_template render failed action=%s "
+                "instance=%s run=%s err=%s",
+                action_name,
+                instance.id,
+                run_id,
+                exc,
+            )
+            rendered = None
+
     duration_seconds = time.monotonic() - started_at
 
     # Step 6 — spend attribution (best-effort, never fails dispatch).
@@ -927,6 +959,7 @@ async def dispatch_app_action(
         spend_usd=spend_usd,
         duration_seconds=duration_seconds,
         error=None,
+        rendered=rendered,
     )
 
 

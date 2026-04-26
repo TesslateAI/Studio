@@ -639,11 +639,133 @@ class AppAutomationTemplate(Base):
 # ---------------------------------------------------------------------------
 
 
+class AppRuntimeDeployment(Base):
+    """Runtime identity separate from logical install (Phase 3 primitive).
+
+    ``AppInstance`` answers "which user owns this install?" —
+    ``AppRuntimeDeployment`` answers "where does this actually run, with
+    what replica policy, on whose tenancy?" One install != one runtime in
+    shared-singleton mode: many ``AppInstance`` rows can point at the
+    same row here via ``AppInstance.runtime_deployment_id``.
+
+    The constraint matrix (``per_install_volume`` ⟹ ``max_replicas=1``;
+    same for ``service_pvc``; replica monotonicity; enum CHECKs) is
+    enforced at the DB level by ``alembic 0076_app_runtime_deployments``
+    so an unsafe row cannot be inserted regardless of which path created
+    it. Scaling-shape fields that need CHECKs are real columns; richer
+    HPA/custom-metric config lives in ``scaling_config`` JSONB.
+
+    For Phase 3 the row is set up at install time:
+      - ``per_install``: one row per ``AppInstance``, ``max_replicas=1``.
+      - ``shared_singleton``: one row per (app_id, app_version_id) reused
+        across all installs; the K8s namespace + project is materialized
+        once.
+      - ``per_invocation``: ``min_replicas=0, max_replicas=0`` with no
+        persistent pods — each invocation spins a Job.
+
+    The Phase 4 controller's idle reaper acts on this row, not on
+    ``AppInstance`` — so reaping shared-singleton scales every install's
+    view simultaneously. PVC + namespace + Secrets persist across scale
+    events; only pod replicas drop to zero.
+    """
+
+    __tablename__ = "app_runtime_deployments"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    app_id = Column(
+        GUID(),
+        ForeignKey("marketplace_apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    app_version_id = Column(
+        GUID(),
+        ForeignKey("app_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # per_install | shared_singleton | per_invocation
+    tenancy_model = Column(String(32), nullable=False)
+    # stateless | per_install_volume | service_pvc | shared_volume | external
+    state_model = Column(String(32), nullable=False)
+
+    # The K8s project/namespace this runs in. Null for ``per_invocation``
+    # deployments that own no persistent pods (the Job runs in some other
+    # bookkeeping namespace owned by the dispatcher).
+    runtime_project_id = Column(
+        GUID(),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    namespace = Column(Text, nullable=True)
+    primary_container_id = Column(Text, nullable=True)
+    # Volume Hub PVC ref. Null for stateless / external state models.
+    volume_id = Column(Text, nullable=True)
+
+    # Scaling fields are REAL COLUMNS (not JSON) so the constraint matrix
+    # works portably across Postgres + SQLite.
+    min_replicas = Column(Integer, nullable=False, default=0, server_default="0")
+    max_replicas = Column(Integer, nullable=False, default=1, server_default="1")
+    desired_replicas = Column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    idle_timeout_seconds = Column(
+        Integer, nullable=False, default=600, server_default="600"
+    )
+    concurrency_target = Column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+
+    # HPA config, custom metrics, and other non-CHECK-enforced scaling
+    # shape lives here.
+    scaling_config = Column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    scaled_to_zero_at = Column(DateTime(timezone=True), nullable=True)
+    last_activity_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "max_replicas >= min_replicas",
+            name="chk_ard_replicas_max_gte_min",
+        ),
+        CheckConstraint(
+            "desired_replicas BETWEEN min_replicas AND max_replicas",
+            name="chk_ard_replicas_desired_in_range",
+        ),
+        CheckConstraint(
+            "NOT (state_model = 'per_install_volume' AND max_replicas > 1)",
+            name="chk_ard_per_install_volume_max_one",
+        ),
+        CheckConstraint(
+            "NOT (state_model = 'service_pvc' AND max_replicas > 1)",
+            name="chk_ard_service_pvc_max_one",
+        ),
+        CheckConstraint(
+            "tenancy_model IN ('per_install', 'shared_singleton', 'per_invocation')",
+            name="chk_ard_tenancy",
+        ),
+        CheckConstraint(
+            "state_model IN ('stateless', 'per_install_volume', 'service_pvc', "
+            "'shared_volume', 'external')",
+            name="chk_ard_state_model",
+        ),
+        Index("ix_ard_app_id", "app_id"),
+        Index("ix_ard_runtime_project_id", "runtime_project_id"),
+    )
+
+
 class AppInstance(Base):
     """Per-install leaf, recreated under the hard reset.
 
-    Adds ``runtime_deployment_id`` for Phase 3's ``AppRuntimeDeployment``
-    primitive (FK constraint added when that table lands).
+    The ``runtime_deployment_id`` FK to ``AppRuntimeDeployment`` lands in
+    ``alembic 0076_app_runtime_deployments`` (Phase 3). The column itself
+    was added in 0074 as a nullable reservation; existing rows from
+    before Phase 3 have ``runtime_deployment_id=NULL`` and stay that way
+    until they're re-installed under the new manifest.
     """
 
     __tablename__ = "app_instances"
@@ -680,8 +802,13 @@ class AppInstance(Base):
         ForeignKey("containers.id", ondelete="SET NULL"),
         nullable=True,
     )
-    # Phase 3 reservation. FK to app_runtime_deployments lands later.
-    runtime_deployment_id = Column(GUID(), nullable=True)
+    # FK to app_runtime_deployments lands in 0076 (Phase 3). ON DELETE
+    # SET NULL: deleting a deployment row never destroys install rows.
+    runtime_deployment_id = Column(
+        GUID(),
+        ForeignKey("app_runtime_deployments.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     installed_at = Column(DateTime(timezone=True), nullable=True)
     uninstalled_at = Column(DateTime(timezone=True), nullable=True)
@@ -837,6 +964,117 @@ class AppInstallAttempt(Base):
     last_error = Column(Text, nullable=True)
 
 
+# ---------------------------------------------------------------------------
+# Connector Proxy — Phase 3 primitives (alembic 0077_connector_proxy_calls).
+# ---------------------------------------------------------------------------
+
+
+class AppConnectorGrant(Base):
+    """Per-install consent + resolved-credential pointer for the Connector Proxy.
+
+    Created at install time (or via the Install Modal connector picker), one
+    row per ``(app_instance, app_connector_requirement)`` pair while
+    ``revoked_at IS NULL``. The Connector Proxy looks this row up on every
+    upstream call to find the credential to inject.
+
+    ``resolved_ref`` discriminates by ``kind``::
+
+        {"kind": "oauth_connection", "id": "<mcp_oauth_connections.id>"}
+        {"kind": "user_mcp_config",  "id": "<user_mcp_configs.id>"}
+        {"kind": "api_key_secret",   "id": "<container_encrypted_secrets.id>"}
+
+    ``exposure_at_grant`` is **pinned at install time**. If a manifest
+    upgrade flips the requirement's exposure (``proxy → env`` or back), the
+    grant is *not* mutated — that's a re-consent path: the install flow
+    revokes the old grant and creates a fresh one with the new value.
+    """
+
+    __tablename__ = "app_connector_grants"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    app_instance_id = Column(
+        GUID(),
+        ForeignKey("app_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    requirement_id = Column(
+        GUID(),
+        ForeignKey("app_connector_requirements.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    resolved_ref = Column(JSON, nullable=False)
+    # 'proxy' | 'env' — pinned at install time.
+    exposure_at_grant = Column(String(8), nullable=False)
+    granted_by_user_id = Column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    granted_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "exposure_at_grant IN ('proxy', 'env')",
+            name="ck_app_connector_grants_exposure_at_grant",
+        ),
+        Index(
+            "ix_app_connector_grants_app_instance_id",
+            "app_instance_id",
+        ),
+    )
+
+
+class ConnectorProxyCall(Base):
+    """Append-only audit row written for every Connector Proxy call.
+
+    Lets the platform answer "what has this app done with my Slack token?"
+    without instrumenting the app pod. ``error`` carries a 500-char prefix
+    of the upstream body when ``status_code >= 400`` — the proxy is
+    responsible for stripping the bearer token before persisting.
+    """
+
+    __tablename__ = "connector_proxy_calls"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    app_instance_id = Column(
+        GUID(),
+        ForeignKey("app_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    requirement_id = Column(
+        GUID(),
+        # SET NULL so a yanked manifest doesn't cascade-delete the audit
+        # trail — the audit must outlive the row it references.
+        ForeignKey("app_connector_requirements.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    connector_id = Column(Text, nullable=False)
+    endpoint = Column(Text, nullable=False)
+    method = Column(String(8), nullable=False, server_default="POST")
+    status_code = Column(Integer, nullable=False)
+    bytes_in = Column(BigInteger, nullable=False, server_default="0")
+    bytes_out = Column(BigInteger, nullable=False, server_default="0")
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_cpc_app_instance_id_created_at",
+            "app_instance_id",
+            "created_at",
+        ),
+        Index(
+            "ix_cpc_connector_id_created_at",
+            "connector_id",
+            "created_at",
+        ),
+    )
+
+
 __all__ = [
     "AutomationDefinition",
     "AutomationTrigger",
@@ -852,7 +1090,10 @@ __all__ = [
     "AppDependency",
     "AppConnectorRequirement",
     "AppAutomationTemplate",
+    "AppRuntimeDeployment",
     "AppInstance",
     "AppInstallAttempt",
     "InvocationSubject",
+    "AppConnectorGrant",
+    "ConnectorProxyCall",
 ]

@@ -1917,106 +1917,12 @@ class AppVersion(Base):
     yanked_second_admin = relationship("User", foreign_keys=[yanked_second_admin_id])
 
 
-class AppInstance(Base):
-    """Per-install leaf. One installed App per Project (partial UNIQUE)."""
-
-    __tablename__ = "app_instances"
-
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    app_id = Column(
-        GUID(),
-        ForeignKey("marketplace_apps.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    app_version_id = Column(
-        GUID(),
-        ForeignKey("app_versions.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    installer_user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    project_id = Column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
-    state = Column(
-        String(24), nullable=False, default="installing", server_default="installing"
-    )  # installing | installed | upgrading | uninstalled | error
-    consent_record = Column(JSON, nullable=False, default=dict, server_default="{}")
-    wallet_mix = Column(JSON, nullable=False, default=dict, server_default="{}")
-    update_policy = Column(
-        String(16), nullable=False, default="manual", server_default="manual"
-    )  # manual | patch-auto | minor-auto | pinned
-    volume_id = Column(Text, nullable=True)
-    feature_set_hash = Column(Text, nullable=True)
-    # Materialized pointer to the manifest's primary container, so the
-    # runtime-status endpoint can resolve ``primary_url`` without scanning
-    # ``containers``. Set by the installer from manifest compute.containers.
-    primary_container_id = Column(
-        GUID(),
-        ForeignKey("containers.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    installed_at = Column(DateTime(timezone=True), nullable=True)
-    uninstalled_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-
-    app = relationship("MarketplaceApp", back_populates="instances")
-    app_version = relationship("AppVersion", back_populates="instances")
-    installer = relationship("User", foreign_keys=[installer_user_id])
-    project = relationship("Project", foreign_keys=[project_id])
-    consents = relationship(
-        "McpConsentRecord", back_populates="app_instance", cascade="all, delete-orphan"
-    )
-
-
-class AppInstallAttempt(Base):
-    """Append-only ledger for the Apps installer saga.
-
-    The installer mints a row here in an independent session **immediately
-    after** the Hub-side volume is materialized, so every Hub volume has a
-    persistent marker that predates any downstream DB writes. If the rest of
-    the install succeeds the row is flipped to ``state='committed'`` and
-    linked to the resulting ``AppInstance``. If the install crashes (worker
-    SIGKILL, flush fails, commit fails), the row stays at ``state='hub_created'``
-    with no linked instance, and the orphan reaper picks it up, calls
-    ``hub_client.delete_volume``, and marks it ``reaped``.
-    """
-
-    __tablename__ = "app_install_attempts"
-
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    marketplace_app_id = Column(
-        GUID(),
-        ForeignKey("marketplace_apps.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    app_version_id = Column(
-        GUID(),
-        ForeignKey("app_versions.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    installer_user_id = Column(
-        GUID(),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    # hub_created | committed | reaped | reap_failed
-    state = Column(String(32), nullable=False, default="hub_created", server_default="hub_created")
-    volume_id = Column(String, nullable=True)
-    node_name = Column(String, nullable=True)
-    bundle_hash = Column(String, nullable=True)
-    app_instance_id = Column(
-        GUID(),
-        ForeignKey("app_instances.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    committed_at = Column(DateTime(timezone=True), nullable=True)
-    reaped_at = Column(DateTime(timezone=True), nullable=True)
-    last_error = Column(Text, nullable=True)
+# NOTE: AppInstance and AppInstallAttempt were previously defined here, but
+# under the Phase 1 hard reset they are recreated in ``models_automations``
+# (with the new ``runtime_deployment_id`` column reserved for Phase 3). The
+# canonical definitions now live there. We re-export them at the bottom of
+# this module so existing ``from .models import AppInstance`` imports keep
+# working without two ORM classes pointing at the same ``__tablename__``.
 
 
 class McpConsentRecord(Base):
@@ -3024,4 +2930,13 @@ from .models_team import (  # noqa: F401, E402
     Team,
     TeamInvitation,
     TeamMembership,
+)
+
+# Re-export AppInstance + AppInstallAttempt from the Phase 1 module. The
+# canonical ORM definitions live there (with the Phase 3 runtime_deployment_id
+# FK); existing ``from .models import AppInstance`` imports keep working
+# without two classes pointing at the same ``__tablename__``.
+from .models_automations import (  # noqa: F401, E402
+    AppInstallAttempt,
+    AppInstance,
 )

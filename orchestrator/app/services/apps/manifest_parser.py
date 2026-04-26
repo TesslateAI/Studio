@@ -34,6 +34,7 @@ from .app_manifest import (
     AppManifest,
     AppManifest2026_05,
 )
+from .template_render import RenderError, get_render_client
 
 _SCHEMA_PATH = Path(__file__).parent / "app_manifest_2025_01.schema.json"
 _SCHEMA_PATH_2025_02 = Path(__file__).parent / "app_manifest_2025_02.schema.json"
@@ -170,6 +171,83 @@ def _jsonschema_err_to_dict(e: JsonSchemaValidationError) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Install-time `result_template` dry-render validation.
+#
+# Plan §"result_template — sandboxed Jinja, subprocess-rendered, output
+# capped" calls for rejecting manifests at publish/install time when any
+# `actions[].result_template` has a syntax error, runaway sentinel, or
+# exceeds the 4 KB body limit. We dry-render with empty `{input: {}, output:
+# {}}` against the long-lived render worker — same code path the runtime
+# delivery hop uses, so behavior is consistent.
+# ---------------------------------------------------------------------------
+
+
+# Strict timeout for install-time validation. The render worker itself caps
+# at DEFAULT_RENDER_TIMEOUT_SECONDS, but the validator uses a tighter ceiling
+# so a runaway template can't park the publish flow.
+_DRY_RENDER_TIMEOUT_SECONDS = 2.0
+
+
+def _iter_result_templates(raw: dict[str, Any]) -> list[tuple[str, str]]:
+    """Yield ``(action_name, template)`` pairs from a parsed manifest.
+
+    Returns an empty list for schemas that don't declare result templates
+    (currently 2025-01 / 2025-02), so the validator is a no-op there.
+    """
+    out: list[tuple[str, str]] = []
+    for action in raw.get("actions") or []:
+        if not isinstance(action, dict):
+            continue
+        template = action.get("result_template")
+        name = action.get("name") or "<unnamed>"
+        if isinstance(template, str) and template.strip():
+            out.append((str(name), template))
+    return out
+
+
+async def validate_result_templates(parsed: ParsedManifest) -> None:
+    """Dry-render every ``actions[].result_template`` declared in the manifest.
+
+    Raises :class:`ManifestValidationError` aggregating every template
+    that fails to compile / render / fits-in-cap. Uses the long-lived
+    render worker so install-time validation exercises the exact same
+    sandbox the runtime uses.
+
+    Empty / absent templates are skipped — they're a valid manifest
+    pattern (``result_template`` is optional and defaults to
+    ``{{ output | tojson }}`` at delivery time).
+    """
+    pairs = _iter_result_templates(parsed.raw)
+    if not pairs:
+        return
+
+    client = get_render_client()
+    errors: list[dict[str, Any]] = []
+    for action_name, template in pairs:
+        try:
+            await client.render(
+                template,
+                {"input": {}, "output": {}},
+                timeout=_DRY_RENDER_TIMEOUT_SECONDS,
+            )
+        except RenderError as exc:
+            errors.append(
+                {
+                    "path": ["actions", action_name, "result_template"],
+                    "message": str(exc),
+                    "validator": "result_template_dry_render",
+                    "validator_value": None,
+                }
+            )
+
+    if errors:
+        raise ManifestValidationError(
+            "manifest result_template dry-render failed",
+            errors=errors,
+        )
+
+
 # Re-export for back-compat — older code may import MANIFEST_SCHEMA_VERSION
 # from manifest_parser.
 __all__ = [
@@ -180,4 +258,5 @@ __all__ = [
     "load_schema",
     "schema_hash",
     "parse",
+    "validate_result_templates",
 ]

@@ -1255,6 +1255,14 @@ app.include_router(app_bundles.router, prefix="/api/app-bundles", tags=["apps:bu
 app.include_router(automations.router)  # /api/automations - definitions, runs, artifacts
 app.include_router(app_actions.router)  # /api/apps/{instance}/actions/{name}
 
+# --- Connector Proxy (Phase 3) ---------------------------------------------
+# Mounted on the orchestrator for Phase 3; Phase 4 lifts this into a
+# dedicated `opensail-runtime` Deployment + Service. App pods reach it via
+# `OPENSAIL_RUNTIME_URL` env, which today resolves to the orchestrator.
+from .services.apps.connector_proxy import router as connector_proxy_router  # noqa: E402
+
+app.include_router(connector_proxy_router)  # /api/v1/connector-proxy/connectors/{id}/{path}
+
 # Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
 try:
     from .routers.mcp_server import get_mcp_asgi_app
