@@ -157,6 +157,8 @@ class ToolRegistry:
         "send_message": "channel.manage",
         # Container control
         "container_status": "container.view",
+        "container_start": "container.start_stop",
+        "container_stop": "container.start_stop",
         "container_restart": "container.start_stop",
         "container_logs": "container.view",
         "container_health": "container.view",
@@ -181,6 +183,9 @@ class ToolRegistry:
             "web_fetch",  # Web operations (can leak data)
             "web_search",  # Web search (can leak query data)
             "send_message",  # Can send data externally
+            "container_start",
+            "container_stop",
+            "container_restart",  # Container lifecycle (state-mutating)
             # 'todo_write', 'save_plan', 'update_plan' excluded - safe planning operations
         }
     )
