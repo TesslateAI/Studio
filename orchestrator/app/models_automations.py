@@ -349,11 +349,13 @@ class AutomationRunArtifact(Base):
 
 
 class AutomationDeliveryTarget(Base):
-    """Per-automation fan-out edge to a (Phase 4) ``CommunicationDestination``.
+    """Per-automation fan-out edge to a :class:`CommunicationDestination`.
 
-    The FK to ``communication_destinations`` is intentionally NOT enforced
-    in Phase 1 — that table lands in Phase 4. The column ships now as a
-    plain GUID so wiring code can persist destinations between phases.
+    Phase 4 promoted ``destination_id`` from a plain GUID column to a
+    real FK against ``communication_destinations.id`` (alembic
+    ``0079_comm_destinations``). CASCADE on delete: when a destination is
+    removed, its fan-out edges go with it. The parent automation stays —
+    the user can re-wire delivery to another destination.
     """
 
     __tablename__ = "automation_delivery_targets"
@@ -365,13 +367,102 @@ class AutomationDeliveryTarget(Base):
         nullable=False,
         index=True,
     )
-    destination_id = Column(GUID(), nullable=False)
+    destination_id = Column(
+        GUID(),
+        ForeignKey("communication_destinations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     ordinal = Column(Integer, nullable=False, default=0, server_default="0")
 
     # {kind: drop|retry_n|escalate_to_destination_id, ...}
     on_failure = Column(JSON, nullable=False, default=dict, server_default="{}")
     artifact_filter = Column(
         Text, nullable=False, default="all", server_default="all"
+    )
+
+
+class CommunicationDestination(Base):
+    """Stored, named delivery target inside a :class:`ChannelConfig`.
+
+    A :class:`ChannelConfig` is "one bot/app credential set" (one row per
+    Slack workspace, one row per Telegram bot). A
+    ``CommunicationDestination`` is a saved, user-facing pointer *inside*
+    that connection — "#standup", "DM Manav", "Standup Email" — so a
+    user configures once and references the destination by id from many
+    automations.
+
+    No new bot per agent session: one Telegram bot multiplexes all
+    chats; one Slack app reaches all channels it's invited to. The row
+    here is just the addressed pointer.
+
+    Auth model: a row is owned by ``owner_user_id`` (most common) and/or
+    scoped to ``team_id``. Both nullable so an admin can mint a team-only
+    destination without pinning to a single user.
+
+    See ``/Users/smirk/.claude/plans/ultrathink-i-want-to-glittery-pond.md``
+    section "CommunicationDestination — gateway delivery target distinct
+    from ChannelConfig" for the full design.
+    """
+
+    __tablename__ = "communication_destinations"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+
+    owner_user_id = Column(
+        GUID(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    team_id = Column(
+        GUID(),
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # The underlying connection (Slack workspace, Telegram bot, …).
+    # CASCADE on delete: removing the credential removes its named
+    # pointers — the credential is the prerequisite for delivery.
+    channel_config_id = Column(
+        GUID(),
+        ForeignKey("channel_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # slack_channel | slack_dm | slack_thread | telegram_chat |
+    # telegram_topic | discord_channel | discord_dm | email | webhook |
+    # web_inbox. Matches the CHECK in alembic 0079.
+    kind = Column(String(32), nullable=False)
+    name = Column(String(128), nullable=False)
+
+    # {chat_id, thread_id?, email_address?, webhook_url?, signing_key?}
+    config = Column(JSON, nullable=False, default=dict, server_default="{}")
+
+    # text | blocks | rich | code_block | inline_table | jinja_template.
+    # Matches the CHECK in alembic 0079.
+    formatting_policy = Column(
+        String(32), nullable=False, default="text", server_default="text"
+    )
+
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('slack_channel', 'slack_dm', 'slack_thread', "
+            "'telegram_chat', 'telegram_topic', 'discord_channel', "
+            "'discord_dm', 'email', 'webhook', 'web_inbox')",
+            name="ck_communication_destinations_kind",
+        ),
+        CheckConstraint(
+            "formatting_policy IN ('text', 'blocks', 'rich', 'code_block', "
+            "'inline_table', 'jinja_template')",
+            name="ck_communication_destinations_formatting_policy",
+        ),
     )
 
 
@@ -1213,6 +1304,7 @@ __all__ = [
     "AutomationRunArtifact",
     "AutomationDeliveryTarget",
     "AutomationApprovalRequest",
+    "CommunicationDestination",
     "AppAction",
     "AppView",
     "AppDataResource",

@@ -10,6 +10,8 @@ import type {
 import { ConfirmDialog } from '../../components/modals/ConfirmDialog';
 import { RunStatusBadge } from './components/RunStatusBadge';
 import { ContractEditor } from './components/ContractEditor';
+import { DestinationPicker } from './components/DestinationPicker';
+import type { AutomationDeliveryTargetIn } from '../../types/automations';
 
 const PAGE_SIZE = 25;
 
@@ -39,6 +41,12 @@ export default function AutomationDetailPage() {
   const [editName, setEditName] = useState('');
   const [editContract, setEditContract] = useState('');
   const [editActive, setEditActive] = useState(true);
+  /**
+   * Phase 4: edit a single delivery destination via the picker. The
+   * form only supports one delivery target per automation today (matches
+   * the create flow). Empty string = "no delivery target".
+   */
+  const [editDeliveryDestinationId, setEditDeliveryDestinationId] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
   const reload = useCallback(async () => {
@@ -50,6 +58,7 @@ export default function AutomationDetailPage() {
       setEditName(def.name);
       setEditContract(JSON.stringify(def.contract ?? {}, null, 2));
       setEditActive(def.is_active);
+      setEditDeliveryDestinationId(def.delivery_targets[0]?.destination_id ?? '');
     } catch (err) {
       setError(
         (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ||
@@ -134,12 +143,24 @@ export default function AutomationDetailPage() {
       toast.error(`Invalid contract: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
+    const deliveryTargets: AutomationDeliveryTargetIn[] = editDeliveryDestinationId.trim()
+      ? [
+          {
+            destination_id: editDeliveryDestinationId.trim(),
+            ordinal: 0,
+            on_failure: {},
+            artifact_filter: 'all',
+          },
+        ]
+      : [];
+
     setSavingEdit(true);
     try {
       const updated = await automationsApi.update(id, {
         name: editName.trim(),
         contract,
         is_active: editActive,
+        delivery_targets: deliveryTargets,
       });
       setDefinition(updated);
       setEditing(false);
@@ -226,6 +247,9 @@ export default function AutomationDetailPage() {
                   setEditName(definition.name);
                   setEditContract(JSON.stringify(definition.contract ?? {}, null, 2));
                   setEditActive(definition.is_active);
+                  setEditDeliveryDestinationId(
+                    definition.delivery_targets[0]?.destination_id ?? ''
+                  );
                 }}
                 disabled={savingEdit}
                 className="btn btn-sm btn-icon"
@@ -281,9 +305,19 @@ export default function AutomationDetailPage() {
                   </span>
                 </label>
                 <ContractEditor value={editContract} onChange={setEditContract} />
+                <div>
+                  <span className="block text-xs font-medium text-[var(--text)] mb-1">
+                    Delivery destination
+                  </span>
+                  <DestinationPicker
+                    value={editDeliveryDestinationId}
+                    onChange={setEditDeliveryDestinationId}
+                    placeholder="No delivery target"
+                  />
+                </div>
                 <p className="text-[10px] text-[var(--text-subtle)]">
-                  Phase 1 edits cover name + contract + active flag. To change the
-                  trigger or action, recreate the automation.
+                  Edits cover name + contract + active flag + delivery destination.
+                  To change the trigger or action, recreate the automation.
                 </p>
               </div>
             ) : (

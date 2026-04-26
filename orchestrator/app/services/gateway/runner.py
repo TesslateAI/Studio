@@ -77,6 +77,18 @@ class GatewayRunner:
             )
         )
 
+        # Start AppRuntimeDeployment idle reaper (Phase 4).
+        # Lives alongside the cron tick — the gateway runner's existing
+        # single-firer file lock + replicas=1 keeps it correct enough until
+        # the dedicated automations-controller Deployment lands.
+        self._background_tasks.add(
+            asyncio.create_task(
+                self._runtime_reaper_loop(
+                    db_factory, interval=settings.gateway_tick_interval
+                )
+            )
+        )
+
         # Publish status
         if self._redis:
             import json
@@ -974,6 +986,33 @@ class GatewayRunner:
                         logger.info("[GATEWAY] Archived %d idle sessions", len(stale))
             except Exception:
                 logger.warning("[GATEWAY] Session reaper error", exc_info=True)
+
+    async def _runtime_reaper_loop(self, db_factory, interval: int = 60) -> None:
+        """Reap idle ``AppRuntimeDeployment`` rows on a fixed interval.
+
+        Runs alongside the cron scheduler with its own DB session per tick.
+        Failures are logged and swallowed so a transient DB blip can't
+        kill the loop. In docker / desktop modes the reaper itself
+        early-returns — the loop still ticks but does no K8s work.
+        """
+        from ..apps.runtime_reaper import reap_idle_runtimes
+
+        while self._running:
+            await asyncio.sleep(interval)
+            try:
+                async with db_factory() as db:
+                    result = await reap_idle_runtimes(db)
+                if result.reaped or result.timeout_killed or result.skipped_active:
+                    logger.info(
+                        "[GATEWAY] runtime_reaper: examined=%d reaped=%d "
+                        "timeout_killed=%d skipped_active=%d",
+                        result.examined,
+                        result.reaped,
+                        result.timeout_killed,
+                        result.skipped_active,
+                    )
+            except Exception:
+                logger.warning("[GATEWAY] Runtime reaper error", exc_info=True)
 
     async def _media_cache_cleaner(self) -> None:
         """Clean up old media cache files hourly."""

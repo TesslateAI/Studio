@@ -13,6 +13,7 @@ import type {
 import { TriggerEditor } from './components/TriggerEditor';
 import { ActionEditor } from './components/ActionEditor';
 import { ContractEditor } from './components/ContractEditor';
+import { DestinationPicker } from './components/DestinationPicker';
 
 const DEFAULT_CONTRACT = `{
   "allowed_tools": ["read", "write", "bash"],
@@ -65,9 +66,8 @@ export default function AutomationCreatePage() {
     ordinal: 0,
   });
   const [contractText, setContractText] = useState<string>(DEFAULT_CONTRACT);
-  // Phase 4 owns CommunicationDestination management. Phase 1 lets the
-  // user paste a destination UUID directly so they can wire something up
-  // if a destination already exists in the DB.
+  // Phase 4: pick a stored CommunicationDestination via DestinationPicker
+  // (drop-down + inline create). Empty string = "no delivery target".
   const [deliveryDestinationId, setDeliveryDestinationId] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -242,14 +242,12 @@ export default function AutomationCreatePage() {
 
           <Section
             title="Delivery target (optional)"
-            description="Phase 4 adds a destination picker. For now, paste an existing CommunicationDestination UUID."
+            description="Pick a saved CommunicationDestination — or create a new one inline. Leave empty to skip delivery."
           >
-            <input
-              type="text"
+            <DestinationPicker
               value={deliveryDestinationId}
-              onChange={(e) => setDeliveryDestinationId(e.target.value)}
-              placeholder="destination UUID (leave blank to skip)"
-              className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+              onChange={setDeliveryDestinationId}
+              placeholder="No delivery target"
             />
           </Section>
 

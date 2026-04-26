@@ -5,6 +5,7 @@ import type {
   AutomationActionType,
   AppActionRow,
 } from '../../../types/automations';
+import { DestinationPicker } from './DestinationPicker';
 
 interface Props {
   value: AutomationActionIn;
@@ -320,18 +321,17 @@ function GatewaySendFields({
 }) {
   return (
     <div className="space-y-3">
-      <label className="block">
+      <div>
         <span className="block text-xs font-medium text-[var(--text)] mb-1">
-          Destination ID (CommunicationDestination UUID)
+          Destination
         </span>
-        <input
-          type="text"
+        <DestinationPicker
           value={String(value.config.destination_id ?? '')}
-          onChange={(e) => updateConfig({ destination_id: e.target.value })}
-          placeholder="destination UUID — Phase 4 adds a picker"
-          className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+          onChange={(destId) => updateConfig({ destination_id: destId })}
+          allowEmpty={false}
+          placeholder="Select destination"
         />
-      </label>
+      </div>
 
       <label className="block">
         <span className="block text-xs font-medium text-[var(--text)] mb-1">Message body</span>

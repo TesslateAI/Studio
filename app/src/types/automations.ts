@@ -1,14 +1,16 @@
 /**
  * Automation Runtime — TypeScript types mirroring the backend Pydantic
- * shapes in ``orchestrator/app/schemas_automations.py``.
+ * shapes in ``orchestrator/app/schemas_automations.py`` +
+ * ``orchestrator/app/routers/communication_destinations.py``.
  *
  * Conventions:
  * - All UUIDs cross the wire as strings (the backend serialises them so).
  * - ``Decimal`` values come back as strings from FastAPI (Pydantic v2 default).
  * - All datetimes are ISO-8601 UTC strings.
  *
- * Phase 1 only — Wave/Phase 4 will introduce CommunicationDestination CRUD.
- * Until then the destination_id field is a free-text UUID input in the UI.
+ * Phase 4 introduced the CommunicationDestination primitive: a stored,
+ * NAMED delivery target inside a ChannelConfig. The DestinationPicker
+ * component drives the UI; types live below.
  */
 
 export type AutomationTriggerKind = 'cron' | 'webhook' | 'app_invocation' | 'manual';
@@ -309,4 +311,66 @@ export interface AppActionListResponse {
   app_instance_id: string;
   app_version_id: string;
   actions: AppActionRow[];
+}
+
+// ---------------------------------------------------------------------------
+// CommunicationDestination (Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The stored, named delivery target inside a ChannelConfig. A user
+ * configures one per channel/DM/email/etc. they want to deliver to and
+ * references it by id from many automations.
+ *
+ * Mirrors the backend ``CommunicationDestinationOut`` Pydantic model in
+ * ``orchestrator/app/routers/communication_destinations.py``.
+ */
+export type CommunicationDestinationKind =
+  | 'slack_channel'
+  | 'slack_dm'
+  | 'slack_thread'
+  | 'telegram_chat'
+  | 'telegram_topic'
+  | 'discord_channel'
+  | 'discord_dm'
+  | 'email'
+  | 'webhook'
+  | 'web_inbox';
+
+export type CommunicationDestinationFormattingPolicy =
+  | 'text'
+  | 'blocks'
+  | 'rich'
+  | 'code_block'
+  | 'inline_table'
+  | 'jinja_template';
+
+export interface CommunicationDestination {
+  id: string;
+  owner_user_id: string | null;
+  team_id: string | null;
+  channel_config_id: string;
+  kind: CommunicationDestinationKind;
+  name: string;
+  config: Record<string, unknown>;
+  formatting_policy: CommunicationDestinationFormattingPolicy;
+  created_at: string;
+  last_used_at: string | null;
+  /** How many ACTIVE automations reference this destination. */
+  in_use_count: number;
+}
+
+export interface CommunicationDestinationCreate {
+  channel_config_id: string;
+  kind: CommunicationDestinationKind;
+  name: string;
+  config?: Record<string, unknown>;
+  formatting_policy?: CommunicationDestinationFormattingPolicy;
+  team_id?: string | null;
+}
+
+export interface CommunicationDestinationUpdate {
+  name?: string;
+  config?: Record<string, unknown>;
+  formatting_policy?: CommunicationDestinationFormattingPolicy;
 }

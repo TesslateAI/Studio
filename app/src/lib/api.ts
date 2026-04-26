@@ -3997,6 +3997,30 @@ export const appVersionsApi = {
   },
 };
 
+// --- Publish-as-App (Architecture canvas drawer) ----------------------------
+//
+// These hit /api/projects/{slug}/publish-app/* endpoints registered by
+// orchestrator/app/routers/app_publish.py. Wraps the lower-level
+// /api/app-versions/publish endpoint with project-slug ergonomics + an
+// inferrer that produces a draft manifest from project structure.
+
+import type {
+  PublishDraftResponse,
+  PublishAppRequest,
+  PublishAppResponse,
+} from '../types/publish';
+
+export const publishApi = {
+  async draft(projectSlug: string): Promise<PublishDraftResponse> {
+    const response = await api.post(`/api/projects/${projectSlug}/publish-app/draft`);
+    return response.data;
+  },
+  async publish(projectSlug: string, body: PublishAppRequest): Promise<PublishAppResponse> {
+    const response = await api.post(`/api/projects/${projectSlug}/publish-app`, body);
+    return response.data;
+  },
+};
+
 // --- App Installs -----------------------------------------------------------
 
 export interface InstallRequest {
@@ -4631,6 +4655,9 @@ import type {
   AutomationRunRequest,
   AutomationRunResponse,
   AutomationRunSummary,
+  CommunicationDestination,
+  CommunicationDestinationCreate,
+  CommunicationDestinationUpdate,
 } from '../types/automations';
 
 export interface ListAutomationsParams {
@@ -4785,6 +4812,60 @@ export const appActionsApi = {
   /** GET /api/apps/{app_instance_id}/actions — read-only listing. */
   async list(appInstanceId: string): Promise<AppActionListResponse> {
     const response = await api.get(`/api/apps/${appInstanceId}/actions`);
+    return response.data;
+  },
+};
+
+/**
+ * CommunicationDestination CRUD (Phase 4).
+ *
+ * A destination is a stored, NAMED gateway delivery target inside a
+ * ``ChannelConfig`` (one per channel/DM/email/etc.). Endpoints mirror
+ * ``orchestrator/app/routers/communication_destinations.py``.
+ */
+export const communicationDestinationsApi = {
+  async list(params?: {
+    channel_config_id?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<CommunicationDestination[]> {
+    const qs = new URLSearchParams();
+    if (params?.channel_config_id) qs.append('channel_config_id', params.channel_config_id);
+    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.append('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await api.get(`/api/destinations${suffix}`);
+    return response.data;
+  },
+
+  async create(payload: CommunicationDestinationCreate): Promise<CommunicationDestination> {
+    const response = await api.post('/api/destinations', payload);
+    return response.data;
+  },
+
+  async get(id: string): Promise<CommunicationDestination> {
+    const response = await api.get(`/api/destinations/${id}`);
+    return response.data;
+  },
+
+  async update(
+    id: string,
+    payload: CommunicationDestinationUpdate
+  ): Promise<CommunicationDestination> {
+    const response = await api.patch(`/api/destinations/${id}`, payload);
+    return response.data;
+  },
+
+  /**
+   * Delete a destination. Server returns 409 if the destination is
+   * referenced by active automations — pass ``force=true`` to override.
+   */
+  async remove(
+    id: string,
+    force = false
+  ): Promise<{ status: string; id: string }> {
+    const suffix = force ? '?force=true' : '';
+    const response = await api.delete(`/api/destinations/${id}${suffix}`);
     return response.data;
   },
 };

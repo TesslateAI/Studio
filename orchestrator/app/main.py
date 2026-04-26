@@ -28,6 +28,7 @@ from .routers import (
     app_bundles,
     app_composition,
     app_installs,
+    app_publish,
     app_runtime,
     app_runtime_status,
     app_schedules,
@@ -39,6 +40,7 @@ from .routers import (
     automations,
     billing,
     channels,
+    communication_destinations,
     chat,
     creators,
     deployment_credentials,
@@ -1251,10 +1253,16 @@ app.include_router(
 )  # /api/app-instances/{id}/trigger/{name} — HMAC auth
 app.include_router(admin_marketplace.router, prefix="/api/admin-marketplace", tags=["apps:admin"])
 app.include_router(app_bundles.router, prefix="/api/app-bundles", tags=["apps:bundles"])
+app.include_router(
+    app_publish.router, prefix="/api", tags=["apps:publish"]
+)  # /api/projects/{slug}/publish-app — Architecture canvas drawer flow
 
 # --- Automation Runtime + typed App Actions (Phase 1) ----------------------
 app.include_router(automations.router)  # /api/automations - definitions, runs, artifacts
 app.include_router(app_actions.router)  # /api/apps/{instance}/actions/{name}
+app.include_router(
+    communication_destinations.router
+)  # /api/destinations - named gateway delivery targets (Phase 4)
 
 # --- App Composition (Phase 3) ---------------------------------------------
 # Parent → child action / view / data-resource calls, gated by
