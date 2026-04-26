@@ -4659,6 +4659,8 @@ import type {
   CommunicationDestination,
   CommunicationDestinationCreate,
   CommunicationDestinationUpdate,
+  RunSpendRollup,
+  RunStep,
 } from '../types/automations';
 
 // Re-export so page-level imports can pull these from `lib/api` uniformly.
@@ -4751,6 +4753,56 @@ export const automationsApi = {
   async listRunArtifacts(id: string, runId: string): Promise<AutomationRunArtifactOut[]> {
     const response = await api.get(`/api/automations/${id}/runs/${runId}/artifacts`);
     return response.data;
+  },
+
+  /**
+   * Per-run spend rollup. The backend returns ``spend_by_source`` (the JSON
+   * blob already on AutomationRun) plus a ``per_app`` breakdown joined from
+   * SpendRecord. The endpoint is a Phase-5 stub today: when the route is
+   * not yet deployed the client returns an empty rollup so the UI can show
+   * an empty-state instead of crashing.
+   */
+  async getRunSpend(id: string, runId: string): Promise<RunSpendRollup> {
+    try {
+      const response = await api.get(`/api/automations/${id}/runs/${runId}/spend`);
+      return response.data;
+    } catch {
+      return { spend_by_source: {}, per_app: [] };
+    }
+  },
+
+  /**
+   * Single-artifact metadata fetch — paired with ``artifactDownloadUrl``.
+   * Useful for the ApprovalDrawer ``context_artifacts`` list which only has
+   * ids and needs to render previews. Falls back to the bulk
+   * ``listRunArtifacts`` server-side endpoint (the same auth gate applies).
+   */
+  async getArtifact(
+    id: string,
+    runId: string,
+    artifactId: string
+  ): Promise<AutomationRunArtifactOut | null> {
+    try {
+      const all = await this.listRunArtifacts(id, runId);
+      return all.find((a) => a.id === artifactId) ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Read-only listing of progressively-persisted agent steps for a run
+   * whose action_type is ``agent.run``. Phase 5 stub: returns ``[]`` if the
+   * server-side endpoint hasn't shipped yet rather than throwing — the UI
+   * renders "No steps recorded" in that case.
+   */
+  async listRunSteps(id: string, runId: string): Promise<RunStep[]> {
+    try {
+      const response = await api.get(`/api/automations/${id}/runs/${runId}/steps`);
+      return Array.isArray(response.data) ? response.data : [];
+    } catch {
+      return [];
+    }
   },
 
   /**

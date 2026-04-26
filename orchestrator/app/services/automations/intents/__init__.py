@@ -55,7 +55,7 @@ async def record_intent(
     The TXN MUST already have verified the lease — most callers should
     use :func:`record_intent_with_lease` instead.
     """
-    from ...models_automations import ControllerIntent
+    from ....models_automations import ControllerIntent
 
     intent_id = uuid4()
     db.add(
@@ -130,7 +130,7 @@ async def mark_applied(
     db: AsyncSession, intent_id: UUID, lease_term: int
 ) -> None:
     """Move an intent to ``applied``."""
-    from ...models_automations import ControllerIntent
+    from ....models_automations import ControllerIntent
 
     now = datetime.now(UTC)
     await db.execute(
@@ -147,7 +147,7 @@ async def mark_applied(
 
 async def mark_superseded(db: AsyncSession, intent_id: UUID) -> None:
     """Move an intent to ``superseded`` (stale lease term)."""
-    from ...models_automations import ControllerIntent
+    from ....models_automations import ControllerIntent
 
     await db.execute(
         ControllerIntent.__table__.update()
@@ -164,7 +164,7 @@ async def mark_failed(
     attempts: int,
 ) -> None:
     """Move an intent to ``failed`` (exhausted attempts)."""
-    from ...models_automations import ControllerIntent
+    from ....models_automations import ControllerIntent
 
     await db.execute(
         ControllerIntent.__table__.update()

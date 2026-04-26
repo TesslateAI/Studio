@@ -107,8 +107,13 @@ async def _seed(
     paired_telegram: bool = False,
     user_email: str | None = "owner@example.com",
 ):
+    suffix = uuid.uuid4().hex[:8]
     user = User(
         id=uuid.uuid4(),
+        name="Test Owner",
+        username=f"test-owner-{suffix}",
+        slug=f"test-owner-{suffix}",
+        handle=f"test-owner-{suffix}",
         email=user_email or "noemail@example.com",
         hashed_password="x",
         is_active=True,

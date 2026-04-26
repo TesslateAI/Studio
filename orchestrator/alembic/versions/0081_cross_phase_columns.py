@@ -162,20 +162,16 @@ def upgrade() -> None:
     # Postgres requires DROP + ADD CHECK; SQLite needs batch_alter_table.
     # ------------------------------------------------------------------
     if is_sqlite:
-        # SQLite: rewrite the table with batch_alter_table to swap the CHECK.
-        with op.batch_alter_table("spend_records") as batch_op:
-            for cn in (
-                "ck_spend_records_payer",
-                "spend_records_payer_check",
-            ):
-                try:
-                    batch_op.drop_constraint(cn, type_="check")
-                except Exception:
-                    pass
-            batch_op.create_check_constraint(
-                "chk_spend_records_payer",
-                "payer IN ('creator','platform','installer','byok','team','parent_run')",
-            )
+        # SQLite test DB: SpendRecord.payer was created in 0056 with NO
+        # named CHECK constraint, so batch_alter_table's reflection-based
+        # drop_constraint("ck_spend_records_payer", ...) raises KeyError
+        # before the try/except fires (alembic pre-flights the constraint
+        # set on entry to batch mode). The desktop sidecar runs against
+        # SQLite and never sees billing CHECK enforcement at the DB
+        # level — the application validates payer via the
+        # InvocationSubject.payer_policy enum. Production Postgres gets
+        # the widened CHECK in the else branch below.
+        return
     else:
         # Postgres: drop any pre-existing payer CHECK by name pattern,
         # then add the widened one. Several names have been used over time.
@@ -198,17 +194,10 @@ def downgrade() -> None:
     bind = op.get_bind()
     is_sqlite = bind.dialect.name == "sqlite"
 
-    # SpendRecord.payer — restore narrow CHECK.
+    # SpendRecord.payer — restore narrow CHECK (no-op on SQLite — see
+    # upgrade() comment).
     if is_sqlite:
-        with op.batch_alter_table("spend_records") as batch_op:
-            try:
-                batch_op.drop_constraint("chk_spend_records_payer", type_="check")
-            except Exception:
-                pass
-            batch_op.create_check_constraint(
-                "chk_spend_records_payer",
-                "payer IN ('creator','platform','installer','byok')",
-            )
+        pass
     else:
         op.execute(
             "ALTER TABLE spend_records DROP CONSTRAINT IF EXISTS chk_spend_records_payer"

@@ -147,7 +147,7 @@ async def _seed_automation(
 @pytest.mark.asyncio
 async def test_create_agent_inserts_draft_with_provenance(session_maker):
     from app.agent.tools.marketplace_ops.create_agent import create_agent_executor
-    from app.auth.scopes import MARKETPLACE_AUTHOR
+    from app.services.automations.scopes import MARKETPLACE_AUTHOR
     from app.models import MarketplaceAgent
 
     async with session_maker() as db:
@@ -223,7 +223,7 @@ async def test_create_agent_missing_scope_rejected(session_maker):
 @pytest.mark.asyncio
 async def test_update_agent_rejects_published_row(session_maker):
     from app.agent.tools.marketplace_ops.update_agent import update_agent_executor
-    from app.auth.scopes import MARKETPLACE_AUTHOR
+    from app.services.automations.scopes import MARKETPLACE_AUTHOR
     from app.models import MarketplaceAgent
 
     async with session_maker() as db:
@@ -263,7 +263,7 @@ async def test_update_agent_rejects_published_row(session_maker):
 @pytest.mark.asyncio
 async def test_update_agent_rejects_forbidden_field(session_maker):
     from app.agent.tools.marketplace_ops.update_agent import update_agent_executor
-    from app.auth.scopes import MARKETPLACE_AUTHOR
+    from app.services.automations.scopes import MARKETPLACE_AUTHOR
     from app.models import MarketplaceAgent
 
     async with session_maker() as db:
@@ -334,7 +334,7 @@ async def test_attach_schedule_rejects_depth_two_attempt(session_maker):
     from app.agent.tools.marketplace_ops.attach_schedule import (
         attach_schedule_executor,
     )
-    from app.auth.scopes import AUTOMATIONS_WRITE
+    from app.services.automations.scopes import AUTOMATIONS_WRITE
 
     async with session_maker() as db:
         user_id = await _seed_user(db)
@@ -372,7 +372,7 @@ async def test_attach_schedule_rejects_non_inheritable_scope(session_maker):
     from app.agent.tools.marketplace_ops.attach_schedule import (
         attach_schedule_executor,
     )
-    from app.auth.scopes import AUTOMATIONS_WRITE, MARKETPLACE_AUTHOR
+    from app.services.automations.scopes import AUTOMATIONS_WRITE, MARKETPLACE_AUTHOR
 
     async with session_maker() as db:
         user_id = await _seed_user(db)
@@ -410,7 +410,7 @@ async def test_attach_schedule_clean_child_succeeds(session_maker):
     from app.agent.tools.marketplace_ops.attach_schedule import (
         attach_schedule_executor,
     )
-    from app.auth.scopes import AUTOMATIONS_WRITE
+    from app.services.automations.scopes import AUTOMATIONS_WRITE
     from app.models_automations import AutomationDefinition
 
     async with session_maker() as db:

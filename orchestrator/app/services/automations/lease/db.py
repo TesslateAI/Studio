@@ -113,7 +113,12 @@ class DBLease(Lease):
                 cur_holder = row[1]
                 cur_term = int(row[2] or 0)
                 cur_expires = row[3]
-                # Normalize expires for tz-aware comparison on SQLite.
+                # Normalize expires for tz-aware comparison. SQLite returns
+                # timestamps as ISO strings (no datetime adapter); Postgres
+                # returns proper datetime objects. Parse strings first, then
+                # ensure UTC tz on naive datetimes.
+                if cur_expires is not None and isinstance(cur_expires, str):
+                    cur_expires = datetime.fromisoformat(cur_expires)
                 if cur_expires is not None and getattr(cur_expires, "tzinfo", None) is None:
                     cur_expires = cur_expires.replace(tzinfo=UTC)
 

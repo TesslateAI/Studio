@@ -30,6 +30,7 @@ from ..services.apps.installer import (
     IncompatibleAppError,
     InstallError,
     create_per_pod_signing_key,
+    delete_per_pod_signing_key,
     install_app,
     propagate_user_secrets_post_install,
 )
@@ -498,6 +499,23 @@ async def uninstall_endpoint(
         except Exception:
             logger.warning(
                 "uninstall: user-secret cleanup failed for instance=%s "
+                "(namespace delete will sweep it)",
+                inst.id,
+                exc_info=True,
+            )
+
+        # Drop the per-pod HMAC signing-key Secret. Same best-effort
+        # contract as ``delete_user_secrets`` above — namespace delete
+        # cascades, but explicit cleanup keeps stray Secrets out of the
+        # orchestrator namespace where the installer mirrors them.
+        try:
+            await delete_per_pod_signing_key(
+                app_instance_id=inst.id,
+                target_namespace=f"proj-{project_id_for_cleanup}",
+            )
+        except Exception:
+            logger.warning(
+                "uninstall: per-pod signing-key cleanup failed for instance=%s "
                 "(namespace delete will sweep it)",
                 inst.id,
                 exc_info=True,

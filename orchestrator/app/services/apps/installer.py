@@ -654,6 +654,30 @@ async def install_app(
     containers_by_name: dict[str, Container] = {}
     primary_container: Container | None = None
 
+    # Per-pod runtime env overlay (Connector Proxy auth + runtime URL).
+    # Gets layered onto the primary container's environment_vars so the
+    # SDK inside the pod can reach the proxy with a verifiable token.
+    # The token value is materialized as a ``${secret:name/key}`` reference
+    # so ``resolve_env_for_pod`` translates it to a K8s
+    # ``valueFrom.secretKeyRef`` — token bytes never sit in the pod spec.
+    #
+    # ``OPENSAIL_RUNTIME_URL`` is injected even outside K8s (desktop / dev)
+    # so the SDK has a stable env contract; non-K8s callers reach the
+    # orchestrator at the same Service name today.
+    runtime_env_overlay: dict[str, str] = {}
+    # Defer the token secret reference until we have ``instance`` minted
+    # (instance.id is the secret name suffix). We add the runtime URL eagerly.
+    if (
+        runtime_contract.tenancy_model == "per_install"
+        or (
+            runtime_contract.tenancy_model == "shared_singleton"
+            and materialize_compute
+        )
+    ):
+        runtime_env_overlay["OPENSAIL_RUNTIME_URL"] = (
+            "http://opensail-runtime:8400"
+        )
+
     for entry in container_specs:
         if not isinstance(entry, dict):
             continue
@@ -673,6 +697,13 @@ async def install_app(
         is_primary = bool(entry.get("primary", False))
 
         env_in = dict(entry.get("env") or {})
+        # Layer runtime env overlay onto every container in the install.
+        # Manifest-declared values win — operators can override the runtime
+        # URL for migration windows. The token (added below post-instance)
+        # also yields to manifest-declared values so an app can opt out
+        # entirely if it ships its own auth.
+        for ov_key, ov_val in runtime_env_overlay.items():
+            env_in.setdefault(ov_key, ov_val)
 
         c = Container(
             project_id=project.id,
@@ -773,6 +804,23 @@ async def install_app(
             f"project {project.id if project is not None else '<none>'} "
             "already has an installed app instance"
         ) from e
+
+    # 8.5) Wire ``OPENSAIL_APPINSTANCE_TOKEN`` onto the primary container as
+    # a secretKeyRef. The K8s Secret named ``app-pod-key-{instance.id}`` is
+    # minted by ``create_per_pod_signing_key`` after this transaction
+    # commits; the env reference here is what makes the orchestrator's
+    # ``resolve_env_for_pod`` translate to a ``valueFrom.secretKeyRef`` at
+    # pod-spec build time. The secret must exist before the pod starts —
+    # the install router calls ``create_per_pod_signing_key`` before any
+    # ``orchestrator.start_project`` call, so the ordering holds. Manifest-
+    # declared values still win (``setdefault``) so an app can opt out.
+    if primary_container is not None and runtime_env_overlay:
+        env = dict(primary_container.environment_vars or {})
+        env.setdefault(
+            "OPENSAIL_APPINSTANCE_TOKEN",
+            f"${{secret:app-pod-key-{instance.id}/token}}",
+        )
+        primary_container.environment_vars = env
 
     for consent in mcp_consents:
         server_id = consent.get("mcp_server_id")

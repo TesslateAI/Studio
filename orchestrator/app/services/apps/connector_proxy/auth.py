@@ -281,12 +281,47 @@ def invalidate_signing_key_cache(app_instance_id: UUID | None = None) -> None:
     _signing_key_cache.pop(app_instance_id, None)
 
 
+def parse_app_instance_token(token: str) -> tuple[UUID, str, str]:
+    """Public re-export of the token parser.
+
+    Same shape and error class as :func:`_parse_token`. Tests + the
+    installer call this to assert token shape without reaching into the
+    underscored internal.
+    """
+    return _parse_token(token)
+
+
+def derive_signing_key(
+    app_instance_id: UUID, *, fallback_secret: str | bytes | None = None
+) -> bytes:
+    """Public re-export of the deterministic per-pod signing-key derivation.
+
+    Mirrors :func:`shared_singleton_router._derive_signing_key`. The
+    fallback secret defaults to ``settings.secret_key`` so callers like
+    the installer don't have to thread the config object themselves.
+
+    This is the same key the verifier resolves when the K8s Secret is
+    unavailable, so producers (installer minting tokens) and consumers
+    (proxy verifying tokens) stay in sync without sharing the K8s Secret
+    on dev / desktop modes.
+    """
+    if fallback_secret is None:
+        from ....config import get_settings
+
+        fallback_secret = get_settings().secret_key
+    return _derive_signing_key(
+        app_instance_id=app_instance_id, fallback_secret=fallback_secret
+    )
+
+
 __all__ = [
     "APP_INSTANCE_HEADER",
     "AppInstanceAuthError",
+    "derive_signing_key",
     "generate_pod_signing_key",
     "generate_pod_token",
     "invalidate_signing_key_cache",
+    "parse_app_instance_token",
     "verify_app_instance",
 ]
 

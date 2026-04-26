@@ -199,14 +199,24 @@ async def reap_idle_runtimes(
             await db.commit()
             intents_recorded += 1
         except LeaseLost:
-            await db.rollback()
+            # No write committed in record_intent_with_lease before the
+            # term check fails, so no rollback is required (and calling
+            # rollback on a session whose only activity was a read can
+            # raise MissingGreenlet on async SQLite). Let the exception
+            # propagate to the supervisor cleanly.
             logger.warning(
                 "[REAPER] lease lost mid-pass; aborting at deployment=%s",
                 deployment.id,
             )
             raise
         except Exception:
-            await db.rollback()
+            try:
+                await db.rollback()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                logger.debug(
+                    "[REAPER] rollback after intent-record failure also failed",
+                    exc_info=True,
+                )
             logger.exception(
                 "[REAPER] failed to record intent for deployment=%s",
                 deployment.id,

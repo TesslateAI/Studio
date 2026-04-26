@@ -963,3 +963,160 @@ async def test_wire_install_links_is_idempotent_on_repeat(
         ["list_accounts", "summarize_pipeline"]
     )
     assert refreshed.granted_views == ["account_card"]
+
+
+# ---------------------------------------------------------------------------
+# parent_run_id propagation — child InvocationSubject mint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_via_link_propagates_parent_run_id(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When parent_run_id is supplied AND a parent InvocationSubject exists,
+    dispatch_via_link mints a child subject with payer_policy='parent_run'
+    and parent_run_id pointing at the parent run.
+
+    This guarantees the child's spend rolls up to the parent's budget
+    envelope rather than touching the child install's own wallet.
+    """
+    from app.models_automations import (
+        AutomationDefinition,
+        AutomationEvent,
+        AutomationRun,
+        InvocationSubject,
+    )
+
+    user = await _seed_user(db, "alice")
+    _, _, parent = await _seed_app_install(
+        db, creator_user_id=user.id, app_slug="dashboard"
+    )
+    _, _, child = await _seed_app_install(
+        db,
+        creator_user_id=user.id,
+        app_slug="crm",
+        actions=[{"name": "list_accounts"}],
+    )
+    await _seed_link(
+        db,
+        parent_install=parent,
+        child_install=child,
+        alias="crm",
+        granted_actions=["list_accounts"],
+    )
+
+    # Seed a parent automation_definition + automation_run so the
+    # composition resolver can find a parent subject to inherit from.
+    parent_autom = AutomationDefinition(
+        id=uuid.uuid4(),
+        name="parent-autom",
+        owner_user_id=user.id,
+        workspace_scope="none",
+        contract={"allowed_tools": [], "max_compute_tier": 0},
+        max_compute_tier=0,
+        is_active=True,
+    )
+    db.add(parent_autom)
+    parent_event = AutomationEvent(
+        id=uuid.uuid4(),
+        automation_id=parent_autom.id,
+        payload={},
+        trigger_kind="manual",
+    )
+    db.add(parent_event)
+    await db.flush()
+    parent_run = AutomationRun(
+        id=uuid.uuid4(),
+        automation_id=parent_autom.id,
+        event_id=parent_event.id,
+        status="running",
+    )
+    db.add(parent_run)
+    await db.flush()
+
+    # Insert the parent's InvocationSubject row directly — composition's
+    # _mint_child_invocation_subject reads the most-recent parent subject
+    # by automation_run_id, so we don't need to call resolve_invocation_subject
+    # here (and avoid pulling in its full FK chain).
+    parent_subject = InvocationSubject(
+        id=uuid.uuid4(),
+        automation_run_id=parent_run.id,
+        invoking_user_id=user.id,
+        team_id=None,
+        app_instance_id=parent.id,
+        agent_id=None,
+        payer_policy="installer",
+        parent_run_id=None,
+        credit_source="opensail_credits",
+        credit_source_ref=str(user.id),
+        budget_envelope={"max_usd_per_run": "1.00", "max_usd_per_day": None},
+        spent_so_far_usd=0,
+        litellm_key_id=None,
+    )
+    db.add(parent_subject)
+    await db.flush()
+
+    captured_calls: list[dict[str, Any]] = []
+
+    async def _stub_dispatch(
+        db_arg: AsyncSession,
+        *,
+        app_instance_id: UUID,
+        action_name: str,
+        input: dict[str, Any],
+        run_id: UUID | None = None,
+        invocation_subject_id: UUID | None = None,
+    ):
+        captured_calls.append(
+            {
+                "app_instance_id": app_instance_id,
+                "action_name": action_name,
+                "run_id": run_id,
+                "invocation_subject_id": invocation_subject_id,
+            }
+        )
+        return ActionDispatchResult(
+            output={},
+            artifacts=[],
+            spend_usd=0,  # type: ignore[arg-type]
+            duration_seconds=0.0,
+            error=None,
+        )
+
+    monkeypatch.setattr(
+        composition.action_dispatcher, "dispatch_app_action", _stub_dispatch
+    )
+
+    await composition.dispatch_via_link(
+        db,
+        parent_install_id=parent.id,
+        alias="crm",
+        action_name="list_accounts",
+        input={},
+        parent_run_id=parent_run.id,
+    )
+
+    # The dispatcher saw the freshly-minted child subject id.
+    assert len(captured_calls) == 1
+    call = captured_calls[0]
+    assert call["run_id"] == parent_run.id
+    child_subject_id = call["invocation_subject_id"]
+    assert child_subject_id is not None
+
+    # And that child subject row has payer_policy='parent_run' +
+    # parent_run_id pointing at the parent run.
+    child_subject = (
+        await db.execute(
+            select(InvocationSubject).where(InvocationSubject.id == child_subject_id)
+        )
+    ).scalar_one()
+    assert child_subject.payer_policy == "parent_run"
+    assert child_subject.parent_run_id == parent_run.id
+    assert child_subject.credit_source == "parent_run"
+    assert child_subject.credit_source_ref == str(parent_subject.id)
+    assert child_subject.app_instance_id == child.id
+    # Child wallet untouched: its spent_so_far_usd is 0 at mint time.
+    from decimal import Decimal as _Decimal
+
+    assert _Decimal(child_subject.spent_so_far_usd) == _Decimal("0")

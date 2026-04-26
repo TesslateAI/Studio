@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { X } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { automationsApi } from '../../../lib/api';
 import type {
   ApprovalChoice,
@@ -137,9 +139,12 @@ export default function ApprovalDrawer({ approval, onClose, onResolved }: Props)
     setArtifactsError(null);
   }, [approval?.id]);
 
-  // Fetch artefact metadata for the run, then narrow down to the ones
-  // listed in ``context_artifacts``. We use the existing run-artifacts
-  // endpoint rather than introducing a new per-id fetch.
+  // Hydrate the ``context_artifacts`` ids into full artifact rows.
+  // Phase 5: prefer the per-id ``getArtifact`` endpoint so a context with
+  // many artifacts on a run with hundreds of unrelated artifacts doesn't
+  // pull the whole list. ``getArtifact`` itself falls back to a single
+  // ``listRunArtifacts`` call internally — see api.ts. We drop ids that
+  // don't resolve so a single missing artifact doesn't break the drawer.
   useEffect(() => {
     if (!approval) return;
     const refIds = approval.context_artifacts ?? [];
@@ -148,12 +153,17 @@ export default function ApprovalDrawer({ approval, onClose, onResolved }: Props)
       return;
     }
     let cancelled = false;
-    automationsApi
-      .listRunArtifacts(approval.automation_id, approval.run_id)
-      .then((all) => {
+    Promise.all(
+      refIds.map((aid) =>
+        automationsApi.getArtifact(approval.automation_id, approval.run_id, aid)
+      )
+    )
+      .then((rows) => {
         if (cancelled) return;
-        const wanted = new Set(refIds);
-        setArtifacts(all.filter((a) => wanted.has(a.id)));
+        const resolved = rows.filter(
+          (r): r is AutomationRunArtifactOut => r !== null
+        );
+        setArtifacts(resolved);
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -320,30 +330,36 @@ export default function ApprovalDrawer({ approval, onClose, onResolved }: Props)
             </Section>
           )}
 
-          {/* Artefacts */}
+          {/* Artefacts — render inline by kind. Empty list collapses the
+              entire section per spec ("If artifact list is empty, render
+              nothing"). */}
           {(approval.context_artifacts?.length ?? 0) > 0 && (
-            <Section title={`Artifacts (${approval.context_artifacts.length})`}>
+            <>
               {artifactsError ? (
-                <div className="text-xs text-[var(--status-error)]">{artifactsError}</div>
+                <Section title="Artifacts">
+                  <div className="text-xs text-[var(--status-error)]">{artifactsError}</div>
+                </Section>
               ) : artifacts === null ? (
-                <div className="text-xs text-[var(--text-subtle)]">Loading artifacts…</div>
-              ) : artifacts.length === 0 ? (
-                <div className="text-xs text-[var(--text-subtle)]">
-                  Referenced artifacts could not be found.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {artifacts.map((a) => (
-                    <ArtifactPreview
-                      key={a.id}
-                      automationId={approval.automation_id}
-                      runId={approval.run_id}
-                      artifact={a}
-                    />
-                  ))}
-                </div>
+                <Section title="Artifacts">
+                  <div className="text-xs text-[var(--text-subtle)]">
+                    Loading artifacts…
+                  </div>
+                </Section>
+              ) : artifacts.length === 0 ? null : (
+                <Section title={`Artifacts (${artifacts.length})`}>
+                  <div className="flex flex-col gap-2">
+                    {artifacts.map((a) => (
+                      <ContextArtifactRow
+                        key={a.id}
+                        automationId={approval.automation_id}
+                        runId={approval.run_id}
+                        artifact={a}
+                      />
+                    ))}
+                  </div>
+                </Section>
               )}
-            </Section>
+            </>
           )}
 
           {/* Other context fields (catch-all) */}
@@ -420,6 +436,91 @@ export default function ApprovalDrawer({ approval, onClose, onResolved }: Props)
         isLoading={submitting !== null}
       />
     </>
+  );
+}
+
+/**
+ * Renders a single ``context_artifacts`` entry. Markdown is rendered
+ * inline via the same react-markdown stack we use elsewhere; image kinds
+ * embed an ``<img>`` pointing at the artifact-download endpoint; everything
+ * else falls back to the existing ``ArtifactPreview`` (which exposes a
+ * Download link for files / inline preview for text/json).
+ */
+function ContextArtifactRow({
+  automationId,
+  runId,
+  artifact,
+}: {
+  automationId: string;
+  runId: string;
+  artifact: AutomationRunArtifactOut;
+}) {
+  const downloadUrl = automationsApi.artifactDownloadUrl(
+    automationId,
+    runId,
+    artifact.id
+  );
+
+  if (
+    artifact.kind === 'markdown' &&
+    (artifact.storage_mode === 'inline' || artifact.storage_mode === 'cas') &&
+    artifact.preview_text != null
+  ) {
+    return (
+      <article className="rounded-[var(--radius-small)] border border-[var(--border)] bg-[var(--bg)] p-3 space-y-2">
+        <header className="flex items-center justify-between text-xs">
+          <span className="font-medium text-[var(--text)]">
+            {artifact.name || '(unnamed)'}
+          </span>
+          <a
+            href={downloadUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] text-[var(--text-muted)] hover:underline"
+          >
+            Download
+          </a>
+        </header>
+        <div className="prose prose-sm max-w-none text-[var(--text)]">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {artifact.preview_text}
+          </ReactMarkdown>
+        </div>
+      </article>
+    );
+  }
+
+  if (artifact.kind === 'image' || artifact.kind === 'screenshot') {
+    return (
+      <article className="rounded-[var(--radius-small)] border border-[var(--border)] bg-[var(--bg)] p-3 space-y-2">
+        <header className="flex items-center justify-between text-xs">
+          <span className="font-medium text-[var(--text)]">
+            {artifact.name || '(unnamed)'}
+          </span>
+          <a
+            href={downloadUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] text-[var(--text-muted)] hover:underline"
+          >
+            Download
+          </a>
+        </header>
+        <img
+          src={downloadUrl}
+          alt={artifact.name || 'artifact image'}
+          className="max-w-full rounded-[var(--radius-small)]"
+        />
+      </article>
+    );
+  }
+
+  return (
+    <ArtifactPreview
+      automationId={automationId}
+      runId={runId}
+      artifact={artifact}
+    />
   );
 }
 

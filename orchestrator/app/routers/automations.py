@@ -776,6 +776,79 @@ async def list_run_artifacts(
     return [AutomationRunArtifactOut.model_validate(a) for a in artifacts]
 
 
+@router.get("/{automation_id}/runs/{run_id}/spend")
+async def get_run_spend(
+    automation_id: UUID,
+    run_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Spend rollup for a single run.
+
+    Phase 5 surfaces ``automation_runs.spend_by_source`` (the JSON blob
+    written by the dispatcher) plus a per-app breakdown joined from
+    :class:`SpendRecord`. The full join is intentionally minimal here —
+    the UI handles missing dimensions gracefully and shows an empty-state
+    when the rollup is not yet available.
+
+    The endpoint is read-only and inherits the same ownership/team-membership
+    gates as the rest of the automation routes.
+    """
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    run = (
+        await db.execute(
+            select(AutomationRun).where(
+                AutomationRun.id == run_id,
+                AutomationRun.automation_id == automation_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    spend_by_source: dict[str, Any] = run.spend_by_source or {}
+
+    # Per-app breakdown — best-effort SpendRecord join. We do not import
+    # SpendRecord at module level to avoid a circular import at startup
+    # (the model graph crosses billing/automation packages); a deferred
+    # import keeps the route resilient when the table is absent in older
+    # alembic revisions.
+    per_app: list[dict[str, Any]] = []
+    try:
+        from ..models import SpendRecord  # local import — see comment above
+
+        rows = (
+            await db.execute(
+                select(
+                    SpendRecord.app_instance_id,
+                    func.sum(SpendRecord.amount_usd).label("total"),
+                )
+                .where(SpendRecord.automation_run_id == run_id)
+                .group_by(SpendRecord.app_instance_id)
+            )
+        ).all()
+        for app_instance_id, total in rows:
+            per_app.append(
+                {
+                    "app_instance_id": (
+                        str(app_instance_id) if app_instance_id is not None else None
+                    ),
+                    # Phase 5 stub: name resolution lives in the apps router;
+                    # leaving null lets the UI fall back to the id.
+                    "app_name": None,
+                    "amount_usd": str(total) if total is not None else "0",
+                }
+            )
+    except Exception as exc:  # noqa: BLE001 — never block the rollup on join issues
+        logger.debug(
+            "[AUTOMATIONS] spend per-app join skipped run=%s err=%r", run_id, exc
+        )
+
+    return {"spend_by_source": spend_by_source, "per_app": per_app}
+
+
 @router.get("/{automation_id}/runs/{run_id}/artifacts/{artifact_id}")
 async def download_artifact(
     automation_id: UUID,

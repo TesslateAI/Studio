@@ -3,7 +3,7 @@
 Pure functions; no DB / Redis required. Exercises the three rules the
 agent-builder skill relies on:
 
-1.  Positive-list scope filter (``app.auth.scopes`` integration).
+1.  Positive-list scope filter (``app.services.automations.scopes`` integration).
 2.  Per-run spend cap inheritance.
 3.  Daily spend cap inheritance vs. parent's remaining daily.
 """
@@ -14,7 +14,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.auth.scopes import (
+from app.services.automations.scopes import (
     APP_INVOKE,
     AUTOMATIONS_WRITE,
     INHERITABLE_SCOPES_POSITIVE_LIST,

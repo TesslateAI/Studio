@@ -294,6 +294,54 @@ export interface AutomationRunDetail extends AutomationRunSummary {
 }
 
 // ---------------------------------------------------------------------------
+// Run spend rollup (Phase 5 — surfaces SpendRecord rows joined per app)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-app slice of spend for a single automation run. The breakdown comes
+ * from joining ``SpendRecord`` rows to the run via ``automation_run_id``.
+ */
+export interface RunSpendPerApp {
+  app_instance_id: string | null;
+  app_name: string | null;
+  amount_usd: string;
+}
+
+export interface RunSpendRollup {
+  /**
+   * Source-keyed totals as written to ``automation_runs.spend_by_source``.
+   * Common keys: ``model_usd``, ``tool_usd``, ``app_invoke_usd``. Decimals
+   * cross the wire as strings.
+   */
+  spend_by_source: Record<string, string>;
+  per_app: RunSpendPerApp[];
+}
+
+// ---------------------------------------------------------------------------
+// Agent steps (read-only — listing for the RunDetailPage Steps tab)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lightweight view of a single ``AgentStep`` row for the RunDetailPage.
+ * Only the fields the UI cares about — the full step record lives on the
+ * backend and is not paginated through here.
+ */
+export interface RunStep {
+  id: string;
+  ordinal: number;
+  /** Free-form label written by the agent runner. */
+  name: string | null;
+  thought: string | null;
+  /** Tool name when the step invoked a tool, otherwise null. */
+  tool_name: string | null;
+  /** Tool input/output as JSON-serialisable blobs. */
+  input: unknown | null;
+  output: unknown | null;
+  status: string;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // App Actions (read-only listing for Phase 1 UI)
 // ---------------------------------------------------------------------------
 

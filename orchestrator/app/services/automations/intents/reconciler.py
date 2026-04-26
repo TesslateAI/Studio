@@ -297,7 +297,7 @@ async def tick(
     max_batch: int = _MAX_BATCH,
 ) -> dict[str, int]:
     """One reconcile pass. Returns counts for observability."""
-    from ...models_automations import ControllerIntent
+    from ....models_automations import ControllerIntent
 
     counts = {"applied": 0, "superseded": 0, "retried": 0, "failed": 0}
 
