@@ -3,10 +3,10 @@
 Forking creates:
   - A brand-new MarketplaceApp with forker as creator, `forked_from`
     pointing at the source app id, fresh reputation, state='draft'.
-  - An editable source Project owned by the forker (app_role='app_source')
-    whose volume is materialized from the source AppVersion's bundle.
-    This is what surfaces in the forker's Projects list so they can edit
-    and republish.
+  - An editable source Project owned by the forker
+    (project_kind='app_source') whose volume is materialized from the
+    source AppVersion's bundle. This is what surfaces in the forker's
+    Projects list so they can edit and republish.
 
 Matches plan docs/proposed/plans/tesslate-apps.md.
 """
@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...models import AppVersion, MarketplaceApp, Project
+from ...models import PROJECT_KIND_APP_SOURCE, AppVersion, MarketplaceApp, Project
 from ..hub_client import HubClient
 
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ async def fork_app(
             visibility="team",
             volume_id=volume_id,
             cache_node=cache_node,
-            app_role="app_source",
+            project_kind=PROJECT_KIND_APP_SOURCE,
         )
         db.add(project)
         try:

@@ -81,10 +81,12 @@ function AppCard({
 /**
  * Dropdown that lets the creator start a publish flow from:
  *   - "New App" → navigates to /creator/publish/new (existing creator path).
- *   - A project they already own whose app_role is null or 'app_source'.
- *     Selecting a null-role project flips it to 'app_source' before navigating
- *     to /creator/publish/<projectId>.
+ *   - A project they already own whose project_kind is 'workspace' or
+ *     'app_source'. Selecting a 'workspace' project flips it to 'app_source'
+ *     before navigating to /creator/publish/<projectId>.
  */
+type ProjectKind = 'workspace' | 'app_source' | 'app_runtime';
+
 function PublishNewButton() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -93,7 +95,7 @@ function PublishNewButton() {
     id: string;
     slug: string;
     name: string;
-    app_role: string | null;
+    project_kind: ProjectKind;
   }>>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,20 +105,31 @@ function PublishNewButton() {
     setError(null);
     projectsApi
       .getAll()
-      .then((all: Array<{ id: string; slug: string; name: string; app_role?: string | null }>) => {
-        const eligible = all
-          .filter((p) => !p.app_role || p.app_role === 'app_source')
-          .map((p) => ({ id: p.id, slug: p.slug, name: p.name, app_role: p.app_role ?? null }));
-        setProjects(eligible);
-      })
+      .then(
+        (
+          all: Array<{ id: string; slug: string; name: string; project_kind: ProjectKind }>
+        ) => {
+          const eligible = all
+            .filter(
+              (p) => p.project_kind === 'workspace' || p.project_kind === 'app_source'
+            )
+            .map((p) => ({
+              id: p.id,
+              slug: p.slug,
+              name: p.name,
+              project_kind: p.project_kind,
+            }));
+          setProjects(eligible);
+        }
+      )
       .catch((err) => setError(extractError(err, 'Failed to load projects')))
       .finally(() => setLoading(false));
   }, [open, projects.length]);
 
-  const pick = async (p: { id: string; slug: string; app_role: string | null }) => {
+  const pick = async (p: { id: string; slug: string; project_kind: ProjectKind }) => {
     try {
-      if (p.app_role !== 'app_source') {
-        await projectsApi.setAppRole(p.slug, 'app_source');
+      if (p.project_kind !== 'app_source') {
+        await projectsApi.setProjectKind(p.slug, 'app_source');
       }
       navigate(`/creator/publish/${p.id}`);
     } catch (err) {
@@ -175,7 +188,7 @@ function PublishNewButton() {
                 className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--surface)] flex items-center justify-between gap-2"
               >
                 <span className="truncate">{p.name}</span>
-                {p.app_role === 'app_source' && (
+                {p.project_kind === 'app_source' && (
                   <span className="text-[10px] text-[var(--text-subtle)]">source</span>
                 )}
               </button>

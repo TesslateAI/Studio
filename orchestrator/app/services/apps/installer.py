@@ -3,7 +3,7 @@
 Flow (single transaction):
     load AppVersion+App -> approval gate -> compat re-check -> dedupe
     installer->app -> validate consent shape -> restore bundle to a new
-    volume via Hub -> create Project(app_role=app_instance) -> insert
+    volume via Hub -> create Project(project_kind=app_runtime) -> insert
     AppInstance + McpConsentRecord rows.
 
 Idempotency: the DB has a partial UNIQUE on
@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ... import config_features
 from ...models import (
+    PROJECT_KIND_APP_RUNTIME,
     AgentSchedule,
     AppInstallAttempt,
     AppInstance,
@@ -97,12 +98,12 @@ async def _default_project_factory(
     owner_user_id: UUID,
     volume_id: str,
     cache_node: str,
-    app_role: str,
+    project_kind: str,
 ) -> Project:
     """Minimum-viable Project creation for the installer. Callers that need
     container specs or richer setup should pass their own factory."""
     # Slug must be unique + URL-safe. A short uuid suffix is fine for the
-    # app_instance case; install UIs may rename the project later.
+    # app_runtime case; install UIs may rename the project later.
     suffix = uuid.uuid4().hex[:8]
     base = "".join(c if c.isalnum() or c in "-_" else "-" for c in name.lower()).strip("-") or "app"
     slug = f"{base}-{suffix}"
@@ -114,7 +115,7 @@ async def _default_project_factory(
         visibility="team",
         volume_id=volume_id,
         cache_node=cache_node,
-        app_role=app_role,
+        project_kind=project_kind,
     )
     db.add(project)
     await db.flush()
@@ -248,7 +249,7 @@ async def install_app(
         bundle_hash=av.bundle_hash,
     )
 
-    # 6) Create the app_instance Project.
+    # 6) Create the app_runtime Project.
     factory = project_factory or _default_project_factory
     project = await factory(
         db,
@@ -257,9 +258,9 @@ async def install_app(
         owner_user_id=installer_user_id,
         volume_id=volume_id,
         cache_node=node_name,
-        app_role="app_instance",
+        project_kind=PROJECT_KIND_APP_RUNTIME,
     )
-    # App instances don't need template-build provisioning — the volume was
+    # App runtimes don't need template-build provisioning — the volume was
     # materialized from the bundle. Mark ready so the orchestrator start path
     # (shared with user projects) doesn't bail at its provisioning gate.
     project.environment_status = "ready"

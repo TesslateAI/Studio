@@ -1250,18 +1250,18 @@ function ProjectPageInner() {
   // `project` flips from null to populated.
   // ---------------------------------------------------------------------------
 
-  const canPublish = project?.app_role !== 'app_instance' && canEditSettings;
+  const canPublish = project?.project_kind !== 'app_runtime' && canEditSettings;
   const handlePublishAsApp = useCallback(async () => {
     if (!slug || !canPublish) return;
     try {
-      if (project?.app_role !== 'app_source') {
-        await projectsApi.setAppRole(slug, 'app_source');
+      if (project?.project_kind !== 'app_source') {
+        await projectsApi.setProjectKind(slug, 'app_source');
       }
       navigate(`/creator/publish/${project?.id}`);
     } catch (err) {
-      console.error('setAppRole failed', err);
+      console.error('setProjectKind failed', err);
     }
-  }, [slug, canPublish, project?.app_role, project?.id, navigate]);
+  }, [slug, canPublish, project?.project_kind, project?.id, navigate]);
 
   // The builder sidebar is intentionally identical to the dashboard sidebar.
   // No project-specific affordances are injected — going Dashboard ↔ Project

@@ -22,7 +22,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ... import config_features
-from ...models import AppSubmission, AppVersion, MarketplaceApp, Project
+from ...models import (
+    PROJECT_KIND_APP_SOURCE,
+    AppSubmission,
+    AppVersion,
+    MarketplaceApp,
+    Project,
+)
 from ...utils.slug_generator import slugify
 from ..hub_client import HubClient
 from . import compatibility
@@ -129,9 +135,10 @@ async def publish_version(
     ).scalar_one_or_none()
     if project is None:
         raise SourceNotPublishableError(f"project {project_id} not found")
-    if project.app_role != "app_source":
+    if project.project_kind != PROJECT_KIND_APP_SOURCE:
         raise SourceNotPublishableError(
-            f"project {project_id} has app_role={project.app_role!r}, expected 'app_source'"
+            f"project {project_id} has project_kind={project.project_kind!r}, "
+            f"expected 'app_source'"
         )
     if not project.volume_id:
         raise SourceNotPublishableError(

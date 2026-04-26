@@ -571,8 +571,10 @@ export const projectsApi = {
     const response = await api.get(`/api/projects/${slug}`);
     return response.data;
   },
-  setAppRole: async (slug: string, role: 'app_source' | null) => {
-    const response = await api.patch(`/api/projects/${slug}/app-role`, { app_role: role });
+  setProjectKind: async (slug: string, kind: 'workspace' | 'app_source') => {
+    const response = await api.patch(`/api/projects/${slug}/project-kind`, {
+      project_kind: kind,
+    });
     return response.data;
   },
   delete: async (slug: string) => {

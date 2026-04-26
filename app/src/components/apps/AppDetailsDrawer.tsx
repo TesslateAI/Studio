@@ -35,7 +35,7 @@ function formatDate(iso: string | null | undefined): string {
 /**
  * Right-side drawer for managing an installed app: overview metadata,
  * per-container status, schedules, and live container logs (via the existing
- * project /logs/stream WebSocket — apps are projects with app_role='app_instance').
+ * project /logs/stream WebSocket — apps are projects with project_kind='app_runtime').
  */
 export default function AppDetailsDrawer({ install, runtime, onClose }: Props) {
   const [tab, setTab] = useState<TabKey>('overview');

@@ -1424,10 +1424,15 @@ class ComputeManager:
                 dev_containers_for_urls = [
                     c for c in containers if getattr(c, "container_type", "base") != "service"
                 ]
+                from ..models import PROJECT_KIND_APP_RUNTIME
+
                 for c in dev_containers_for_urls:
                     cdir = resolve_k8s_container_dir(c)
                     preview: str | None = None
-                    if getattr(project, "app_role", "none") == "app_instance":
+                    if (
+                        getattr(project, "project_kind", None)
+                        == PROJECT_KIND_APP_RUNTIME
+                    ):
                         preview = await resolve_app_url_for_container(
                             db,
                             c,
@@ -1770,9 +1775,13 @@ class ComputeManager:
                 resolve_app_url_for_container,
             )
 
+            from ..models import PROJECT_KIND_APP_RUNTIME
+
             preview_url: str | None = None
             ingress_hostname: str | None = None
-            if getattr(project, "app_role", "none") == "app_instance":
+            if (
+                getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME
+            ):
                 preview_url = await resolve_app_url_for_container(
                     db, container, protocol=settings.k8s_container_url_protocol
                 )

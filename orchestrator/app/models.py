@@ -39,6 +39,16 @@ from .models_kanban import (  # noqa: F401
     ProjectNote,
 )
 
+# Project kinds — replaces the legacy `app_role` field. Values constrained
+# by DB-level CHECK in alembic 0074
+# (`ck_projects_project_kind`: project_kind IN ('workspace','app_source','app_runtime')).
+PROJECT_KIND_WORKSPACE = "workspace"
+PROJECT_KIND_APP_SOURCE = "app_source"
+PROJECT_KIND_APP_RUNTIME = "app_runtime"
+PROJECT_KINDS = frozenset(
+    {PROJECT_KIND_WORKSPACE, PROJECT_KIND_APP_SOURCE, PROJECT_KIND_APP_RUNTIME}
+)
+
 
 class Project(Base):
     __tablename__ = "projects"
@@ -96,10 +106,18 @@ class Project(Base):
     active_compute_pod = Column(String(255), nullable=True)
 
     # Tesslate Apps primitive: role of this Project in the app lifecycle.
-    # none: ordinary user project (default, existing behavior)
-    # app_source: the authoring project a creator publishes AppVersions from
-    # app_instance: a runtime mount of an installed AppVersion (one per install)
-    app_role = Column(String(20), default="none", server_default="none", nullable=False, index=True)
+    # workspace:    ordinary user project (default, existing behavior)
+    # app_source:   the authoring project a creator publishes AppVersions from
+    # app_runtime:  a runtime mount of an installed AppVersion (one per install)
+    # Values constrained by DB-level CHECK in alembic 0074. Use the
+    # PROJECT_KIND_* constants below rather than string literals.
+    project_kind = Column(
+        String(20),
+        default=PROJECT_KIND_WORKSPACE,
+        server_default=PROJECT_KIND_WORKSPACE,
+        nullable=False,
+        index=True,
+    )
 
     # Per-project runtime selector: "local" | "docker" | "k8s".
     # NULL falls back to the deployment-wide default (see OrchestratorFactory).

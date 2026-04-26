@@ -66,8 +66,8 @@ async def _visible_projects_query(user: User, db: AsyncSession):
     if not member and not is_superuser:
         return None
 
-    app_role_filter = exclude_app_instances_clause()
-    base = select(Project).where(and_(Project.team_id == team_id, app_role_filter))
+    project_kind_filter = exclude_app_instances_clause()
+    base = select(Project).where(and_(Project.team_id == team_id, project_kind_filter))
     if (member and member.role == "admin") or is_superuser:
         return base
     # Regular member: team-visible OR explicit per-project membership

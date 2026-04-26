@@ -159,7 +159,7 @@ def _make_source_project(db_session, owner_user_id: UUID, team_id: UUID) -> mode
         team_id=team_id,
         visibility="team",
         volume_id=f"vol-source-{uuid.uuid4().hex[:8]}",
-        app_role="app_source",
+        project_kind=models.PROJECT_KIND_APP_SOURCE,
     )
     db_session.add(project)
     db_session.flush()
@@ -279,7 +279,7 @@ async def test_install_app_happy_path(db_session, test_user, test_team):
     )
 
     project = db_session.get(models.Project, result.project_id)
-    assert project is not None and project.app_role == "app_instance"
+    assert project is not None and project.project_kind == models.PROJECT_KIND_APP_RUNTIME
     assert project.volume_id == result.volume_id
     inst = db_session.get(models.AppInstance, result.app_instance_id)
     assert inst is not None and inst.state == "installed"

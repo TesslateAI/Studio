@@ -97,13 +97,14 @@ async def _resolve_container_url(
     protocol: str,
     app_domain: str,
 ) -> str:
-    """Compute a public URL for a container, branching on app_role.
+    """Compute a public URL for a container, branching on project_kind.
 
-    Installed AppInstance projects render as
+    Installed app-runtime projects render as
     ``{dir}-{app_handle}-{creator_handle}.{domain}`` (or
     ``{app_handle}-{creator_handle}.{domain}`` for single-container apps).
-    Non-app user projects keep the legacy ``{project_slug}-{dir}.{domain}``.
+    Workspace / app_source projects keep the legacy ``{project_slug}-{dir}.{domain}``.
     """
+    from ..models import PROJECT_KIND_APP_RUNTIME
     from ..services.apps.runtime_urls import (
         container_url as _legacy_url,
     )
@@ -111,7 +112,10 @@ async def _resolve_container_url(
         resolve_app_url_for_container,
     )
 
-    if container is not None and getattr(project, "app_role", "none") == "app_instance":
+    if (
+        container is not None
+        and getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME
+    ):
         url = await resolve_app_url_for_container(db, container, protocol=protocol)
         if url:
             return url
@@ -350,16 +354,16 @@ async def get_projects(
     if not member and not getattr(current_user, "is_superuser", False):
         return []
 
-    # Hide installed-app instance projects from the normal Projects list —
+    # Hide installed-app runtime projects from the normal Projects list —
     # those are rendered in Library > Apps instead. Forks (app_source) remain.
     from ..services.apps.project_scopes import exclude_app_instances_clause
 
-    app_role_filter = exclude_app_instances_clause()
+    project_kind_filter = exclude_app_instances_clause()
 
     # Admins / superusers see all projects in the team
     if (member and member.role == "admin") or getattr(current_user, "is_superuser", False):
         result = await db.execute(
-            select(Project).where(and_(Project.team_id == team_id, app_role_filter))
+            select(Project).where(and_(Project.team_id == team_id, project_kind_filter))
         )
     else:
         # Non-admin: team-visible projects + projects with explicit membership
@@ -367,7 +371,7 @@ async def get_projects(
             select(Project).where(
                 and_(
                     Project.team_id == team_id,
-                    app_role_filter,
+                    project_kind_filter,
                     or_(
                         Project.visibility == "team",
                         Project.id.in_(
@@ -3137,49 +3141,55 @@ async def update_project_settings(
         raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}") from e
 
 
-@router.patch("/{project_slug}/app-role", response_model=ProjectSchema)
-async def set_project_app_role(
+@router.patch("/{project_slug}/project-kind", response_model=ProjectSchema)
+async def set_project_kind(
     project_slug: str,
     payload: dict,
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Flip a project between `null` (regular) and `app_source` (publishable).
+    """Flip a project between ``workspace`` and ``app_source`` (publishable).
 
-    Transitions allowed: ``None ↔ 'app_source'``. An ``app_instance`` project
-    is an installed app — not a creator surface — and may NOT be re-roled.
+    Transitions allowed: ``workspace ↔ app_source``. An ``app_runtime``
+    project is an installed app — not a creator surface — and may NOT be
+    re-kinded.
     """
+    from ..models import (
+        PROJECT_KIND_APP_RUNTIME,
+        PROJECT_KIND_APP_SOURCE,
+        PROJECT_KIND_WORKSPACE,
+    )
     from ..permissions import get_project_with_access
 
-    # Accept {"app_role": "app_source" | null} from the request body.
-    if not isinstance(payload, dict) or "app_role" not in payload:
-        raise HTTPException(status_code=400, detail="missing 'app_role' field")
-    requested = payload["app_role"]
-    if requested not in (None, "app_source"):
+    # Accept {"project_kind": "workspace" | "app_source"} from the request body.
+    if not isinstance(payload, dict) or "project_kind" not in payload:
+        raise HTTPException(status_code=400, detail="missing 'project_kind' field")
+    requested = payload["project_kind"]
+    if requested not in (PROJECT_KIND_WORKSPACE, PROJECT_KIND_APP_SOURCE):
         raise HTTPException(
             status_code=400,
-            detail="app_role must be null or 'app_source'",
+            detail="project_kind must be 'workspace' or 'app_source'",
         )
 
     project, _role = await get_project_with_access(
         db, project_slug, current_user.id, Permission.PROJECT_EDIT
     )
 
-    current = project.app_role
-    if current == "app_instance":
+    current = project.project_kind
+    if current == PROJECT_KIND_APP_RUNTIME:
         raise HTTPException(
             status_code=409,
-            detail="installed app_instance projects cannot change app_role",
+            detail="installed app_runtime projects cannot change project_kind",
         )
     if current == requested:
         # No-op; return current.
         return ProjectSchema.model_validate(project)
 
-    project.app_role = requested
+    project.project_kind = requested
     await db.commit()
     await db.refresh(project)
     logger.info(
-        "project %s app_role: %s -> %s (user=%s)",
+        "project %s project_kind: %s -> %s (user=%s)",
         project.id,
         current,
         requested,

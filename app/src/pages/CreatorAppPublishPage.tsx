@@ -15,7 +15,7 @@ interface ProjectLite {
   id: string;
   slug: string;
   name: string;
-  app_role?: string | null;
+  project_kind?: 'workspace' | 'app_source' | 'app_runtime';
 }
 
 interface AxiosLikeError {
@@ -132,7 +132,10 @@ export default function CreatorAppPublishPage() {
   }, [existingAppId, activeTeam?.slug]);
 
   const sourceProjects = useMemo(
-    () => projects.filter((p) => !p.app_role || p.app_role === 'app_source'),
+    () =>
+      projects.filter(
+        (p) => p.project_kind === 'workspace' || p.project_kind === 'app_source'
+      ),
     [projects]
   );
 

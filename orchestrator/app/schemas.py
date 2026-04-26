@@ -167,6 +167,10 @@ class Project(ProjectBase):
     )
     hibernated_at: datetime | None = None
     compute_tier: str = "none"  # none | ephemeral | environment
+    # Tesslate Apps lifecycle role of this Project: workspace (default
+    # user project), app_source (creator authoring), app_runtime
+    # (installed app instance — hidden from the regular Projects list).
+    project_kind: str = "workspace"
 
     class Config:
         from_attributes = True
