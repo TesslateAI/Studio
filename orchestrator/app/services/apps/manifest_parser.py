@@ -1,11 +1,18 @@
 """Manifest loader + validator.
 
 Two layers of validation:
-  1. Structural (JSON Schema) — hash-pinned, frozen at 2025-01.
+  1. Structural (JSON Schema) — hash-pinned per dated schema file.
   2. Typed (Pydantic) — ergonomic access for code paths that read a manifest.
 
-Keep these two in lockstep. The schema file is authoritative; the Pydantic
-model exists for editor support and typed access.
+Keep these two in lockstep. Each schema file is authoritative; the Pydantic
+models exist for editor support and typed access.
+
+Supported schema versions:
+  * 2025-01 — original frozen schema. Typed mirror: :class:`AppManifest`.
+  * 2025-02 — wave 9 additions (primary container, connections, schedules).
+              Validated structurally only — code paths that need new fields
+              read from the raw dict.
+  * 2026-05 — App Runtime Contract. Typed mirror: :class:`AppManifest2026_05`.
 """
 
 from __future__ import annotations
@@ -19,17 +26,24 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import BaseModel, ValidationError as PydanticValidationError
 
-from .app_manifest import MANIFEST_SCHEMA_VERSION, AppManifest
+from .app_manifest import (
+    MANIFEST_SCHEMA_VERSION,
+    SUPPORTED_SCHEMA_VERSIONS,
+    AppManifest,
+    AppManifest2026_05,
+)
 
 _SCHEMA_PATH = Path(__file__).parent / "app_manifest_2025_01.schema.json"
 _SCHEMA_PATH_2025_02 = Path(__file__).parent / "app_manifest_2025_02.schema.json"
+_SCHEMA_PATH_2026_05 = Path(__file__).parent / "app_manifest_2026_05.schema.json"
 
 # Registry of supported schema files keyed by manifest_schema_version.
 _SCHEMA_PATHS: dict[str, Path] = {
     "2025-01": _SCHEMA_PATH,
     "2025-02": _SCHEMA_PATH_2025_02,
+    "2026-05": _SCHEMA_PATH_2026_05,
 }
 
 
@@ -43,10 +57,11 @@ class ManifestValidationError(ValueError):
 
 @dataclass(frozen=True)
 class ParsedManifest:
-    # None when the manifest's declared schema_version is newer than the
-    # Pydantic mirror (e.g. 2025-02). Consumers should fall back to `raw` for
-    # fields not yet modeled in :class:`AppManifest`.
-    manifest: AppManifest | None
+    # Typed Pydantic model for the parsed manifest. Always populated for
+    # supported versions: AppManifest for 2025-01, AppManifest2026_05 for
+    # 2026-05. None for 2025-02 (still validated structurally — the legacy
+    # mirror does not cover the new container/connection/schedule fields).
+    manifest: AppManifest | AppManifest2026_05 | None
     raw: dict[str, Any]
     canonical_hash: str
     schema_version: str
@@ -64,12 +79,23 @@ def schema_hash(version: str = "2025-01") -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# All three schemas declare draft-2020-12 in their $schema field; use the
+# matching validator for each.
 _validator = Draft202012Validator(load_schema("2025-01"))
 _validator_2025_02 = Draft202012Validator(load_schema("2025-02"))
+_validator_2026_05 = Draft202012Validator(load_schema("2026-05"))
 
-_VALIDATORS: dict[str, Draft202012Validator] = {
+_VALIDATORS: dict[str, Any] = {
     "2025-01": _validator,
     "2025-02": _validator_2025_02,
+    "2026-05": _validator_2026_05,
+}
+
+# Map of schema version -> typed Pydantic model. Versions absent from this
+# map fall through to structural-only validation (raw dict is canonical).
+_TYPED_MIRRORS: dict[str, type[BaseModel]] = {
+    "2025-01": AppManifest,
+    "2026-05": AppManifest2026_05,
 }
 
 
@@ -86,8 +112,10 @@ def parse(source: str | bytes | dict[str, Any]) -> ParsedManifest:
 
     declared = raw.get("manifest_schema_version")
     if declared not in _VALIDATORS:
+        supported = ", ".join(SUPPORTED_SCHEMA_VERSIONS)
         raise ManifestValidationError(
-            f"unsupported manifest_schema_version: {declared!r}"
+            f"unsupported manifest_schema_version: {declared!r} "
+            f"(supported: {supported})"
         )
 
     validator = _VALIDATORS[declared]
@@ -98,12 +126,13 @@ def parse(source: str | bytes | dict[str, Any]) -> ParsedManifest:
             errors=[_jsonschema_err_to_dict(e) for e in schema_errors],
         )
 
-    # Typed Pydantic mirror currently tracks 2025-01. Newer versions validate
-    # structurally only until the mirror is bumped — raw dict remains canonical.
-    manifest: AppManifest | None = None
-    if declared == MANIFEST_SCHEMA_VERSION:
+    # Typed Pydantic mirror is applied when one is registered for this version.
+    # 2025-02 is still structural-only; consumers fall back to `raw`.
+    manifest: AppManifest | AppManifest2026_05 | None = None
+    typed_model = _TYPED_MIRRORS.get(declared)
+    if typed_model is not None:
         try:
-            manifest = AppManifest.model_validate(raw)
+            manifest = typed_model.model_validate(raw)
         except PydanticValidationError as e:
             raise ManifestValidationError(
                 "manifest failed typed validation", errors=e.errors()
@@ -111,7 +140,7 @@ def parse(source: str | bytes | dict[str, Any]) -> ParsedManifest:
 
     canonical_hash = hashlib.sha256(_canonical_bytes(raw)).hexdigest()
     return ParsedManifest(
-        manifest=manifest,  # type: ignore[arg-type]
+        manifest=manifest,
         raw=raw,
         canonical_hash=canonical_hash,
         schema_version=declared,
@@ -139,3 +168,16 @@ def _jsonschema_err_to_dict(e: JsonSchemaValidationError) -> dict[str, Any]:
         "validator": e.validator,
         "validator_value": e.validator_value,
     }
+
+
+# Re-export for back-compat — older code may import MANIFEST_SCHEMA_VERSION
+# from manifest_parser.
+__all__ = [
+    "MANIFEST_SCHEMA_VERSION",
+    "SUPPORTED_SCHEMA_VERSIONS",
+    "ManifestValidationError",
+    "ParsedManifest",
+    "load_schema",
+    "schema_hash",
+    "parse",
+]

@@ -970,19 +970,32 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             if payload.gateway_deliver:
                 try:
                     from .services.cache_service import get_redis_client
+                    from .services.gateway.envelope import (
+                        KIND_MESSAGE,
+                        build_envelope,
+                    )
 
                     gw_redis = await get_redis_client()
                     if gw_redis:
+                        body = (final_response or "")[:8000]
+                        envelope = build_envelope(
+                            kind=KIND_MESSAGE,
+                            config_id=payload.channel_config_id or "",
+                            session_key=payload.session_key or "",
+                            task_id=task_id,
+                            body=body,
+                            artifact_refs=[],
+                            # Preserve legacy fields so any consumer rolled
+                            # back to the pre-Phase-0 parser still works.
+                            extra={
+                                "deliver": payload.gateway_deliver,
+                                "schedule_id": payload.schedule_id or "",
+                                "response": body,
+                            },
+                        )
                         await gw_redis.xadd(
                             settings.gateway_delivery_stream,
-                            {
-                                "task_id": task_id,
-                                "config_id": payload.channel_config_id or "",
-                                "session_key": payload.session_key or "",
-                                "deliver": payload.gateway_deliver,
-                                "response": (final_response or "")[:8000],
-                                "schedule_id": payload.schedule_id or "",
-                            },
+                            envelope,
                             maxlen=settings.gateway_delivery_maxlen,
                         )
                         logger.info(

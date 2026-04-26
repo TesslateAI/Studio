@@ -42,42 +42,47 @@ async def _mint_invocation_key(
     installer_user_id: UUID,
     app_instance_id: UUID,
     budget_usd: Decimal,
-) -> str | None:
+) -> str:
     """Mint an invocation-tier LiteLLM key, returning the ``key_id``.
 
     Prefers ``litellm_keys.mint_invocation``; falls back to the generic
     ``mint`` helper on the ``invocation`` tier if the specialized helper
     isn't present yet.
+
+    Raises:
+        Any exception raised by the underlying mint path (e.g.
+        ``KeyMintError`` / ``KeyTransitionError`` from the lifecycle state
+        machine, or upstream LiteLLM transport errors). Callers MUST surface
+        these as a typed invocation failure rather than swallowing them — a
+        missing key means the invocation cannot authenticate to LiteLLM, and
+        silent failure here was previously hiding mint regressions in run
+        history.
     """
     from ...services import litellm_keys
     from ...services.litellm_service import LiteLLMService
 
     delegate = LiteLLMService()  # LiteLLMDelegate implementation
 
-    try:
-        mint_invocation = getattr(litellm_keys, "mint_invocation", None)
-        if mint_invocation is not None:
-            row = await mint_invocation(
-                db,
-                delegate=delegate,
-                installer_user_id=installer_user_id,
-                app_instance_id=app_instance_id,
-                budget_usd=budget_usd,
-            )
-        else:
-            # Fallback: base mint on the invocation tier.
-            row = await litellm_keys.mint(
-                db,
-                delegate=delegate,
-                tier="invocation",
-                user_id=installer_user_id,
-                app_instance_id=app_instance_id,
-                budget_usd=budget_usd,
-            )
-        return row.key_id
-    except Exception:
-        logger.exception("app_invocations.mint failed instance=%s", app_instance_id)
-        return None
+    mint_invocation = getattr(litellm_keys, "mint_invocation", None)
+    if mint_invocation is not None:
+        row = await mint_invocation(
+            db,
+            delegate=delegate,
+            installer_user_id=installer_user_id,
+            app_instance_id=app_instance_id,
+            budget_usd=budget_usd,
+        )
+    else:
+        # Fallback: base mint on the invocation tier.
+        row = await litellm_keys.mint(
+            db,
+            delegate=delegate,
+            tier="invocation",
+            user_id=installer_user_id,
+            app_instance_id=app_instance_id,
+            budget_usd=budget_usd,
+        )
+    return row.key_id
 
 
 async def _resolve_env(container: Container) -> list[Any]:
@@ -242,20 +247,24 @@ async def invoke_app_instance_task(
         execution = trig_cfg.get("execution", "job")
         entrypoint = trig_cfg.get("entrypoint") or ""
 
-        # Mint invocation key for this run (budget bookkeeping).
-        invocation_key_id = await _mint_invocation_key(
-            db,
-            installer_user_id=instance.installer_user_id,
-            app_instance_id=instance.id,
-            budget_usd=_DEFAULT_INVOCATION_BUDGET_USD,
-        )
-        await db.commit()
-
         status = "failed"
         error: str | None = None
         summary: dict[str, Any] = {}
+        invocation_key_id: str | None = None
 
         try:
+            # Mint invocation key for this run (budget bookkeeping).
+            # Domain failures (KeyMintError, KeyTransitionError, etc.) must
+            # surface in run history, so the mint lives inside the same
+            # try/except that captures execution-path failures below.
+            invocation_key_id = await _mint_invocation_key(
+                db,
+                installer_user_id=instance.installer_user_id,
+                app_instance_id=instance.id,
+                budget_usd=_DEFAULT_INVOCATION_BUDGET_USD,
+            )
+            await db.commit()
+
             if execution == "http-post":
                 import httpx
 

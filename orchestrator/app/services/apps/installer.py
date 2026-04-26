@@ -326,10 +326,21 @@ async def install_app(
     for conn in compute.get("connections") or []:
         if not isinstance(conn, dict):
             continue
-        src_name = conn.get("source") or conn.get("source_name")
-        tgt_name = conn.get("target") or conn.get("target_name")
-        src = containers_by_name.get(src_name) if src_name else None
-        tgt = containers_by_name.get(tgt_name) if tgt_name else None
+        # Manifest schema (2025-02 and 2026-05) names these fields
+        # `source_container` / `target_container`. No legacy fallback —
+        # there is no installed-base predating the schema.
+        src_name = conn.get("source_container")
+        tgt_name = conn.get("target_container")
+        if not src_name:
+            raise IncompatibleAppError(
+                "manifest compute.connections entry missing 'source_container'"
+            )
+        if not tgt_name:
+            raise IncompatibleAppError(
+                "manifest compute.connections entry missing 'target_container'"
+            )
+        src = containers_by_name.get(src_name)
+        tgt = containers_by_name.get(tgt_name)
         if src is None or tgt is None:
             logger.warning(
                 "install_app: skipping connection %r->%r (unknown name)",

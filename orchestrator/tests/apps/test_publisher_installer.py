@@ -360,3 +360,150 @@ async def test_install_unapproved_rejected_without_flag(
         team_id=test_team.id,
     )
     assert result.app_instance_id is not None
+
+
+def _seed_version_with_compute(
+    db_session,
+    creator_user_id: UUID,
+    *,
+    containers: list[dict[str, Any]],
+    connections: list[dict[str, Any]],
+) -> tuple[models.MarketplaceApp, models.AppVersion]:
+    """Seed an approved AppVersion whose manifest carries compute.containers
+    and compute.connections — used to exercise the installer's connection
+    materialization path."""
+    manifest = _minimal_manifest()
+    manifest["compute"] = {
+        "model": "always-on",
+        "containers": containers,
+        "connections": connections,
+    }
+    app = models.MarketplaceApp(
+        id=uuid.uuid4(),
+        slug=manifest["app"]["slug"],
+        name=manifest["app"]["name"],
+        creator_user_id=creator_user_id,
+        state="draft",
+        visibility="public",
+    )
+    db_session.add(app)
+    db_session.flush()
+    av = models.AppVersion(
+        id=uuid.uuid4(),
+        app_id=app.id,
+        version=manifest["app"]["version"],
+        manifest_schema_version="2025-02",
+        manifest_json=manifest,
+        manifest_hash="sha256:" + ("3" * 64),
+        bundle_hash="sha256:" + ("4" * 64),
+        feature_set_hash=config_features.feature_set_hash(),
+        required_features=[],
+        approval_state="stage1_approved",
+    )
+    db_session.add(av)
+    db_session.flush()
+    return app, av
+
+
+@pytest.mark.integration
+async def test_install_materializes_connections_from_manifest(
+    db_session, test_user, test_team
+):
+    """Connections in manifest.compute use schema field names
+    `source_container` / `target_container`. The installer must read those
+    exact keys (no legacy `source` / `source_name` fallback) and create
+    ContainerConnection rows wired to the right Container ids."""
+    containers = [
+        {"name": "web", "image": "nginx:latest", "ports": [80], "primary": True},
+        {"name": "api", "image": "python:3.11", "ports": [8000]},
+    ]
+    connections = [
+        {
+            "source_container": "web",
+            "target_container": "api",
+            "connector_type": "http_api",
+            "config": {"path": "/api"},
+        }
+    ]
+    _, av = _seed_version_with_compute(
+        db_session,
+        test_user.id,
+        containers=containers,
+        connections=connections,
+    )
+    hub = FakeHubClient()
+    consent = {
+        "ai_compute": {"payer": "installer"},
+        "general_compute": {"payer": "installer"},
+        "platform_fee": {"model": "free"},
+    }
+
+    result = await installer.install_app(
+        db_session,
+        installer_user_id=test_user.id,
+        app_version_id=av.id,
+        hub_client=hub,
+        wallet_mix_consent=consent,
+        mcp_consents=[],
+        team_id=test_team.id,
+    )
+
+    container_rows = (
+        db_session.query(models.Container)
+        .filter_by(project_id=result.project_id)
+        .all()
+    )
+    by_name = {c.name: c for c in container_rows}
+    assert set(by_name.keys()) == {"web", "api"}
+
+    conn_rows = (
+        db_session.query(models.ContainerConnection)
+        .filter_by(project_id=result.project_id)
+        .all()
+    )
+    assert len(conn_rows) == 1
+    cn = conn_rows[0]
+    assert cn.source_container_id == by_name["web"].id
+    assert cn.target_container_id == by_name["api"].id
+    assert cn.connector_type == "http_api"
+    assert cn.config == {"path": "/api"}
+
+
+@pytest.mark.integration
+async def test_install_rejects_connection_missing_source_container(
+    db_session, test_user, test_team
+):
+    """A connection entry without `source_container` must raise — never
+    silently insert with an empty string. Guards against the prior bug
+    where the installer read `conn.get("source")` and accepted None."""
+    containers = [
+        {"name": "web", "image": "nginx:latest", "primary": True},
+        {"name": "api", "image": "python:3.11"},
+    ]
+    # Legacy field name `source` should NOT be honored.
+    connections = [
+        {"source": "web", "target_container": "api", "connector_type": "http_api"}
+    ]
+    _, av = _seed_version_with_compute(
+        db_session,
+        test_user.id,
+        containers=containers,
+        connections=connections,
+    )
+    hub = FakeHubClient()
+    consent = {
+        "ai_compute": {"payer": "installer"},
+        "general_compute": {"payer": "installer"},
+        "platform_fee": {"model": "free"},
+    }
+
+    with pytest.raises(installer.IncompatibleAppError, match="source_container"):
+        await installer.install_app(
+            db_session,
+            installer_user_id=test_user.id,
+            app_version_id=av.id,
+            hub_client=hub,
+            wallet_mix_consent=consent,
+            mcp_consents=[],
+            team_id=test_team.id,
+        )

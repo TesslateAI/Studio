@@ -2100,12 +2100,26 @@ class SpendRecord(Base):
     )
     settled = Column(Boolean, nullable=False, default=False, server_default="false")
     settled_at = Column(DateTime(timezone=True), nullable=True)
+    # Automation Runtime attribution columns (Phase 0).
+    # ``automation_run_id`` and ``invocation_subject_id`` are intentionally
+    # FK-less today: their target tables (``automation_runs`` /
+    # ``invocation_subjects``) land in Phase 1 / Phase 2 alembics, which will
+    # add the FK constraints at that time. The columns ship now so spend
+    # written between phases is never orphaned of attribution.
+    automation_run_id = Column(GUID(), nullable=True)
+    invocation_subject_id = Column(GUID(), nullable=True)
+    agent_id = Column(
+        GUID(),
+        ForeignKey("marketplace_agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     meta = Column(JSON, nullable=False, default=dict, server_default="{}")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     installer = relationship("User", foreign_keys=[installer_user_id])
     payer_user = relationship("User", foreign_keys=[payer_user_id])
     usage_log = relationship("UsageLog", foreign_keys=[usage_log_id])
+    agent = relationship("MarketplaceAgent", foreign_keys=[agent_id])
 
 
 # ============================================================================

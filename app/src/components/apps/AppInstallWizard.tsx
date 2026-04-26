@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { X } from '@phosphor-icons/react';
+import { X, Warning } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import {
   appVersionsApi,
@@ -16,7 +16,9 @@ import { useTeam } from '../../contexts/TeamContext';
  * Steps:
  *   1. Compatibility — GET /api/app-versions/{id}/compat; blocks if !compatible.
  *   2. Wallet consent — creator-defined billing dimensions; user acks.
- *   3. MCP consent — per-declaration scope accept.
+ *   3. Connector consent — per-declaration scope + exposure accept (manifest
+ *      2026-05: connectors[] with exposure=proxy|env). exposure=env warns the
+ *      user that raw credentials will be injected into the app container.
  *   4. Team + options — teamId + update_policy.
  *   5. Review + confirm — install via useApps().installApp.
  */
@@ -37,10 +39,18 @@ interface BillingDim {
   cap_usd?: number | null;
 }
 
-interface McpDecl {
-  name: string;
+type ConnectorKind = 'mcp' | 'api_key' | 'oauth' | 'webhook';
+type ConnectorExposure = 'proxy' | 'env';
+
+interface ConnectorDecl {
+  id: string;
+  kind: ConnectorKind;
   scopes: string[];
-  server_url?: string;
+  /** Per manifest 2026-05: 'proxy' routes calls through the platform Connector
+   *  Proxy (token never leaves the platform); 'env' injects the raw credential
+   *  as a container env var so the app can use it directly. */
+  exposure: ConnectorExposure;
+  required: boolean;
 }
 
 function parseBilling(manifest: Record<string, unknown> | null): BillingDim[] {
@@ -61,18 +71,30 @@ function parseBilling(manifest: Record<string, unknown> | null): BillingDim[] {
   return dims;
 }
 
-function parseMcp(manifest: Record<string, unknown> | null): McpDecl[] {
+function parseConnectors(manifest: Record<string, unknown> | null): ConnectorDecl[] {
+  // Manifest 2026-05: connectors live in `manifest.connectors[]`. The legacy
+  // `manifest.mcp` field has been removed entirely — Phase 1's hard reset
+  // forces all installs to re-run through this wizard against the new schema.
   if (!manifest) return [];
-  const mcp = manifest.mcp;
-  if (!Array.isArray(mcp)) return [];
-  const out: McpDecl[] = [];
-  for (const raw of mcp) {
+  const connectors = manifest.connectors;
+  if (!Array.isArray(connectors)) return [];
+  const out: ConnectorDecl[] = [];
+  const validKinds: ConnectorKind[] = ['mcp', 'api_key', 'oauth', 'webhook'];
+  for (const raw of connectors) {
     if (raw && typeof raw === 'object') {
-      const m = raw as Record<string, unknown>;
+      const c = raw as Record<string, unknown>;
+      const kindRaw = typeof c.kind === 'string' ? c.kind : 'api_key';
+      const kind: ConnectorKind = (validKinds as string[]).includes(kindRaw)
+        ? (kindRaw as ConnectorKind)
+        : 'api_key';
+      const exposureRaw = typeof c.exposure === 'string' ? c.exposure : 'proxy';
+      const exposure: ConnectorExposure = exposureRaw === 'env' ? 'env' : 'proxy';
       out.push({
-        name: typeof m.name === 'string' ? m.name : 'unnamed',
-        scopes: Array.isArray(m.scopes) ? (m.scopes as string[]) : [],
-        server_url: typeof m.server_url === 'string' ? m.server_url : undefined,
+        id: typeof c.id === 'string' ? c.id : 'unnamed',
+        kind,
+        scopes: Array.isArray(c.scopes) ? (c.scopes as string[]) : [],
+        exposure,
+        required: typeof c.required === 'boolean' ? c.required : true,
       });
     }
   }
@@ -138,7 +160,7 @@ export function AppInstallWizard({
   const [error, setError] = useState<string | null>(null);
 
   const [walletAccepted, setWalletAccepted] = useState(false);
-  const [mcpAccepted, setMcpAccepted] = useState<Record<string, boolean>>({});
+  const [connectorAccepted, setConnectorAccepted] = useState<Record<string, boolean>>({});
   const [teamId, setTeamId] = useState<string>(activeTeam?.id ?? '');
   const [updatePolicy, setUpdatePolicy] = useState<UpdatePolicy>('manual');
   const [submitting, setSubmitting] = useState(false);
@@ -171,18 +193,19 @@ export function AppInstallWizard({
     () => parseBilling(version?.manifest_json ?? null),
     [version]
   );
-  const mcpDecls = useMemo(
-    () => parseMcp(version?.manifest_json ?? null),
+  const connectorDecls = useMemo(
+    () => parseConnectors(version?.manifest_json ?? null),
     [version]
   );
 
-  const allMcpAccepted =
-    mcpDecls.length === 0 || mcpDecls.every((d) => mcpAccepted[d.name]);
+  const allConnectorsAccepted =
+    connectorDecls.length === 0 ||
+    connectorDecls.every((d) => connectorAccepted[d.id]);
 
-  const acceptAllMcp = () => {
+  const acceptAllConnectors = () => {
     const next: Record<string, boolean> = {};
-    for (const d of mcpDecls) next[d.name] = true;
-    setMcpAccepted(next);
+    for (const d of connectorDecls) next[d.id] = true;
+    setConnectorAccepted(next);
   };
 
   const goNext = () => setStep((s) => (s < 5 ? ((s + 1) as WizardStep) : s));
@@ -196,13 +219,13 @@ export function AppInstallWizard({
       case 2:
         return walletAccepted;
       case 3:
-        return allMcpAccepted;
+        return allConnectorsAccepted;
       case 4:
         return !!teamId;
       default:
         return true;
     }
-  }, [step, loading, compat, walletAccepted, allMcpAccepted, teamId]);
+  }, [step, loading, compat, walletAccepted, allConnectorsAccepted, teamId]);
 
   const confirm = async () => {
     if (!teamId) {
@@ -224,10 +247,17 @@ export function AppInstallWizard({
         app_version_id: appVersionId,
         team_id: teamId,
         wallet_mix_consent: walletMix,
-        mcp_consents: mcpDecls.map((d) => ({
-          name: d.name,
+        // Backend wire contract still keys this field as `mcp_consents` for
+        // back-compat. Each entry now carries the full connector descriptor
+        // (id, kind, exposure, scopes) so the orchestrator can record exactly
+        // which exposure mode the installer agreed to.
+        mcp_consents: connectorDecls.map((d) => ({
+          id: d.id,
+          name: d.id,
+          kind: d.kind,
+          exposure: d.exposure,
           scopes: d.scopes,
-          accepted: mcpAccepted[d.name] === true,
+          accepted: connectorAccepted[d.id] === true,
         })),
         update_policy: updatePolicy,
       });
@@ -243,7 +273,7 @@ export function AppInstallWizard({
   const titles: Record<WizardStep, string> = {
     1: 'Compatibility',
     2: 'Wallet & billing',
-    3: 'MCP access',
+    3: 'Connectors & access',
     4: 'Team & policy',
     5: 'Review',
   };
@@ -318,34 +348,77 @@ export function AppInstallWizard({
     if (step === 3) {
       return (
         <div className="flex flex-col gap-3" data-testid="mcp-step">
-          {mcpDecls.length === 0 ? (
-            <p className="text-xs">This app requests no MCP servers.</p>
+          {connectorDecls.length === 0 ? (
+            <p className="text-xs">This app requests no connectors.</p>
           ) : (
             <>
               <div className="flex items-center justify-between">
-                <p className="text-xs">Accept each MCP server's scopes:</p>
-                <button type="button" className="btn btn-sm" onClick={acceptAllMcp}>
+                <p className="text-xs">
+                  Review each connector's access mode and scopes:
+                </p>
+                <button type="button" className="btn btn-sm" onClick={acceptAllConnectors}>
                   Accept all
                 </button>
               </div>
-              {mcpDecls.map((d) => (
+              {connectorDecls.map((d) => (
                 <div
-                  key={d.name}
-                  className="p-3 border border-[var(--border)] rounded-[var(--radius-small)]"
+                  key={d.id}
+                  className="p-3 border border-[var(--border)] rounded-[var(--radius-small)] flex flex-col gap-2"
+                  data-testid={`connector-${d.id}`}
                 >
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={!!mcpAccepted[d.name]}
+                      checked={!!connectorAccepted[d.id]}
                       onChange={(e) =>
-                        setMcpAccepted((m) => ({ ...m, [d.name]: e.target.checked }))
+                        setConnectorAccepted((m) => ({ ...m, [d.id]: e.target.checked }))
                       }
                     />
-                    <span className="font-semibold text-[var(--text)]">{d.name}</span>
+                    <span className="font-semibold text-[var(--text)]">{d.id}</span>
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-subtle)]">
+                      {d.kind}
+                    </span>
+                    {d.exposure === 'proxy' ? (
+                      <span
+                        className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+                        title="Calls route through the platform Connector Proxy. Your token never reaches this app."
+                      >
+                        Proxied
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400"
+                        title="The raw credential will be injected into this app's container as an environment variable."
+                      >
+                        Env
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-[var(--text-subtle)]">
                     scopes: {d.scopes.join(', ') || '(none)'}
                   </p>
+                  {d.exposure === 'proxy' ? (
+                    <p className="text-[11px] text-[var(--text-subtle)]">
+                      Proxied — your token stays on the platform; this app calls
+                      it through the Connector Proxy.
+                    </p>
+                  ) : (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-[var(--radius-small)] bg-amber-500/10 border border-amber-500/30 p-2"
+                    >
+                      <Warning
+                        size={14}
+                        weight="fill"
+                        className="text-amber-400 mt-0.5 flex-shrink-0"
+                      />
+                      <p className="text-[11px] text-amber-300 leading-snug">
+                        This app will receive your raw <span className="font-mono">{d.id}</span>{' '}
+                        {d.kind} credential as an environment variable. Only
+                        install if you trust the creator.
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
             </>
@@ -407,8 +480,15 @@ export function AppInstallWizard({
           {billingDims.length}
         </div>
         <div>
-          <span className="text-[var(--text-subtle)]">MCP servers accepted:</span>{' '}
-          {mcpDecls.length}
+          <span className="text-[var(--text-subtle)]">Connectors accepted:</span>{' '}
+          {connectorDecls.length}
+          {connectorDecls.some((d) => d.exposure === 'env') && (
+            <span className="ml-2 inline-flex items-center gap-1 text-amber-400">
+              <Warning size={12} weight="fill" />
+              {connectorDecls.filter((d) => d.exposure === 'env').length} use env-injected
+              credentials
+            </span>
+          )}
         </div>
       </div>
     );

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...models import AppInstance, AppVersion, LiteLLMKeyLedger, MarketplaceApp
 from .. import litellm_keys
 from .key_lifecycle import KeyState, KeyTier
-from .runtime import _extract_api_key
+from .runtime import ApiKeyExtractionError, _extract_api_key  # noqa: F401  (re-export for callers)
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,10 @@ async def begin_hosted_invocation(
             "invocation_id": str(invocation_id),
         },
     )
+    # _extract_api_key raises ApiKeyExtractionError if the delegate didn't
+    # surface the api_key — let it propagate so the caller sees a typed
+    # failure rather than a silent empty-string handle that would only fail
+    # later as an opaque LiteLLM 401.
     api_key = _extract_api_key(delegate, row.key_id)
     logger.info(
         "hosted_agent.begin app_instance=%s agent=%s tier=%s key=%s budget=%s",

@@ -757,20 +757,69 @@ class GatewayRunner:
                 await asyncio.sleep(2)
 
     async def _process_delivery(self, data: dict) -> None:
-        """Process a single delivery from the stream."""
-        config_id = data.get(b"config_id", data.get("config_id", ""))
-        session_key = data.get(b"session_key", data.get("session_key", ""))
-        response_text = data.get(b"response", data.get("response", ""))
+        """Process a single delivery from the stream.
 
-        if isinstance(config_id, bytes):
-            config_id = config_id.decode()
-        if isinstance(session_key, bytes):
-            session_key = session_key.decode()
-        if isinstance(response_text, bytes):
-            response_text = response_text.decode()
+        The envelope is parsed via :func:`envelope.parse_envelope` so we get a
+        normalized dict with a real ``kind`` (defaulted to ``"message"`` for
+        backward compatibility) and a decoded ``artifact_refs`` list. Phase 0
+        only renders ``kind="message"``; ``"approval_card"`` (Phase 2) and
+        ``"artifact"`` (Phase 4) are accepted but skipped (and acked by the
+        caller) so unknown kinds never crash or loop.
+        """
+        from .envelope import (
+            KIND_APPROVAL_CARD,
+            KIND_ARTIFACT,
+            KIND_MESSAGE,
+            parse_envelope,
+        )
 
-        if not response_text:
+        parsed = parse_envelope(data)
+        kind = parsed["kind"]
+        config_id = parsed["config_id"]
+        session_key = parsed["session_key"]
+        body = parsed["body"]
+        artifact_refs = parsed["artifact_refs"]
+        task_id = parsed["task_id"]
+
+        # Phase 2 / Phase 4 envelope kinds — accept but no-op for now so the
+        # producer can begin emitting them without a coordinated deploy.
+        if kind in (KIND_APPROVAL_CARD, KIND_ARTIFACT):
+            logger.info(
+                "[GATEWAY] delivery kind=%s not yet implemented "
+                "(lands in Phase 2/4); skipping session=%s task=%s",
+                kind,
+                session_key,
+                task_id,
+            )
+            # Still release the session so the next pending message can flow.
+            self._active_sessions.pop(session_key, None)
+            pending = self._pending_messages.pop(session_key, [])
+            if pending:
+                next_event = pending[0]
+                if len(pending) > 1:
+                    self._pending_messages[session_key] = pending[1:]
+                asyncio.create_task(self._handle_message(next_event))
             return
+
+        if kind != KIND_MESSAGE:
+            # Unknown kind from a future producer — log + skip rather than
+            # crash. The XACK in the consumer loop ensures we don't replay it.
+            logger.warning(
+                "[GATEWAY] unknown delivery kind=%r — skipping session=%s",
+                kind,
+                session_key,
+            )
+            return
+
+        if not body:
+            return
+
+        if artifact_refs:
+            # Phase 4 will resolve and attach these. For now just log.
+            logger.debug(
+                "[GATEWAY] delivery has %d artifact_refs (ignored in Phase 0)",
+                len(artifact_refs),
+            )
 
         adapter = self.adapters.get(config_id)
         if not adapter:
@@ -784,10 +833,10 @@ class GatewayRunner:
 
         try:
             if hasattr(adapter, "send_gateway_response"):
-                await adapter.send_gateway_response(chat_id, response_text)
+                await adapter.send_gateway_response(chat_id, body)
             else:
                 jid = f"{adapter.channel_type}:{chat_id}"
-                await adapter.send_message(jid, response_text)
+                await adapter.send_message(jid, body)
 
             logger.info("[GATEWAY] Delivered response to session %s", session_key)
         except Exception:
@@ -798,15 +847,11 @@ class GatewayRunner:
             from ...models import ChannelMessage
 
             async with self._db_factory() as db:
-                task_id = data.get(b"task_id", data.get("task_id", ""))
-                if isinstance(task_id, bytes):
-                    task_id = task_id.decode()
-
                 msg = ChannelMessage(
                     channel_config_id=uuid.UUID(config_id) if config_id else None,
                     direction="outbound",
                     jid=f"{adapter.channel_type}:{chat_id}",
-                    content=response_text[:2000],
+                    content=body[:2000],
                     task_id=task_id,
                     status="delivered",
                 )
