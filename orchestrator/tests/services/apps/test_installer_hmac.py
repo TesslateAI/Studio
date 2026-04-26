@@ -103,7 +103,7 @@ def fake_k8s(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         secret_key = real_settings.secret_key or "test-secret-key"
 
     monkeypatch.setattr(
-        "app.services.apps.installer.get_settings", lambda: _Patched()
+        "app.config.get_settings", lambda: _Patched()
     )
     return api
 
@@ -259,7 +259,7 @@ async def test_non_k8s_mode_returns_token_without_secret_create(
         secret_key = "test-secret-key"
 
     monkeypatch.setattr(
-        "app.services.apps.installer.get_settings", lambda: _Patched()
+        "app.config.get_settings", lambda: _Patched()
     )
     # Ensure the K8s module IS NOT touched even if installed in this env.
     with patch("kubernetes.client.CoreV1Api") as mock_core:

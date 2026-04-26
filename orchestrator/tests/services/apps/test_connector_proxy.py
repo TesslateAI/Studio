@@ -56,6 +56,11 @@ from app.models_automations import (
 )
 from app.services.apps.connector_proxy import router as connector_proxy_router
 from app.services.apps.connector_proxy.audit import scrub_error_body
+from app.services.apps.connector_proxy.auth import (
+    derive_signing_key,
+    generate_pod_token,
+    invalidate_signing_key_cache,
+)
 from app.services.apps.connector_proxy.provider_adapters import (
     ADAPTER_REGISTRY,
 )
@@ -63,6 +68,24 @@ from app.services.apps.connector_proxy.provider_adapters.base import (
     AllowedEndpoint,
 )
 from app.services.channels.registry import encrypt_credentials
+
+
+def _signed_appinstance_header(instance_id: uuid.UUID) -> str:
+    """Mint a valid X-OpenSail-AppInstance header for tests.
+
+    The proxy's auth verifier loads the per-pod signing key from a K8s
+    Secret in production. Under pytest there is no K8s; we use the
+    fallback path (HMAC over ``app-pod-key:{instance_id}`` with the
+    current settings.secret_key) which both production and tests use
+    when no Secret backs the install. Cache is cleared so a per-test
+    invalidation contract holds.
+    """
+    invalidate_signing_key_cache(instance_id)
+    from app.config import get_settings
+
+    secret = (get_settings().secret_key or "test-secret").encode()
+    key = derive_signing_key(instance_id, fallback_secret=secret.decode())
+    return generate_pod_token(app_instance_id=instance_id, signing_key=key)
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +333,7 @@ async def test_no_grant_returns_403(client: TestClient, db_session: AsyncSession
     )
     resp = client.post(
         "/api/v1/connector-proxy/connectors/slack/chat.postMessage",
-        headers={"X-OpenSail-AppInstance": str(instance_id)},
+        headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
     )
     assert resp.status_code == 403
     assert "no active grant" in resp.json()["detail"]
@@ -325,7 +348,7 @@ async def test_env_exposure_grant_returns_403(
     )
     resp = client.post(
         "/api/v1/connector-proxy/connectors/slack/chat.postMessage",
-        headers={"X-OpenSail-AppInstance": str(instance_id)},
+        headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
     )
     assert resp.status_code == 403
     assert "exposure='env'" in resp.json()["detail"]
@@ -340,7 +363,7 @@ async def test_unknown_connector_returns_404(
     )
     resp = client.post(
         "/api/v1/connector-proxy/connectors/not-a-real-connector/anything",
-        headers={"X-OpenSail-AppInstance": str(instance_id)},
+        headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
     )
     assert resp.status_code == 404
 
@@ -358,7 +381,7 @@ async def test_endpoint_not_in_allowlist_returns_403(
         )
         resp = client.post(
             "/api/v1/connector-proxy/connectors/slack/totally.fake",
-            headers={"X-OpenSail-AppInstance": str(instance_id)},
+            headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
         )
     assert resp.status_code == 403
     assert "allowlist" in resp.json()["detail"]
@@ -392,7 +415,7 @@ async def test_happy_path_injects_bearer_and_records_audit(
         resp = client.post(
             "/api/v1/connector-proxy/connectors/slack/chat.postMessage",
             headers={
-                "X-OpenSail-AppInstance": str(instance_id),
+                "X-OpenSail-AppInstance": _signed_appinstance_header(instance_id),
                 "Content-Type": "application/json",
                 # The app pod tries to smuggle its own Authorization — must be stripped.
                 "Authorization": "Bearer pretend-rogue-app-token",
@@ -454,7 +477,7 @@ async def test_response_strips_authorization_echo(
         )
         resp = client.get(
             "/api/v1/connector-proxy/connectors/slack/auth.test",
-            headers={"X-OpenSail-AppInstance": str(instance_id)},
+            headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
         )
 
     assert resp.status_code == 200
@@ -479,7 +502,7 @@ async def test_audit_records_error_body_for_4xx(
         )
         resp = client.post(
             "/api/v1/connector-proxy/connectors/slack/chat.postMessage",
-            headers={"X-OpenSail-AppInstance": str(instance_id)},
+            headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
             json={"channel": "C-NOPE", "text": "hi"},
         )
 
@@ -517,9 +540,17 @@ async def test_401_with_refresh_hook_retries_once(
         refresh_calls.append(oauth_connection_id)
         return token_new
 
+    import dataclasses as _dc
     slack = ADAPTER_REGISTRY.get("slack")
     assert slack is not None
-    monkeypatch.setattr(slack, "refresh_hook", fake_refresh)
+    # ProviderAdapter is a frozen dataclass — replace the registry slot
+    # with a clone that sets refresh_hook. monkeypatch.setitem restores
+    # the original at fixture teardown.
+    monkeypatch.setitem(
+        ADAPTER_REGISTRY._adapters,
+        "slack",
+        _dc.replace(slack, refresh_hook=fake_refresh),
+    )
 
     request_count = {"n": 0}
 
@@ -540,7 +571,7 @@ async def test_401_with_refresh_hook_retries_once(
         )
         resp = client.post(
             "/api/v1/connector-proxy/connectors/slack/chat.postMessage",
-            headers={"X-OpenSail-AppInstance": str(instance_id)},
+            headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
             json={"channel": "C1", "text": "hi"},
         )
 
@@ -562,9 +593,14 @@ async def test_401_second_time_propagates_to_caller(
     async def fake_refresh(db, oauth_connection_id):
         return "xoxb-still-bad-zzzzzzzzzzzzzzzzz"
 
+    import dataclasses as _dc
     slack = ADAPTER_REGISTRY.get("slack")
     assert slack is not None
-    monkeypatch.setattr(slack, "refresh_hook", fake_refresh)
+    monkeypatch.setitem(
+        ADAPTER_REGISTRY._adapters,
+        "slack",
+        _dc.replace(slack, refresh_hook=fake_refresh),
+    )
 
     request_count = {"n": 0}
 
@@ -578,7 +614,7 @@ async def test_401_second_time_propagates_to_caller(
         )
         resp = client.post(
             "/api/v1/connector-proxy/connectors/slack/chat.postMessage",
-            headers={"X-OpenSail-AppInstance": str(instance_id)},
+            headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
             json={"channel": "C1", "text": "hi"},
         )
 
@@ -616,7 +652,7 @@ async def test_401_without_refresh_hook_propagates(
         )
         resp = client.post(
             "/api/v1/connector-proxy/connectors/slack/chat.postMessage",
-            headers={"X-OpenSail-AppInstance": str(instance_id)},
+            headers={"X-OpenSail-AppInstance": _signed_appinstance_header(instance_id)},
             json={"channel": "C1"},
         )
 

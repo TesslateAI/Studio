@@ -1418,3 +1418,23 @@ __all__ = [
     "ControllerLease",
     "ControllerIntent",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Cross-module mapper-init guard.
+#
+# Several relationships on tables defined in this module (e.g.
+# ``AppInstance.app -> MarketplaceApp``) reference classes that live in
+# ``app.models`` via string lookup. SQLAlchemy resolves those names
+# lazily at first ``configure_mappers()`` — by which time *both* modules
+# must have executed. When a service module imports straight from this
+# file (e.g. ``from app.models_automations import ControllerIntent`` in
+# the controller's reconciler), ``app.models`` would otherwise never run
+# and the mapper init throws ``InvalidRequestError: ... 'MarketplaceApp'
+# failed to locate a name``.
+#
+# Importing ``app.models`` here AFTER our own classes are defined is
+# circular-safe: ``models.py`` re-imports back into this module at its
+# tail, but by then we are fully initialised so the re-entrant import
+# returns the cached, fully populated module without raising.
+from . import models  # noqa: F401, E402

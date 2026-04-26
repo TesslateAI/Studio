@@ -30,12 +30,26 @@ logger = logging.getLogger(__name__)
 # every possible secret format — the goal is to defang the obvious self-
 # inflicted leak (an error envelope that quoted the request header back).
 _AUTH_HEADER_RE = re.compile(
-    r"(authorization\s*[:=]\s*)([^\s,;\"\\\']+)",
+    # Consume the whole header value, including a leading scheme token
+    # (Bearer / token / Basic) plus the credential string. The credential
+    # class explicitly stops at common JSON/CSV/quote terminators so we
+    # don't run away across an entire log line, but it crosses spaces
+    # inside the auth value itself (which is otherwise legitimate).
+    r"(authorization\s*[:=]\s*)(?:(?:Bearer|token|Basic)\s+)?([^\"'`}\),;]+)",
     re.IGNORECASE,
 )
 _BEARER_RE = re.compile(
     r"\b(Bearer|token)\s+([A-Za-z0-9._\-+/=]{16,})",
     re.IGNORECASE,
+)
+# Provider-specific token patterns (Slack xox*, OpenAI sk-, GitHub ghp_/gho_/
+# ghu_, etc.). Catches naked tokens not preceded by Bearer/Authorization —
+# defense in depth against creative upstream error envelopes.
+_PROVIDER_TOKEN_RE = re.compile(
+    r"\b(xox[abops]-[A-Za-z0-9-]{16,}"
+    r"|sk-[A-Za-z0-9_-]{20,}"
+    r"|gh[pous]_[A-Za-z0-9]{20,}"
+    r"|github_pat_[A-Za-z0-9_]{20,})",
 )
 _ERROR_PREFIX_LIMIT = 500
 
@@ -51,6 +65,7 @@ def scrub_error_body(body: str | None) -> str | None:
     truncated = body[:_ERROR_PREFIX_LIMIT * 4]
     scrubbed = _AUTH_HEADER_RE.sub(r"\1[REDACTED]", truncated)
     scrubbed = _BEARER_RE.sub(r"\1 [REDACTED]", scrubbed)
+    scrubbed = _PROVIDER_TOKEN_RE.sub("[REDACTED]", scrubbed)
     return scrubbed[:_ERROR_PREFIX_LIMIT]
 
 
