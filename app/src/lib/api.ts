@@ -4606,4 +4606,135 @@ export const appBundlesApi = {
 // ===== /Tesslate Apps =====
 // =============================================================================
 
+// =============================================================================
+// ===== Automations (Phase 1) =====
+// =============================================================================
+//
+// HTTP client for the Automation Runtime. Endpoint shapes mirror
+// ``orchestrator/app/schemas_automations.py`` — see the matching
+// ``app/src/types/automations.ts`` types.
+//
+// Auth: relies on the same Bearer / cookie/CSRF flow the rest of the file uses
+// via the shared `api` axios instance. No special handling here.
+// =============================================================================
+
+import type {
+  AppActionListResponse,
+  AutomationDefinitionIn,
+  AutomationDefinitionOut,
+  AutomationDefinitionSummary,
+  AutomationDefinitionUpdate,
+  AutomationRunArtifactOut,
+  AutomationRunDetail,
+  AutomationRunRequest,
+  AutomationRunResponse,
+  AutomationRunSummary,
+} from '../types/automations';
+
+export interface ListAutomationsParams {
+  is_active?: boolean;
+  workspace_scope?: string;
+  team_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListRunsParams {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const automationsApi = {
+  async list(params?: ListAutomationsParams): Promise<AutomationDefinitionSummary[]> {
+    const qs = new URLSearchParams();
+    if (params?.is_active !== undefined) qs.append('is_active', String(params.is_active));
+    if (params?.workspace_scope) qs.append('workspace_scope', params.workspace_scope);
+    if (params?.team_id) qs.append('team_id', params.team_id);
+    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.append('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await api.get(`/api/automations${suffix}`);
+    return response.data;
+  },
+
+  async create(payload: AutomationDefinitionIn): Promise<AutomationDefinitionOut> {
+    const response = await api.post('/api/automations', payload);
+    return response.data;
+  },
+
+  async get(id: string): Promise<AutomationDefinitionOut> {
+    const response = await api.get(`/api/automations/${id}`);
+    return response.data;
+  },
+
+  async update(
+    id: string,
+    payload: AutomationDefinitionUpdate
+  ): Promise<AutomationDefinitionOut> {
+    const response = await api.patch(`/api/automations/${id}`, payload);
+    return response.data;
+  },
+
+  /**
+   * Soft-delete by default (sets is_active=false). Pass `hard=true` to
+   * fully remove a definition that has zero runs (server returns 409 if
+   * any runs exist).
+   */
+  async remove(id: string, hard = false): Promise<{ status: string; id: string; hard: boolean }> {
+    const suffix = hard ? '?hard=true' : '';
+    const response = await api.delete(`/api/automations/${id}${suffix}`);
+    return response.data;
+  },
+
+  async run(id: string, payload?: AutomationRunRequest): Promise<AutomationRunResponse> {
+    const response = await api.post(`/api/automations/${id}/run`, payload ?? {});
+    return response.data;
+  },
+
+  async listRuns(
+    id: string,
+    params?: ListRunsParams
+  ): Promise<AutomationRunSummary[]> {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.append('status', params.status);
+    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.append('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await api.get(`/api/automations/${id}/runs${suffix}`);
+    return response.data;
+  },
+
+  async getRun(id: string, runId: string): Promise<AutomationRunDetail> {
+    const response = await api.get(`/api/automations/${id}/runs/${runId}`);
+    return response.data;
+  },
+
+  async listRunArtifacts(id: string, runId: string): Promise<AutomationRunArtifactOut[]> {
+    const response = await api.get(`/api/automations/${id}/runs/${runId}/artifacts`);
+    return response.data;
+  },
+
+  /**
+   * URL of the artifact-download endpoint. The endpoint either streams
+   * inline content or 307-redirects to a signed S3 URL — easiest for the
+   * UI to just open it in a new tab / treat it as a link target.
+   */
+  artifactDownloadUrl(id: string, runId: string, artifactId: string): string {
+    return `${API_URL}/api/automations/${id}/runs/${runId}/artifacts/${artifactId}`;
+  },
+};
+
+export const appActionsApi = {
+  /** GET /api/apps/{app_instance_id}/actions — read-only listing. */
+  async list(appInstanceId: string): Promise<AppActionListResponse> {
+    const response = await api.get(`/api/apps/${appInstanceId}/actions`);
+    return response.data;
+  },
+};
+
+// =============================================================================
+// ===== /Automations =====
+// =============================================================================
+
 export default api;

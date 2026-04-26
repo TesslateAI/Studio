@@ -72,6 +72,11 @@ import AdminSubmissionWorkbenchPage from './pages/AdminSubmissionWorkbenchPage';
 import AdminYankCenterPage from './pages/AdminYankCenterPage';
 import AdminCreatorReputationPage from './pages/AdminCreatorReputationPage';
 import AdminAdversarialSuitePage from './pages/AdminAdversarialSuitePage';
+// Automations (Phase 1 — basic builder)
+import AutomationsListPage from './pages/automations/AutomationsListPage';
+import AutomationCreatePage from './pages/automations/AutomationCreatePage';
+import AutomationDetailPage from './pages/automations/AutomationDetailPage';
+import RunDetailPage from './pages/automations/RunDetailPage';
 
 const IS_TAURI = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
 
@@ -357,6 +362,15 @@ function AppContent() {
           <Route path="/admin/marketplace/yanks" element={<AdminYankCenterPage />} />
           <Route path="/admin/marketplace/reputation" element={<AdminCreatorReputationPage />} />
           <Route path="/admin/marketplace/adversarial" element={<AdminAdversarialSuitePage />} />
+
+          {/* Automations (Phase 1) — list + create + detail + run-detail */}
+          <Route path="/automations" element={<AutomationsListPage />} />
+          <Route path="/automations/new" element={<AutomationCreatePage />} />
+          <Route path="/automations/:id" element={<AutomationDetailPage />} />
+          <Route
+            path="/automations/:id/runs/:run_id"
+            element={<RunDetailPage />}
+          />
 
           {/* Project builder — shares the same NavigationSidebar instance so
               navigating Dashboard ↔ Project doesn't unmount/remount the

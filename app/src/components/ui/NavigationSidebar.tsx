@@ -17,6 +17,7 @@ import {
   Zap,
   Plug,
   Rocket,
+  Workflow,
 } from 'lucide-react';
 import { MoodyFace } from './MoodyFace';
 import {
@@ -48,7 +49,8 @@ interface NavigationSidebarProps {
     | 'library'
     | 'feedback'
     | 'builder'
-    | 'settings';
+    | 'settings'
+    | 'automations';
   showContent?: boolean;
   /** Render prop for injecting builder-specific items into the sidebar */
   builderSection?: (ctx: {
@@ -755,6 +757,22 @@ export function NavigationSidebar({
               >
                 <SquaresFour size={16} className={iconClass(activePage === 'apps')} />
                 {isExpanded && <span className={labelClass(activePage === 'apps')}>Apps</span>}
+              </button>
+            </Tooltip>
+
+            <Tooltip content="Automations" side="right" delay={200}>
+              <button
+                onClick={() => navigate('/automations')}
+                className={
+                  isExpanded
+                    ? navButtonClass(activePage === 'automations')
+                    : navButtonClassCollapsed(activePage === 'automations')
+                }
+              >
+                <Workflow size={16} className={iconClass(activePage === 'automations')} />
+                {isExpanded && (
+                  <span className={labelClass(activePage === 'automations')}>Automations</span>
+                )}
               </button>
             </Tooltip>
 

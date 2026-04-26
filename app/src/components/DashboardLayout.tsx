@@ -55,11 +55,12 @@ function DashboardLayoutInner() {
   // project is conceptually a deeper view of the same Workspaces section,
   // and keeping the highlight stable makes the sidebar feel like it's the
   // exact same instance as the dashboard's.
-  const getActivePage = (): 'home' | 'chat' | 'apps' | 'dashboard' | 'marketplace' | 'library' | 'feedback' => {
+  const getActivePage = (): 'home' | 'chat' | 'apps' | 'dashboard' | 'marketplace' | 'library' | 'feedback' | 'automations' => {
     const path = location.pathname;
     if (path.includes('/home')) return 'home';
     if (path.includes('/chat')) return 'chat';
     if (path.startsWith('/apps')) return 'apps';
+    if (path.startsWith('/automations')) return 'automations';
     if (path.includes('/marketplace')) return 'marketplace';
     if (path.includes('/library')) return 'library';
     if (path.includes('/feedback')) return 'feedback';
