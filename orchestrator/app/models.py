@@ -130,6 +130,24 @@ class Project(Base):
     # Long-form mission statement propagated into agent goal ancestry.
     mission = Column(Text, nullable=True)
 
+    # Phase 5 — UX convenience: Automation Builder seeds new automation
+    # contracts from this template. Per-project, admin-settable. Empty
+    # dict by default. Not a legacy backfill mechanism.
+    default_contract_template = Column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    # Phase 5 — strong project ↔ MarketplaceApp link. Set when the user
+    # publishes this project as an app via the Publish Drawer. Lets us
+    # answer "which app does this project publish to?" in a single
+    # column lookup (vs traversing AppVersion.bundle_hash).
+    published_app_id = Column(
+        GUID(),
+        ForeignKey("marketplace_apps.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -1171,6 +1189,16 @@ class MarketplaceAgent(Base):
     is_featured = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     is_published = Column(Boolean, default=True)  # For user-created forked agents
+
+    # Phase 5 — agent-builder provenance. When the agent-builder skill
+    # creates a new agent, this points back to the source automation.
+    # Lets the dispatcher walk parent/child chains for cycle detection
+    # and budget rollup. NULL for agents created via the UI directly.
+    # FK constraint added in Postgres only (SQLite cannot ALTER existing
+    # tables to add cross-table FKs without batch_alter; the migration
+    # writes the column on both backends and conditionally adds the FK).
+    created_by_automation_id = Column(GUID(), nullable=True, index=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -2606,6 +2634,15 @@ class ChannelConfig(Base):
     name = Column(String(100), nullable=False)
     credentials = Column(Text, nullable=False)  # Fernet-encrypted JSON
     webhook_secret = Column(String(64), nullable=False)  # random secret for URL signing
+    # Phase 4 — team-scoped destinations. NULL = personal. Set = the
+    # whole team can resolve a CommunicationDestination that points at
+    # this ChannelConfig (e.g., shared Slack workspace credential).
+    team_id = Column(
+        GUID(),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     default_agent_id = Column(
         GUID(), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )

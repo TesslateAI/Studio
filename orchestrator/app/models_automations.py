@@ -1295,6 +1295,102 @@ class AppEmbed(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 4: Controller plane (lease + intent rows)
+# ---------------------------------------------------------------------------
+
+
+class ControllerLease(Base):
+    """Single-leader coordination row.
+
+    One row per controller name (``cron``, ``reaper``, ``drain``, ...).
+    Holds a monotonically incremented ``term`` so deposed leaders can't
+    write through with stale state.
+
+    Used by the ``DBLease`` backend (default; works on Postgres + SQLite).
+    ``RedisLease`` and ``K8sLease`` use their native primitives instead.
+
+    Lease fencing pattern:
+
+    .. code-block:: sql
+
+        BEGIN;
+          SELECT * FROM controller_leases
+            WHERE name=:name FOR UPDATE;
+          -- assert returned term == our_term
+          INSERT INTO controller_intents (...);
+        COMMIT;
+        -- only now: K8s mutation
+    """
+
+    __tablename__ = "controller_leases"
+
+    name = Column(String(64), primary_key=True)
+    holder = Column(Text, nullable=True)
+    term = Column(BigInteger, nullable=False, default=0, server_default="0")
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    acquired_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class ControllerIntent(Base):
+    """Durable intent row — reconciler reads, applies, marks status.
+
+    K8s controllers solved verify-then-mutate years ago: write durable
+    intent, reconcile asynchronously. This table is that contract for
+    the OpenSail controller plane.
+
+    Status state machine::
+
+        pending → applied
+                → superseded   (lease_term mismatch)
+                → failed       (exhausted attempts; manual investigation)
+
+    Idempotency rules:
+
+    * ``patch scale=0`` is naturally idempotent — apply it and we're done.
+    * ``delete Pod X`` uses ``resourceVersion`` precondition or 404
+      tolerance — the reconciler treats 404 on delete as "already done".
+    * Composable mutations (``scale + delete + secret-rotate``) become
+      a sequence of intents, each idempotent.
+
+    The ``lease_term`` column is the TOCTOU defence — written in the same
+    TXN as the lease verify, read by the reconciler before mutating.
+    """
+
+    __tablename__ = "controller_intents"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    kind = Column(String(48), nullable=False)
+    target_ref = Column(JSON, nullable=False)
+    lease_term = Column(BigInteger, nullable=False)
+    status = Column(
+        String(16),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )
+    applied_by_term = Column(BigInteger, nullable=True)
+    last_error = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'applied', 'superseded', 'failed')",
+            name="chk_ci_status",
+        ),
+        Index(
+            "ix_controller_intents_status_created",
+            "status",
+            "created_at",
+        ),
+        Index("ix_controller_intents_kind", "kind"),
+    )
+
+
 __all__ = [
     "AutomationDefinition",
     "AutomationTrigger",
@@ -1319,4 +1415,6 @@ __all__ = [
     "ConnectorProxyCall",
     "AppInstanceLink",
     "AppEmbed",
+    "ControllerLease",
+    "ControllerIntent",
 ]
