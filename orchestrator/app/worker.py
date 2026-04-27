@@ -769,6 +769,16 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         )
                         session_id = complete_data.get("session_id")
 
+                    elif event_type == "tool_error":
+                        err_data = event.get("data", {})
+                        logger.warning(
+                            "[WORKER] Tool error in task %s: tool=%s iteration=%s error=%s",
+                            task_id,
+                            err_data.get("tool_name"),
+                            err_data.get("iteration"),
+                            err_data.get("error"),
+                        )
+
                     # Publish event to Redis Stream for API pod to forward to SSE
                     if pubsub:
                         await pubsub.publish_agent_event(task_id, event)

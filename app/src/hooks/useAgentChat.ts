@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { chatApi } from '../lib/api';
 import type {
   AgentMessageData,
@@ -23,10 +24,7 @@ import type {
  * ProjectPage can manage dock tabs / canvas pulses without pulling in
  * UI dependencies here.
  */
-function dispatchNodeConfigEvent(
-  type: string,
-  data: Record<string, unknown> | undefined
-): boolean {
+function dispatchNodeConfigEvent(type: string, data: Record<string, unknown> | undefined): boolean {
   if (!data) return false;
   switch (type) {
     case 'architecture_node_added':
@@ -36,28 +34,16 @@ function dispatchNodeConfigEvent(
       );
       return true;
     case 'user_input_required':
-      nodeConfigEvents.emit(
-        'user-input-required',
-        data as unknown as UserInputRequiredEvent
-      );
+      nodeConfigEvents.emit('user-input-required', data as unknown as UserInputRequiredEvent);
       return true;
     case 'node_config_resumed':
-      nodeConfigEvents.emit(
-        'node-config-resumed',
-        data as unknown as NodeConfigResumedEvent
-      );
+      nodeConfigEvents.emit('node-config-resumed', data as unknown as NodeConfigResumedEvent);
       return true;
     case 'node_config_cancelled':
-      nodeConfigEvents.emit(
-        'node-config-cancelled',
-        data as unknown as NodeConfigCancelledEvent
-      );
+      nodeConfigEvents.emit('node-config-cancelled', data as unknown as NodeConfigCancelledEvent);
       return true;
     case 'secret_rotated':
-      nodeConfigEvents.emit(
-        'secret-rotated',
-        data as unknown as SecretRotatedEvent
-      );
+      nodeConfigEvents.emit('secret-rotated', data as unknown as SecretRotatedEvent);
       return true;
     default:
       return false;
@@ -767,6 +753,17 @@ export function useAgentChat({
                   },
                 })
               );
+            } else if (event.type === 'tool_error') {
+              // Non-fatal: a single tool call failed but the agent continues.
+              // Surface as a warning toast so the user knows without breaking
+              // the session or the message stream.
+              const toolErr = event.data as { tool_name?: string; error?: string };
+              const toolLabel = toolErr.tool_name ? `[${toolErr.tool_name}] ` : '';
+              const errMsg = toolErr.error || 'Tool call failed';
+              toast.error(`${toolLabel}${errMsg}`, {
+                duration: 5000,
+                id: `tool-err-${toolErr.tool_name ?? 'unknown'}`,
+              });
             } else if (event.type === 'error') {
               const errorData = event.data || {};
               if ((errorData as { code?: string }).code === 'insufficient_credits') {

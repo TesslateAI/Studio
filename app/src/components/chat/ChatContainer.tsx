@@ -1481,6 +1481,14 @@ export function ChatContainer({
                 },
               })
             );
+          } else if (event.type === 'tool_error') {
+            // Non-fatal: single tool call failed, agent continues.
+            const toolErr = event.data as { tool_name?: string; error?: string };
+            const toolLabel = toolErr.tool_name ? `[${toolErr.tool_name}] ` : '';
+            toast.error(`${toolLabel}${toolErr.error || 'Tool call failed'}`, {
+              duration: 5000,
+              id: `tool-err-${toolErr.tool_name ?? 'unknown'}`,
+            });
           } else if (event.type === 'error') {
             const errorData = event.data as Record<string, unknown>;
             // Handle insufficient credits specifically
