@@ -7,6 +7,7 @@ import type {
   DBMessage,
   ToolCallDetail,
   AgentStep,
+  ChatMention,
 } from '../types/agent';
 import type { ChatAgent } from '../types/chat';
 import type { EditMode } from '../components/chat/EditModeStatus';
@@ -513,7 +514,12 @@ export function useAgentChat({
   }, [chatId, agent]);
 
   const sendMessage = useCallback(
-    async (message: string, overrideChatId?: string, attachments?: SerializedAttachment[]) => {
+    async (
+      message: string,
+      overrideChatId?: string,
+      attachments?: SerializedAttachment[],
+      mentions?: ChatMention[]
+    ) => {
       if ((!message.trim() && (!attachments || attachments.length === 0)) || isExecuting) return;
 
       // Resolve the chat ID — create a session on the fly if needed
@@ -569,6 +575,10 @@ export function useAgentChat({
             max_iterations: undefined,
             edit_mode: editModeRef.current,
             attachments,
+            // @-mention picker entries — backend splits these by kind
+            // into mention_agent_ids / mention_mcp_config_ids /
+            // mention_app_instance_ids on the AgentTaskPayload.
+            mentions: mentions && mentions.length > 0 ? mentions : undefined,
           },
           (event) => {
             if (!isMountedRef.current) return;

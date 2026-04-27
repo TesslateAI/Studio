@@ -24,17 +24,22 @@ import {
   ListChecks,
   Brain,
   ArrowsClockwise,
+  Question,
+  Plus,
+  Robot,
+  PencilSimple as PencilSimpleIcon,
 } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import JSZip from 'jszip';
 import { type ChatAgent } from '../../types/chat';
-import { type SerializedAttachment } from '../../types/agent';
-import { projectsApi } from '../../lib/api';
+import { type SerializedAttachment, type ChatMention } from '../../types/agent';
+import { projectsApi, mentionApi, type MentionItem } from '../../lib/api';
 import { modKey } from '../../lib/keyboard-registry';
+import { useCommands } from '../../contexts/CommandContext';
 import { useAttachments } from '../../hooks/useAttachments';
 import { AttachmentStrip } from './AttachmentStrip';
-import { FilePickerDropdown } from './FilePickerDropdown';
 import { PlusMenu } from './PlusMenu';
+import { MentionPicker, type MentionPickerFile } from './MentionPicker';
 
 // Width thresholds for responsive collapse
 // Below VERY_COMPACT: Only essential icons (agent icon, menu, send button)
@@ -53,13 +58,21 @@ const COMMAND_ICONS: Record<string, ReactNode> = {
   '/retry': <ArrowClockwise size={14} weight="bold" />,
   '/effort': <Brain size={14} weight="bold" />,
   '/compact': <ArrowsClockwise size={14} weight="bold" />,
+  '/help': <Question size={14} weight="bold" />,
+  '/new': <Plus size={14} weight="bold" />,
+  '/model': <Robot size={14} weight="bold" />,
+  '/session': <PencilSimpleIcon size={14} weight="bold" />,
 };
 
 interface ChatInputProps {
   agents: ChatAgent[];
   currentAgent: ChatAgent;
   onSelectAgent: (agent: ChatAgent) => void;
-  onSendMessage: (message: string, attachments?: SerializedAttachment[]) => void;
+  onSendMessage: (
+    message: string,
+    attachments?: SerializedAttachment[],
+    mentions?: ChatMention[]
+  ) => void;
   slug?: string;
   projectName?: string;
   placeholder?: string;
@@ -135,6 +148,26 @@ export function ChatInput({
   const commandsRef = useRef<HTMLDivElement>(null);
   const commandsButtonRef = useRef<HTMLButtonElement>(null);
 
+  // External focus / attach triggers — dispatched by ChatContainer when the
+  // command palette or a keybinding fires. Keeps the textarea ref private
+  // here without forcing a forwardRef refactor on every consumer.
+  useEffect(() => {
+    const focus = () => textareaRef.current?.focus();
+    const attach = () => {
+      // Legacy "open file picker" event — folded into the unified mention
+      // picker so a single shortcut surfaces everything attachable.
+      setShowMentionPicker(true);
+    };
+    window.addEventListener('tesslate:focus-chat', focus);
+    window.addEventListener('tesslate:open-attach', attach);
+    return () => {
+      window.removeEventListener('tesslate:focus-chat', focus);
+      window.removeEventListener('tesslate:open-attach', attach);
+    };
+  }, []);
+
+  const commands = useCommands();
+
   const {
     attachments,
     addImage,
@@ -144,9 +177,21 @@ export function ChatInput({
     clearAttachments,
     serializeForSend,
   } = useAttachments();
-  const [showFilePicker, setShowFilePicker] = useState(false);
-  const [filePickerQuery, setFilePickerQuery] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+
+  // Unified @-mention picker. Replaces the previous FilePickerDropdown —
+  // files are now one of four sections (Agents / Apps / Connectors / Files).
+  // ``mentions`` is the structured list that ships in the chat request
+  // alongside the raw message string. The textarea still carries the
+  // human-readable ``@coworker`` token so chat history renders naturally.
+  const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentions, setMentions] = useState<ChatMention[]>([]);
+  const [mentionAgents, setMentionAgents] = useState<MentionItem[]>([]);
+  const [mentionMcps, setMentionMcps] = useState<MentionItem[]>([]);
+  const [mentionApps, setMentionApps] = useState<MentionItem[]>([]);
+  const [mentionFiles, setMentionFiles] = useState<MentionPickerFile[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
 
   // Derived compact states
   const isCompact = compactLevel === 'compact' || compactLevel === 'veryCompact';
@@ -234,6 +279,8 @@ export function ChatInput({
   const stableSkills = availableSkills?.length ? availableSkills : EMPTY_SKILLS;
   const slashCommands = useMemo(() => {
     const builtIn = [
+      { command: '/help', description: 'List available slash commands', isSkill: false },
+      { command: '/new', description: 'Start a new chat session', isSkill: false },
       { command: '/clear', description: 'Clear chat history', isSkill: false },
       { command: '/plan', description: 'Toggle plan mode', isSkill: false },
       { command: '/undo', description: 'Remove last message exchange', isSkill: false },
@@ -244,6 +291,8 @@ export function ChatInput({
         isSkill: false,
       },
       { command: '/compact', description: 'Compact conversation context', isSkill: false },
+      { command: '/model', description: 'Switch model / agent', isSkill: false },
+      { command: '/session', description: 'Rename current session', isSkill: false },
     ];
     const skillCommands = stableSkills.map((skill) => ({
       command: `/${skill.name}`,
@@ -282,16 +331,213 @@ export function ChatInput({
       setShowCommands(false);
       setFilteredCommands([]);
 
-      // Detect @ file references
+      // Detect ``@<query>`` at the end of the textarea content. Opens the
+      // unified mention picker (Agents / Apps / Connectors / Files). The
+      // textarea remains the source of truth — when the user picks an
+      // item we splice the trailing ``@<query>`` token out and replace it
+      // with the chosen display token + record the structured mention in
+      // ``mentions[]``.
       const atMatch = message.match(/@(\S*)$/);
-      if (atMatch && projectSlug) {
-        setFilePickerQuery(atMatch[1]);
-        setShowFilePicker(true);
+      if (atMatch) {
+        setMentionQuery(atMatch[1]);
+        setShowMentionPicker(true);
       } else {
-        setShowFilePicker(false);
+        setShowMentionPicker(false);
+        setMentionQuery('');
       }
     }
-  }, [message, slashCommands, projectSlug]);
+  }, [message, slashCommands]);
+
+  // Eagerly load mention sources on mount so auto-resolve of typed
+  // @<slug> tokens works even when the user never opens the picker
+  // (and so a fast typist who presses Enter before the picker's lazy
+  // fetch completes still gets structured mentions in the request).
+  // The cost is three small parallel GETs, swallowed individually by
+  // mentionApi.search; cached for the component's lifetime.
+  const mentionLoadedRef = useRef(false);
+  useEffect(() => {
+    if (mentionLoadedRef.current) return;
+    let cancelled = false;
+    setMentionLoading(true);
+    (async () => {
+      try {
+        const result = await mentionApi.search();
+        if (cancelled) return;
+        setMentionAgents(result.agents);
+        setMentionMcps(result.mcps);
+        setMentionApps(result.apps);
+        mentionLoadedRef.current = true;
+      } catch {
+        // mentionApi.search swallows per-category failures itself; this
+        // catch handles a complete fetch crash. Leave lists empty so the
+        // picker still renders project files.
+      } finally {
+        if (!cancelled) setMentionLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Project files for the picker's Files section. Lazy-loaded the first
+  // time the picker opens — only when the chat is project-scoped.
+  // Uses the same ``getFileTree`` source the legacy FilePickerDropdown
+  // used, so existing file-reference behaviour is preserved.
+  const filesLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!showMentionPicker || filesLoadedRef.current || !projectSlug) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const tree = await projectsApi.getFileTree(projectSlug);
+        if (cancelled) return;
+        const rows: MentionPickerFile[] = (tree || [])
+          .filter((f: { is_dir?: boolean }) => !f.is_dir)
+          .slice(0, 200)
+          .map((f: { path: string }) => ({
+            kind: 'file' as const,
+            path: f.path,
+            display: f.path.split('/').pop() || f.path,
+          }));
+        setMentionFiles(rows);
+        filesLoadedRef.current = true;
+      } catch {
+        // Project file listing is best-effort here.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showMentionPicker, projectSlug]);
+
+  // ---------------------------------------------------------------
+  // Auto-resolve typed @-mentions
+  // ---------------------------------------------------------------
+  // The picker is the discovery affordance, but we don't want to
+  // *require* an explicit click — users frequently type the slug
+  // directly (e.g. ``@surfaces-mathkit``) and never interact with
+  // the dropup. Without auto-resolve those typed-only mentions
+  // never make it into the structured ``mentions[]`` array, so the
+  // backend sends them as plain text and the agent has no
+  // ``[mentions]`` block to read from.
+  //
+  // Strategy: index every loaded library item by slug, scan the
+  // message for ``@<slug>`` tokens against that index, and reconcile
+  // ``mentions[]`` to match. Keeps existing picker-driven mentions
+  // intact (they have richer offset/display data) — we only ADD
+  // entries not already present, and never remove the picker's
+  // explicit choices unless their display token has been deleted
+  // from the message.
+
+  const mentionLibrary = useMemo(() => {
+    const m = new Map<string, MentionItem>();
+    for (const a of mentionAgents) if (a.slug) m.set(a.slug, a);
+    for (const x of mentionMcps) if (x.slug) m.set(x.slug, x);
+    for (const x of mentionApps) if (x.slug) m.set(x.slug, x);
+    return m;
+  }, [mentionAgents, mentionMcps, mentionApps]);
+
+  useEffect(() => {
+    // Pull every ``@<slug>`` occurrence; slugs are kebab-case + dots
+    // for app reverse-DNS ids. Word boundary at the end keeps us from
+    // greedily matching across whitespace.
+    const matches = Array.from(
+      message.matchAll(/(?:^|\s)@([a-zA-Z0-9_.\-]+)/g)
+    );
+    if (!matches.length && !mentions.length) return;
+
+    let changed = false;
+    const next = [...mentions];
+    const seenRefs = new Set(next.map((m) => m.ref_id));
+
+    for (const m of matches) {
+      const slug = m[1];
+      const item = mentionLibrary.get(slug);
+      if (!item) continue;
+      if (!item.enabled) continue;
+      if (seenRefs.has(item.ref_id)) continue;
+      const display = '@' + slug;
+      // Anchor offset to where the match landed in the message body
+      // so a future renderer can highlight the exact substring; the
+      // ``@`` itself is one char before the slug.
+      const baseIdx = m.index ?? 0;
+      const offset =
+        baseIdx + (m[0].startsWith('@') ? 0 : m[0].indexOf('@'));
+      next.push({ kind: item.kind, ref_id: item.ref_id, display, offset });
+      seenRefs.add(item.ref_id);
+      changed = true;
+    }
+
+    // Drop mentions whose display token has been deleted from the
+    // message body so the structured array stays in sync with what
+    // the user actually typed.
+    const filtered = next.filter((m) => message.includes(m.display));
+    if (filtered.length !== next.length) changed = true;
+
+    if (changed) setMentions(filtered);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message, mentionLibrary]);
+
+  // ---------------------------------------------------------------
+  // Inline mention highlighting
+  // ---------------------------------------------------------------
+  // The textarea is a real <textarea>, so we can't render React nodes
+  // inside it. We use the standard textarea-highlighter trick: a div
+  // with identical font + padding + wrapping sits BEHIND the textarea.
+  // The overlay div renders the same text, but with each registered
+  // @-mention's display token wrapped in a rounded colored <span>
+  // whose background peeks through the textarea (textarea bg is
+  // transparent). The overlay text itself is transparent so we don't
+  // double-paint glyphs — only the colored pills are visible.
+  //
+  // Order matters: longest tokens first so '@foo-bar' isn't matched
+  // by a shorter '@foo' that happens to share the prefix.
+
+  // Overlay-only classes — bg + ring, no `text-…`. The overlay has
+  // text-transparent at the parent level; if a pill class set a text
+  // color it would override that and produce visible "ghost" glyphs
+  // behind the textarea's real text (the "double text" bug).
+  const MENTION_KIND_PILL: Record<string, string> = {
+    agent:
+      'bg-[var(--primary)]/20 ring-1 ring-inset ring-[var(--primary)]/40',
+    app:
+      'bg-[var(--status-purple)]/20 ring-1 ring-inset ring-[var(--status-purple)]/40',
+    mcp:
+      'bg-[var(--accent)]/20 ring-1 ring-inset ring-[var(--accent)]/40',
+  };
+
+  const messageParts = useMemo(() => {
+    if (!mentions.length) return [{ text: message }] as Array<{
+      text: string;
+      kind?: ChatMention['kind'];
+    }>;
+
+    // Map display token -> kind. If two mentions reuse the same display
+    // (rare; user @-mentioned the same handle twice), the latest entry
+    // wins.
+    const tokenMap = new Map<string, ChatMention['kind']>();
+    for (const m of mentions) tokenMap.set(m.display, m.kind);
+
+    const tokens = Array.from(tokenMap.keys()).sort(
+      (a, b) => b.length - a.length
+    );
+    const escaped = tokens.map((t) =>
+      t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    );
+    const re = new RegExp(`(${escaped.join('|')})`, 'g');
+
+    const parts: Array<{ text: string; kind?: ChatMention['kind'] }> = [];
+    let last = 0;
+    for (const m of message.matchAll(re)) {
+      const idx = m.index ?? 0;
+      if (idx > last) parts.push({ text: message.slice(last, idx) });
+      parts.push({ text: m[0], kind: tokenMap.get(m[0]) });
+      last = idx + m[0].length;
+    }
+    if (last < message.length) parts.push({ text: message.slice(last) });
+    return parts;
+  }, [message, mentions]);
 
   // Auto-resize textarea as user types
   // Note: This causes a reflow but it's unavoidable for auto-sizing textareas
@@ -344,6 +590,24 @@ export function ChatInput({
       if (onCompact) {
         onCompact();
       }
+    } else if (cmd === '/help') {
+      const lines = slashCommands
+        .filter((c) => !c.isSkill)
+        .map((c) => `${c.command} — ${c.description}`)
+        .join('\n');
+      toast(lines, { duration: 8000, icon: '❓', style: { whiteSpace: 'pre-line' } });
+      setMessage('');
+    } else if (cmd === '/new') {
+      commands.executeCommand('newChatSession');
+      setMessage('');
+    } else if (cmd === '/model') {
+      // Bare /model opens the picker; "/model <name>" is handled in sendMessage.
+      commands.executeCommand('switchModel');
+      setMessage('');
+    } else if (cmd === '/session') {
+      // Bare /session triggers a rename prompt; "/session <name>" handled in sendMessage.
+      commands.executeCommand('renameChatSession');
+      setMessage('');
     }
   };
 
@@ -354,7 +618,9 @@ export function ChatInput({
       // Check if it's a built-in slash command
       if (trimmed.startsWith('/')) {
         const baseCmd = trimmed.split(' ')[0];
-        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry'].includes(baseCmd);
+        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry', '/help', '/new'].includes(
+          baseCmd
+        );
         if (isBuiltIn) {
           executeCommand(baseCmd);
         } else if (baseCmd === '/effort') {
@@ -377,17 +643,30 @@ export function ChatInput({
           // Skill slash commands are sent as regular messages to the agent
           setMessageHistory((prev) => [...prev, trimmed]);
           const serialized = await serializeForSend();
-          onSendMessage(trimmed, serialized.length > 0 ? serialized : undefined);
+          // Drop mentions whose display token is no longer in the message
+          // (the user may have manually deleted ``@x`` after picking it).
+          const liveMentions = mentions.filter((m) => trimmed.includes(m.display));
+          onSendMessage(
+            trimmed,
+            serialized.length > 0 ? serialized : undefined,
+            liveMentions.length > 0 ? liveMentions : undefined
+          );
         }
       } else {
         // Regular message
         setMessageHistory((prev) => [...prev, trimmed]);
         const serialized = await serializeForSend();
-        onSendMessage(trimmed, serialized.length > 0 ? serialized : undefined);
+        const liveMentions = mentions.filter((m) => trimmed.includes(m.display));
+        onSendMessage(
+          trimmed,
+          serialized.length > 0 ? serialized : undefined,
+          liveMentions.length > 0 ? liveMentions : undefined
+        );
       }
       setMessage('');
       setHistoryIndex(-1);
       clearAttachments();
+      setMentions([]);
     }
   };
 
@@ -615,7 +894,42 @@ export function ChatInput({
   const handleFileSelect = (filePath: string, fileName: string) => {
     addFileReference(filePath, fileName);
     setMessage((prev) => prev.replace(/@\S*$/, ''));
-    setShowFilePicker(false);
+    setShowMentionPicker(false);
+  };
+
+  // Replace the trailing ``@<query>`` token in the textarea with the
+  // selected mention's display token, and record the structured mention
+  // for the eventual chat request. ``offset`` lets the backend (or a
+  // later renderer) align the mention token to the message body.
+  const handleMentionSelect = (mention: ChatMention, item: MentionItem) => {
+    const display = mention.display || `@${item.slug || item.name}`;
+    setMessage((prev) => {
+      const updated = prev.replace(/@\S*$/, '');
+      const offset = updated.length;
+      // Avoid duplicate refs for the same target — replace if already present.
+      setMentions((curr) => {
+        const filtered = curr.filter((m) => m.ref_id !== mention.ref_id);
+        return [...filtered, { ...mention, display, offset }];
+      });
+      return updated + display + ' ';
+    });
+    setShowMentionPicker(false);
+    setMentionQuery('');
+    textareaRef.current?.focus();
+  };
+
+  const handleMentionFileSelect = (file: MentionPickerFile) => {
+    handleFileSelect(file.path, file.display);
+  };
+
+  const handleMentionDisabled = (item: MentionItem) => {
+    // Surface a hint instead of inserting. We deliberately don't navigate
+    // away — that would interrupt the user's typing flow. The label tells
+    // them why it's greyed.
+    const reason = item.state_label || 'disabled';
+    toast(`${item.name} is ${reason}. Enable it in your library to use it.`, {
+      icon: 'ℹ️',
+    });
   };
 
   // Settings drop-up — rendered inline next to the trigger button so it
@@ -861,14 +1175,26 @@ export function ChatInput({
         </div>
       )}
 
-      {/* @ file picker */}
-      {showFilePicker && projectSlug && (
-        <FilePickerDropdown
-          slug={projectSlug}
-          query={filePickerQuery}
-          onSelect={handleFileSelect}
-          onClose={() => setShowFilePicker(false)}
-        />
+      {/* @-mention picker — dropup above the textarea. Anchored relative
+          to the form so it sits flush above the input. Renders four
+          sections (Agents / Apps / Connectors / Files) and is gated on
+          `showMentionPicker` from the @-detect effect above. */}
+      {showMentionPicker && (
+        <div className="absolute left-2 right-2 bottom-full mb-1 z-50">
+          <MentionPicker
+            isOpen={showMentionPicker}
+            query={mentionQuery}
+            agents={mentionAgents}
+            mcps={mentionMcps}
+            apps={mentionApps}
+            files={projectSlug ? mentionFiles : []}
+            loading={mentionLoading}
+            onSelectMention={handleMentionSelect}
+            onSelectFile={handleMentionFileSelect}
+            onDisabledSelect={handleMentionDisabled}
+            onClose={() => setShowMentionPicker(false)}
+          />
+        </div>
       )}
 
       {/* Settings / menu dropdown is now anchored to the trigger button
@@ -923,24 +1249,60 @@ export function ChatInput({
                   </div>
                 </div>
               )}
-              <textarea
-                ref={textareaRef}
-                value={message}
-                onChange={(e) => {
-                  setMessage(e.target.value);
-                }}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                placeholder=""
-                rows={1}
-                className={`chat-input bg-transparent border-none text-[var(--text)] text-sm !outline-none focus:!outline-none placeholder:text-[var(--text)]/40 resize-none overflow-hidden leading-relaxed my-2 ${
-                  recognizedCommand ? 'w-0 opacity-0 p-0 m-0' : 'w-full'
-                }`}
-                style={{
-                  minHeight: recognizedCommand ? '0' : '24px',
-                  maxHeight: '200px',
-                }}
-              />
+              <div className={`relative ${recognizedCommand ? 'w-0' : 'flex-1 w-full'}`}>
+                {/* Inline mention-highlight overlay — renders the same
+                    text geometry as the textarea so coloured pills sit
+                    exactly behind the @<token> glyphs. ``aria-hidden``
+                    keeps it out of the screen-reader tree.
+                */}
+                {!recognizedCommand && mentions.length > 0 && (
+                  <div
+                    aria-hidden
+                    // ``[&_*]:!text-transparent`` forces every descendant
+                    // (including the kind-pill spans) to inherit
+                    // transparency — defence in depth so a future pill
+                    // class that introduces ``text-…`` can't ever cause
+                    // the "double text" overlap again.
+                    className="pointer-events-none absolute inset-0 my-2 text-sm leading-relaxed whitespace-pre-wrap break-words text-transparent [&_*]:!text-transparent"
+                  >
+                    {messageParts.map((p, i) =>
+                      p.kind ? (
+                        <span
+                          key={i}
+                          className={`rounded-md ${MENTION_KIND_PILL[p.kind] ?? ''}`}
+                        >
+                          {p.text}
+                        </span>
+                      ) : (
+                        <span key={i}>{p.text}</span>
+                      )
+                    )}
+                    {/* Trailing newline so wrapping width matches the
+                        textarea's content rect when message ends with
+                        \n (textarea adds a phantom line for the caret).
+                    */}
+                    {'\n'}
+                  </div>
+                )}
+                <textarea
+                  ref={textareaRef}
+                  value={message}
+                  onChange={(e) => {
+                    setMessage(e.target.value);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
+                  placeholder=""
+                  rows={1}
+                  className={`relative z-[1] chat-input bg-transparent border-none text-[var(--text)] text-sm !outline-none focus:!outline-none placeholder:text-[var(--text)]/40 resize-none overflow-hidden leading-relaxed my-2 ${
+                    recognizedCommand ? 'w-0 opacity-0 p-0 m-0' : 'w-full'
+                  }`}
+                  style={{
+                    minHeight: recognizedCommand ? '0' : '24px',
+                    maxHeight: '200px',
+                  }}
+                />
+              </div>
             </>
           )}
         </div>

@@ -15,7 +15,6 @@ error before we hit Hub. IntegrityError at flush time is translated.
 from __future__ import annotations
 
 import logging
-import secrets as _secrets
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -30,17 +29,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ... import config_features
 from ...models import (
     PROJECT_KIND_APP_RUNTIME,
-    AgentSchedule,
     AppInstallAttempt,
     AppInstance,
     AppVersion,
     Container,
-    ContainerConnection,
     MarketplaceApp,
     McpConsentRecord,
     Project,
 )
-from ...models_automations import AppRuntimeDeployment
+from ...models_automations import (
+    AppAutomationTemplate,
+    AppRuntimeDeployment,
+    AutomationAction,
+    AutomationDefinition,
+    AutomationDeliveryTarget,
+    AutomationTrigger,
+)
 from ..hub_client import HubClient
 from . import compatibility
 
@@ -340,6 +344,182 @@ async def _find_shared_singleton_deployment(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+_VALID_TRIGGER_KINDS: frozenset[str] = frozenset(
+    {"cron", "webhook", "app_invocation", "manual"}
+)
+_VALID_ACTION_TYPES: frozenset[str] = frozenset(
+    {"agent.run", "app.invoke", "gateway.send"}
+)
+
+
+async def _materialize_install_automations(
+    db: AsyncSession,
+    *,
+    app_version_id: UUID,
+    installer_user_id: UUID,
+    team_id: UUID,
+    target_project_id: UUID,
+) -> int:
+    """Project ``app_automation_templates`` (default-enabled) into
+    ``automation_definitions`` rows owned by the installer.
+
+    Per v9: apps cannot run schedules autonomously. ``app_automation_templates``
+    is the publish-time projection of ``manifest.automation_templates[]``;
+    each row is a *suggestion*. Rows with ``is_default_enabled=True`` create
+    real automation definitions on install — the user owns them and can
+    pause / edit / delete via ``/api/automations``.
+
+    The ``contract`` JSONB column on ``automation_definitions`` is NOT NULL
+    and the create router rejects ``{}``; we mirror that gate here so an
+    empty ``contract_template`` skips the row (with a warning) rather than
+    poisoning the install transaction with a CHECK violation.
+
+    Trigger / action kinds are validated against the same enums the
+    automations router enforces (defense in depth — a malformed template
+    in the DB shouldn't block the install).
+
+    Returns:
+        Number of automation_definitions rows created.
+    """
+    template_rows = (
+        (
+            await db.execute(
+                select(AppAutomationTemplate).where(
+                    AppAutomationTemplate.app_version_id == app_version_id,
+                    AppAutomationTemplate.is_default_enabled.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not template_rows:
+        return 0
+
+    created = 0
+    for tpl in template_rows:
+        contract = tpl.contract_template or {}
+        if not isinstance(contract, dict) or not contract:
+            logger.warning(
+                "install_app: skipping automation template %r (empty contract_template)",
+                tpl.name,
+            )
+            continue
+
+        trigger_cfg = dict(tpl.trigger_config or {})
+        trigger_kind = str(trigger_cfg.pop("kind", "") or "")
+        if trigger_kind not in _VALID_TRIGGER_KINDS:
+            logger.warning(
+                "install_app: skipping automation template %r "
+                "(trigger.kind=%r not in %s)",
+                tpl.name,
+                trigger_kind,
+                sorted(_VALID_TRIGGER_KINDS),
+            )
+            continue
+
+        action_cfg = dict(tpl.action_config or {})
+        # 2026-05 manifests serialize AutomationActionSpec.kind, but Phase 1
+        # AutomationDefinition stores the runtime field as action_type.
+        # Accept both so a manifest authored against the schema (kind) lands
+        # cleanly without forcing creators to know the internal column name.
+        action_type = str(
+            action_cfg.pop("action_type", None)
+            or action_cfg.pop("kind", None)
+            or ""
+        )
+        if action_type not in _VALID_ACTION_TYPES:
+            logger.warning(
+                "install_app: skipping automation template %r "
+                "(action.action_type=%r not in %s)",
+                tpl.name,
+                action_type,
+                sorted(_VALID_ACTION_TYPES),
+            )
+            continue
+
+        definition = AutomationDefinition(
+            id=uuid.uuid4(),
+            name=tpl.name,
+            owner_user_id=installer_user_id,
+            team_id=team_id,
+            workspace_scope="target_project",
+            target_project_id=target_project_id,
+            contract=contract,
+            max_compute_tier=int(contract.get("max_compute_tier", 0) or 0),
+            is_active=True,
+            created_by_user_id=installer_user_id,
+            depth=0,
+        )
+        db.add(definition)
+        # Flush so the trigger/action FKs resolve. The router's create handler
+        # does the same — without an explicit flush the FK enforcement on
+        # ``automation_id`` fires before the parent row lands.
+        await db.flush()
+
+        db.add(
+            AutomationTrigger(
+                id=uuid.uuid4(),
+                automation_id=definition.id,
+                kind=trigger_kind,
+                config=trigger_cfg,
+                is_active=True,
+            )
+        )
+
+        # Phase 1 dispatcher accepts exactly one action per definition.
+        action_app_action_id = action_cfg.pop("app_action_id", None)
+        db.add(
+            AutomationAction(
+                id=uuid.uuid4(),
+                automation_id=definition.id,
+                ordinal=int(action_cfg.pop("ordinal", 0) or 0),
+                action_type=action_type,
+                config=action_cfg,
+                app_action_id=action_app_action_id,
+            )
+        )
+
+        # delivery_config is optional — accept either a list of target dicts
+        # or a dict carrying a "targets" list, both with destination_id keys.
+        delivery_cfg = tpl.delivery_config or {}
+        if isinstance(delivery_cfg, dict):
+            target_specs = delivery_cfg.get("targets") or []
+        elif isinstance(delivery_cfg, list):
+            target_specs = delivery_cfg
+        else:
+            target_specs = []
+        for ordinal, spec in enumerate(target_specs):
+            if not isinstance(spec, dict):
+                continue
+            destination_id = spec.get("destination_id")
+            if destination_id is None:
+                continue
+            db.add(
+                AutomationDeliveryTarget(
+                    id=uuid.uuid4(),
+                    automation_id=definition.id,
+                    destination_id=destination_id,
+                    ordinal=int(spec.get("ordinal", ordinal) or ordinal),
+                    on_failure=spec.get("on_failure") or {},
+                    artifact_filter=str(spec.get("artifact_filter") or "all"),
+                )
+            )
+        created += 1
+
+    if created:
+        await db.flush()
+        logger.info(
+            "install_app: materialized %d AutomationDefinition rows from "
+            "%d app_automation_templates (target_project=%s installer=%s)",
+            created,
+            len(template_rows),
+            target_project_id,
+            installer_user_id,
+        )
+    return created
+
+
 def _consent_matches_billing(consent: dict[str, Any], billing: dict[str, Any]) -> bool:
     """Every billing dimension present in the manifest must also be present
     (by key) in the consent payload. Accepts either a flat consent
@@ -418,6 +598,36 @@ async def install_app(
         )
 
     # 3) Dedupe: one installed instance per (installer, app).
+    #
+    # Two layers of protection because the original SELECT-then-INSERT was
+    # TOCTOU: two concurrent click-to-install requests both pass the
+    # SELECT, both call ``hub_client.create_volume_from_bundle`` (slow,
+    # mints two volumes), both reach the AppInstance INSERT, both succeed
+    # because the partial UNIQUE on ``project_id`` doesn't catch the
+    # per_install case (each install creates a fresh project_id).
+    #
+    # Layer A — Postgres advisory transaction-scoped lock keyed by
+    # ``(installer_user_id, app_id)``. Concurrent installs of the same app
+    # by the same user serialize on this lock; the second waits for the
+    # first to commit, then sees the freshly-inserted ``state='installed'``
+    # row in the SELECT below and bails without ever calling Hub. The lock
+    # is released automatically at transaction end. Skipped on SQLite
+    # (desktop) — SQLite serializes writes via WAL so the race is far
+    # narrower, and the partial UNIQUE in alembic 0085 is the hard gate.
+    #
+    # Layer B — partial UNIQUE index
+    # ``uq_app_instances_user_app_installed`` (alembic 0085) on
+    # ``(installer_user_id, app_id) WHERE state='installed'``. The
+    # IntegrityError catch around ``db.flush()`` translates a constraint
+    # violation back to ``AlreadyInstalledError``.
+    if db.bind.dialect.name == "postgresql":
+        from sqlalchemy import text
+
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"app-install:{installer_user_id}:{app_row.id}"},
+        )
+
     existing_instance_id = (
         await db.execute(
             select(AppInstance.id)
@@ -636,21 +846,21 @@ async def install_app(
         await db.flush()
         materialize_compute = True
 
-    # 7) Materialize Containers + Connections from manifest.compute.
+    # 7) Materialize Containers + Connections from the bundle's
+    # ``.tesslate/config.json``.
+    #
+    # The 2026-05 manifest deliberately drops the legacy
+    # ``compute.containers[]`` block. The App Runtime Contract treats the
+    # bundle CAS as the source of truth for container layout: publish
+    # snapshots the source project's volume (``.tesslate/config.json``
+    # included), install creates a fresh volume from the bundle, the new
+    # volume already carries that config. We delegate to
+    # :func:`materialize_compute_from_volume` which uses the same parser
+    # the source-side ``setup-config`` flow uses — keeping source and
+    # install symmetric.
+    #
     # Skipped for per_invocation (no project) and for shared_singleton
     # reuse (the first installer already materialized them).
-    compute = manifest_json.get("compute") or {}
-    container_specs = list(compute.get("containers") or [])
-    compute_model = str(compute.get("model") or "always-on")
-    if not materialize_compute:
-        container_specs = []
-    if compute_model == "job-only":
-        logger.info(
-            "install_app: app=%s version=%s is job-only — containers will be marked status=job_only",
-            app_row.id,
-            av.id,
-        )
-    initial_status = "job_only" if compute_model == "job-only" else "stopped"
     containers_by_name: dict[str, Container] = {}
     primary_container: Container | None = None
 
@@ -665,8 +875,6 @@ async def install_app(
     # so the SDK has a stable env contract; non-K8s callers reach the
     # orchestrator at the same Service name today.
     runtime_env_overlay: dict[str, str] = {}
-    # Defer the token secret reference until we have ``instance`` minted
-    # (instance.id is the secret name suffix). We add the runtime URL eagerly.
     if (
         runtime_contract.tenancy_model == "per_install"
         or (
@@ -674,110 +882,38 @@ async def install_app(
             and materialize_compute
         )
     ):
-        # ``connector_proxy_runtime_url`` resolves to the standalone
-        # ``opensail-runtime:8400`` Service in dedicated mode and to the
-        # embedded mount (``tesslate-backend-service:8000/api/v1/connector-proxy``)
-        # in desktop / docker mode. The SDK appends
-        # ``/connectors/{id}/{path}`` either way.
         from ...config import get_settings as _get_runtime_settings
 
         runtime_env_overlay["OPENSAIL_RUNTIME_URL"] = (
             _get_runtime_settings().connector_proxy_runtime_url
         )
 
-    for entry in container_specs:
-        if not isinstance(entry, dict):
-            continue
-        # The container loop only runs when ``materialize_compute`` is
-        # True, which guarantees ``project`` was assigned above. The
-        # assertion documents the invariant for static analyzers.
-        assert project is not None, "container materialization requires a project"
-        name = str(entry.get("name") or "").strip()
-        if not name:
-            raise IncompatibleAppError("manifest compute.containers entry missing 'name'")
-        image = entry.get("image")
-        if not image:
-            raise IncompatibleAppError(f"manifest compute.containers[{name}] missing 'image'")
-        ports = entry.get("ports") or []
-        port = ports[0] if ports else None
-        directory = entry.get("directory") or "/app"
-        is_primary = bool(entry.get("primary", False))
-
-        env_in = dict(entry.get("env") or {})
-        # Layer runtime env overlay onto every container in the install.
-        # Manifest-declared values win — operators can override the runtime
-        # URL for migration windows. The token (added below post-instance)
-        # also yields to manifest-declared values so an app can opt out
-        # entirely if it ships its own auth.
-        for ov_key, ov_val in runtime_env_overlay.items():
-            env_in.setdefault(ov_key, ov_val)
-
-        c = Container(
-            project_id=project.id,
-            name=name,
-            directory=directory,
-            container_name=f"{project.slug}-{name}",
-            port=port,
-            internal_port=port,
-            startup_command=entry.get("startup_command"),
-            environment_vars=env_in,
-            image=str(image),
-            status=initial_status,
-            container_type=("service" if entry.get("kind") == "service" else "base"),
-            is_primary=is_primary,
-        )
-        db.add(c)
-        containers_by_name[name] = c
-        if is_primary and primary_container is None:
-            primary_container = c
-
-    # Default primary if none marked: first container inserted.
-    if primary_container is None and containers_by_name:
-        first = next(iter(containers_by_name.values()))
-        first.is_primary = True
-        primary_container = first
-
-    # Flush so Container.id values are available for FK references below.
-    if containers_by_name:
-        await db.flush()
-
     if materialize_compute:
-        assert project is not None
-        for conn in compute.get("connections") or []:
-            if not isinstance(conn, dict):
-                continue
-            # Manifest schema (2025-02 and 2026-05) names these fields
-            # `source_container` / `target_container`. No legacy fallback —
-            # there is no installed-base predating the schema.
-            src_name = conn.get("source_container")
-            tgt_name = conn.get("target_container")
-            if not src_name:
-                raise IncompatibleAppError(
-                    "manifest compute.connections entry missing 'source_container'"
-                )
-            if not tgt_name:
-                raise IncompatibleAppError(
-                    "manifest compute.connections entry missing 'target_container'"
-                )
-            src = containers_by_name.get(src_name)
-            tgt = containers_by_name.get(tgt_name)
-            if src is None or tgt is None:
-                logger.warning(
-                    "install_app: skipping connection %r->%r (unknown name)",
-                    src_name,
-                    tgt_name,
-                )
-                continue
-            db.add(
-                ContainerConnection(
-                    project_id=project.id,
-                    source_container_id=src.id,
-                    target_container_id=tgt.id,
-                    connector_type=conn.get("connector_type", "env_injection"),
-                    config=conn.get("config") or {"env_mapping": conn.get("env_mapping") or {}},
-                    label=conn.get("label"),
+        assert project is not None, "container materialization requires a project"
+        from .install_compute_materializer import (
+            BundleConfigMissing,
+            materialize_compute_from_volume,
+        )
+
+        try:
+            containers_by_name, primary_container = (
+                await materialize_compute_from_volume(
+                    db,
+                    project=project,
+                    installer_user_id=installer_user_id,
+                    volume_id=volume_id,
+                    cache_node=node_name,
+                    runtime_env_overlay=runtime_env_overlay,
                 )
             )
+        except BundleConfigMissing as exc:
+            raise IncompatibleAppError(str(exc)) from exc
+        except ValueError as exc:
+            # parse_tesslate_config raises ValueError for invalid JSON or
+            # unsafe startup commands — both are install-blocking.
+            raise IncompatibleAppError(
+                f"bundle .tesslate/config.json invalid: {exc}"
+            ) from exc
 
     # 8) Insert AppInstance + McpConsentRecord rows.
     #
@@ -805,11 +941,20 @@ async def install_app(
     try:
         await db.flush()
     except IntegrityError as e:
-        # Partial UNIQUE on project_id caught a concurrent install. Translate.
+        # Concurrent install raced past the dedupe SELECT. Two known
+        # constraints can fire here:
+        #   (1) ``uq_app_instances_user_app_installed`` (alembic 0085) —
+        #       partial UNIQUE on ``(installer_user_id, app_id) WHERE
+        #       state='installed'``. Catches per_install duplicates.
+        #   (2) Partial UNIQUE on ``app_instances(project_id) WHERE
+        #       state='installed' AND project_id IS NOT NULL``. Catches
+        #       shared_singleton reuse races.
+        # Both translate to the same domain error so callers don't need to
+        # distinguish.
         await db.rollback()
         raise AlreadyInstalledError(
-            f"project {project.id if project is not None else '<none>'} "
-            "already has an installed app instance"
+            f"user {installer_user_id} already has app {app_row.id} installed "
+            "(concurrent install)"
         ) from e
 
     # 8.5) Wire ``OPENSAIL_APPINSTANCE_TOKEN`` onto the primary container as
@@ -841,54 +986,25 @@ async def install_app(
             )
         )
 
-    # 9) Materialize AgentSchedule rows for manifest.schedules.
-    # AgentSchedule.project_id is NOT NULL — schedules are skipped for
-    # per_invocation installs (no persistent project to anchor them on).
-    # The Phase 4 controller handles trigger routing for per_invocation
-    # apps via automation_definitions instead.
-    schedule_specs = (
-        list(manifest_json.get("schedules") or []) if project is not None else []
-    )
-    for sched in schedule_specs:
-        if not isinstance(sched, dict):
-            continue
-        sched_name = str(sched.get("name") or "").strip()
-        if not sched_name:
-            logger.warning("install_app: skipping schedule without name")
-            continue
-        trigger_kind = str(sched.get("trigger_kind") or "cron")
-        default_cron = sched.get("default_cron") or ("0 0 * * *" if trigger_kind == "cron" else "")
-        trigger_config: dict[str, Any] = {
-            "execution": sched.get("execution", "job"),
-            "entrypoint": sched.get("entrypoint"),
-        }
-        if trigger_kind == "webhook":
-            # Per-schedule HMAC secrets are stored as a kid-keyed list so they
-            # can be rotated and revoked without losing back-compat for callers
-            # mid-flight. The verifier in routers/app_triggers.py also accepts
-            # the legacy single-key shape ({"webhook_secret": "..."}) for one
-            # release; new installs always emit the list form.
-            trigger_config["webhook_secrets"] = [
-                {
-                    "kid": "v1",
-                    "secret": _secrets.token_urlsafe(32),
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "revoked_at": None,
-                }
-            ]
-        db.add(
-            AgentSchedule(
-                user_id=installer_user_id,
-                project_id=project.id,
-                app_instance_id=instance.id,
-                name=sched_name,
-                cron_expression=default_cron or "",
-                normalized_cron=default_cron or "",
-                prompt_template=sched.get("prompt_template") or "",
-                trigger_kind=trigger_kind,
-                trigger_config=trigger_config,
-                is_active=True,
-            )
+    # 9) Materialize AutomationDefinition rows from app_automation_templates.
+    #
+    # Per the v9 plan: apps don't run schedules autonomously. Each
+    # ``app_automation_templates`` row (a publish-time projection of the
+    # manifest's ``automation_templates[]`` block) is a *suggestion*.
+    # Templates with ``is_default_enabled=True`` create real
+    # ``AutomationDefinition`` rows owned by the installer and scoped to
+    # the install's runtime project; the user can later toggle them off
+    # or add new ones via ``/api/automations``.
+    #
+    # Skipped for per_invocation installs (no persistent project to anchor
+    # the automation's ``target_project_id`` on).
+    if project is not None:
+        await _materialize_install_automations(
+            db,
+            app_version_id=av.id,
+            installer_user_id=installer_user_id,
+            team_id=team_id,
+            target_project_id=project.id,
         )
 
     # 9.5) Wire app_instance_links rows for manifest.dependencies[] (Phase 3).

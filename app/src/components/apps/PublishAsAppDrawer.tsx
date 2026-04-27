@@ -14,8 +14,6 @@ interface Props {
   projectSlug: string;
   /** Project name — drawer header. */
   projectName: string;
-  /** Pre-fetched draft (from the toolbar button). When null, the drawer fetches its own. */
-  initialDraft?: PublishDraftResponse | null;
   onClose: () => void;
   /**
    * Called after a successful publish. Parent should refresh project info so
@@ -107,21 +105,22 @@ function resolveJumpTarget(item: ChecklistItem): InspectorJumpTarget | null {
 export default function PublishAsAppDrawer({
   projectSlug,
   projectName,
-  initialDraft = null,
   onClose,
   onPublished,
   onJumpToInspector,
 }: Props) {
-  const [draft, setDraft] = useState<PublishDraftResponse | null>(initialDraft);
-  const [yamlText, setYamlText] = useState<string>(initialDraft?.yaml ?? '');
+  const [draft, setDraft] = useState<PublishDraftResponse | null>(null);
+  const [yamlText, setYamlText] = useState<string>('');
   const [editing, setEditing] = useState(false);
-  const [loading, setLoading] = useState(initialDraft === null);
+  const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch the draft if the parent didn't pre-load it.
+  // Fetch the inferred draft once on mount. The drawer owns the fetch
+  // (single source of truth) — pushing a parent pre-fetch through an
+  // initialDraft prop introduces a stale-closure race when the response
+  // lands after the drawer has already mounted and started its own fetch.
   useEffect(() => {
-    if (initialDraft) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -143,7 +142,7 @@ export default function PublishAsAppDrawer({
     return () => {
       cancelled = true;
     };
-  }, [initialDraft, projectSlug]);
+  }, [projectSlug]);
 
   // Re-check the manifest after the user edits YAML. The inferrer endpoint
   // doesn't validate edited content directly — for Phase 5 we re-fetch the

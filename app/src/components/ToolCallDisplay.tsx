@@ -15,6 +15,7 @@ import { type ToolCallDetail } from '../types/agent';
 import { AnsiLine } from '../lib/ansi';
 import { Citations } from './chat/CitationCard';
 import { ReauthBanner } from './chat/ReauthBanner';
+import { CallAgentToolDisplay } from './chat/CallAgentToolDisplay';
 
 interface ToolCallDisplayProps {
   toolCall: ToolCallDetail;
@@ -80,6 +81,15 @@ const shouldTruncateOutput = (output: string): boolean => {
 export default function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
   const [showFullOutput, setShowFullOutput] = useState(false);
   const isDevelopment = import.meta.env.DEV;
+
+  // ``call_agent`` is the @-mention multi-agent delegation tool — its
+  // result has its own structured shape (output, agent_slug, sub_chat_id,
+  // duration_seconds) that the generic renderer below cannot surface
+  // cleanly. Render the dedicated drill-in card instead. The hook above
+  // still runs so the rules-of-hooks invariant is preserved.
+  if (toolCall.name === 'call_agent') {
+    return <CallAgentToolDisplay toolCall={toolCall} />;
+  }
 
   const { name, parameters, result } = toolCall;
   const hasResult = result !== undefined && result !== null;

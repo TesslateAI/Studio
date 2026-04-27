@@ -145,3 +145,80 @@ def test_tool_construction_rejects_non_bool_annotation() -> None:
             state_serializable="yes",  # type: ignore[arg-type]
             holds_external_state=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# MCP bridge — runtime-constructed Tool instances
+# ---------------------------------------------------------------------------
+#
+# The static walks above only cover tools registered at module import time.
+# MCP bridge functions construct ``Tool`` per-user, per-server, per-call —
+# invisible to ``_registered_tools()``. Without these tests, a future field
+# added to ``Tool`` will silently break every installed MCP at runtime
+# (the worker's MCP-loading swallow turns it into "agent says it has no
+# integration") while the static CI test stays green. This is exactly the
+# regression that landed when ``state_serializable`` became required.
+
+
+@pytest.mark.unit
+def test_bridge_mcp_tools_declares_state_annotations() -> None:
+    """Every Tool produced by ``bridge_mcp_tools`` must declare both
+    state-shape annotations. Mirrors the static-tool invariant."""
+    from app.services.mcp.bridge import bridge_mcp_tools
+
+    bridged = bridge_mcp_tools(
+        "test_server",
+        [
+            {
+                "name": "search",
+                "description": "test tool",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "create_page",
+                "description": "another test tool",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+        ],
+    )
+    assert len(bridged) == 2
+    for t in bridged:
+        assert isinstance(t.state_serializable, bool), (
+            f"bridge_mcp_tools produced '{t.name}' without a bool "
+            f"state_serializable; got {type(t.state_serializable).__name__}"
+        )
+        assert isinstance(t.holds_external_state, bool), (
+            f"bridge_mcp_tools produced '{t.name}' without a bool "
+            f"holds_external_state; got {type(t.holds_external_state).__name__}"
+        )
+
+
+@pytest.mark.unit
+def test_bridge_mcp_resources_declares_state_annotations() -> None:
+    """The resource meta-tool produced by ``bridge_mcp_resources`` must
+    declare both state-shape annotations."""
+    from app.services.mcp.bridge import bridge_mcp_resources
+
+    resource_tool = bridge_mcp_resources(
+        "test_server",
+        [{"uri": "test://resource", "name": "resource"}],
+        [],
+    )
+    assert resource_tool is not None
+    assert isinstance(resource_tool.state_serializable, bool)
+    assert isinstance(resource_tool.holds_external_state, bool)
+
+
+@pytest.mark.unit
+def test_bridge_mcp_prompts_declares_state_annotations() -> None:
+    """The prompt meta-tool produced by ``bridge_mcp_prompts`` must
+    declare both state-shape annotations."""
+    from app.services.mcp.bridge import bridge_mcp_prompts
+
+    prompt_tool = bridge_mcp_prompts(
+        "test_server",
+        [{"name": "test_prompt", "description": "x", "arguments": []}],
+    )
+    assert prompt_tool is not None
+    assert isinstance(prompt_tool.state_serializable, bool)
+    assert isinstance(prompt_tool.holds_external_state, bool)

@@ -92,6 +92,53 @@ class FakeHubClient:
 
 
 # ---------------------------------------------------------------------------
+# Bundle config.json stub — install-time container materialization now reads
+# ``.tesslate/config.json`` from the materialized volume via the orchestrator.
+# These tests focus on the AppRuntimeDeployment primitive, not on container
+# layout, so we stub the orchestrator with a minimal valid config and stay
+# off the real Docker/K8s factory path.
+# ---------------------------------------------------------------------------
+
+
+import json as _json  # noqa: E402
+
+_DEFAULT_BUNDLE_CONFIG_JSON = _json.dumps(
+    {
+        "primaryApp": "primary",
+        "apps": {
+            "primary": {
+                "directory": "/app",
+                "start": "node index.js",
+                "port": 3000,
+            }
+        },
+        "infrastructure": {},
+        "connections": [],
+    }
+)
+
+
+class _StubOrchestrator:
+    async def read_file(self, **kwargs: Any) -> str | None:
+        if kwargs.get("file_path") == ".tesslate/config.json":
+            return _DEFAULT_BUNDLE_CONFIG_JSON
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _patch_install_orchestrator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the install-time container materializer onto a stub orchestrator
+    so the tests don't trip over the real DockerOrchestrator's ``/projects``
+    mkdir on macOS dev machines.
+    """
+    import app.services.orchestration as _orchestration
+
+    monkeypatch.setattr(
+        _orchestration, "get_orchestrator", lambda *a, **kw: _StubOrchestrator()
+    )
+
+
+# ---------------------------------------------------------------------------
 # Manifest builders — minimal 2026-05 manifests, parameterized by tenancy +
 # state model so each test can pick its own runtime contract.
 # ---------------------------------------------------------------------------

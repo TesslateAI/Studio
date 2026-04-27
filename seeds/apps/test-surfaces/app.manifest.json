@@ -1,0 +1,214 @@
+{
+  "manifest_schema_version": "2026-05",
+  "app": {
+    "id": "com.tesslate.test-surfaces",
+    "slug": "test-surfaces",
+    "name": "Test Surfaces",
+    "version": "0.3.0",
+    "description": "Comprehensive surface-test app: 3 actions (echo, add_numbers, now), 1 view (dashboard), 1 data resource (status, cached), 1 dependency on surfaces-mathkit (for app-to-app composition), and 1 automation_template (cron\u2192now).",
+    "category": "utility",
+    "forkable": true
+  },
+  "runtime": {
+    "tenancy_model": "per_install",
+    "state_model": "per_install_volume",
+    "scaling": {
+      "min_replicas": 1,
+      "max_replicas": 1,
+      "target_concurrency": 4,
+      "idle_timeout_seconds": 600
+    },
+    "storage": {
+      "write_scope": [
+        "/app/data"
+      ]
+    }
+  },
+  "billing": {
+    "ai_compute": {
+      "payer_default": "platform"
+    },
+    "general_compute": {
+      "payer_default": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "surfaces": [
+    {
+      "kind": "ui",
+      "entrypoint": "/",
+      "container": "web"
+    }
+  ],
+  "actions": [
+    {
+      "name": "echo",
+      "description": "Echo back the message verbatim with a server timestamp.",
+      "handler": {
+        "kind": "http_post",
+        "container": "web",
+        "path": "/actions/echo"
+      },
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "echoed",
+          "echoed_at"
+        ],
+        "properties": {
+          "echoed": {
+            "type": "string"
+          },
+          "echoed_at": {
+            "type": "string"
+          }
+        }
+      },
+      "timeout_seconds": 10
+    },
+    {
+      "name": "add_numbers",
+      "description": "Add two numbers and return the sum.",
+      "handler": {
+        "kind": "http_post",
+        "container": "web",
+        "path": "/actions/add"
+      },
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "a",
+          "b"
+        ],
+        "properties": {
+          "a": {
+            "type": "number"
+          },
+          "b": {
+            "type": "number"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "sum"
+        ],
+        "properties": {
+          "sum": {
+            "type": "number"
+          }
+        }
+      },
+      "timeout_seconds": 10
+    },
+    {
+      "name": "now",
+      "description": "Return current server time and call counter.",
+      "handler": {
+        "kind": "http_post",
+        "container": "web",
+        "path": "/actions/now"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "now_iso",
+          "calls"
+        ],
+        "properties": {
+          "now_iso": {
+            "type": "string"
+          },
+          "calls": {
+            "type": "integer"
+          }
+        }
+      },
+      "timeout_seconds": 10
+    }
+  ],
+  "views": [
+    {
+      "name": "dashboard",
+      "kind": "full_page",
+      "entrypoint": "/views/dashboard"
+    }
+  ],
+  "data_resources": [
+    {
+      "name": "status",
+      "backed_by_action": "now",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "now_iso": {
+            "type": "string"
+          },
+          "calls": {
+            "type": "integer"
+          }
+        }
+      },
+      "cache_ttl_seconds": 60
+    }
+  ],
+  "dependencies": [
+    {
+      "alias": "mathkit",
+      "app_id": "surfaces-mathkit",
+      "required": true,
+      "needs": {
+        "actions": [
+          "multiply"
+        ],
+        "views": [
+          "calculator"
+        ],
+        "data_resources": [
+          "last_result"
+        ]
+      }
+    }
+  ],
+  "automation_templates": [
+    {
+      "name": "Hourly status ping v3",
+      "description": "Calls the now action every hour as a cheap liveness ping; opted in by default.",
+      "trigger": {
+        "kind": "cron",
+        "expression": "0 * * * *",
+        "timezone": "UTC"
+      },
+      "action": {
+        "kind": "app.invoke",
+        "action": "now",
+        "input": {}
+      },
+      "is_default_enabled": true,
+      "contract_template": {
+        "allowed_tools": [],
+        "max_compute_tier": 0
+      }
+    }
+  ]
+}

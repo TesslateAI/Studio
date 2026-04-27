@@ -62,6 +62,8 @@ import {
 } from '../components/views/ArchitectureView';
 import DesignView from '../components/views/DesignView';
 import { projectsApi, marketplaceApi } from '../lib/api';
+import PublishAsAppDrawer from '../components/apps/PublishAsAppDrawer';
+import { inspectorFocusEvents } from '../utils/inspectorFocusEvents';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
 import { useTeam } from '../contexts/TeamContext';
@@ -275,10 +277,32 @@ function ProjectPageInner() {
   const archRef = useRef<ArchitectureViewHandle>(null);
   const [archState, setArchState] = useState({ configDirty: false, isRunning: false });
 
+  // Publish-as-App drawer state. Lives at the project level so the
+  // toolbar button (above the dock), the architecture canvas button, and
+  // the command palette all open the same drawer instance. The drawer
+  // owns its own draft fetch (one source of truth) — a parent pre-fetch
+  // would race with the drawer's own effect when the response landed
+  // after mount.
+  const [isPublishOpen, setIsPublishOpen] = useState(false);
+
+  // Zen mode is declared near the BuilderShell destructure below.
+
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
-  const { isLeftSidebarExpanded } = useBuilderShell();
+  const { isLeftSidebarExpanded, setIsLeftSidebarExpanded } = useBuilderShell();
+
+  // Zen mode hides the chat panel and collapses the navigation rail; ⌘⇧\.
+  // Derived: if both are already hidden we restore them; otherwise hide both.
+  const toggleZenMode = useCallback(() => {
+    const inZen = !isChatVisible && !isLeftSidebarExpanded;
+    setIsChatVisible(inZen);
+    setIsLeftSidebarExpanded(inZen);
+  }, [isChatVisible, isLeftSidebarExpanded, setIsLeftSidebarExpanded]);
+
+  const toggleNavRail = useCallback(() => {
+    setIsLeftSidebarExpanded(!isLeftSidebarExpanded);
+  }, [isLeftSidebarExpanded, setIsLeftSidebarExpanded]);
   const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
@@ -949,6 +973,65 @@ function ProjectPageInner() {
     }
   }, [slug, isEnvironmentRunning]);
 
+  // Explicit lifecycle commands — separate from the toggle button so command-
+  // palette / keyboard invocations have predictable semantics (Run only starts;
+  // Stop only stops; Restart cycles).
+  const handleRunProject = useCallback(async () => {
+    if (!slug) return;
+    if (isEnvironmentRunning) {
+      toast('Environment already running', { icon: 'ℹ️' });
+      return;
+    }
+    try {
+      toast.loading('Starting environment...', { id: 'env-toggle' });
+      await projectsApi.startAllContainers(slug);
+      toast.success('Environment started!', { id: 'env-toggle', duration: 2000 });
+      const p = await projectsApi.get(slug);
+      setProject(p);
+      loadContainer();
+    } catch (error) {
+      console.error('runProject failed:', error);
+      toast.error('Failed to start environment', { id: 'env-toggle' });
+    }
+  }, [slug, isEnvironmentRunning]);
+
+  const handleStopProject = useCallback(async () => {
+    if (!slug) return;
+    if (!isEnvironmentRunning) {
+      toast('Environment is not running', { icon: 'ℹ️' });
+      return;
+    }
+    try {
+      toast.loading('Stopping environment...', { id: 'env-toggle' });
+      await projectsApi.stopAllContainers(slug);
+      toast.success('Environment stopped', { id: 'env-toggle', duration: 2000 });
+      const p = await projectsApi.get(slug);
+      setProject(p);
+      loadContainer();
+    } catch (error) {
+      console.error('stopProject failed:', error);
+      toast.error('Failed to stop environment', { id: 'env-toggle' });
+    }
+  }, [slug, isEnvironmentRunning]);
+
+  const handleRestartProject = useCallback(async () => {
+    if (!slug) return;
+    try {
+      toast.loading('Restarting environment...', { id: 'env-toggle' });
+      if (isEnvironmentRunning) {
+        await projectsApi.stopAllContainers(slug);
+      }
+      await projectsApi.startAllContainers(slug);
+      toast.success('Environment restarted!', { id: 'env-toggle', duration: 2000 });
+      const p = await projectsApi.get(slug);
+      setProject(p);
+      loadContainer();
+    } catch (error) {
+      console.error('restartProject failed:', error);
+      toast.error('Failed to restart environment', { id: 'env-toggle' });
+    }
+  }, [slug, isEnvironmentRunning]);
+
   // ---------------------------------------------------------------------------
   // Dock / tool helpers
   // ---------------------------------------------------------------------------
@@ -1079,6 +1162,56 @@ function ProjectPageInner() {
     (e) => {
       e.preventDefault();
       dock.openTool('settings');
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+a',
+    (e) => {
+      e.preventDefault();
+      dock.openTool('architecture');
+    },
+    { enableOnFormTags: false }
+  );
+  // Project lifecycle
+  useHotkeys(
+    'mod+e',
+    (e) => {
+      e.preventDefault();
+      handleRunProject();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+e',
+    (e) => {
+      e.preventDefault();
+      handleStopProject();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+r',
+    (e) => {
+      e.preventDefault();
+      handleRestartProject();
+    },
+    { enableOnFormTags: false }
+  );
+  // Layout
+  useHotkeys(
+    'mod+\\',
+    (e) => {
+      e.preventDefault();
+      toggleNavRail();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+\\',
+    (e) => {
+      e.preventDefault();
+      toggleZenMode();
     },
     { enableOnFormTags: false }
   );
@@ -1214,6 +1347,20 @@ function ProjectPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabType, slug]);
 
+  // Publish action — declared up here (above useCommandHandlers) so the
+  // palette command can reference the same callback. Hook order stays stable
+  // because this runs on every render before any early returns.
+  //
+  // Single entry point shared by the project toolbar button, the
+  // architecture canvas button, and the command palette `publishProject`
+  // action. The legacy `/creator/publish/:appId` page is gone (v9 spec
+  // puts the publish flow on the architecture canvas + drawer).
+  const canPublish = project?.project_kind !== 'app_runtime' && canEditSettings;
+  const handlePublishAsApp = useCallback(() => {
+    if (!slug || !canPublish) return;
+    setIsPublishOpen(true);
+  }, [slug, canPublish]);
+
   // Register command handlers for CommandPalette
   useCommandHandlers({
     switchView: (view: ViewType) => {
@@ -1242,26 +1389,88 @@ function ProjectPageInner() {
       }
     },
     refreshPreview,
+    runProject: handleRunProject,
+    stopProject: handleStopProject,
+    restartProject: handleRestartProject,
+    toggleLeftSidebar: toggleChatVisible,
+    toggleRightSidebar: toggleNavRail,
+    toggleZenMode,
+    archAutoLayout: () => {
+      const ref = archRef.current;
+      if (!ref) {
+        toast('Open the Architecture view first', { icon: 'ℹ️' });
+        dock.openTool('architecture');
+        return;
+      }
+      ref.autoLayout().catch((err) => {
+        console.error('archAutoLayout failed', err);
+        toast.error('Auto-layout failed');
+      });
+    },
+    archSaveConfig: () => {
+      const ref = archRef.current;
+      if (!ref) {
+        dock.openTool('architecture');
+        toast('Open the Architecture view first', { icon: 'ℹ️' });
+        return;
+      }
+      ref.saveConfig().catch((err) => {
+        console.error('archSaveConfig failed', err);
+        toast.error('Save failed');
+      });
+    },
+    archLoadConfig: () => {
+      const ref = archRef.current;
+      if (!ref) {
+        dock.openTool('architecture');
+        toast('Open the Architecture view first', { icon: 'ℹ️' });
+        return;
+      }
+      ref.loadConfig().catch((err) => {
+        console.error('archLoadConfig failed', err);
+        toast.error('Load failed');
+      });
+    },
+    openTimeline: () => dock.openTool('volume'),
+    publishProject: () => {
+      // handlePublishAsApp is defined further down — we reference the same
+      // callback by name so the palette command and the toolbar button stay
+      // in sync.
+      handlePublishAsApp();
+    },
+    forkProject: () => {
+      if (project?.id) navigate(`/apps/${project.id}/fork`);
+    },
+    openProjectOverview: () => {
+      if (slug) navigate(`/project/${slug}`);
+    },
+    viewContainerLogs: () => dock.openTool('terminal'),
+    restartContainer: handleRestartProject,
+    copyDebugInfo: async () => {
+      const debug = {
+        slug,
+        projectId: project?.id,
+        runtime: project?.runtime,
+        environmentStatus,
+        userAgent: navigator.userAgent,
+        timestamp: new Date().toISOString(),
+      };
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(debug, null, 2));
+        toast.success('Debug info copied');
+      } catch {
+        toast.error('Could not copy to clipboard');
+      }
+    },
   });
 
   // ---------------------------------------------------------------------------
-  // Sidebar registration + Publish action — must run on every render (not gated
-  // by the loading early-return below) so the hook order stays stable when
-  // `project` flips from null to populated.
+  // Sidebar registration — must run on every render (not gated by the loading
+  // early-return below) so the hook order stays stable when `project` flips
+  // from null to populated. (handlePublishAsApp is declared above next to
+  // useCommandHandlers so the palette command and the toolbar button share
+  // the same callback identity.)
   // ---------------------------------------------------------------------------
-
-  const canPublish = project?.project_kind !== 'app_runtime' && canEditSettings;
-  const handlePublishAsApp = useCallback(async () => {
-    if (!slug || !canPublish) return;
-    try {
-      if (project?.project_kind !== 'app_source') {
-        await projectsApi.setProjectKind(slug, 'app_source');
-      }
-      navigate(`/creator/publish/${project?.id}`);
-    } catch (err) {
-      console.error('setProjectKind failed', err);
-    }
-  }, [slug, canPublish, project?.project_kind, project?.id, navigate]);
 
   // The builder sidebar is intentionally identical to the dashboard sidebar.
   // No project-specific affordances are injected — going Dashboard ↔ Project
@@ -1456,6 +1665,7 @@ function ProjectPageInner() {
         }}
         onStateChange={handleArchStateChange}
         readOnly={isViewer}
+        onPublishAsApp={canPublish ? handlePublishAsApp : undefined}
       />
     ),
     preview: (_tab: TabInstance, idx: number) => (
@@ -1952,6 +2162,38 @@ function ProjectPageInner() {
             toast.success('Deployment started successfully!');
           }}
           defaultProvider={container?.deployment_provider as string | undefined}
+        />
+      )}
+
+      {/* Publish-as-App drawer — single instance shared by the project
+          toolbar button, the architecture canvas button, and the command
+          palette `publishProject` action. The drawer owns its own draft
+          fetch on mount. The "Fix in inspector" button is canvas-aware:
+          we open the architecture tab and emit a
+          publish-inspector-jump-request event; ArchitectureView listens
+          and selects the matching React Flow node. */}
+      {isPublishOpen && (
+        <PublishAsAppDrawer
+          projectSlug={slug!}
+          projectName={(project?.name as string | undefined) ?? slug!}
+          onClose={() => setIsPublishOpen(false)}
+          onPublished={() => {
+            // Project's app_role / project_kind flips on first publish; the
+            // toolbar button label depends on it, so refresh project data.
+            loadProject();
+          }}
+          onJumpToInspector={(target) => {
+            setIsPublishOpen(false);
+            // Make sure the canvas tab is mounted so it can hear the event.
+            dock.openTool('architecture');
+            // Defer one rAF tick to let ArchitectureView's effect attach
+            // its listener after mounting. inspectorFocusEvents drops the
+            // event silently if no one is listening, so without the
+            // deferral a fresh-mount canvas would miss the request.
+            requestAnimationFrame(() => {
+              inspectorFocusEvents.emit('publish-inspector-jump-request', target);
+            });
+          }}
         />
       )}
     </>

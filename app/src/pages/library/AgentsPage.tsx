@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package,
   Power,
@@ -120,6 +120,8 @@ export default function AgentsPage({
   onTogglePublish: (agent: LibraryAgent) => void;
 }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoCreateTriggered = useRef(false);
 
   // Local state
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
@@ -143,6 +145,19 @@ export default function AgentsPage({
   useEffect(() => {
     if (showSearch) searchInputRef.current?.focus();
   }, [showSearch]);
+
+  // Auto-open the new-agent editor when navigated here with ?create=true
+  // (e.g. from the Home page's split Agents card "+" button). Strip the param
+  // so a refresh doesn't re-trigger the modal.
+  useEffect(() => {
+    if (autoCreateTriggered.current) return;
+    if (searchParams.get('create') !== 'true') return;
+    autoCreateTriggered.current = true;
+    const next = new URLSearchParams(searchParams);
+    next.delete('create');
+    setSearchParams(next, { replace: true });
+    setEditingAgent(makeNewAgent());
+  }, [searchParams, setSearchParams]);
 
   // Close sort menu on outside click
   useEffect(() => {

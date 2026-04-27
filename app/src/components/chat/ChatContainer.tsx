@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useHotkeys } from 'react-hotkeys-hook';
 import { Loader2, FileCode, X, List, Plus, Plug } from 'lucide-react';
 import { PencilSimple, Storefront } from '@phosphor-icons/react';
+import { useCommandHandlers } from '../../contexts/CommandContext';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { type EditMode } from './EditModeStatus';
@@ -17,6 +19,7 @@ import {
   type AgentMessageData,
   type DBMessage,
   type SerializedAttachment,
+  type ChatMention,
 } from '../../types/agent';
 import { type ChatAgent } from '../../types/chat';
 
@@ -1193,7 +1196,11 @@ export function ChatContainer({
     };
   }, [agentExecuting, stopAgentExecution]);
 
-  const sendAgentMessage = async (message: string, attachments?: SerializedAttachment[]) => {
+  const sendAgentMessage = async (
+    message: string,
+    attachments?: SerializedAttachment[],
+    mentions?: ChatMention[]
+  ) => {
     if ((!message.trim() && (!attachments || attachments.length === 0)) || agentExecuting) return;
 
     const userMessage: Message = {
@@ -1240,6 +1247,10 @@ export function ChatContainer({
           edit_mode: editMode,
           view_context: viewContext, // UI view context for scoped tools
           attachments,
+          // @-mention picker entries — backend splits these by kind into
+          // mention_agent_ids / mention_mcp_config_ids /
+          // mention_app_instance_ids on the AgentTaskPayload.
+          mentions: mentions && mentions.length > 0 ? mentions : undefined,
         },
         (event) => {
           // Guard against state updates after unmount (orphaned SSE callbacks)
@@ -1735,10 +1746,16 @@ export function ChatContainer({
     }
   };
 
-  const handleSendMessage = (message: string, attachments?: SerializedAttachment[]) => {
-    // Use agent's mode to determine stream vs agent execution
+  const handleSendMessage = (
+    message: string,
+    attachments?: SerializedAttachment[],
+    mentions?: ChatMention[]
+  ) => {
+    // Use agent's mode to determine stream vs agent execution. Mentions
+    // only make sense for the agent path — stream mode bypasses the
+    // worker / payload pipeline entirely, so we drop them silently.
     if (currentAgent.mode === 'agent') {
-      sendAgentMessage(message, attachments);
+      sendAgentMessage(message, attachments, mentions);
     } else {
       sendStreamMessage(message);
     }
@@ -1915,6 +1932,113 @@ export function ChatContainer({
       }
     },
     [currentChatId, sessions]
+  );
+
+  // -------------------------------------------------------------------------
+  // Command palette / keyboard wiring for chat actions.
+  // -------------------------------------------------------------------------
+
+  const cycleSession = useCallback(
+    (delta: number) => {
+      if (sessions.length === 0) return;
+      const idx = sessions.findIndex((s) => s.id === currentChatId);
+      const next = sessions[(idx + delta + sessions.length) % sessions.length];
+      if (next && next.id !== currentChatId) handleSelectSession(next.id);
+    },
+    [sessions, currentChatId, handleSelectSession]
+  );
+
+  const cycleEditMode = useCallback(() => {
+    setEditMode((prev) => {
+      const order: EditMode[] = ['ask', 'plan', 'allow'];
+      const i = order.indexOf(prev);
+      return order[(i + 1) % order.length];
+    });
+  }, []);
+
+  const renameCurrentSession = useCallback(() => {
+    if (!currentChatId) return;
+    const session = sessions.find((s) => s.id === currentChatId);
+    const proposed = window.prompt('Rename session', session?.title ?? '');
+    if (proposed && proposed.trim() && proposed !== session?.title) {
+      handleRenameSession(currentChatId, proposed.trim());
+    }
+  }, [currentChatId, sessions, handleRenameSession]);
+
+  const deleteCurrentSession = useCallback(() => {
+    if (!currentChatId) return;
+    if (window.confirm('Delete this chat session?')) {
+      handleDeleteSession(currentChatId);
+    }
+  }, [currentChatId, handleDeleteSession]);
+
+  useCommandHandlers({
+    clearChat: () => {
+      handleClearHistory();
+    },
+    newChatSession: handleNewSession,
+    nextChatSession: () => cycleSession(1),
+    prevChatSession: () => cycleSession(-1),
+    stopAgent: () => {
+      stopAgentExecution();
+    },
+    toggleEditMode: cycleEditMode,
+    renameChatSession: renameCurrentSession,
+    deleteChatSession: deleteCurrentSession,
+    switchModel: () => {
+      // The agent dropdown is rendered above the input — focus the chat
+      // input first so the user is anchored, then dispatch a window event
+      // that the dropdown listens for to open itself.
+      window.dispatchEvent(new Event('tesslate:focus-chat'));
+      window.dispatchEvent(new Event('tesslate:open-agent-picker'));
+    },
+    focusChatInput: () => {
+      window.dispatchEvent(new Event('tesslate:focus-chat'));
+    },
+    attachChatFile: () => {
+      window.dispatchEvent(new Event('tesslate:open-attach'));
+    },
+  });
+
+  useHotkeys(
+    'mod+shift+j',
+    (e) => {
+      e.preventDefault();
+      handleNewSession();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+]',
+    (e) => {
+      e.preventDefault();
+      cycleSession(1);
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+[',
+    (e) => {
+      e.preventDefault();
+      cycleSession(-1);
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+.',
+    (e) => {
+      e.preventDefault();
+      if (agentExecuting) stopAgentExecution();
+    },
+    { enableOnFormTags: ['INPUT', 'TEXTAREA'] }
+  );
+  useHotkeys(
+    'mod+shift+c',
+    (e) => {
+      e.preventDefault();
+      window.dispatchEvent(new Event('tesslate:focus-chat'));
+    },
+    { enableOnFormTags: false }
   );
 
   // Get current session title for header

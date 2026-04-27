@@ -1217,11 +1217,22 @@ export const chatApi = {
   },
 };
 
+/** Channel platform a chat originated from. NULL for browser sessions. */
+export type SidebarChatPlatform =
+  | 'telegram'
+  | 'discord'
+  | 'slack'
+  | 'whatsapp'
+  | 'signal'
+  | 'cli'
+  | null;
+
 export interface SidebarChat {
   id: string;
   title: string;
   status: string;
   origin: string;
+  platform: SidebarChatPlatform;
   project_id: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -1240,26 +1251,186 @@ export interface SidebarProject {
   chats: SidebarChat[];
 }
 
+export interface SidebarAutomation {
+  id: string;
+  name: string;
+  is_active: boolean;
+  target_project_id: string | null;
+  workspace_project_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface SidebarTreeResponse {
   rootChats: SidebarChat[];
   projects: SidebarProject[];
+  automations: SidebarAutomation[];
 }
 
+// ─── @-mention picker ───────────────────────────────────────────────
+//
+// Aggregates the three categories (agents / mcps / apps) the chat
+// input's @-mention picker needs into a single shape. Each call
+// fans out to the existing per-category endpoints in parallel —
+// failures in one category surface as an empty list for that
+// category, never an exception, so the picker stays responsive
+// even if (e.g.) the MCP service is briefly unreachable.
+
+export type MentionItemKind = 'agent' | 'mcp' | 'app';
+
+export interface MentionItem {
+  kind: MentionItemKind;
+  ref_id: string;
+  slug: string;
+  name: string;
+  // Whether the item is currently usable. Disabled items are still
+  // returned so the picker can grey them out (so users can self-
+  // discover what they could turn on) — selecting a disabled item
+  // routes to the appropriate library page rather than inserting.
+  enabled: boolean;
+  // Optional secondary label (e.g. "needs reauth", "draft").
+  state_label?: string;
+  icon_url?: string | null;
+  description?: string;
+}
+
+export interface MentionSearchResponse {
+  agents: MentionItem[];
+  mcps: MentionItem[];
+  apps: MentionItem[];
+}
+
+export const mentionApi = {
+  /**
+   * Fetch the user's library across all three categories. Used by the
+   * @-mention picker. Results are filtered client-side by the picker;
+   * we don't push the search query to the server because the lists
+   * are small and a single fetch primes all three sections at once.
+   */
+  search: async (): Promise<MentionSearchResponse> => {
+    const safeGet = async <T,>(url: string, params?: Record<string, unknown>) => {
+      try {
+        const r = await api.get(url, { params });
+        return r.data as T;
+      } catch {
+        return null;
+      }
+    };
+
+    type RawAgent = {
+      id: string;
+      slug?: string | null;
+      name?: string | null;
+      description?: string | null;
+      avatar_url?: string | null;
+      is_enabled?: boolean | null;
+      is_published?: boolean | null;
+    };
+    type RawMcp = {
+      id: string;
+      server_slug?: string | null;
+      server_name?: string | null;
+      is_active?: boolean | null;
+      is_connected?: boolean | null;
+      needs_reauth?: boolean | null;
+      icon_url?: string | null;
+    };
+    type RawApp = {
+      id: string;
+      app_slug?: string | null;
+      app_name?: string | null;
+      state?: string | null;
+    };
+
+    const [agentsRaw, mcpsRaw, appsRaw] = await Promise.all([
+      // /my-agents wraps in {agents:[...]} on cloud and returns a flat
+      // list on some routes — accept both shapes so a single normaliser
+      // works against any backend variant the user lands on.
+      safeGet<{ agents?: RawAgent[] } | RawAgent[]>('/api/marketplace/my-agents'),
+      safeGet<RawMcp[]>('/api/mcp/installed'),
+      safeGet<{ items?: RawApp[] } | RawApp[]>('/api/app-installs/mine', {
+        limit: 200,
+      }),
+    ]);
+
+    const agentsList: RawAgent[] = Array.isArray(agentsRaw)
+      ? (agentsRaw as RawAgent[])
+      : ((agentsRaw as { agents?: RawAgent[] })?.agents ?? []);
+    const agents: MentionItem[] = agentsList.map((a) => ({
+      kind: 'agent' as const,
+      ref_id: a.id,
+      slug: a.slug ?? '',
+      name: a.name ?? a.slug ?? 'Unnamed agent',
+      enabled: a.is_enabled !== false,
+      state_label: a.is_enabled === false ? 'disabled' : undefined,
+      icon_url: a.avatar_url ?? null,
+      description: a.description ?? undefined,
+    }));
+
+    const mcps: MentionItem[] = (mcpsRaw ?? []).map((m) => {
+      const usable = m.is_active !== false && m.needs_reauth !== true;
+      let state_label: string | undefined;
+      if (m.needs_reauth) state_label = 'needs reauth';
+      else if (m.is_active === false) state_label = 'disabled';
+      else if (m.is_connected === false) state_label = 'not connected';
+      return {
+        kind: 'mcp' as const,
+        ref_id: m.id,
+        slug: m.server_slug ?? '',
+        name: m.server_name ?? m.server_slug ?? 'Connector',
+        enabled: usable,
+        state_label,
+        icon_url: m.icon_url ?? null,
+      };
+    });
+
+    // /mine response shape is paginated {items: [...]} for some
+    // routers and a flat list for others; normalise.
+    const appsList: RawApp[] = Array.isArray(appsRaw)
+      ? (appsRaw as RawApp[])
+      : ((appsRaw as { items?: RawApp[] })?.items ?? []);
+    const apps: MentionItem[] = appsList
+      // Hide rows that are not in a usable installed state but still
+      // surface "stopped" so the user can discover them.
+      .filter((a) => (a.state ?? 'installed') !== 'uninstalled')
+      .map((a) => ({
+        kind: 'app' as const,
+        ref_id: a.id,
+        slug: a.app_slug ?? '',
+        name: a.app_name ?? a.app_slug ?? 'App',
+        enabled: (a.state ?? 'installed') === 'installed' || (a.state ?? '') === 'running',
+        state_label: a.state && a.state !== 'installed' && a.state !== 'running' ? a.state : undefined,
+      }));
+
+    return { agents, mcps, apps };
+  },
+};
+
 export const sidebarApi = {
-  /** Single-round-trip fetch for the left-nav tree (projects + their chats + root chats). */
+  /** Single-round-trip fetch for the left-nav tree (projects + their chats + root chats + automations). */
   getTree: async (
     opts: {
       projectLimit?: number;
       rootChatLimit?: number;
       chatsPerProject?: number;
+      automationLimit?: number;
     } = {}
   ): Promise<SidebarTreeResponse> => {
     const params: Record<string, number> = {};
     if (opts.projectLimit !== undefined) params.project_limit = opts.projectLimit;
     if (opts.rootChatLimit !== undefined) params.root_chat_limit = opts.rootChatLimit;
     if (opts.chatsPerProject !== undefined) params.chats_per_project = opts.chatsPerProject;
+    if (opts.automationLimit !== undefined) params.automation_limit = opts.automationLimit;
     const response = await api.get('/api/sidebar/tree', { params });
-    return response.data as SidebarTreeResponse;
+    const data = response.data as Partial<SidebarTreeResponse>;
+    // Defensive default — older backends won't return `automations`. Falling
+    // back to an empty array keeps the new sidebar resilient if a client is
+    // briefly running ahead of a deploy.
+    return {
+      rootChats: data.rootChats ?? [],
+      projects: data.projects ?? [],
+      automations: data.automations ?? [],
+    };
   },
 };
 

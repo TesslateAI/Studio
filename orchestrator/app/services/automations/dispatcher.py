@@ -355,15 +355,60 @@ async def _dispatch_agent_run(
     """
     # Lazy import to avoid pulling the worker module at dispatcher import
     # time (worker pulls heavy deps -- model adapters, kubernetes clients).
+    from ...models import Chat, Message
     from ..task_queue import get_task_queue
 
     config = action.config or {}
+    # The frontend's ActionEditor writes ``config.prompt`` for ``agent.run``;
+    # legacy callers and tests use ``config.message``. Keep both wired so a
+    # mid-flight UI change doesn't break existing automations. Event-payload
+    # ``message`` wins last so a webhook trigger can still inject a runtime
+    # prompt when the action template has none.
+    message_text = (
+        config.get("prompt", "")
+        or config.get("message", "")
+        or event_payload.get("message", "")
+    )
+
+    # Tier-0 automations don't ship with a chat_id (no UI conversation
+    # owns the run), but the worker's Message/Chat persistence model
+    # makes ``chat_id`` load-bearing -- a dozen call sites in
+    # ``app.worker.execute_agent_task`` do ``UUID(payload.chat_id)``.
+    # Rather than refactor the worker for a Phase-1 corner case, we
+    # auto-mint an automation-origin chat per run so the existing
+    # progressive-persistence / approval / lock paths continue to work
+    # unchanged. Re-using a single chat per automation would couple
+    # concurrent run UIs together and complicate cancellation; one
+    # chat per run keeps the surface flat. The chat is also what the
+    # AutomationDetailPage's conversation tab reads from when surfacing
+    # the agent's reasoning trail.
+    chat_id = config.get("chat_id") or ""
+    if not chat_id:
+        chat = Chat(
+            user_id=automation.owner_user_id,
+            project_id=automation.target_project_id,
+            origin="automation",
+            title=f"Automation: {automation.name}"[:255],
+        )
+        db.add(chat)
+        await db.flush()
+        if message_text:
+            db.add(
+                Message(
+                    chat_id=chat.id,
+                    role="user",
+                    content=message_text,
+                )
+            )
+        await db.commit()
+        chat_id = str(chat.id)
+
     payload: dict[str, Any] = {
         # Mirrors AgentTaskPayload.from_dict required keys.
         "task_id": str(run.id),
         "user_id": str(automation.owner_user_id),
-        "chat_id": config.get("chat_id", ""),
-        "message": config.get("message", "") or event_payload.get("message", ""),
+        "chat_id": chat_id,
+        "message": message_text,
         "project_id": str(automation.target_project_id or "")
         if automation.target_project_id
         else "",
@@ -1078,13 +1123,18 @@ async def dispatch_automation(
         if action.action_type == "agent.run":
             # Tier-1 ephemeral pod path (Phase 4). Tier-0 stays on the
             # in-process worker enqueue; Tier-2+ goes through wake.py.
-            # Dispatcher branches here because the routing decision
-            # depends on the contract (which dispatcher already has)
-            # rather than on per-runtime state — keeps wake.py the
-            # single source of truth for "wake an existing
-            # Deployment", and ephemeral_pod the single source of
-            # truth for "spawn a one-shot pod".
-            tier = automation.contract.get("max_compute_tier", 0)
+            # Dispatcher branches on ``automation.max_compute_tier`` (the
+            # column), NOT ``contract.max_compute_tier`` (the JSON
+            # ContractGate ceiling for tools): the column is the
+            # explicit deployment tier the user picked when creating the
+            # automation and is constrained to 0 when ``workspace_scope
+            # = 'none'`` (CHECK constraint in the model). The contract's
+            # tier governs which *tools* the agent may call inside the
+            # gate — it does not pick the runtime. Conflating the two
+            # caused Tier-0 (no-pod) automations to be routed into the
+            # ephemeral pod path because the default contract template
+            # in the create form ships with ``max_compute_tier: 1``.
+            tier = automation.max_compute_tier
             if isinstance(tier, int) and tier == 1:
                 action_result = await _dispatch_agent_run_tier1(
                     db,
@@ -1201,24 +1251,62 @@ async def dispatch_automation(
             reason=f"delivery failed: {exc!r}",
         )
 
-    ended_at = datetime.now(tz=UTC)
-    await db.execute(
-        update(AutomationRun)
-        .where(AutomationRun.id == run.id)
-        .values(
-            status="succeeded",
-            ended_at=ended_at,
-            heartbeat_at=ended_at,
-            raw_output=_safe_json(action_result),
-        )
+    # Branch on whether the action handler ran synchronously (real
+    # terminal result) or async (only enqueued — the worker will close
+    # the run when ``execute_agent_task`` finishes the agent loop).
+    #
+    # ``agent.run`` returns ``{"enqueued": True}`` after handing the task
+    # to ARQ. Treating that as terminal succeeded was a long-standing
+    # bug: the run flipped to ``succeeded`` the instant the dispatcher
+    # returned, even when the agent later crashed in the worker. The
+    # ``status="running"`` write at line ~1108 (right before Phase C)
+    # was being clobbered here. ``app.invoke`` and ``gateway.send``
+    # complete in-process and return real results — those paths still
+    # finalize here.
+    is_async_handoff = (
+        isinstance(action_result, dict)
+        and action_result.get("enqueued") is True
     )
+
+    now = datetime.now(tz=UTC)
+    if is_async_handoff:
+        # Status was already set to ``running`` before Phase C. Refresh
+        # heartbeat (heartbeat_sweep watches running rows for a 90s
+        # timeout) and stash the dispatcher receipt so callers can see
+        # which task_id the worker picked up.
+        await db.execute(
+            update(AutomationRun)
+            .where(AutomationRun.id == run.id)
+            .values(
+                heartbeat_at=now,
+                raw_output=_safe_json(action_result),
+            )
+        )
+    else:
+        # Synchronous action — handler completed inline, write terminal
+        # state. WHERE-clause guard: only flip non-terminal rows so a
+        # racing worker writeback or user cancellation can't be stomped.
+        await db.execute(
+            update(AutomationRun)
+            .where(AutomationRun.id == run.id)
+            .where(AutomationRun.status.in_(("queued", "preflight", "running")))
+            .values(
+                status="succeeded",
+                ended_at=now,
+                heartbeat_at=now,
+                raw_output=_safe_json(action_result),
+            )
+        )
+
     await trigger_events.mark_processed(db, event_id)
     await db.commit()
 
+    # ``run_status`` mirrors what's in the row right now so callers
+    # don't have to re-read. Async handoffs are still ``running``.
     return DispatchResult(
         status=DispatchStatus.SUCCEEDED,
         run_id=run.id,
-        run_status="succeeded",
+        run_status="running" if is_async_handoff else "succeeded",
     )
 
 

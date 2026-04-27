@@ -37,6 +37,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -952,6 +953,22 @@ class AppInstance(Base):
         "McpConsentRecord",
         back_populates="app_instance",
         cascade="all, delete-orphan",
+    )
+
+    # Mirror of alembic 0085's partial unique index. Catches the
+    # per_install double-click race the existing
+    # ``ix_app_instances_one_installed_per_project`` couldn't catch (each
+    # per_install creates a fresh project_id). The advisory lock in
+    # ``installer.install_app`` is the fast-path; this is the hard gate.
+    __table_args__ = (
+        Index(
+            "uq_app_instances_user_app_installed",
+            "installer_user_id",
+            "app_id",
+            unique=True,
+            sqlite_where=text("state = 'installed'"),
+            postgresql_where=text("state = 'installed'"),
+        ),
     )
 
 

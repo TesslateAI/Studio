@@ -26,12 +26,8 @@ import { DeploymentTargetNode } from '../DeploymentTargetNode';
 import { GraphCanvas } from '../GraphCanvas';
 import { MarketplaceSidebar } from '../MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../ContainerPropertiesPanel';
-import PublishAsAppDrawer, {
-  type InspectorJumpTarget,
-} from '../apps/PublishAsAppDrawer';
+import type { InspectorJumpTarget } from '../apps/PublishAsAppDrawer';
 import { Rocket } from '@phosphor-icons/react';
-import { publishApi } from '../../lib/api';
-import type { PublishDraftResponse } from '../../types/publish';
 import {
   ExternalServiceCredentialModal,
   type ExternalServiceItem,
@@ -134,6 +130,14 @@ export interface ArchitectureViewProps {
   onNavigateToContainer: (id: string) => void;
   onStateChange?: (state: { configDirty: boolean; isRunning: boolean }) => void;
   readOnly?: boolean;
+  /**
+   * Called when the canvas's "Publish as App" button is clicked. The
+   * drawer state lives on the parent (ProjectPage) so the same drawer
+   * is reachable from the project toolbar and the canvas. When omitted
+   * the canvas button hides — the parent decides whether publishing is
+   * available for this project.
+   */
+  onPublishAsApp?: () => void;
 }
 
 export interface ArchitectureViewHandle {
@@ -160,6 +164,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       onNavigateToContainer,
       onStateChange,
       readOnly = false,
+      onPublishAsApp,
     },
     ref
   ) => {
@@ -217,12 +222,6 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
     }>({ isOpen: false, targetId: null, provider: null });
     const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
 
-    // Publish-as-App drawer state. The toolbar button kicks the draft fetch
-    // first so the drawer opens with content already loaded — keeps the UI
-    // non-blocking during the initial inferrer round-trip.
-    const [isPublishOpen, setIsPublishOpen] = useState(false);
-    const [publishDraft, setPublishDraft] = useState<PublishDraftResponse | null>(null);
-    const [publishLoading, setPublishLoading] = useState(false);
 
     // Confirm dialog state (replaces native confirm() popups)
     const [confirmDialog, setConfirmDialog] = useState<{
@@ -1133,6 +1132,19 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       });
     }, []);
 
+    // The Publish drawer (now hoisted to ProjectPage) emits this event when
+    // the user clicks "Fix in inspector". We're the only listener — we own
+    // the React Flow node graph. Subscribing here means the canvas only
+    // reacts when it's mounted; if the drawer is opened from the toolbar
+    // without the architecture tab open, the event drops silently and the
+    // user gets the YAML-editor fallback.
+    useEffect(() => {
+      const off = inspectorFocusEvents.on('publish-inspector-jump-request', (target) => {
+        handleJumpToInspector(target);
+      });
+      return off;
+    }, [handleJumpToInspector]);
+
     const handleOpenBuilder = useCallback(
       (containerId: string) => {
         onNavigateToContainer(containerId);
@@ -1970,29 +1982,17 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
 
           {/* Publish as App — visible for workspace + app_source projects.
               app_runtime instances (installed apps) explicitly hide this
-              button since they're consumers, not publishers. */}
-          {!readOnly && project &&
+              button since they're consumers, not publishers. The drawer
+              itself lives on ProjectPage so the same instance is reachable
+              from the project toolbar; this button just asks the parent
+              to open it. */}
+          {!readOnly && onPublishAsApp && project &&
             ((project as { project_kind?: string }).project_kind === 'workspace' ||
               (project as { project_kind?: string }).project_kind === 'app_source') && (
               <button
                 type="button"
-                onClick={async () => {
-                  // Pre-fetch the draft so the drawer opens with content.
-                  setPublishLoading(true);
-                  setIsPublishOpen(true);
-                  try {
-                    const draft = await publishApi.draft(slug);
-                    setPublishDraft(draft);
-                  } catch (e) {
-                    console.error('Failed to load publish draft', e);
-                    // Drawer will fall back to its own fetch + error display.
-                    setPublishDraft(null);
-                  } finally {
-                    setPublishLoading(false);
-                  }
-                }}
-                className="absolute top-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--primary)] text-white text-xs font-medium shadow-md hover:opacity-90 disabled:opacity-50"
-                disabled={publishLoading}
+                onClick={onPublishAsApp}
+                className="absolute top-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--primary)] text-white text-xs font-medium shadow-md hover:opacity-90"
                 data-testid="publish-as-app-btn"
                 title={
                   (project as { project_kind?: string }).project_kind === 'app_source'
@@ -2103,30 +2103,6 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
           variant={confirmDialog.variant}
         />
 
-        {/* Publish-as-App drawer — opened by the toolbar button. */}
-        {isPublishOpen && (
-          <PublishAsAppDrawer
-            projectSlug={slug}
-            projectName={
-              ((project as { name?: string } | null)?.name as string | undefined) ?? slug
-            }
-            initialDraft={publishDraft}
-            onClose={() => {
-              setIsPublishOpen(false);
-              setPublishDraft(null);
-            }}
-            onPublished={() => {
-              // Refresh project info so the toolbar button reflects the new
-              // app_source role + the existing-app id for republish.
-              fetchProjectDataRef.current?.();
-            }}
-            onJumpToInspector={(target) => {
-              setIsPublishOpen(false);
-              setPublishDraft(null);
-              handleJumpToInspector(target);
-            }}
-          />
-        )}
       </div>
     );
   }

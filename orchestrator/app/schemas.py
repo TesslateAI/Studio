@@ -725,6 +725,27 @@ class ChatAttachmentSchema(BaseModel):
         return self
 
 
+class ChatMentionSchema(BaseModel):
+    """Structured @-mention from the chat input picker.
+
+    Carried alongside ``message`` rather than parsed out of it. The display
+    token (e.g. ``@coworker``) stays in ``message`` for chat history; the
+    backend uses this structured array for run semantics.
+    """
+
+    kind: str  # 'agent' | 'mcp' | 'app'
+    ref_id: str  # MarketplaceAgent.id | UserMcpConfig.id | AppInstance.id
+    display: str = ""
+    offset: int = 0
+
+    @field_validator("kind")
+    @classmethod
+    def validate_kind(cls, v):
+        if v not in ("agent", "mcp", "app"):
+            raise ValueError("mention kind must be 'agent', 'mcp', or 'app'")
+        return v
+
+
 class AgentChatRequest(BaseModel):
     """Request schema for agent chat."""
 
@@ -738,6 +759,7 @@ class AgentChatRequest(BaseModel):
     edit_mode: str | None = "ask"  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)
     view_context: str | None = None  # UI view context: 'graph', 'builder', 'terminal', 'kanban'
     attachments: list[ChatAttachmentSchema] | None = None
+    mentions: list[ChatMentionSchema] | None = None
 
     @model_validator(mode="after")
     def validate_message_or_attachments(self):

@@ -2,9 +2,10 @@
 
 Exercises :func:`app.services.automations.cron_producer.tick`:
 
-* due trigger → producer inserts ``automation_events`` +
-  ``automation_runs(status='queued', lease_term=current_term)``,
-  advances ``next_run_at``, and ARQ enqueue happens AFTER commit.
+* due trigger → producer inserts ``automation_events`` only (the
+  dispatcher creates the run on first ``dispatch_automation_task``
+  invocation), advances ``next_run_at``, and ARQ enqueue happens
+  AFTER commit.
 * lease term mismatch → :class:`LeaseLost` raised, no rows inserted,
   no enqueue.
 * not-yet-due trigger → no rows produced.
@@ -172,7 +173,7 @@ async def _seed_lease(maker, *, term: int) -> None:
 
 
 @pytest.mark.asyncio
-async def test_due_trigger_inserts_event_run_and_enqueues(session_maker) -> None:
+async def test_due_trigger_inserts_event_and_enqueues(session_maker) -> None:
     from app.models_automations import (
         AutomationEvent,
         AutomationRun,
@@ -218,6 +219,11 @@ async def test_due_trigger_inserts_event_run_and_enqueues(session_maker) -> None
         assert events[0].trigger_kind == "cron"
         assert events[0].idempotency_key.startswith(f"cron:{trig_id}:")
 
+        # Cron does NOT pre-create the run row — the dispatcher's
+        # _upsert_run is the sole creator. See
+        # services/automations/sweep_on_acquire.py for the recovery
+        # contract (sweep on event.dispatched_at IS NULL, not on
+        # run.status='queued').
         runs = list(
             (
                 await db.execute(
@@ -229,11 +235,7 @@ async def test_due_trigger_inserts_event_run_and_enqueues(session_maker) -> None
             .scalars()
             .all()
         )
-        assert len(runs) == 1
-        assert runs[0].status == "queued"
-        assert runs[0].lease_term == 42
-        assert runs[0].event_id == events[0].id
-        assert runs[0].heartbeat_at is not None
+        assert runs == []
 
         trigger = (
             await db.execute(

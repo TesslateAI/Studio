@@ -135,7 +135,62 @@ def stub_queue(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def app_client(session_maker, stub_queue):
+def stub_dispatcher(monkeypatch: pytest.MonkeyPatch, session_maker):
+    """Stub :func:`dispatch_automation` for router tests.
+
+    The router calls the dispatcher synchronously so the response carries a
+    real ``run_id`` (see :func:`run_automation`). Phase B preflight would
+    reach for Redis (LiteLLM key minting, gateway delivery stream, etc.),
+    which the SQLite-only router tests don't host. The stub does only what
+    the router contract needs: insert the run row via the same
+    ``_upsert_run`` the dispatcher uses, then return a ``DispatchResult``
+    so the response body is well-formed.
+
+    Tests that want to inspect dispatch internals belong in
+    ``tests/services/automations/test_dispatcher.py``.
+    """
+    calls: list[tuple[str, str, str]] = []
+
+    async def _stub_dispatch(
+        db,
+        *,
+        automation_id,
+        event_id,
+        worker_id,
+        force_retry: bool = False,
+    ):
+        from app.services.automations.dispatcher import (
+            DispatchResult,
+            DispatchStatus,
+            _upsert_run,
+        )
+
+        calls.append((str(automation_id), str(event_id), worker_id))
+        run, _inserted = await _upsert_run(
+            db,
+            automation_id=automation_id,
+            event_id=event_id,
+            worker_id=worker_id,
+        )
+        await db.commit()
+        return DispatchResult(
+            status=DispatchStatus.SUCCEEDED,
+            run_id=run.id,
+            run_status=run.status,
+            reason="stubbed in router tests",
+        )
+
+    monkeypatch.setattr(
+        "app.services.automations.dispatcher.dispatch_automation",
+        _stub_dispatch,
+        raising=True,
+    )
+    _stub_dispatch.calls = calls  # type: ignore[attr-defined]
+    return _stub_dispatch
+
+
+@pytest.fixture
+def app_client(session_maker, stub_queue, stub_dispatcher):
     """Return ``(client, owner_user_id, session_maker)``.
 
     Builds a fresh FastAPI app instance with only the automations router
@@ -382,15 +437,28 @@ def test_manual_run_creates_event_and_run(app_client) -> None:
 
 
 @pytest.mark.unit
-def test_manual_run_enqueues_dispatch_task(app_client, stub_queue) -> None:
+def test_manual_run_invokes_dispatcher(app_client, stub_dispatcher) -> None:
+    """Manual run dispatches synchronously rather than enqueueing.
+
+    The router used to ``enqueue("dispatch_automation_task", ...)``, but a
+    pre-created run at ``status='queued'`` collided with the dispatcher's
+    idempotency noop branch and the run deadlocked. The new contract is:
+    the router calls :func:`dispatch_automation` inline so the dispatcher's
+    ``_upsert_run`` is the sole creator of the run row.
+    """
     client, _, _ = app_client
     created = client.post("/api/automations", json=_good_create_payload()).json()
     aid = created["id"]
     resp = client.post(f"/api/automations/{aid}/run", json={})
     assert resp.status_code == 202
-    # Stub captured the enqueue.
-    assert any(c[0] == "dispatch_automation_task" for c in stub_queue.calls), (
-        f"expected dispatch_automation_task enqueue; got {stub_queue.calls!r}"
+
+    body = resp.json()
+    assert any(
+        call[0] == aid and call[1] == body["event_id"]
+        for call in stub_dispatcher.calls  # type: ignore[attr-defined]
+    ), (
+        f"expected dispatcher call for automation={aid} "
+        f"event={body['event_id']}; got {stub_dispatcher.calls!r}"  # type: ignore[attr-defined]
     )
 
 

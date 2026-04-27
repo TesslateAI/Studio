@@ -259,8 +259,9 @@ async def _create_arq_pool() -> Any:
     from arq import create_pool
     from arq.connections import RedisSettings
 
-    from ..config import settings
+    from ..config import get_settings
 
+    settings = get_settings()
     redis_url = getattr(settings, "redis_url", "") or ""
     if not redis_url:
         return None

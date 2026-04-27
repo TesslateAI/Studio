@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
-    AgentSchedule,
     AppInstance,
     AppVersion,
     Container,
@@ -24,12 +23,12 @@ from ..models import (
     Project,
     User,
 )
+from ..models_automations import AutomationDefinition, AutomationTrigger
 from ..services.apps.installer import (
     AlreadyInstalledError,
     ConsentRejectedError,
     IncompatibleAppError,
     InstallError,
-    create_per_pod_signing_key,
     delete_per_pod_signing_key,
     install_app,
     propagate_user_secrets_post_install,
@@ -192,29 +191,12 @@ async def install_endpoint(
             exc_info=True,
         )
 
-    # Best-effort: mint the per-pod HMAC signing key Secret + token used by
-    # the Connector Proxy. Failures here MUST NOT roll back the install —
-    # the proxy's deterministic-derivation fallback keeps auth working
-    # without the Secret; the operator sees a warning and can resync.
-    try:
-        env_overlay = await create_per_pod_signing_key(
-            app_instance_id=result.app_instance_id,
-            target_namespace=(
-                f"proj-{result.project_id}" if result.project_id else None
-            ),
-        )
-        if env_overlay:
-            logger.info(
-                "install_endpoint: minted per-pod token for instance=%s",
-                result.app_instance_id,
-            )
-    except Exception:
-        logger.warning(
-            "install_endpoint: per-pod signing-key creation failed instance=%s "
-            "(install succeeded; proxy auth uses fallback derivation)",
-            result.app_instance_id,
-            exc_info=True,
-        )
+    # The per-pod HMAC signing-key Secret is created at /start time
+    # (see ``app_runtime_status.start_runtime``) — the ``proj-{id}``
+    # namespace doesn't exist yet at install time, so writing the Secret
+    # here would silently 404. The pod template's secretKeyRef is
+    # rendered at start_project time and resolves once /start mints the
+    # Secret in the just-created namespace.
 
     return InstallResponse(
         app_instance_id=result.app_instance_id,
@@ -397,27 +379,64 @@ async def get_install_detail(
                 )
             )
 
-        sched_rows = (
+        # Schedules now live in ``automation_definitions`` (Phase 1 hard
+        # reset dropped ``agent_schedules``). Each install's automations are
+        # the rows whose ``target_project_id`` is the install's runtime
+        # project — the same scope ``/api/app-installs/{id}/schedules``
+        # uses. We pair each definition with its first ``automation_triggers``
+        # row to fill in ``cron_expression`` / ``trigger_kind`` for the
+        # legacy detail row shape.
+        defn_rows = (
             (
                 await db.execute(
-                    select(AgentSchedule)
-                    .where(AgentSchedule.app_instance_id == app_instance_id)
-                    .order_by(AgentSchedule.created_at.asc())
+                    select(AutomationDefinition)
+                    .where(AutomationDefinition.target_project_id == inst.project_id)
+                    .order_by(AutomationDefinition.created_at.asc())
                 )
             )
             .scalars()
             .all()
         )
-        for s in sched_rows:
+        triggers_by_definition: dict[UUID, AutomationTrigger] = {}
+        if defn_rows:
+            trigger_rows = (
+                (
+                    await db.execute(
+                        select(AutomationTrigger)
+                        .where(
+                            AutomationTrigger.automation_id.in_(
+                                [r.id for r in defn_rows]
+                            )
+                        )
+                        .order_by(AutomationTrigger.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for trig in trigger_rows:
+                triggers_by_definition.setdefault(trig.automation_id, trig)
+        for defn in defn_rows:
+            trig = triggers_by_definition.get(defn.id)
+            cron_expr: str | None = None
+            trigger_kind = "manual"
+            next_run_at = None
+            last_run_at = None
+            if trig is not None:
+                trigger_kind = trig.kind
+                if isinstance(trig.config, dict):
+                    cron_expr = trig.config.get("cron")
+                next_run_at = trig.next_run_at
+                last_run_at = trig.last_run_at
             schedules_out.append(
                 AppScheduleDetailRow(
-                    id=s.id,
-                    name=s.name,
-                    trigger_kind=s.trigger_kind,
-                    cron_expression=s.cron_expression,
-                    next_run_at=s.next_run_at,
-                    last_run_at=s.last_run_at,
-                    is_active=bool(s.is_active),
+                    id=defn.id,
+                    name=defn.name,
+                    trigger_kind=trigger_kind,
+                    cron_expression=cron_expr,
+                    next_run_at=next_run_at,
+                    last_run_at=last_run_at,
+                    is_active=bool(defn.is_active),
                 )
             )
 

@@ -19,15 +19,22 @@ Per tick the producer:
    * Compute next ``next_run_at`` via :mod:`croniter`.
    * INSERT an ``automation_events`` row with
      ``idempotency_key='cron:{trigger_id}:{tick_iso}'``.
-   * INSERT an ``automation_runs`` row with ``status='queued'``,
-     ``lease_term=current_term``, ``retry_count=0``,
-     ``heartbeat_at=now()``.
    * UPDATE the trigger's ``next_run_at`` and ``last_run_at``.
    * COMMIT.
 
-3. After commit (so the worker always sees the queued row), enqueue
-   ``dispatch_automation_task`` to ARQ with
-   ``_job_id=str(event_id)`` for ARQ-side dedup.
+   The producer **does not pre-create the** ``automation_runs`` **row**.
+   The dispatcher's ``_upsert_run`` (Phase A) is the sole creator of
+   run rows for every trigger source — manual, cron, webhook, gateway,
+   app event. A pre-created queued row would collide with the
+   dispatcher's idempotency branch table (existing ``status='queued'``
+   → ``NOOP_INFLIGHT``) and the run would never progress past queued.
+
+3. After commit, enqueue ``dispatch_automation_task`` to ARQ with
+   ``_job_id=str(event_id)`` for ARQ-side dedup. Recovery if enqueue
+   is lost: :mod:`sweep_on_acquire` sweeps
+   ``automation_events WHERE dispatched_at IS NULL`` after a leader
+   takeover and re-enqueues; :mod:`missed_event_drain` does the same
+   on a steady-state interval.
 
 Lease fencing
 -------------
@@ -113,7 +120,6 @@ async def tick(
     from ...models_automations import (
         AutomationDefinition,
         AutomationEvent,
-        AutomationRun,
         AutomationTrigger,
     )
 
@@ -227,7 +233,6 @@ async def tick(
             trigger.last_run_at = now
 
             event_id = uuid4()
-            run_id = uuid4()
             tick_iso = now.replace(microsecond=0).isoformat()
             db.add(
                 AutomationEvent(
@@ -245,17 +250,12 @@ async def tick(
                     received_at=now,
                 )
             )
-            db.add(
-                AutomationRun(
-                    id=run_id,
-                    automation_id=automation.id,
-                    event_id=event_id,
-                    status="queued",
-                    retry_count=0,
-                    lease_term=current_term,
-                    heartbeat_at=now,
-                )
-            )
+            # NB: no AutomationRun pre-create — the dispatcher owns run row
+            # creation via _upsert_run. Pre-creating at status='queued' would
+            # collide with the dispatcher's idempotency noop branch and the
+            # run would deadlock at queued forever (recovery: see the
+            # sweep_on_acquire / missed_event_drain modules, which sweep on
+            # automation_events.dispatched_at IS NULL).
             enqueue_jobs.append((automation.id, event_id))
 
         await db.commit()

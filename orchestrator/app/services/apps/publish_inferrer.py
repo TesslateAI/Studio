@@ -120,20 +120,43 @@ async def _load_tesslate_config(project: Project) -> TesslateProjectConfig | Non
 
     Returns ``None`` if no config exists or if reading fails. The inferrer is
     designed to fall back to Container row metadata in either case.
+
+    Mirrors the docker/k8s-agnostic pattern in
+    :func:`services.config_sync._auto_sync_tesslate_config`: prefer the
+    host-reachable filesystem path when available (docker / desktop), fall
+    back to the orchestrator's :func:`read_file` interface (kubernetes —
+    reads via FileOps gRPC against the project's PVC). Without this fallback
+    K8s publishes always reported "config.json not found" because
+    ``get_project_fs_path`` returns ``None`` on K8s.
     """
-    fs_path = get_project_fs_path(project)
-    if fs_path is None:
-        # K8s mode: reading the PVC requires the orchestrator + volume hints.
-        # Phase 5 keeps this code path optional — the inferrer falls back to
-        # Container rows. Operators with K8s-only projects still get a usable
-        # draft; the drawer surfaces this in a checklist note.
-        return None
     try:
-        # Inline the parser call to avoid orchestrator-only import paths.
-        config_path = fs_path / ".tesslate" / "config.json"
-        if not config_path.exists():
+        fs_path = get_project_fs_path(project)
+        if fs_path is not None:
+            config_path = fs_path / ".tesslate" / "config.json"
+            if not config_path.exists():
+                return None
+            return parse_tesslate_config(config_path.read_text(encoding="utf-8"))
+
+        # K8s — route through the orchestrator. user_id / container_name are
+        # interface params unused by both the K8s and Docker read_file impls
+        # (FileOps routes by volume_id; Docker reads the project mount); we
+        # pass project.owner_id for ergonomics rather than plumbing user_id
+        # through every caller.
+        from ..orchestration import get_orchestrator
+
+        orchestrator = get_orchestrator()
+        config_json = await orchestrator.read_file(
+            user_id=project.owner_id,
+            project_id=project.id,
+            container_name=None,
+            file_path=".tesslate/config.json",
+            project_slug=project.slug,
+            volume_id=getattr(project, "volume_id", None),
+            cache_node=getattr(project, "cache_node", None),
+        )
+        if not config_json:
             return None
-        return parse_tesslate_config(config_path.read_text(encoding="utf-8"))
+        return parse_tesslate_config(config_json)
     except Exception as exc:  # pragma: no cover — defensive
         logger.debug("publish_inferrer: failed to read .tesslate/config.json: %s", exc)
         return None
@@ -187,6 +210,26 @@ def _connection_to_dict(conn: ContainerConnection, by_id: dict[UUID, Container])
         "to": tgt.name if tgt else str(conn.target_container_id),
         "kind": conn.connector_type or conn.connection_type or "depends_on",
     }
+
+
+def _yaml_to_comment_block(entry: dict[str, Any]) -> list[str]:
+    """Render a dict as a YAML list-item comment, with every line commented.
+
+    Returns one string per output line so callers can ``extend()`` into a
+    flat hint list. The first line carries the ``- `` list-item marker;
+    continuation lines align under the dash. Both are prefixed with ``#``
+    so the whole block is invisible to the YAML parser — without this the
+    multi-line dump leaks ``directory: …`` / ``port: …`` / ``start: …``
+    as real top-level keys (additionalProperties: false → publish 422).
+    """
+    if not entry:
+        return []
+    lines = yaml.safe_dump(entry, sort_keys=False).rstrip("\n").splitlines()
+    if not lines:
+        return []
+    out = [f"#   - {lines[0]}"]
+    out.extend(f"#     {line}" for line in lines[1:])
+    return out
 
 
 def _build_manifest(
@@ -305,18 +348,21 @@ def _build_manifest(
     # creator sees their containers when editing. We keep this in a
     # ``_compute_hint`` key that downstream parsers ignore (additionalProperties:
     # false on the top-level means we cannot ship this under a real key —
-    # render it as a YAML comment block instead). For now, drop containers
-    # under app.description as a hint so the editor surface still has it.
+    # render it as a YAML comment block instead). Every line of the dumped
+    # entry is commented; if only the first line carried the ``#`` prefix
+    # the continuation lines (``directory:``/``port:``/``start:``) would
+    # leak into the YAML body as real top-level keys and the publisher
+    # would 422 on additionalProperties.
     if containers:
         compute_hint_lines = ["# Inferred containers (refine in editor):"]
         for c in containers:
             entry = _container_to_compute_entry(c)
-            compute_hint_lines.append(f"#   - {yaml.safe_dump(entry, sort_keys=False).strip()}")
+            compute_hint_lines.extend(_yaml_to_comment_block(entry))
         if connections:
             compute_hint_lines.append("# Inferred connections:")
             for conn in connections:
                 d = _connection_to_dict(conn, by_id)
-                compute_hint_lines.append(f"#   - {yaml.safe_dump(d, sort_keys=False).strip()}")
+                compute_hint_lines.extend(_yaml_to_comment_block(d))
         manifest.setdefault("_compute_hint_comments", compute_hint_lines)
     if config is not None and config.primaryApp:
         manifest.setdefault("_compute_hint_comments", []).insert(

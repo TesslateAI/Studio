@@ -155,9 +155,21 @@ async def _seed_queued_run(
     automation_id: uuid.UUID,
     age_seconds: int,
 ) -> tuple[uuid.UUID, uuid.UUID]:
-    """Insert a queued run + its event aged ``age_seconds`` in the past."""
-    from app.models_automations import AutomationEvent, AutomationRun
+    """Insert an undispatched event aged ``age_seconds`` in the past.
 
+    The contract the sweep enforces is now event-anchored: the previous
+    leader committed an :class:`AutomationEvent` but its dispatch enqueue
+    was lost, so ``dispatched_at IS NULL`` past the stale cutoff. The
+    dispatcher itself creates the run row on its first invocation, so we
+    do NOT pre-create one here. (See ``services/automations/sweep_on_acquire.py``
+    for the full contract.) The first return value stays a UUID so call
+    sites that want a "queued-run identity" still get one — it's the
+    ``run_id`` the dispatcher *will* mint on first dispatch — but for
+    the sweep test we only assert against ``event_id``.
+    """
+    from app.models_automations import AutomationEvent
+
+    past = datetime.now(UTC) - timedelta(seconds=age_seconds)
     event_id = uuid.uuid4()
     db.add(
         AutomationEvent(
@@ -165,23 +177,12 @@ async def _seed_queued_run(
             automation_id=automation_id,
             payload={},
             trigger_kind="cron",
+            received_at=past,
         )
     )
     await db.flush()
-
-    past = datetime.now(UTC) - timedelta(seconds=age_seconds)
-    run_id = uuid.uuid4()
-    db.add(
-        AutomationRun(
-            id=run_id,
-            automation_id=automation_id,
-            event_id=event_id,
-            status="queued",
-            created_at=past,
-        )
-    )
-    await db.flush()
-    return run_id, event_id
+    # Synthetic run_id placeholder — sweep tests assert against event_id.
+    return uuid.uuid4(), event_id
 
 
 # ---------------------------------------------------------------------------

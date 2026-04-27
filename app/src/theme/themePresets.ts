@@ -271,7 +271,7 @@ export function applyThemePreset(theme: Theme): void {
   const cardHover =
     theme.mode === 'dark'
       ? `color-mix(in srgb, ${colors.surface} 92%, white 8%)`
-      : `color-mix(in srgb, ${colors.surface} 95%, ${colors.textMuted} 5%)`;
+      : `color-mix(in srgb, ${colors.surface} 88%, ${colors.textMuted} 12%)`;
   safeSetProperty(root, '--card-hover', cardHover);
 
   // === TEXT ===

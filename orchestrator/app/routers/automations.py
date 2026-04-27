@@ -550,19 +550,25 @@ async def run_automation(
 ) -> AutomationRunResponse:
     """Manually trigger an automation.
 
-    Implementation note (``trigger_kind='manual'`` vs ``event_id=NULL``):
+    Flow: insert :class:`AutomationEvent`, then call
+    :func:`dispatch_automation` **synchronously** so the response carries a
+    real ``run_id`` for the UI to navigate to.
 
-    The ``automation_triggers.kind`` CHECK already includes ``'manual'`` (see
-    migration 0074), and the ``automation_events`` table has no NOT NULL
-    constraint on ``trigger_id`` — so we mint a fresh
-    :class:`AutomationEvent` with ``trigger_kind='manual'`` and a NULL
-    ``trigger_id``. The dispatcher's idempotency upsert keys off
-    ``(automation_id, event_id)``, which means each manual run gets its own
-    independent run row without colliding with cron / webhook runs. We chose
-    this over ``event_id=NULL`` runs because the dispatcher's UPSERT branch
-    table assumes every run has a non-null event_id (NULL would silently
-    short-circuit the idempotency surface and let two concurrent manual runs
-    both win the insert race).
+    Why synchronous (not enqueue-and-return): the manual-run UX navigates the
+    user straight to the run page. An enqueue-only path would have to either
+    omit ``run_id`` (UI poll required) or pre-create the run row at
+    ``status='queued'`` — but a pre-created queued row collides with the
+    dispatcher's idempotency branch table (``existing_status == 'queued'`` →
+    ``NOOP_INFLIGHT``), so the dispatcher would refuse to progress it past
+    queued. Calling the dispatcher inline lets it own the run row creation
+    (``_upsert_run`` with ``inserted=True``) and continue through Phase B
+    preflight + executor enqueue in one shot. Webhook / cron / gateway
+    triggers all go through the ARQ wrapper for the same dispatcher; only
+    this user-initiated path runs sync because the user is waiting.
+
+    ``trigger_kind='manual'`` and ``trigger_id=None`` are valid — the events
+    table has no NOT NULL on ``trigger_id`` and the kind CHECK includes
+    ``'manual'`` (migration 0074).
     """
     payload = payload or AutomationRunRequest()
     automation = await _load_definition_or_404(db, automation_id)
@@ -586,55 +592,53 @@ async def run_automation(
     await db.commit()
     await db.refresh(event)
 
-    # Eagerly create the run row so the response includes a real ``run_id``.
-    # The dispatcher's upsert is idempotent — if it picks up the event before
-    # this row commits, both arrive at the same ``(automation_id, event_id)``
-    # unique key and the dispatcher takes the existing row.
-    run = AutomationRun(
-        id=uuid4(),
-        automation_id=automation.id,
-        event_id=event.id,
-        status="queued",
-        worker_id=None,
-        heartbeat_at=datetime.now(tz=UTC),
-    )
-    db.add(run)
-    await db.commit()
-    await db.refresh(run)
+    # Synchronously dispatch. The dispatcher creates the run row via its own
+    # idempotent upsert (Phase A) and proceeds through Phase B preflight,
+    # routing to the executor (``agent.run`` enqueues ``execute_agent_task``;
+    # ``app.invoke`` calls the action handler; ``gateway.send`` writes to the
+    # delivery stream). The ``DispatchResult.run_id`` is always populated.
+    from ..services.automations.dispatcher import dispatch_automation
 
-    # Enqueue the dispatcher task. ARQ accepts any string handler name; the
-    # worker registers ``dispatch_automation_task`` in Wave 3B. If the task
-    # isn't registered yet, ARQ holds the job in the queue until it is.
     try:
-        from ..services.task_queue import get_task_queue
-
-        await get_task_queue().enqueue(
-            "dispatch_automation_task",
-            str(automation.id),
-            str(event.id),
-            None,  # worker_id — dispatcher synthesizes one if missing
+        result = await dispatch_automation(
+            db,
+            automation_id=automation.id,
+            event_id=event.id,
+            worker_id=f"manual:{user.id}",
         )
-    except Exception as exc:  # noqa: BLE001 — enqueue must never fail the run record
-        logger.warning(
-            "[AUTOMATIONS] enqueue failed automation=%s event=%s err=%r — "
-            "run row persisted; controller / cron sweep will retry",
+    except Exception:
+        logger.exception(
+            "[AUTOMATIONS] manual dispatch failed automation=%s event=%s "
+            "user=%s — event row persists; controller sweep will retry",
             automation.id,
             event.id,
-            exc,
+            user.id,
+        )
+        # Best-effort rollback of any half-applied dispatcher state. The event
+        # row is already committed above, so the missed-event drain
+        # (``services.automations.missed_event_drain``) will pick it up.
+        try:
+            await db.rollback()
+        except Exception:  # pragma: no cover — defensive
+            pass
+        raise HTTPException(
+            status_code=500,
+            detail="dispatch failed — run will be retried by the controller",
         )
 
     logger.info(
-        "[AUTOMATIONS] manual run automation=%s run=%s event=%s by user=%s",
+        "[AUTOMATIONS] manual run automation=%s run=%s event=%s status=%s by user=%s",
         automation.id,
-        run.id,
+        result.run_id,
         event.id,
+        result.run_status,
         user.id,
     )
     return AutomationRunResponse(
         automation_id=automation.id,
-        run_id=run.id,
+        run_id=result.run_id,
         event_id=event.id,
-        status=run.status,
+        status=result.run_status,
     )
 
 

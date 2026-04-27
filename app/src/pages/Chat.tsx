@@ -13,7 +13,7 @@ import { useAgentChat } from '../hooks/useAgentChat';
 import { marketplaceApi, projectsApi, tasksApi } from '../lib/api';
 import { useTeam } from '../contexts/TeamContext';
 import type { ChatAgent } from '../types/chat';
-import type { SerializedAttachment } from '../types/agent';
+import type { SerializedAttachment, ChatMention } from '../types/agent';
 
 const LANDING_SUGGESTIONS = [
   'Analyze my codebase',
@@ -136,6 +136,14 @@ export default function Chat() {
     }
   }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sidebar's "Show all" routes here with `openSessionsPanel: true`. Flip the
+  // collapsed sessions panel open on arrival so the user lands directly in
+  // the full thread list.
+  useEffect(() => {
+    const shouldOpen = (location.state as Record<string, unknown>)?.openSessionsPanel;
+    if (shouldOpen) setIsSidebarOpen(true);
+  }, [location.state]);
+
   // Load user's agents (same pattern as Project.tsx) — re-fetch on team switch
   useEffect(() => {
     let cancelled = false;
@@ -216,8 +224,12 @@ export default function Chat() {
 
   // Handle send message — sendMessage handles session creation via onSessionNeeded
   const handleSendMessage = useCallback(
-    async (message: string, attachments?: SerializedAttachment[]) => {
-      sendMessage(message, undefined, attachments);
+    async (
+      message: string,
+      attachments?: SerializedAttachment[],
+      mentions?: ChatMention[]
+    ) => {
+      sendMessage(message, undefined, attachments, mentions);
     },
     [sendMessage]
   );
@@ -497,7 +509,7 @@ export default function Chat() {
               className="absolute left-1/2 -translate-x-1/2 bottom-6 z-30
                          w-[min(760px,calc(100%-48px))]
                          bg-[var(--bg)] border border-[var(--border-hover)]
-                         rounded-[var(--radius)] overflow-hidden
+                         rounded-[var(--radius)]
                          max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:translate-x-0
                          max-md:w-full max-md:rounded-b-none"
             >

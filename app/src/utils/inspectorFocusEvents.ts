@@ -35,8 +35,24 @@ export interface InspectorFocusRequest {
   name?: string;
 }
 
+/**
+ * Drawer→canvas hand-off. Emitted by the project-level Publish drawer when
+ * the user clicks "Fix in inspector"; ArchitectureView subscribes whenever
+ * it is mounted, resolves the React Flow node by name, selects it, and
+ * emits a follow-up ``inspector-focus-request`` so the panel scrolls.
+ *
+ * containerName is the manifest-side identifier the drawer knows;
+ * actionName / connectorId are the optional sub-row to focus.
+ */
+export interface PublishInspectorJumpRequest {
+  containerName: string;
+  actionName?: string;
+  connectorId?: string;
+}
+
 type InspectorFocusEventMap = {
   'inspector-focus-request': InspectorFocusRequest;
+  'publish-inspector-jump-request': PublishInspectorJumpRequest;
 };
 
 class InspectorFocusEventBus {

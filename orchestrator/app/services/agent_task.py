@@ -85,6 +85,25 @@ class AgentTaskPayload:
     trigger_payload: dict | None = None   # the original event payload that fired the run
     trigger_event_id: str | None = None   # AutomationEvent UUID
 
+    # Per-turn @-mentions from the chat input. None of these mutate the agent
+    # record — they only affect THIS run. Empty defaults mean legacy callers
+    # (channels, schedules, external_agent, automations) need no changes.
+    mention_agent_ids: list[str] = field(default_factory=list)
+    """MarketplaceAgent.id values authorized for delegation via the call_agent tool.
+    Empty list = call_agent tool is NOT registered (depth-1 cap is structural)."""
+
+    mention_mcp_config_ids: list[str] = field(default_factory=list)
+    """UserMcpConfig.id values to inject as MCP tools for this run only.
+    Loaded by mcp_manager.get_extra_configs(); deduped against assigned MCPs."""
+
+    mention_app_instance_ids: list[str] = field(default_factory=list)
+    """AppInstance.id values surfaced as a system-prompt context hint.
+    The agent already has invoke_app_action; this just tells it which instance to use."""
+
+    parent_task_id: str | None = None
+    """Set by the call_agent tool when dispatching a sub-run. Lets the
+    sub-chat row link back to the parent for the drill-in UI."""
+
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""
         return asdict(self)

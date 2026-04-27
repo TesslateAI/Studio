@@ -59,6 +59,6 @@ describe('CreatorStudioPage', () => {
     expect(screen.getByText('Drafts')).toBeInTheDocument();
     expect(screen.getByText('Submissions')).toBeInTheDocument();
     expect(screen.getByText('Billing')).toBeInTheDocument();
-    expect(screen.getByText(/Publish New Version/)).toBeInTheDocument();
+    expect(screen.getByText(/Publish from project/)).toBeInTheDocument();
   });
 });

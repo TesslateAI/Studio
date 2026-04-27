@@ -17,7 +17,7 @@ import asyncio
 import contextlib
 import logging
 import os
-from datetime import UTC
+from datetime import UTC, datetime
 from uuid import UUID
 
 from arq.connections import RedisSettings
@@ -298,6 +298,124 @@ async def _create_agent_runner(
     return adapter
 
 
+# ---------------------------------------------------------------------------
+# AutomationRun lifecycle helpers
+#
+# When ``execute_agent_task`` runs as the async tail of an ``agent.run``
+# automation action, the dispatcher (services/automations/dispatcher.py)
+# leaves the run row at ``status="running"`` with a fresh heartbeat. The
+# worker owns the rest of the lifecycle:
+#
+#   1. ``_heartbeat_automation_run`` keeps ``heartbeat_at`` fresh on a 30s
+#      cadence so ``services.automations.heartbeat_sweep`` (90s timeout)
+#      does not reap a still-working run.
+#   2. ``_finalize_automation_run`` writes the terminal status when the
+#      agent finishes (``succeeded``), crashes (``failed``), or pauses
+#      for a tool approval (``waiting_approval``). The WHERE clause guards
+#      against stomping a state set elsewhere (user cancellation, Phase 2
+#      contract-breach pause, racing dispatcher writeback).
+#
+# Both helpers open their own ``AsyncSessionLocal`` so they don't share
+# the long-lived session the agent loop uses (which can sit on a
+# transaction for tens of seconds during model round-trips).
+# ---------------------------------------------------------------------------
+
+
+_AUTOMATION_RUN_NON_TERMINAL = ("queued", "preflight", "running")
+
+
+async def _heartbeat_automation_run(
+    automation_run_id: UUID,
+    *,
+    interval_s: float = 30.0,
+) -> None:
+    """Refresh ``AutomationRun.heartbeat_at`` while the agent loop runs.
+
+    The dispatcher writes one heartbeat at handoff; without periodic
+    refresh, runs that exceed 90s wall time (long Notion API calls,
+    slow Tier-0 LLM round-trips) get reaped mid-flight by
+    ``heartbeat_sweep``. The WHERE-clause guard ensures we only refresh
+    rows still in flight — once status has flipped to a terminal or
+    paused state somewhere else, an extra heartbeat would mask that
+    transition.
+    """
+    from sqlalchemy import update as _sa_update
+
+    from .database import AsyncSessionLocal
+    from .models_automations import AutomationRun
+
+    while True:
+        try:
+            await asyncio.sleep(interval_s)
+        except asyncio.CancelledError:
+            raise
+        try:
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    _sa_update(AutomationRun)
+                    .where(AutomationRun.id == automation_run_id)
+                    .where(AutomationRun.status == "running")
+                    .values(heartbeat_at=datetime.now(tz=UTC))
+                )
+                await db.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # heartbeat_sweep is the safety net; one missed write is fine.
+            logger.exception(
+                "[WORKER] heartbeat write failed for automation_run=%s",
+                automation_run_id,
+            )
+
+
+async def _finalize_automation_run(
+    automation_run_id: UUID,
+    *,
+    status: str,
+    raw_output: dict,
+) -> None:
+    """Write the terminal/paused row for an automation_run.
+
+    Guarded by ``WHERE status IN ('queued','preflight','running')`` so
+    we don't overwrite a state owned by another path:
+      * ``cancelled``     — user cancellation
+      * ``waiting_approval`` — Phase 2 contract-breach pause
+      * ``succeeded``/``failed``/``expired`` — already terminal
+
+    For tool-approval pauses (``ApprovalRequired`` raised mid-loop) the
+    caller passes ``status="waiting_approval"``; the same guard lets
+    the existing approval-resume path replay through ``status="running"``
+    without conflict.
+    """
+    from sqlalchemy import update as _sa_update
+
+    from .database import AsyncSessionLocal
+    from .models_automations import AutomationRun
+
+    now = datetime.now(tz=UTC)
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                _sa_update(AutomationRun)
+                .where(AutomationRun.id == automation_run_id)
+                .where(AutomationRun.status.in_(_AUTOMATION_RUN_NON_TERMINAL))
+                .values(
+                    status=status,
+                    ended_at=now,
+                    heartbeat_at=now,
+                    raw_output=raw_output,
+                )
+            )
+            await db.commit()
+    except Exception:
+        logger.exception(
+            "[WORKER] failed to write terminal automation_run state "
+            "(run=%s status=%s)",
+            automation_run_id,
+            status,
+        )
+
+
 async def execute_agent_task(ctx: dict, payload_dict: dict):
     """
     Execute an agent task in the worker process.
@@ -348,6 +466,23 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     message_id = None
     # Ticket tracking — set when payload carries an agent_task_id and the claim succeeds
     claimed_ticket_id: UUID | None = None
+    # Automation-run lifecycle — set when the dispatcher enqueued us.
+    # The worker owns the row's terminal write; the heartbeat task keeps
+    # heartbeat_sweep from reaping a long-running agent loop.
+    auto_run_id: UUID | None = (
+        UUID(payload.automation_run_id) if payload.automation_run_id else None
+    )
+    auto_run_hb_task: asyncio.Task | None = None
+    # Counters captured during the agent loop and consumed by the
+    # success-path finalize. Defaults are conservative so the early-return
+    # branches (project-missing, ticket-already-claimed, etc.) still produce
+    # a valid raw_output payload.
+    iterations = 0
+    tool_calls_made = 0
+    event_count = 0
+    completion_reason: str | None = None
+    session_id: str | None = None
+    chat = None
 
     logger.info(f"[WORKER] Starting agent task {task_id} for project {project_id}")
 
@@ -365,6 +500,13 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             payload.trigger_event_id,
             list((payload.contract or {}).keys()),
         )
+
+    # Spawn the automation-run heartbeat as soon as we know we're bound.
+    # Doing it before the early-return branches (project-missing, ticket
+    # claim races) is fine — the outer ``finally`` cancels it cleanly even
+    # if we never reach the agent loop.
+    if auto_run_id is not None:
+        auto_run_hb_task = asyncio.create_task(_heartbeat_automation_run(auto_run_id))
 
     async with AsyncSessionLocal() as db:
         try:
@@ -589,6 +731,122 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             except Exception as mcp_err:
                 logger.warning("[WORKER] MCP context loading failed (non-fatal): %s", mcp_err)
 
+            # 7c. @-mention extras (per-turn only; never modify the agent record)
+            #
+            # Three independent paths, each gated on its own list being
+            # non-empty so plain chats see zero added prompt content / tools:
+            #
+            #   - mention_mcp_config_ids -> register additional MCP tools
+            #     for this turn, deduped against any MCPs the agent already
+            #     has assigned via AgentMcpAssignment (so we don't double-pay
+            #     tool-schema tokens).
+            #
+            #   - mention_agent_ids     -> register the call_agent tool so
+            #     the calling agent can delegate one turn to another
+            #     configured marketplace agent. This is the multi-agent
+            #     layer; the in-process subagent tools (`task` etc.) in the
+            #     tesslate-agent submodule are a separate, complementary
+            #     mechanism and are unaffected here.
+            #
+            #   - mention_app_instance_ids -> append a lean hint block to
+            #     the user's message body telling the agent which installed
+            #     apps + actions are available. Does NOT touch the system
+            #     prompt or the tool registry, so it preserves prompt-cache
+            #     hits on the (stable) system message; the user message is
+            #     turn-unique anyway.
+            tools_registry = getattr(agent_run_obj, "tools", None)
+
+            if payload.mention_mcp_config_ids and tools_registry is not None:
+                try:
+                    from .services.mcp.manager import get_mcp_manager
+
+                    mcp_mgr = get_mcp_manager()
+                    already_loaded_ma_ids: set[str] = set()
+                    if mcp_context and mcp_context.get("mcp_configs"):
+                        for cfg in mcp_context["mcp_configs"].values():
+                            ma_id = (cfg.get("server") or {}).get(
+                                "marketplace_agent_id"
+                            )
+                            if ma_id:
+                                already_loaded_ma_ids.add(str(ma_id))
+
+                    extra_ctx = await mcp_mgr.get_extra_configs(
+                        list(payload.mention_mcp_config_ids),
+                        payload.user_id,
+                        db,
+                        exclude_marketplace_agent_ids=already_loaded_ma_ids,
+                    )
+                    extra_tools = extra_ctx.get("tools", [])
+                    if extra_tools:
+                        for extra_tool in extra_tools:
+                            tools_registry.register(extra_tool)
+                        logger.info(
+                            "[WORKER] @mcp: registered %d extra MCP tool(s) "
+                            "for this turn (agent='%s')",
+                            len(extra_tools),
+                            agent_model.slug,
+                        )
+                    # Merge extra mcp_configs so executors can reconnect.
+                    if extra_ctx.get("mcp_configs"):
+                        merged = dict(
+                            (mcp_context or {}).get("mcp_configs") or {}
+                        )
+                        merged.update(extra_ctx["mcp_configs"])
+                        # Ensure context dict reflects the merge (built later
+                        # may re-read mcp_context; keep both authoritative).
+                        if mcp_context is not None:
+                            mcp_context["mcp_configs"] = merged
+                except Exception as extra_err:
+                    logger.warning(
+                        "[WORKER] @mcp extras failed (non-fatal): %s",
+                        extra_err,
+                    )
+
+            if payload.mention_agent_ids and tools_registry is not None:
+                try:
+                    from sqlalchemy import select as _sa_select
+
+                    from .agent.tools.agent_ops import register_call_agent_tool
+
+                    auth_uuids: list[UUID] = []
+                    for raw in payload.mention_agent_ids:
+                        try:
+                            auth_uuids.append(UUID(str(raw)))
+                        except (TypeError, ValueError):
+                            continue
+
+                    authorized_agents: list[dict[str, str]] = []
+                    if auth_uuids:
+                        ag_result = await db.execute(
+                            _sa_select(MarketplaceAgent).where(
+                                MarketplaceAgent.id.in_(auth_uuids)
+                            )
+                        )
+                        for ag in ag_result.scalars().all():
+                            authorized_agents.append(
+                                {
+                                    "id": str(ag.id),
+                                    "slug": ag.slug or "",
+                                    "name": getattr(ag, "name", "") or "",
+                                }
+                            )
+
+                    if authorized_agents:
+                        register_call_agent_tool(
+                            tools_registry, authorized_agents=authorized_agents
+                        )
+                        logger.info(
+                            "[WORKER] @agent: registered call_agent with "
+                            "%d authorized delegate(s) for agent '%s'",
+                            len(authorized_agents),
+                            agent_model.slug,
+                        )
+                except Exception as agent_err:
+                    logger.warning(
+                        "[WORKER] @agent tool registration failed (non-fatal): %s",
+                        agent_err,
+                    )
+
             container_id = UUID(payload.container_id) if payload.container_id else None
             container_name = payload.container_name
             container_directory = payload.container_directory
@@ -712,6 +970,14 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "trigger_kind": payload.trigger_kind,
                 "trigger_payload": payload.trigger_payload,
                 "trigger_event_id": payload.trigger_event_id,
+                # Per-turn @-mentions. The call_agent executor reads
+                # ``mention_agent_ids`` to validate that the LLM didn't
+                # invent an agent_id outside the user's authorization.
+                # Empty lists are the legacy / no-mention default.
+                "mention_agent_ids": list(payload.mention_agent_ids or []),
+                "mention_mcp_config_ids": list(payload.mention_mcp_config_ids or []),
+                "mention_app_instance_ids": list(payload.mention_app_instance_ids or []),
+                "parent_task_id": payload.parent_task_id,
             }
 
             # Inject MCP server configs so adapter executors can connect per-call
@@ -831,9 +1097,252 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 extra=context,
             )
 
+            # @-mention hint block — appended to the END of the user message
+            # (turn-unique content) so the system-prompt cache breakpoint
+            # stays intact for non-mention turns. The block resolves the
+            # `@<slug>` tokens the user typed into structured metadata so the
+            # agent picks the right tool and the right id without guessing.
+            #
+            # All three kinds share one block under a single `[mentions]`
+            # heading; the system prompt teaches the agent to read it.
+            effective_message = payload.message or ""
+            if (
+                payload.mention_agent_ids
+                or payload.mention_mcp_config_ids
+                or payload.mention_app_instance_ids
+            ):
+                try:
+                    from sqlalchemy import select as _sa_select
+                    from sqlalchemy.orm import selectinload as _selectinload
+
+                    from .models import (
+                        AppInstance,
+                        MarketplaceAgent as _MarketplaceAgent,
+                        MarketplaceApp,
+                        UserMcpConfig,
+                    )
+                    from .models_automations import (
+                        AppAction,
+                        AppDataResource,
+                        AppView,
+                    )
+
+                    sections: list[str] = []
+
+                    # ------------------------------------------------------
+                    # @agent — list slug + id so call_agent gets the right id
+                    # ------------------------------------------------------
+                    if payload.mention_agent_ids:
+                        agent_uuids: list[UUID] = []
+                        for raw in payload.mention_agent_ids:
+                            try:
+                                agent_uuids.append(UUID(str(raw)))
+                            except (TypeError, ValueError):
+                                continue
+                        if agent_uuids:
+                            res = await db.execute(
+                                _sa_select(_MarketplaceAgent).where(
+                                    _MarketplaceAgent.id.in_(agent_uuids)
+                                )
+                            )
+                            lines = []
+                            for ag in res.scalars().all():
+                                lines.append(
+                                    f"  - @{ag.slug or '?'} (name={ag.name or '?'}, "
+                                    f"agent_id={ag.id})"
+                                )
+                            if lines:
+                                sections.append(
+                                    "agents (delegate one stateless turn via the `call_agent` tool):\n"
+                                    + "\n".join(lines)
+                                )
+
+                    # ------------------------------------------------------
+                    # @mcp — confirm which connector tools just got injected
+                    # ------------------------------------------------------
+                    if payload.mention_mcp_config_ids:
+                        mcp_uuids: list[UUID] = []
+                        for raw in payload.mention_mcp_config_ids:
+                            try:
+                                mcp_uuids.append(UUID(str(raw)))
+                            except (TypeError, ValueError):
+                                continue
+                        if mcp_uuids:
+                            res = await db.execute(
+                                _sa_select(UserMcpConfig)
+                                .where(
+                                    UserMcpConfig.id.in_(mcp_uuids),
+                                    UserMcpConfig.user_id == UUID(payload.user_id),
+                                )
+                                .options(_selectinload(UserMcpConfig.marketplace_agent))
+                            )
+                            lines = []
+                            for umc in res.scalars().all():
+                                ma = umc.marketplace_agent
+                                slug = (ma.slug if ma else None) or "custom"
+                                # The bridge normalises hyphens to underscores
+                                # in the tool prefix; reflect that so the
+                                # agent knows the actual tool names.
+                                ns = slug.replace("-", "_")
+                                name = (ma.name if ma else None) or slug
+                                lines.append(
+                                    f"  - @{slug} (name={name}) — "
+                                    f"tools registered as `mcp__{ns}__*` "
+                                    "for THIS turn only"
+                                )
+                            if lines:
+                                sections.append(
+                                    "connectors (active for this turn — call the listed tool names directly):\n"
+                                    + "\n".join(lines)
+                                )
+
+                    # ------------------------------------------------------
+                    # @app — full action signatures, views, data resources
+                    # ------------------------------------------------------
+                    if payload.mention_app_instance_ids:
+                        app_uuids: list[UUID] = []
+                        for raw in payload.mention_app_instance_ids:
+                            try:
+                                app_uuids.append(UUID(str(raw)))
+                            except (TypeError, ValueError):
+                                continue
+                        if app_uuids:
+                            inst_result = await db.execute(
+                                _sa_select(AppInstance)
+                                .where(
+                                    AppInstance.id.in_(app_uuids),
+                                    AppInstance.installer_user_id
+                                    == UUID(payload.user_id),
+                                )
+                                .options(
+                                    _selectinload(AppInstance.app).selectinload(
+                                        MarketplaceApp.versions
+                                    )
+                                )
+                            )
+                            instances = list(inst_result.scalars().all())
+                            version_ids = [
+                                i.app_version_id for i in instances if i.app_version_id
+                            ]
+                            actions_by_v: dict[UUID, list[AppAction]] = {}
+                            views_by_v: dict[UUID, list[AppView]] = {}
+                            dr_by_v: dict[UUID, list[AppDataResource]] = {}
+                            if version_ids:
+                                ar = await db.execute(
+                                    _sa_select(AppAction).where(
+                                        AppAction.app_version_id.in_(version_ids)
+                                    )
+                                )
+                                for a in ar.scalars().all():
+                                    actions_by_v.setdefault(
+                                        a.app_version_id, []
+                                    ).append(a)
+                                vr = await db.execute(
+                                    _sa_select(AppView).where(
+                                        AppView.app_version_id.in_(version_ids)
+                                    )
+                                )
+                                for v in vr.scalars().all():
+                                    views_by_v.setdefault(
+                                        v.app_version_id, []
+                                    ).append(v)
+                                drr = await db.execute(
+                                    _sa_select(AppDataResource).where(
+                                        AppDataResource.app_version_id.in_(version_ids)
+                                    )
+                                )
+                                for d in drr.scalars().all():
+                                    dr_by_v.setdefault(
+                                        d.app_version_id, []
+                                    ).append(d)
+
+                            for inst in instances:
+                                slug = (
+                                    getattr(inst.app, "slug", "")
+                                    if inst.app is not None
+                                    else ""
+                                ) or "?"
+                                lines: list[str] = [
+                                    f"  - @{slug} app_instance_id={inst.id}"
+                                ]
+                                actions = actions_by_v.get(inst.app_version_id, [])
+                                if actions:
+                                    lines.append("    actions (call via invoke_app_action with this exact app_instance_id):")
+                                    for a in actions:
+                                        # Pull the top-level input keys so the
+                                        # agent sees the parameter shape
+                                        # without us inlining the full
+                                        # JSON schema.
+                                        keys: list[str] = []
+                                        try:
+                                            schema = a.input_schema or {}
+                                            props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+                                            keys = list(props.keys())
+                                        except Exception:
+                                            keys = []
+                                        keys_str = (
+                                            f" input_keys=[{', '.join(keys)}]"
+                                            if keys
+                                            else ""
+                                        )
+                                        rc = a.required_connectors or []
+                                        rc_str = (
+                                            f" needs_connectors={list(rc)}"
+                                            if rc
+                                            else ""
+                                        )
+                                        lines.append(
+                                            f"      - {a.name}{keys_str}{rc_str}"
+                                        )
+                                else:
+                                    lines.append(
+                                        "    actions: (none declared in manifest)"
+                                    )
+                                views = views_by_v.get(inst.app_version_id, [])
+                                if views:
+                                    lines.append(
+                                        "    views: "
+                                        + ", ".join(f"{v.name} ({v.kind})" for v in views)
+                                    )
+                                drs = dr_by_v.get(inst.app_version_id, [])
+                                if drs:
+                                    lines.append(
+                                        "    data_resources: "
+                                        + ", ".join(d.name for d in drs)
+                                    )
+                                sections.append("\n".join(lines))
+
+                    if sections:
+                        # The wrapper text is the same every time the block
+                        # appears; the system prompt explains how to read it.
+                        # Keeping the explanation inline as well so a model
+                        # without our updated system prompt still gets a
+                        # nudge.
+                        hint_block = (
+                            "\n\n[mentions]\n"
+                            "The user attached structured @-mentions to this "
+                            "message. Treat them as authoritative — do not "
+                            "guess slugs or ids; use the values below.\n\n"
+                            + "\n\n".join(sections)
+                        )
+                        effective_message = effective_message + hint_block
+                        logger.info(
+                            "[WORKER] @-mentions: annotated message "
+                            "(agents=%d mcps=%d apps=%d) for agent '%s'",
+                            len(payload.mention_agent_ids),
+                            len(payload.mention_mcp_config_ids),
+                            len(payload.mention_app_instance_ids),
+                            agent_model.slug,
+                        )
+                except Exception as mention_err:
+                    logger.warning(
+                        "[WORKER] @-mention hint block failed (non-fatal): %s",
+                        mention_err,
+                    )
+
             try:
                 async for event in agent_run_obj.run_turn(
-                    payload.message, adapter_ctx, event_sink=_step_sink
+                    effective_message, adapter_ctx, event_sink=_step_sink
                 ):
                     event_count += 1
                     event_type = event.get("type", "unknown")
@@ -1086,6 +1595,31 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
                     await finish_ticket(db, ticket_id=claimed_ticket_id, status=terminal)
 
+            # Close the AutomationRun row when the dispatcher handed us
+            # this task. Until this fix, the dispatcher flipped status to
+            # ``succeeded`` the moment it enqueued — so a real worker
+            # crash after dispatch would still leave the run looking
+            # successful. The WHERE-clause guard inside _finalize lets a
+            # racing user-cancellation or contract-breach pause win.
+            if auto_run_id is not None:
+                final_status = (
+                    "cancelled" if completion_reason == "cancelled" else "succeeded"
+                )
+                await _finalize_automation_run(
+                    auto_run_id,
+                    status=final_status,
+                    raw_output={
+                        "task_id": task_id,
+                        "chat_id": str(chat.id) if chat else payload.chat_id,
+                        "message_id": str(message_id) if message_id else None,
+                        "iterations": iterations,
+                        "tool_calls": tool_calls_made,
+                        "events": event_count,
+                        "completion_reason": completion_reason,
+                        "session_id": session_id,
+                    },
+                )
+
             logger.info(f"[WORKER] Task {task_id} complete, saved to database")
 
         except Exception as e:
@@ -1115,6 +1649,27 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 },
                             },
                         )
+                # Hand the AutomationRun off to the approval queue. Status
+                # flips from ``running`` to ``waiting_approval`` so
+                # heartbeat_sweep (which only reaps ``running``) leaves it
+                # alone; the existing approval-resume path can flip it
+                # back to ``running`` when the operator unblocks it.
+                if auto_run_id is not None:
+                    await _finalize_automation_run(
+                        auto_run_id,
+                        status="waiting_approval",
+                        raw_output={
+                            "task_id": task_id,
+                            "approval_required": {
+                                "tool_name": e.tool_name,
+                                "ticket_id": (
+                                    str(e.ticket_id)
+                                    if getattr(e, "ticket_id", None)
+                                    else None
+                                ),
+                            },
+                        },
+                    )
                 # Do NOT mark the ticket failed — it stays "awaiting_approval"
                 # until the operator approves and re-queues it.
                 return
@@ -1135,6 +1690,20 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     from .services.agent_tickets import finish_ticket
 
                     await finish_ticket(db, ticket_id=claimed_ticket_id, status="failed")
+
+            # Close the AutomationRun row as failed. Same WHERE-guard as the
+            # success path — a user cancellation or contract-breach pause
+            # that landed first wins.
+            if auto_run_id is not None:
+                await _finalize_automation_run(
+                    auto_run_id,
+                    status="failed",
+                    raw_output={
+                        "task_id": task_id,
+                        "error": str(e)[:1000],
+                        "error_type": type(e).__name__,
+                    },
+                )
 
             # Finalize stale in_progress placeholder message and reset chat status
             try:
@@ -1177,6 +1746,12 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat_task
+            # Cancel the AutomationRun heartbeat too — its loop only
+            # tickles a row we no longer own.
+            if auto_run_hb_task is not None:
+                auto_run_hb_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await auto_run_hb_task
             if lock_acquired and pubsub:
                 await pubsub.release_chat_lock(payload.chat_id, task_id)
                 logger.debug(f"[WORKER] Released chat lock for {payload.chat_id}")

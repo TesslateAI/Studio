@@ -65,7 +65,6 @@ import AppWorkspacePage from './pages/AppWorkspacePage';
 import AppSourceBrowserPage from './pages/AppSourceBrowserPage';
 import ForkPage from './pages/ForkPage';
 import CreatorStudioPage from './pages/CreatorStudioPage';
-import CreatorAppPublishPage from './pages/CreatorAppPublishPage';
 import CreatorBillingPage from './pages/CreatorBillingPage';
 import AdminMarketplaceReviewPage from './pages/AdminMarketplaceReviewPage';
 import AdminSubmissionWorkbenchPage from './pages/AdminSubmissionWorkbenchPage';
@@ -355,7 +354,6 @@ function AppContent() {
 
           {/* Creator Studio */}
           <Route path="/creator" element={<CreatorStudioPage />} />
-          <Route path="/creator/publish/:appId" element={<CreatorAppPublishPage />} />
           <Route path="/creator/billing" element={<CreatorBillingPage />} />
 
           {/* Admin Marketplace */}

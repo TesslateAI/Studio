@@ -48,6 +48,28 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+# Allowed values for MarketplaceApp.forkable (String(16) column documented as
+# "true | restricted | no" in models.py).
+_FORKABLE_STRING_VALUES = ("true", "restricted", "no")
+
+
+def _coerce_forkable(raw_value: Any) -> str:
+    """Normalize manifest.app.forkable to the column's string enum.
+
+    2025-01 declares forkable as Literal["true","restricted","no"]; 2026-05
+    declares it as bool. The DB column is the 2025-01 string enum, so we
+    coerce here once at the publish boundary.
+
+    True → "true", False → "no", a valid string passes through, everything
+    else falls back to the conservative "restricted".
+    """
+    if isinstance(raw_value, bool):
+        return "true" if raw_value else "no"
+    if isinstance(raw_value, str) and raw_value in _FORKABLE_STRING_VALUES:
+        return raw_value
+    return "restricted"
+
+
 class PublishError(Exception):
     """Base for publish-time failures."""
 
@@ -102,29 +124,29 @@ async def publish_version(
     except ManifestValidationError:
         logger.info("publish_version: result_template validation failed")
         raise
-    manifest = parsed.manifest
-    # For schema versions without a typed Pydantic mirror (e.g. 2025-02),
-    # read directly from the raw validated dict. All required keys are
-    # guaranteed present by JSON Schema validation in parse_manifest.
+    # All metadata reads go through the validated raw dict. The typed mirror
+    # (parsed.manifest) varies in shape across schema versions — 2025-01
+    # carries `compatibility` and `listing` blocks, 2026-05 dropped both —
+    # so reading via the typed model couples the publisher to a specific
+    # version. parse_manifest already validated structurally; raw access is
+    # uniform across versions.
     raw = parsed.raw
     app_dict = raw.get("app") or {}
     compat_dict = raw.get("compatibility") or {}
     listing_dict = raw.get("listing") or {}
-    version_str = (manifest.app.version if manifest else app_dict.get("version")) or ""
+
+    version_str = app_dict.get("version") or ""
     if not version_str:
         raise PublishError("manifest.app.version must be non-empty")
-    required_features = (
-        list(manifest.compatibility.required_features)
-        if manifest
-        else list(compat_dict.get("required_features") or [])
-    )
+
+    manifest_schema_version = raw.get("manifest_schema_version", "")
+    # `compatibility.required_features` and `compatibility.manifest_schema`
+    # exist in 2025-01 only. For 2026-05 the compatibility block is gone;
+    # creators no longer declare runtime features per-manifest, and the
+    # schema version itself is the gating signal we feed compatibility.check.
+    required_features = list(compat_dict.get("required_features") or [])
     manifest_schema_str = (
-        manifest.compatibility.manifest_schema
-        if manifest
-        else compat_dict.get("manifest_schema", "")
-    )
-    manifest_schema_version = (
-        manifest.manifest_schema_version if manifest else raw.get("manifest_schema_version", "")
+        compat_dict.get("manifest_schema") or manifest_schema_version
     )
 
     # 2) Compat check vs server feature set.
@@ -158,8 +180,16 @@ async def publish_version(
     # 4) Get-or-create MarketplaceApp.
     if app_id is None:
         # First publish — create the hub row.
-        app_slug = (manifest.app.slug if manifest else app_dict.get("slug")) or ""
-        app_name = (manifest.app.name if manifest else app_dict.get("name")) or ""
+        app_slug = app_dict.get("slug") or ""
+        if not app_slug:
+            # 2026-05 made app.slug optional (creators only need to declare
+            # the reverse-DNS app.id). Derive a slug from the id's last
+            # segment so the unique-NOT-NULL column always has a value.
+            raw_id = app_dict.get("id") or ""
+            if raw_id:
+                last_segment = raw_id.rsplit(".", 1)[-1]
+                app_slug = slugify(last_segment, max_length=80)
+        app_name = app_dict.get("name") or ""
         # Auto-derive handle from slug; (creator_user_id, handle) unique
         # constraint catches in-creator duplicates via IntegrityError below.
         from .reserved_handles import is_reserved as _is_reserved_handle
@@ -172,17 +202,15 @@ async def publish_version(
             name=app_name,
             handle=derived_handle or None,
             creator_user_id=creator_user_id,
-            description=(manifest.app.description if manifest else app_dict.get("description")),
-            category=(manifest.app.category if manifest else app_dict.get("category")),
-            icon_ref=(manifest.app.icon_ref if manifest else app_dict.get("icon_ref")),
-            forkable=(
-                manifest.app.forkable if manifest else app_dict.get("forkable", "restricted")
-            ),
-            visibility=(
-                manifest.listing.visibility
-                if manifest
-                else listing_dict.get("visibility", "private")
-            ),
+            description=app_dict.get("description"),
+            category=app_dict.get("category"),
+            icon_ref=app_dict.get("icon_ref"),
+            forkable=_coerce_forkable(app_dict.get("forkable")),
+            # 2026-05 removed the listing block; defaulting to "private" is
+            # the safest first-publish posture (creators promote via the
+            # marketplace UI). 2025-01 manifests carry listing.visibility
+            # explicitly, which lands here unchanged.
+            visibility=listing_dict.get("visibility", "private"),
             state="draft",
         )
         db.add(new_app)

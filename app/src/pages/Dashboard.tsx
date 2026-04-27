@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useHotkeys } from 'react-hotkeys-hook';
 import { projectsApi, tasksApi, teamsApi } from '../lib/api';
 import { useTheme } from '../theme/ThemeContext';
 import { useTeam } from '../contexts/TeamContext';
+import { useCommandHandlers } from '../contexts/CommandContext';
 import { MobileMenu, ProjectCard } from '../components/ui';
 import type { Status } from '../components/ui';
 import type { EnvironmentStatus } from '../components/ui/environmentStatus';
@@ -87,6 +89,30 @@ export default function Dashboard() {
   useEffect(() => {
     loadProjects();
   }, [activeTeam?.slug, teamSwitchKey]);
+
+  // Command palette / keyboard wiring. Registers `openCreateProject` so
+  // ⌘N (and the palette's "Create New Project" entry) opens the modal.
+  // Also handles ⌘I for repo import.
+  const openCreateProject = useCallback(() => setShowCreateDialog(true), []);
+  const openImportProject = useCallback(() => setShowImportDialog(true), []);
+  useCommandHandlers({ openCreateProject });
+
+  useHotkeys(
+    'mod+n',
+    (e) => {
+      e.preventDefault();
+      openCreateProject();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+i',
+    (e) => {
+      e.preventDefault();
+      openImportProject();
+    },
+    { enableOnFormTags: false }
+  );
 
   // Open create modal with pre-selected base from search params (e.g., from marketplace "Use This Version")
   useEffect(() => {

@@ -20,10 +20,19 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
   const modalRef = useRef<HTMLDivElement>(null);
 
   const filteredGroups = useMemo<ShortcutGroup[]>(() => {
-    if (!search) return shortcutGroups;
+    // Hide paletteOnly entries — they have no keybinding and live in the
+    // command palette only.
+    const visibleGroups = shortcutGroups
+      .map((group) => ({
+        ...group,
+        shortcuts: group.shortcuts.filter((s) => !s.paletteOnly),
+      }))
+      .filter((group) => group.shortcuts.length > 0);
+
+    if (!search) return visibleGroups;
 
     const searchLower = search.toLowerCase();
-    return shortcutGroups
+    return visibleGroups
       .map((group) => ({
         ...group,
         shortcuts: group.shortcuts.filter(

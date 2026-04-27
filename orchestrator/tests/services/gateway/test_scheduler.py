@@ -225,7 +225,7 @@ def test_cron_tick_no_due_triggers_returns_zero(session_maker) -> None:
 def test_cron_tick_fires_due_trigger_and_advances_next_run_at(
     session_maker,
 ) -> None:
-    """One due trigger → AutomationEvent + AutomationRun(queued) + 1 enqueue."""
+    """One due trigger → AutomationEvent only (dispatcher creates the run) + 1 enqueue."""
     from app.models_automations import (
         AutomationEvent,
         AutomationRun,
@@ -283,6 +283,10 @@ def test_cron_tick_fires_due_trigger_and_advances_next_run_at(
             assert evt.payload.get("cron_expression") == "*/5 * * * *"
             assert str(evt.id) == args[1]
 
+            # Cron does NOT pre-create the run row. The dispatcher's
+            # _upsert_run is the sole creator of run rows for every trigger
+            # source. See services/automations/sweep_on_acquire.py for the
+            # event-anchored recovery contract.
             runs = (
                 await db.execute(
                     select(AutomationRun).where(
@@ -290,9 +294,7 @@ def test_cron_tick_fires_due_trigger_and_advances_next_run_at(
                     )
                 )
             ).scalars().all()
-            assert len(runs) == 1
-            assert runs[0].status == "queued"
-            assert runs[0].event_id == evt.id
+            assert runs == []
 
             trig = (
                 await db.execute(
@@ -488,14 +490,15 @@ def test_cron_tick_invalid_timezone_deactivates(session_maker) -> None:
 
 
 @pytest.mark.unit
-def test_cron_tick_enqueue_failure_leaves_run_queued(session_maker) -> None:
-    """If ARQ enqueue fails, the AutomationRun row remains in 'queued'.
+def test_cron_tick_enqueue_failure_leaves_event_undispatched(session_maker) -> None:
+    """If ARQ enqueue fails, the AutomationEvent row stays undispatched.
 
-    The Phase 4 controller's sweep-on-acquire is responsible for
-    re-enqueueing orphaned 'queued' rows; the producer only logs and
-    moves on (it is non-blocking).
+    The producer is no longer responsible for creating the run row — the
+    dispatcher's ``_upsert_run`` is the sole creator. Recovery is anchored
+    on the event row instead: ``sweep_on_acquire`` and ``missed_event_drain``
+    re-enqueue events with ``dispatched_at IS NULL`` past the stale cutoff.
     """
-    from app.models_automations import AutomationRun
+    from app.models_automations import AutomationEvent, AutomationRun
     from app.services.gateway.scheduler import cron_tick
 
     boom = _BoomArqPool()
@@ -520,6 +523,20 @@ def test_cron_tick_enqueue_failure_leaves_run_queued(session_maker) -> None:
         assert fired == 0
 
         async with session_maker() as db:
+            # Event was committed before the (failed) enqueue, so it
+            # exists with dispatched_at IS NULL — the sweep's recovery
+            # anchor.
+            events = (
+                await db.execute(
+                    select(AutomationEvent).where(
+                        AutomationEvent.automation_id == automation_id
+                    )
+                )
+            ).scalars().all()
+            assert len(events) == 1
+            assert events[0].dispatched_at is None
+
+            # No run row — the dispatcher never executed.
             runs = (
                 await db.execute(
                     select(AutomationRun).where(
@@ -527,9 +544,7 @@ def test_cron_tick_enqueue_failure_leaves_run_queued(session_maker) -> None:
                     )
                 )
             ).scalars().all()
-            # Row still durably persisted at status='queued' for sweep recovery.
-            assert len(runs) == 1
-            assert runs[0].status == "queued"
+            assert runs == []
 
     asyncio.run(tick_and_assert())
 

@@ -311,7 +311,16 @@ def _build_container_url(project: Project, container: Container) -> str:
     settings = get_settings()
     protocol = getattr(settings, "k8s_container_url_protocol", "http")
     domain = settings.app_domain
-    dir_or_name = container.directory or container.name
+    # Mirror the ingress hostname builder. ``resolve_k8s_container_dir``
+    # owns the canonical algorithm (sanitize ``container.directory``;
+    # fall back to ``container.id[:12]`` when directory is "."/empty).
+    # Computing ``container.directory or container.name`` here drifts
+    # from the ingress for any app whose .tesslate/config.json has
+    # directory="." — the ingress lands on ``{slug}-{shortHex}`` while
+    # this would build ``{slug}-..`` and 404.
+    from ..compute_manager import resolve_k8s_container_dir
+
+    dir_or_name = resolve_k8s_container_dir(container)
     return container_url(
         project_slug=project.slug,
         container_dir_or_name=dir_or_name,
@@ -1020,7 +1029,9 @@ def _build_deployment_url(
     protocol = getattr(settings, "k8s_container_url_protocol", "http")
     domain = settings.app_domain
     if container is not None:
-        dir_or_name = container.directory or container.name
+        from ..compute_manager import resolve_k8s_container_dir
+
+        dir_or_name = resolve_k8s_container_dir(container)
     else:
         dir_or_name = handler.get("container") or "app"
     return container_url(

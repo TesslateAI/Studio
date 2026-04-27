@@ -645,6 +645,22 @@ class Chat(Base):
     last_active_at = Column(DateTime(timezone=True), nullable=True)
     idle_timeout_minutes = Column(Integer, nullable=True)
 
+    # Multi-agent delegation (@-mention call_agent path). When the calling
+    # agent invokes ``@coworker`` via the ``call_agent`` tool, the dispatched
+    # run gets its own disposable Chat row tagged with the parent's
+    # task_id and ``is_delegated_run=True``. This is distinct from the
+    # in-process ``task`` / subagent tools in the tesslate-agent submodule
+    # (those run inside the same process, never touch the DB, and never
+    # set this flag).
+    #
+    # All chat-list queries filter ``is_delegated_run=False`` so delegated
+    # runs do not pollute the user's sidebar. The chat-detail loader does
+    # NOT filter, so the drill-in UI (expand the ``call_agent`` tool call
+    # in the parent's transcript → "View full trajectory") can navigate
+    # by id.
+    parent_task_id = Column(String(64), nullable=True, index=True)
+    is_delegated_run = Column(Boolean, nullable=False, server_default="0", default=False)
+
     __table_args__ = (Index("ix_chats_user_project", "user_id", "project_id"),)
 
     user = relationship("User", back_populates="chats")

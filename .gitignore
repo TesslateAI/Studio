@@ -28,6 +28,7 @@ env/
 venv/
 ENV/
 .venv
+.venv-*/
 pip-log.txt
 pip-delete-this-directory.txt
 .pytest_cache/

@@ -1,26 +1,32 @@
 """
-Cron Producer — tick-based cron trigger dispatcher.
+Cron Producer — tick-based cron trigger dispatcher (legacy gateway path).
 
 Phase 1 of the OpenSail Automation Runtime. Operates on
 ``automation_triggers`` (kind='cron') joined to ``automation_definitions``,
-materializes an ``AutomationEvent`` + ``AutomationRun(status='queued')``
-in a single transaction, then enqueues ``dispatch_automation_task`` to ARQ.
+inserts an ``automation_events`` row, and enqueues ``dispatch_automation_task``
+to ARQ. The dispatcher's ``_upsert_run`` is the sole creator of the
+``automation_runs`` row — pre-creating one here would collide with the
+dispatcher's idempotency noop branch (existing ``status='queued'`` →
+``NOOP_INFLIGHT``) and the run would deadlock at queued forever.
 
 The legacy ``agent_schedules`` table was dropped by alembic 0074; this
-module replaces the previous schedule dispatcher.
+module replaces the previous schedule dispatcher. Phase 4 supersedes this
+module with ``services.automations.cron_producer`` running inside a
+dedicated ``automations-controller`` Deployment; this gateway path stays
+as a fall-back for pre-Phase-4 deployments.
 
 Concurrency model
 -----------------
 The gateway runner is pinned to a single replica via the existing file lock
 + K8s ``Recreate`` strategy. The SQL claim still uses ``SELECT ... FOR UPDATE
-SKIP LOCKED`` so two pods racing the same tick remain correct. Phase 4 will
-move this loop into a dedicated ``automations-controller`` Deployment with
-proper leader election.
+SKIP LOCKED`` so two pods racing the same tick remain correct.
 
-The ARQ enqueue happens **after** ``commit()`` so the durable
-``AutomationRun(status='queued')`` row is visible before the dispatcher
-worker can pick it up. If the enqueue fails, the row is left in 'queued'
-state for the Phase 4 controller's sweep-on-acquire to re-enqueue.
+Recovery
+--------
+If the ARQ enqueue fails, ``automation_events.dispatched_at`` stays NULL.
+The controller's :mod:`sweep_on_acquire` and :mod:`missed_event_drain`
+modules re-enqueue dispatch for events with ``dispatched_at IS NULL``
+older than the stale cutoff.
 """
 
 from __future__ import annotations
@@ -107,15 +113,15 @@ async def cron_tick(db, arq_pool, now: datetime | None = None) -> int:
     on the gateway file-lock above for single-writer correctness, which is
     fine for desktop-mode single-process operation.
 
-    The transaction commits **before** ARQ enqueue so the dispatcher worker
-    always finds the ``AutomationRun(status='queued')`` row when it picks
-    the job up. Enqueue failure leaves the row in 'queued' for the Phase 4
-    controller's sweep-on-acquire to recover.
+    The transaction commits **before** ARQ enqueue so the durable event
+    row is visible to the dispatcher worker when it picks the job up.
+    Enqueue failure leaves ``automation_events.dispatched_at`` NULL; the
+    controller's :mod:`sweep_on_acquire` / :mod:`missed_event_drain`
+    re-enqueue from there.
     """
     from ...models_automations import (
         AutomationDefinition,
         AutomationEvent,
-        AutomationRun,
         AutomationTrigger,
     )
 
@@ -205,7 +211,6 @@ async def cron_tick(db, arq_pool, now: datetime | None = None) -> int:
         trigger.last_run_at = now
 
         event_id = uuid4()
-        run_id = uuid4()
         db.add(
             AutomationEvent(
                 id=event_id,
@@ -220,20 +225,14 @@ async def cron_tick(db, arq_pool, now: datetime | None = None) -> int:
                 received_at=now,
             )
         )
-        db.add(
-            AutomationRun(
-                id=run_id,
-                automation_id=automation.id,
-                event_id=event_id,
-                status="queued",
-                retry_count=0,
-            )
-        )
+        # NB: no AutomationRun pre-create — the dispatcher's _upsert_run
+        # is the sole creator of run rows. Pre-creating at status='queued'
+        # would collide with the dispatcher's idempotency noop branch
+        # (NOOP_INFLIGHT) and the run would deadlock at queued.
         enqueue_jobs.append((automation.id, event_id))
 
-    # Commit BEFORE enqueue: the dispatcher worker MUST see the queued run
-    # row when it pops the ARQ job. If the commit fails, we re-raise (no
-    # phantom enqueues against rolled-back state).
+    # Commit BEFORE enqueue so the durable event row is visible to the
+    # dispatcher worker. If commit fails we re-raise (no phantom enqueues).
     await db.commit()
 
     if not enqueue_jobs:

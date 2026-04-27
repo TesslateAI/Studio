@@ -193,7 +193,46 @@ class ContractGate:
         (explicitly different from absent). Any extra MCP / skill names
         passed as parameters by future tool wrappers are checked against
         ``allowed_mcps`` / ``allowed_skills`` respectively.
+
+        MCP-bridged tools are handled separately from the literal
+        ``allowed_tools`` allow-list. Their names follow the form
+        ``mcp__<server_slug>__<verb>`` and the catalog of verbs is owned by
+        the remote MCP server (changes outside the contract author's view).
+        Gating those by enumerating every tool name would force users to
+        re-author the contract whenever the MCP server adds a tool. The
+        contract gate for MCP tools is the per-server ``allowed_mcps``
+        list instead — set by the user once when attaching the server.
         """
+        # MCP-bridged tool names follow ``mcp__<server_slug>__<verb>``.
+        # Route their gating through ``allowed_mcps`` (server allow-list)
+        # rather than the literal ``allowed_tools`` list. Without this
+        # branch, automations with a non-null ``allowed_tools`` would
+        # deny every MCP call because the bridged names never appear in
+        # the user-authored tool list.
+        if tool_name.startswith("mcp__"):
+            parts = tool_name.split("__", 2)
+            server_slug = parts[1] if len(parts) >= 2 else ""
+
+            allowed_mcps = self.contract.get("allowed_mcps")
+            if allowed_mcps is not None:
+                # bridge.py uses the marketplace slug verbatim, but
+                # manager.py normalizes hyphens→underscores for some
+                # providers that rewrite '-' in function names. Tolerate
+                # either spelling so contract authors can use whichever
+                # form matches what they see in the UI.
+                candidates = {server_slug, server_slug.replace("_", "-")}
+                if not (candidates & set(allowed_mcps)):
+                    return ContractGateDecision(
+                        allowed=False,
+                        reason=(
+                            f"MCP server '{server_slug}' not in "
+                            f"contract.allowed_mcps (via tool '{tool_name}')"
+                        ),
+                        breach_kind=BreachKind.MCP_DISALLOWED,
+                    )
+            # Allowed: skip the literal ``allowed_tools`` check below.
+            return None
+
         allowed_tools = self.contract.get("allowed_tools")
         if allowed_tools is not None and tool_name not in allowed_tools:
             return ContractGateDecision(

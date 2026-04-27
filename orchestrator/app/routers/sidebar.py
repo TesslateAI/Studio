@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import Chat, Project, User
+from ..models_automations import AutomationDefinition
 from ..models_team import ProjectMembership, TeamMembership
 from ..services.apps.project_scopes import exclude_app_instances_clause
 from ..users import current_active_user
@@ -92,9 +93,31 @@ def _serialize_chat(chat: Chat) -> dict:
         "title": chat.title or "Untitled",
         "status": chat.status or "active",
         "origin": chat.origin or "browser",
+        # `platform` distinguishes channel-originated chats (telegram/discord/
+        # slack/whatsapp/signal/cli) from the default browser session, so the
+        # sidebar can render a brand icon instead of the generic chat bubble.
+        "platform": chat.platform,
         "project_id": str(chat.project_id) if chat.project_id else None,
         "created_at": chat.created_at.isoformat() if chat.created_at else None,
         "updated_at": chat.updated_at.isoformat() if chat.updated_at else None,
+    }
+
+
+def _serialize_automation(automation: AutomationDefinition) -> dict:
+    return {
+        "id": str(automation.id),
+        "name": automation.name,
+        "is_active": bool(automation.is_active),
+        "target_project_id": (
+            str(automation.target_project_id) if automation.target_project_id else None
+        ),
+        "workspace_project_id": (
+            str(automation.workspace_project_id)
+            if automation.workspace_project_id
+            else None
+        ),
+        "created_at": automation.created_at.isoformat() if automation.created_at else None,
+        "updated_at": automation.updated_at.isoformat() if automation.updated_at else None,
     }
 
 
@@ -103,6 +126,7 @@ async def sidebar_tree(
     project_limit: int = Query(30, ge=1, le=100),
     root_chat_limit: int = Query(50, ge=1, le=200),
     chats_per_project: int = Query(20, ge=1, le=100),
+    automation_limit: int = Query(30, ge=0, le=100),
     current_user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -112,7 +136,8 @@ async def sidebar_tree(
 
         {
           "rootChats":  [{...chat...}, ...],
-          "projects":   [{id, name, slug, updated_at, chats: [{...}, ...]}, ...]
+          "projects":   [{id, name, slug, updated_at, chats: [{...}, ...]}, ...],
+          "automations": [{id, name, updated_at, ...}, ...]
         }
     """
     # --- Projects: rank by the latest activity inside them ---
@@ -196,6 +221,7 @@ async def sidebar_tree(
             Chat.user_id == current_user.id,
             Chat.project_id.in_(project_ids),
             Chat.status.notin_(HIDDEN_CHAT_STATUSES),
+            Chat.is_delegated_run.is_(False),
         )
         ranked_sub = ranked.subquery()
         chat_rows = await db.execute(
@@ -223,4 +249,39 @@ async def sidebar_tree(
     )
     root_chats = [_serialize_chat(c) for c in root_chat_rows.scalars().all()]
 
-    return {"rootChats": root_chats, "projects": projects}
+    # --- Automations the user can see ---
+    # Visibility mirrors the projects rule: owner OR (active team member +
+    # automation belongs to that team). Inactive automations are hidden so
+    # the sidebar timeline only surfaces things the user can interact with.
+    automations: list[dict] = []
+    if automation_limit > 0:
+        automation_filter = [AutomationDefinition.is_active.is_(True)]
+        team_id = current_user.default_team_id
+        if team_id:
+            automation_filter.append(
+                or_(
+                    AutomationDefinition.owner_user_id == current_user.id,
+                    AutomationDefinition.team_id == team_id,
+                )
+            )
+        else:
+            automation_filter.append(
+                AutomationDefinition.owner_user_id == current_user.id
+            )
+
+        automation_rows = await db.execute(
+            select(AutomationDefinition)
+            .where(and_(*automation_filter))
+            .order_by(
+                AutomationDefinition.updated_at.desc().nullslast(),
+                AutomationDefinition.created_at.desc(),
+            )
+            .limit(automation_limit)
+        )
+        automations = [_serialize_automation(a) for a in automation_rows.scalars().all()]
+
+    return {
+        "rootChats": root_chats,
+        "projects": projects,
+        "automations": automations,
+    }
