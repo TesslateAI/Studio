@@ -355,11 +355,15 @@ export function ChatInput({
   // The cost is three small parallel GETs, swallowed individually by
   // mentionApi.search; cached for the component's lifetime.
   const mentionLoadedRef = useRef(false);
+  // Promise handle so a fast-typist's send can await the in-flight load
+  // before resolving @-mentions. Without this, hitting Enter before the
+  // eager fetch resolves yields an empty library → no mentions shipped.
+  const mentionLoadPromiseRef = useRef<Promise<void> | null>(null);
   useEffect(() => {
     if (mentionLoadedRef.current) return;
     let cancelled = false;
     setMentionLoading(true);
-    (async () => {
+    const p = (async () => {
       try {
         const result = await mentionApi.search();
         if (cancelled) return;
@@ -375,6 +379,7 @@ export function ChatInput({
         if (!cancelled) setMentionLoading(false);
       }
     })();
+    mentionLoadPromiseRef.current = p;
     return () => {
       cancelled = true;
     };
@@ -611,6 +616,81 @@ export function ChatInput({
     }
   };
 
+  // Resolve `@<slug>` tokens in a message at send-time. The picker writes
+  // into ``mentions`` state and an effect auto-resolves typed-only tokens
+  // — but both run AFTER render, so a fast Enter can fire while ``mentions``
+  // is still empty. Re-scanning here makes resolution deterministic.
+  // Async because if the eager library fetch hasn't completed yet, we
+  // await it (or do a one-shot fetch as a fallback) before scanning.
+  const resolveMentionsAtSend = async (
+    trimmed: string
+  ): Promise<ChatMention[]> => {
+    const hasAtToken = /(?:^|\s)@([a-zA-Z0-9_.\-]+)/.test(trimmed);
+    let library = mentionLibrary;
+    if (hasAtToken && library.size === 0) {
+      // Eager fetch may still be in flight; wait for it, then build a
+      // fresh library from whatever the fetch loaded. State may not have
+      // flushed by the time the promise resolves, so go through
+      // ``mentionApi.search`` once if state is still empty.
+      if (mentionLoadPromiseRef.current) {
+        try {
+          await mentionLoadPromiseRef.current;
+        } catch {
+          // swallowed inside the promise itself
+        }
+      }
+      // Read state via a fresh closure-time snapshot (state vars below
+      // are stale to this closure if the promise just resolved).
+      // Falling through to a synchronous library rebuild from state.
+      library = new Map<string, MentionItem>();
+      for (const a of mentionAgents) if (a.slug) library.set(a.slug, a);
+      for (const x of mentionMcps) if (x.slug) library.set(x.slug, x);
+      for (const x of mentionApps) if (x.slug) library.set(x.slug, x);
+      if (library.size === 0) {
+        // Last-resort: do a one-shot fetch right now. This costs three
+        // GETs but only on the first Enter before eager fetch settled.
+        try {
+          const result = await mentionApi.search();
+          for (const a of result.agents) if (a.slug) library.set(a.slug, a);
+          for (const x of result.mcps) if (x.slug) library.set(x.slug, x);
+          for (const x of result.apps) if (x.slug) library.set(x.slug, x);
+          // Stash into state too so subsequent sends use the cache.
+          setMentionAgents(result.agents);
+          setMentionMcps(result.mcps);
+          setMentionApps(result.apps);
+          mentionLoadedRef.current = true;
+        } catch {
+          // best-effort
+        }
+      }
+    }
+    const out: ChatMention[] = [];
+    const seenRefs = new Set<string>();
+    for (const m of mentions) {
+      if (trimmed.includes(m.display) && !seenRefs.has(m.ref_id)) {
+        out.push(m);
+        seenRefs.add(m.ref_id);
+      }
+    }
+    const matches = trimmed.matchAll(/(?:^|\s)@([a-zA-Z0-9_.\-]+)/g);
+    for (const m of matches) {
+      const slug = m[1];
+      const item = library.get(slug);
+      if (!item || !item.enabled) continue;
+      if (seenRefs.has(item.ref_id)) continue;
+      const baseIdx = m.index ?? 0;
+      const offset = baseIdx + (m[0].startsWith('@') ? 0 : m[0].indexOf('@'));
+      out.push({
+        kind: item.kind,
+        ref_id: item.ref_id,
+        display: '@' + slug,
+        offset,
+      });
+      seenRefs.add(item.ref_id);
+    }
+    return out;
+  };
+
   const sendMessage = async () => {
     const hasContent = message.trim() || attachments.length > 0;
     if (hasContent && !disabled) {
@@ -643,9 +723,7 @@ export function ChatInput({
           // Skill slash commands are sent as regular messages to the agent
           setMessageHistory((prev) => [...prev, trimmed]);
           const serialized = await serializeForSend();
-          // Drop mentions whose display token is no longer in the message
-          // (the user may have manually deleted ``@x`` after picking it).
-          const liveMentions = mentions.filter((m) => trimmed.includes(m.display));
+          const liveMentions = await resolveMentionsAtSend(trimmed);
           onSendMessage(
             trimmed,
             serialized.length > 0 ? serialized : undefined,
@@ -656,7 +734,7 @@ export function ChatInput({
         // Regular message
         setMessageHistory((prev) => [...prev, trimmed]);
         const serialized = await serializeForSend();
-        const liveMentions = mentions.filter((m) => trimmed.includes(m.display));
+        const liveMentions = await resolveMentionsAtSend(trimmed);
         onSendMessage(
           trimmed,
           serialized.length > 0 ? serialized : undefined,
