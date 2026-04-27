@@ -51,8 +51,9 @@ import {
 } from '../contexts/BuilderShellContext';
 import { nodeConfigEvents } from '../utils/nodeConfigEvents';
 import { nodeConfigApi } from '../lib/api';
-import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
+import { ProviderConnectModal } from '../components/modals/ProviderConnectModal';
+import { DeployHubDrawer } from '../components/deploy/DeployHubDrawer';
 import CodeEditor from '../components/CodeEditor';
 import { ContainerSelector, PROJECT_ROOT_ID } from '../components/ContainerSelector';
 import { type PreviewableContainer } from '../components/PreviewPortPicker';
@@ -303,8 +304,19 @@ function ProjectPageInner() {
   const toggleNavRail = useCallback(() => {
     setIsLeftSidebarExpanded(!isLeftSidebarExpanded);
   }, [isLeftSidebarExpanded, setIsLeftSidebarExpanded]);
-  const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
+  // Unified Deploy hub — replaces the legacy DeploymentsDropdown + standalone
+  // "Publish as App" entry. The hub fans out to PublishAsAppDrawer (hero),
+  // the architecture canvas (graph deeplink), and DeploymentModal /
+  // ProviderConnectModal (per-provider quick deploy).
+  const [isDeployHubOpen, setIsDeployHubOpen] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
+  const [deployModalProvider, setDeployModalProvider] = useState<string | undefined>(undefined);
+  const [providerConnectTarget, setProviderConnectTarget] = useState<string | null>(null);
+  const [marketplaceFocus, setMarketplaceFocus] = useState<{
+    category: string;
+    nonce: number;
+  } | null>(null);
+  const [deployHubRefreshNonce, setDeployHubRefreshNonce] = useState(0);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
 
   // Preview port picker
@@ -1666,6 +1678,7 @@ function ProjectPageInner() {
         onStateChange={handleArchStateChange}
         readOnly={isViewer}
         onPublishAsApp={canPublish ? handlePublishAsApp : undefined}
+        marketplaceFocus={marketplaceFocus}
       />
     ),
     preview: (_tab: TabInstance, idx: number) => (
@@ -1885,30 +1898,16 @@ function ProjectPageInner() {
 
       <div className="w-px h-[22px] bg-[var(--border)] mx-0.5 hidden md:block" />
 
-      <div className="relative">
-        <button
-          onClick={
-            canDeploy ? () => setShowDeploymentsDropdown(!showDeploymentsDropdown) : undefined
-          }
-          className="btn btn-filled"
-          style={!canDeploy ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-          title={!canDeploy ? 'Deployment restricted for viewers' : undefined}
-        >
-          {!canDeploy && <LockSimple size={13} weight="bold" />}
-          <Rocket size={15} weight="bold" />
-          <span className="hidden md:inline">Deploy</span>
-        </button>
-        <DeploymentsDropdown
-          projectSlug={slug!}
-          isOpen={showDeploymentsDropdown}
-          onClose={() => setShowDeploymentsDropdown(false)}
-          onOpenDeployModal={() => setShowDeployModal(true)}
-          assignedDeploymentTarget={
-            container?.deployment_provider as 'vercel' | 'netlify' | 'cloudflare' | null | undefined
-          }
-          containerName={container?.name as string | undefined}
-        />
-      </div>
+      <button
+        onClick={canDeploy ? () => setIsDeployHubOpen(true) : undefined}
+        className="btn btn-filled"
+        style={!canDeploy ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+        title={!canDeploy ? 'Deployment restricted for viewers' : undefined}
+      >
+        {!canDeploy && <LockSimple size={13} weight="bold" />}
+        <Rocket size={15} weight="bold" />
+        <span className="hidden md:inline">Deploy</span>
+      </button>
     </div>
   );
 
@@ -2156,12 +2155,65 @@ function ProjectPageInner() {
         <DeploymentModal
           projectSlug={slug!}
           isOpen={showDeployModal}
-          onClose={() => setShowDeployModal(false)}
+          onClose={() => {
+            setShowDeployModal(false);
+            setDeployModalProvider(undefined);
+          }}
           onSuccess={() => {
             setShowDeployModal(false);
+            setDeployModalProvider(undefined);
+            // Hub may show this deployment in the recent list — bump nonce
+            // so the next open re-fetches.
+            setDeployHubRefreshNonce((n) => n + 1);
             toast.success('Deployment started successfully!');
           }}
-          defaultProvider={container?.deployment_provider as string | undefined}
+          defaultProvider={
+            deployModalProvider ??
+            (container?.deployment_provider as string | undefined)
+          }
+        />
+      )}
+
+      {/* Unified Deploy hub — toolbar Deploy button opens this. Hands off to
+          PublishAsAppDrawer (hero), the architecture canvas (Card B), and
+          DeploymentModal / ProviderConnectModal (per-provider quick deploy). */}
+      <DeployHubDrawer
+        isOpen={isDeployHubOpen}
+        onClose={() => setIsDeployHubOpen(false)}
+        projectSlug={slug!}
+        canPublish={canPublish}
+        refreshNonce={deployHubRefreshNonce}
+        onOpenPublishDrawer={handlePublishAsApp}
+        onOpenArchitectureWithDeploymentCategory={() => {
+          dock.openTool('architecture');
+          setMarketplaceFocus({ category: 'deployment', nonce: Date.now() });
+        }}
+        onOpenDeployModal={(provider) => {
+          setIsDeployHubOpen(false);
+          setDeployModalProvider(provider);
+          setShowDeployModal(true);
+        }}
+        onOpenProviderConnectModal={(provider) => {
+          setProviderConnectTarget(provider);
+        }}
+      />
+
+      {/* ProviderConnectModal triggered from the Deploy hub when a chip
+          without credentials is clicked. After connecting, we open the
+          DeploymentModal preselected to that provider so the user can
+          ship right away without a second trip through the hub. */}
+      {providerConnectTarget && (
+        <ProviderConnectModal
+          isOpen={true}
+          defaultProvider={providerConnectTarget}
+          onClose={() => setProviderConnectTarget(null)}
+          onConnected={(provider) => {
+            setProviderConnectTarget(null);
+            setDeployHubRefreshNonce((n) => n + 1);
+            setIsDeployHubOpen(false);
+            setDeployModalProvider(provider);
+            setShowDeployModal(true);
+          }}
         />
       )}
 

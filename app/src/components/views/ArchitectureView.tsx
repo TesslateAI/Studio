@@ -138,6 +138,13 @@ export interface ArchitectureViewProps {
    * available for this project.
    */
   onPublishAsApp?: () => void;
+  /**
+   * Deep-link signal forwarded to the floating MarketplaceSidebar. The
+   * unified Deploy hub bumps `nonce` to ask the sidebar to open and
+   * expand a specific category (e.g., "deployment") so the user lands
+   * directly in the right component list.
+   */
+  marketplaceFocus?: { category: string; nonce: number } | null;
 }
 
 export interface ArchitectureViewHandle {
@@ -165,6 +172,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       onStateChange,
       readOnly = false,
       onPublishAsApp,
+      marketplaceFocus,
     },
     ref
   ) => {
@@ -1977,6 +1985,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
             <MarketplaceSidebar
               onAutoLayout={handleAutoLayout}
               autoLayoutDisabled={nodes.length < 2}
+              focusSignal={marketplaceFocus ?? null}
             />
           )}
 

@@ -255,18 +255,28 @@ export default function Chat() {
     [currentAgent]
   );
 
-  // Handle project connection — persisted via session, survives reloads
+  // Handle project connection — persisted via session, survives reloads.
+  // On the landing screen there's no session yet (lazy creation on first
+  // send), but connecting a workspace is a meaningful action with persisted
+  // state, so materialize the session now — same pattern as handleCreateWorkspace.
   const handleConnectProject = useCallback(
     async (projectId: string, projectName: string) => {
-      if (!currentSessionId) return;
+      let sessionId = currentSessionId;
+      if (!sessionId) {
+        sessionId = await createSession();
+      }
+      if (!sessionId) {
+        toast.error('Failed to connect project');
+        return;
+      }
       try {
-        await updateSessionProject(currentSessionId, projectId, projectName);
+        await updateSessionProject(sessionId, projectId, projectName);
         toast.success(`Connected to ${projectName}`);
       } catch {
         toast.error('Failed to connect project');
       }
     },
-    [currentSessionId, updateSessionProject]
+    [currentSessionId, createSession, updateSessionProject]
   );
 
   const handleDisconnectProject = useCallback(async () => {
