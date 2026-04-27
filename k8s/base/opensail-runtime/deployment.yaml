@@ -47,6 +47,11 @@ spec:
         component: connector-proxy
     spec:
       terminationGracePeriodSeconds: 30
+      # K8s auto-injects $<SERVICE>_PORT etc. for every Service in the
+      # namespace. With this Service also named `opensail-runtime`, that
+      # would clobber OPENSAIL_RUNTIME_PORT (the int the proxy reads in
+      # __main__.py) with `tcp://<ip>:8400` and crash boot.
+      enableServiceLinks: false
       # Reuse the backend SA so the proxy can read per-pod-key Secrets
       # via the K8s API (same RBAC the installer uses to write them).
       serviceAccountName: tesslate-backend-sa
