@@ -321,13 +321,24 @@ async def test_check_state_model_framework_pattern(db, seeded_project):
 
 
 @pytest.mark.asyncio
-async def test_add_postgres_writes_secret_and_patches_manifest(db, seeded_project):
+async def test_add_postgres_writes_secret_and_patches_manifest(
+    db, seeded_project, monkeypatch
+):
     """add_postgres: stubbed URL + real K8s Secret write + manifest patched.
 
     The K8s client is a MagicMock so we can assert ``create_namespaced_secret``
     was called with the right args. The manifest YAML is pre-seeded in the
-    workspace so we can verify the in-place patch.
+    workspace so we can verify the in-place patch. We flip the
+    ``MANAGED_POSTGRES_ALLOW_STUB`` setting on for this test so the
+    provisioner returns the sentinel-DNS stub instead of trying to connect
+    to a real pool — exercising the wiring without a backing Postgres.
     """
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("MANAGED_POSTGRES_ALLOW_STUB", "1")
+    monkeypatch.delenv("MANAGED_POSTGRES_ADMIN_URL", raising=False)
+
     project, project_root = seeded_project
 
     # Pre-seed an opensail.app.yaml so the patcher writes through.
@@ -403,4 +414,4 @@ async def test_add_postgres_writes_secret_and_patches_manifest(db, seeded_projec
     assert "DATABASE_URL" in helper_body
 
     # 7. Notes call out the stub.
-    assert any("STUBBED" in n for n in result.notes)
+    assert any("STUB" in n for n in result.notes)

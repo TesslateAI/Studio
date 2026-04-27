@@ -533,6 +533,90 @@ class TelegramChannel(GatewayAdapter):
     # Approval cards (Phase 4) — outbound inline_keyboard buttons
     # ------------------------------------------------------------------
 
+    # ---- Phase 4 file upload (approval-card artifacts) -----------------
+
+    # Telegram's documented sendDocument upload limit (50 MiB), but we
+    # cap at 25 MiB for parity with Slack so the runner has one cross-
+    # platform threshold to enforce. Larger payloads need the local-bot
+    # API server which we can't assume in production.
+    TELEGRAM_FILE_UPLOAD_MAX_BYTES: int = 25 * 1024 * 1024
+
+    async def send_document(
+        self,
+        *,
+        chat_id: str,
+        filename: str,
+        content: bytes,
+        caption: str | None = None,
+        mime_type: str | None = None,
+        message_thread_id: int | str | None = None,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> dict[str, Any]:
+        """Upload a binary blob to ``chat_id`` via Telegram ``sendDocument``.
+
+        Uses ``multipart/form-data`` because the Bot API only accepts
+        binary payloads when the request body is multipart — the JSON
+        form expects a ``file_id`` or URL string.
+
+        Returns ``{"ok": ..., "message_id": ..., "error": ...}`` so the
+        caller can audit the post.
+        """
+        if len(content) > self.TELEGRAM_FILE_UPLOAD_MAX_BYTES:
+            return {
+                "ok": False,
+                "error": "file_too_large",
+                "message_id": None,
+            }
+
+        owns_client = http_client is None
+        client = http_client or httpx.AsyncClient(timeout=60.0)
+        try:
+            url = f"{TELEGRAM_API}/bot{self.bot_token}/sendDocument"
+            data: dict[str, Any] = {"chat_id": str(chat_id)}
+            if caption:
+                # Telegram caption max is 1024 chars; truncate so the
+                # API doesn't 400 us.
+                data["caption"] = caption[:1024]
+                data["parse_mode"] = "HTML"
+            if message_thread_id is not None:
+                data["message_thread_id"] = str(int(message_thread_id))
+
+            files = {
+                "document": (
+                    filename,
+                    content,
+                    mime_type or "application/octet-stream",
+                ),
+            }
+            resp = await client.post(url, data=data, files=files)
+            result = resp.json()
+            if not result.get("ok"):
+                logger.warning(
+                    "[TG] sendDocument failed chat=%s file=%s: %s",
+                    chat_id,
+                    filename,
+                    result.get("description"),
+                )
+                return {
+                    "ok": False,
+                    "error": result.get("description") or "send_document_failed",
+                    "message_id": None,
+                }
+            msg_id = None
+            if result.get("result"):
+                msg_id = str(result["result"].get("message_id", ""))
+            return {"ok": True, "message_id": msg_id, "error": None}
+        except Exception as exc:
+            logger.exception(
+                "[TG] send_document raised chat=%s file=%s",
+                chat_id,
+                filename,
+            )
+            return {"ok": False, "error": str(exc), "message_id": None}
+        finally:
+            if owns_client:
+                await client.aclose()
+
     async def send_approval_card(
         self,
         chat_id: str,

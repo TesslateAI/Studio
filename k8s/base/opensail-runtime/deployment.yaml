@@ -1,0 +1,214 @@
+# OpenSail Connector Proxy Deployment (opensail-runtime)
+#
+# Standalone proxy pod that serves /api/v1/connector-proxy. Reuses the
+# orchestrator's container image — entrypoint switches to
+# ``python -m app.services.apps.connector_proxy`` so we run the
+# minimal FastAPI app (router + /health) instead of the full orchestrator.
+#
+# Why a separate Deployment:
+#   * NetworkPolicy can pin egress to the upstream OAuth providers
+#     (Slack, GitHub, Linear, Gmail) instead of inheriting the
+#     orchestrator's broad "talk to anything internal" allowlist.
+#   * Ingress is bounded to compute-pool + proj-* namespaces — app pods
+#     reach it directly, no orchestrator hop.
+#   * Crash blast radius shrinks: a panic in the proxy stops proxy
+#     traffic but leaves the orchestrator (and every running agent
+#     loop) untouched.
+#
+# Scaling: stateless. Replicas live behind the Service; horizontal
+# scaling = bumping replicas. The per-pod signing key is read from a
+# K8s Secret on demand and TTL-cached in memory for 60s
+# (services/apps/connector_proxy/auth.py), so cache warmup is cheap.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensail-runtime
+  namespace: tesslate
+  labels:
+    app: opensail-runtime
+    component: connector-proxy
+spec:
+  revisionHistoryLimit: 3
+  replicas: 1  # Overridden by overlays for production
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: opensail-runtime
+      component: connector-proxy
+  template:
+    metadata:
+      labels:
+        app: opensail-runtime
+        component: connector-proxy
+    spec:
+      terminationGracePeriodSeconds: 30
+      # Reuse the backend SA so the proxy can read per-pod-key Secrets
+      # via the K8s API (same RBAC the installer uses to write them).
+      serviceAccountName: tesslate-backend-sa
+      automountServiceAccountToken: false
+      volumes:
+        - name: backend-sa-token
+          projected:
+            defaultMode: 0644
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
+      containers:
+        - name: proxy
+          # Same orchestrator image — only the entrypoint differs. Patched
+          # by overlays the same way ``tesslate-backend`` is.
+          image: tesslate-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.services.apps.connector_proxy"]
+          ports:
+            - containerPort: 8400
+              name: http
+              protocol: TCP
+          volumeMounts:
+            - name: backend-sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          env:
+            # Topology — when this pod boots, the orchestrator pod has
+            # already had its CONNECTOR_PROXY_MODE flipped to "dedicated"
+            # (overlay env-patch.yaml); the proxy itself just needs the
+            # setting for its /health response and runtime URL property.
+            - name: CONNECTOR_PROXY_MODE
+              value: "dedicated"
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+            - name: KUBERNETES_NAMESPACE
+              value: "tesslate"
+
+            # Database — same secret refs as the orchestrator. The proxy
+            # reads app_connector_grants and writes connector_proxy_calls;
+            # both live in the orchestrator DB.
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: DATABASE_URL
+
+            # Secret key — used by the auth verifier when the per-pod
+            # Secret is unavailable (deterministic-derivation fallback).
+            # Must match the orchestrator's value or installer-minted
+            # tokens won't verify.
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SECRET_KEY
+
+            # JWT alg pinned for parity with the orchestrator (no JWT
+            # surface on the proxy today, but config requires it).
+            - name: ALGORITHM
+              value: "HS256"
+            - name: ACCESS_TOKEN_EXPIRE_MINUTES
+              value: "30"
+
+            # CORS / hosts — proxy only takes in-cluster traffic but
+            # config validation requires these be set.
+            - name: CORS_ORIGINS
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: CORS_ORIGINS
+            - name: ALLOWED_HOSTS
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: ALLOWED_HOSTS
+
+            # LiteLLM — config requires these even though the proxy
+            # never touches LiteLLM. Reuse the orchestrator's secrets.
+            - name: LITELLM_API_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: LITELLM_API_BASE
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: LITELLM_MASTER_KEY
+            - name: LITELLM_DEFAULT_MODELS
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: LITELLM_DEFAULT_MODELS
+
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8400
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8400
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8400
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]

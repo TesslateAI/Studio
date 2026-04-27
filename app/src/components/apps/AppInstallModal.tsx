@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CaretDown, CaretRight, X, Warning } from '@phosphor-icons/react';
+import { CaretDown, CaretRight, CheckCircle, X, Warning } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import {
   appVersionsApi,
+  marketplaceAppsApi,
   type AppVersionDetail,
   type CompatReport,
   type UpdatePolicy,
@@ -184,13 +185,40 @@ function CollapsibleSection({
   );
 }
 
+/** Dependency install state — drives the inline "Install" buttons in the
+ *  Modules section. Phase 5 recursive composition: parent install button
+ *  stays disabled while any required dependency is missing. */
+type DependencyState =
+  | { status: 'unknown' }
+  | { status: 'installed'; appInstanceId: string }
+  | { status: 'skipped' };
+
 export function AppInstallModal({
   appVersionId,
   onClose,
   onDone,
 }: AppInstallModalProps) {
-  const { installApp } = useApps();
+  const { installApp, myInstalls, refresh: refreshApps } = useApps();
   const { teams, activeTeam } = useTeam();
+
+  // Per-alias child-install state. Resolved on mount + after each child
+  // install completes. ``unknown`` is the default until we know whether
+  // the dep is satisfied by an existing install.
+  const [depState, setDepState] = useState<Record<string, DependencyState>>({});
+
+  // The currently-open child install modal (null when none). Multiple
+  // levels recurse via the React tree — each child renders the same
+  // <AppInstallModal /> with its own state.
+  const [activeChild, setActiveChild] = useState<{
+    alias: string;
+    appVersionId: string;
+  } | null>(null);
+
+  // Resolved app_version_id per dependency alias. We resolve eagerly on
+  // mount so the user clicks Install without an extra round-trip.
+  const [depVersionByAlias, setDepVersionByAlias] = useState<
+    Record<string, string | null>
+  >({});
 
   const [version, setVersion] = useState<AppVersionDetail | null>(null);
   const [compat, setCompat] = useState<CompatReport | null>(null);
@@ -241,6 +269,68 @@ export function AppInstallModal({
     () => parseDependencies(version?.manifest_json ?? null),
     [version]
   );
+
+  // Resolve each dependency's app_id → latest published app_version_id so
+  // the inline Install button has something to hand the child modal.
+  // Failures are recorded as ``null`` and surface as a disabled Install
+  // button with a "Cannot resolve" tooltip — non-blocking for optional
+  // deps.
+  useEffect(() => {
+    let cancelled = false;
+    if (dependencies.length === 0) {
+      setDepVersionByAlias({});
+      return;
+    }
+    (async () => {
+      const next: Record<string, string | null> = {};
+      await Promise.all(
+        dependencies.map(async (d) => {
+          try {
+            const versions = await marketplaceAppsApi.listVersions(d.app_id, {
+              limit: 1,
+            });
+            const latest = versions.items?.[0];
+            next[d.alias] = latest ? latest.id : null;
+          } catch {
+            next[d.alias] = null;
+          }
+        })
+      );
+      if (!cancelled) setDepVersionByAlias(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dependencies]);
+
+  // Initial / refresh-driven dep state lookup. We treat any AppInstance
+  // for the same app_id as "already installed" (per-user installs from
+  // the user's wallet — composition contract treats them as satisfied
+  // links). The ``state==='installed'`` filter guards against in-flight
+  // installs so we don't block the parent on a half-baked child.
+  useEffect(() => {
+    if (dependencies.length === 0) return;
+    setDepState((prev) => {
+      const next: Record<string, DependencyState> = { ...prev };
+      for (const dep of dependencies) {
+        if (next[dep.alias]?.status === 'skipped') continue;
+        const match = myInstalls.find(
+          (inst) =>
+            inst.app_id === dep.app_id &&
+            (inst.state === 'installed' || inst.state === 'running')
+        );
+        if (match) {
+          next[dep.alias] = {
+            status: 'installed',
+            appInstanceId: match.id,
+          };
+        } else if (!next[dep.alias] || next[dep.alias].status === 'unknown') {
+          next[dep.alias] = { status: 'unknown' };
+        }
+      }
+      return next;
+    });
+  }, [dependencies, myInstalls]);
   const manifestTenancy = useMemo(
     () => parseTenancyMode(version?.manifest_json ?? null),
     [version]
@@ -263,13 +353,30 @@ export function AppInstallModal({
     setConnectorAccepted(next);
   }, [connectorDecls]);
 
+  // Required dependencies must be ``installed`` (skipping is only valid
+  // for optional deps). Optional deps that the user explicitly skipped
+  // count as resolved.
+  const allRequiredDepsSatisfied = useMemo(() => {
+    return dependencies
+      .filter((d) => d.required)
+      .every((d) => depState[d.alias]?.status === 'installed');
+  }, [dependencies, depState]);
+
   const canInstall = useMemo(() => {
     if (loading || submitting) return false;
     if (!compat?.compatible) return false;
     if (!teamId) return false;
     if (!allConnectorsAccepted) return false;
+    if (!allRequiredDepsSatisfied) return false;
     return true;
-  }, [loading, submitting, compat, teamId, allConnectorsAccepted]);
+  }, [
+    loading,
+    submitting,
+    compat,
+    teamId,
+    allConnectorsAccepted,
+    allRequiredDepsSatisfied,
+  ]);
 
   const confirm = async () => {
     if (!teamId) {
@@ -516,41 +623,116 @@ export function AppInstallModal({
                 )}
               </CollapsibleSection>
 
-              {/* Modules (dependencies). */}
+              {/* Modules (dependencies). Recursive Phase 5 install:
+                  inline Install / Skip buttons drive a child <AppInstallModal>
+                  for each dep whose app_id is not already satisfied. */}
               <CollapsibleSection
                 label="Modules"
                 count={dependencies.length}
-                defaultExpanded={false}
+                defaultExpanded={dependencies.length > 0}
               >
                 {dependencies.length === 0 ? (
                   <p className="text-[var(--text-subtle)]">
                     This app has no app-level dependencies.
                   </p>
                 ) : (
-                  <ul className="space-y-1.5">
-                    {dependencies.map((d) => (
+                  <ul className="space-y-1.5" data-testid="dependencies-list">
+                    {dependencies.map((d) => {
+                      const state = depState[d.alias] ?? {
+                        status: 'unknown' as const,
+                      };
+                      const childVersionId = depVersionByAlias[d.alias];
+                      const installed = state.status === 'installed';
+                      const skipped = state.status === 'skipped';
+                      return (
+                        <li
+                          key={d.alias}
+                          className="flex flex-wrap items-center gap-2 p-2 rounded-[var(--radius-small)] border border-[var(--border)]"
+                          data-testid={`dependency-${d.alias}`}
+                        >
+                          <span className="font-mono text-[var(--text)]">
+                            {d.alias}
+                          </span>
+                          <span className="text-[var(--text-subtle)]">
+                            → {d.app_id}
+                          </span>
+                          <span
+                            className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--border)] ${
+                              d.required
+                                ? 'text-[var(--text)]'
+                                : 'text-[var(--text-subtle)]'
+                            }`}
+                          >
+                            {d.required ? 'required' : 'optional'}
+                          </span>
+                          <div className="flex-1" />
+                          {installed ? (
+                            <span
+                              className="flex items-center gap-1 text-[11px] text-emerald-400"
+                              data-testid={`dep-installed-${d.alias}`}
+                            >
+                              <CheckCircle size={12} weight="fill" />
+                              Installed
+                            </span>
+                          ) : skipped ? (
+                            <span
+                              className="text-[11px] text-[var(--text-subtle)]"
+                              data-testid={`dep-skipped-${d.alias}`}
+                            >
+                              Skipped
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                disabled={!childVersionId}
+                                title={
+                                  childVersionId
+                                    ? `Install ${d.alias}`
+                                    : 'Cannot resolve a published version for this app'
+                                }
+                                onClick={() => {
+                                  if (!childVersionId) return;
+                                  setActiveChild({
+                                    alias: d.alias,
+                                    appVersionId: childVersionId,
+                                  });
+                                }}
+                                data-testid={`dep-install-${d.alias}`}
+                              >
+                                Install {d.alias}
+                              </button>
+                              {!d.required && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  onClick={() => {
+                                    setDepState((prev) => ({
+                                      ...prev,
+                                      [d.alias]: { status: 'skipped' },
+                                    }));
+                                  }}
+                                  data-testid={`dep-skip-${d.alias}`}
+                                >
+                                  Skip
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </li>
+                      );
+                    })}
+                    {!allRequiredDepsSatisfied && (
                       <li
-                        key={d.alias}
-                        className="flex items-center gap-2"
-                        data-testid={`dependency-${d.alias}`}
+                        role="alert"
+                        className="text-[11px] text-amber-300 leading-snug"
+                        data-testid="dep-blocking-banner"
                       >
-                        <span className="font-mono text-[var(--text)]">
-                          {d.alias}
-                        </span>
-                        <span className="text-[var(--text-subtle)]">
-                          → {d.app_id}
-                        </span>
-                        {d.required ? (
-                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-subtle)]">
-                            required
-                          </span>
-                        ) : (
-                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-subtle)]">
-                            optional
-                          </span>
-                        )}
+                        Install or resolve all required dependencies before
+                        installing this app.
                       </li>
-                    ))}
+                    )}
                   </ul>
                 )}
               </CollapsibleSection>
@@ -631,6 +813,33 @@ export function AppInstallModal({
           </button>
         </div>
       </div>
+
+      {/* Recursive child install modal — opened by the "Install {alias}"
+          button in Modules. Higher z-index so it stacks over the parent.
+          On success we mark the dep installed; on cancel we leave the dep
+          in 'unknown' state so the user can retry or skip. */}
+      {activeChild && (
+        <div className="fixed inset-0 z-[60]">
+          <AppInstallModal
+            appVersionId={activeChild.appVersionId}
+            onClose={() => setActiveChild(null)}
+            onDone={(childInstanceId) => {
+              const alias = activeChild.alias;
+              setDepState((prev) => ({
+                ...prev,
+                [alias]: {
+                  status: 'installed',
+                  appInstanceId: childInstanceId,
+                },
+              }));
+              setActiveChild(null);
+              // Refresh installs so the satisfied-by-existing-install
+              // path picks up the new row on subsequent renders.
+              void refreshApps();
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

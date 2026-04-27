@@ -17,6 +17,7 @@ import {
 import api, { createLogStreamWebSocket } from '../lib/api';
 import { toast } from 'react-hot-toast';
 import { connectionEvents } from '../utils/connectionEvents';
+import { inspectorFocusEvents } from '../utils/inspectorFocusEvents';
 import { AnsiLine } from '../lib/ansi';
 import {
   ExternalServiceCredentialModal,
@@ -255,6 +256,54 @@ export const ContainerPropertiesPanel = ({
     },
     []
   );
+
+  // Phase 5 inspector-jump listener.
+  //
+  // PublishAsAppDrawer's "Fix in inspector" handler emits an
+  // ``inspector-focus-request`` after the canvas selects this container.
+  // We expand the App Contract section, then scroll the matching action
+  // or connector row into view via ``scrollIntoView({ block: 'center' })``.
+  // Up to 4 rAF retries give the section's render pass time to mount the
+  // child rows before we look them up.
+  const panelRootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const off = inspectorFocusEvents.on('inspector-focus-request', (req) => {
+      if (req.containerId !== containerId) return;
+      setIsAppContractExpanded(true);
+      const tryFocus = (attempt: number) => {
+        const root = panelRootRef.current;
+        if (!root) {
+          if (attempt < 4) requestAnimationFrame(() => tryFocus(attempt + 1));
+          return;
+        }
+        const selector =
+          req.kind === 'action'
+            ? req.name
+              ? `[data-action-name="${CSS.escape(req.name)}"]`
+              : '[data-action-name]'
+            : req.name
+              ? `[data-connector-id="${CSS.escape(req.name)}"]`
+              : '[data-connector-id]';
+        const el = root.querySelector<HTMLElement>(selector);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Highlight pulse — additive Tailwind ring; auto-removed after 1.5s.
+          el.classList.add('ring-2', 'ring-[var(--primary)]', 'ring-offset-2');
+          window.setTimeout(() => {
+            el.classList.remove(
+              'ring-2',
+              'ring-[var(--primary)]',
+              'ring-offset-2'
+            );
+          }, 1500);
+        } else if (attempt < 4) {
+          requestAnimationFrame(() => tryFocus(attempt + 1));
+        }
+      };
+      requestAnimationFrame(() => tryFocus(0));
+    });
+    return off;
+  }, [containerId]);
 
   const saveAnnotations = useCallback(() => {
     try {
@@ -660,6 +709,7 @@ export const ContainerPropertiesPanel = ({
 
       {/* Panel — no outer container, cards float directly */}
       <div
+        ref={panelRootRef}
         className="fixed md:absolute inset-y-4 md:inset-y-auto md:top-4 md:bottom-4 right-4 w-[calc(100%-2rem)] max-w-sm md:w-[var(--panel-w)] md:max-w-none flex flex-col overflow-hidden z-50"
         style={{ '--panel-w': `${panelWidth}px` } as React.CSSProperties}
       >
@@ -1135,6 +1185,10 @@ export const ContainerPropertiesPanel = ({
                   {annotations.actions.map((action, idx) => (
                     <div
                       key={idx}
+                      // Phase 5 inspector-jump scroll target. The panel
+                      // listens for ``inspector-focus-request`` events and
+                      // resolves the matching row by ``data-action-name``.
+                      data-action-name={action.name || `__unnamed_${idx}`}
                       className="space-y-1.5 pl-3 border-l-2 border-[var(--border)]"
                     >
                       <input
@@ -1318,6 +1372,9 @@ export const ContainerPropertiesPanel = ({
                     return (
                       <div
                         key={idx}
+                        // Phase 5 inspector-jump scroll target. Same data
+                        // attribute pattern as the action row above.
+                        data-connector-id={conn.id || `__unnamed_${idx}`}
                         className="space-y-1.5 pl-3 border-l-2 border-[var(--border)]"
                       >
                         <input

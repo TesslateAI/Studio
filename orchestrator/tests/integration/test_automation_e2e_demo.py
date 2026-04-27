@@ -219,6 +219,78 @@ async def _seed_recurring_automation(
     return autom_id
 
 
+async def _seed_app_action_for_owner(
+    db,
+    *,
+    owner_user_id: uuid.UUID,
+    action_name: str = "summarize_pipeline",
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Seed MarketplaceApp + AppVersion + AppAction + AppInstance.
+
+    Returns ``(app_action_id, app_instance_id)``. The dispatcher's
+    ``_dispatch_app_action`` looks up these rows by FK before invoking
+    ``services.apps.action_dispatcher.dispatch_app_action`` so the
+    automation_actions.app_action_id must reference a real row.
+    """
+    from app.models import AppVersion, MarketplaceApp
+    from app.models_automations import AppAction, AppInstance
+
+    suffix = uuid.uuid4().hex[:6]
+    app_id = uuid.uuid4()
+    db.add(
+        MarketplaceApp(
+            id=app_id,
+            slug=f"e2e-app-{suffix}",
+            handle=f"e2e-app-{suffix}",
+            name="E2E Demo App",
+            description="test",
+            category="productivity",
+            state="published",
+            creator_user_id=owner_user_id,
+        )
+    )
+
+    app_version_id = uuid.uuid4()
+    db.add(
+        AppVersion(
+            id=app_version_id,
+            app_id=app_id,
+            version="0.1.0",
+            manifest_schema_version="2026-05",
+            manifest_json={},
+            manifest_hash=f"sha256:e2e-{suffix}",
+            feature_set_hash=f"sha256:fs-{suffix}",
+            bundle_hash=f"cas://e2e-{suffix}",
+            approval_state="approved",
+        )
+    )
+
+    app_action_id = uuid.uuid4()
+    db.add(
+        AppAction(
+            id=app_action_id,
+            app_version_id=app_version_id,
+            name=action_name,
+            handler={"kind": "http_post", "container": "api", "path": "/x"},
+            input_schema=None,
+            output_schema=None,
+        )
+    )
+
+    instance_id = uuid.uuid4()
+    db.add(
+        AppInstance(
+            id=instance_id,
+            app_id=app_id,
+            app_version_id=app_version_id,
+            installer_user_id=owner_user_id,
+            state="active",
+        )
+    )
+    await db.flush()
+    return app_action_id, instance_id
+
+
 async def _seed_event_for(db, *, automation_id: uuid.UUID) -> uuid.UUID:
     """Mint the event row the cron producer would have written."""
     from app.models_automations import AutomationEvent
@@ -271,9 +343,9 @@ async def test_demo_recurring_report_end_to_end(
         dispatch_automation,
     )
 
-    # ---- Step 0: stub services.apps.action_dispatcher (Wave 2B surface) --
+    # ---- Step 0: stub services.apps.action_dispatcher.dispatch_app_action --
     fake_module = type(sys)("app.services.apps.action_dispatcher")
-    fake_module.dispatch = AsyncMock(
+    fake_module.dispatch_app_action = AsyncMock(
         return_value={
             "action_type": "app.invoke",
             "ok": True,
@@ -291,16 +363,15 @@ async def test_demo_recurring_report_end_to_end(
         apps_pkg, "action_dispatcher", fake_module, raising=False
     )
 
-    # ---- Step 1: owner + app_action + automation + delivery target ------
+    # ---- Step 1: owner + app + version + action + install + automation ---
     async with session_maker() as db:
         owner_id = await _seed_user(db)
-
-        # The app_action FK chain (marketplace_apps -> app_versions ->
-        # app_actions) is heavyweight; for the dispatch flow we only need
-        # the UUID to exist as the value of automation_actions.app_action_id.
-        # The dispatcher hands the id straight to the (mocked) action
-        # dispatcher, which never validates it.
-        app_action_id = uuid.uuid4()
+        # The dispatcher resolves automation_actions.app_action_id ->
+        # AppAction -> AppInstance(installer_user_id=owner) before
+        # forwarding to dispatch_app_action, so the FK chain must exist.
+        app_action_id, _ = await _seed_app_action_for_owner(
+            db, owner_user_id=owner_id
+        )
         automation_id = await _seed_recurring_automation(
             db, owner_user_id=owner_id, app_action_id=app_action_id
         )
@@ -332,9 +403,10 @@ async def test_demo_recurring_report_end_to_end(
     assert run.worker_id == "cron-producer"
 
     # ---- Step 5: action_dispatcher was actually called -----
-    fake_module.dispatch.assert_awaited_once()
-    kwargs = fake_module.dispatch.await_args.kwargs
+    fake_module.dispatch_app_action.assert_awaited_once()
+    kwargs = fake_module.dispatch_app_action.await_args.kwargs
     assert kwargs["run_id"] == result.run_id
+    assert kwargs["action_name"] == "summarize_pipeline"
 
     # ---- Step 6: AutomationEvent stamped as dispatched -----
     async with session_maker() as db:

@@ -34,6 +34,13 @@ resources:
   - automations-controller/rbac.yaml
   - automations-controller/deployment.yaml
 
+  # OpenSail Connector Proxy (Phase 4 — opensail-runtime).
+  # Standalone Deployment + Service + NetworkPolicy. Orchestrator runs
+  # with CONNECTOR_PROXY_MODE=dedicated so its main.py skips the
+  # in-process router mount; app pods reach this via in-cluster
+  # OPENSAIL_RUNTIME_URL=http://opensail-runtime:8400.
+  - opensail-runtime/
+
   # Redis (distributed backplane for horizontal scaling)
   - redis/
 

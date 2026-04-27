@@ -7,6 +7,7 @@ as defense-in-depth for Docker Compose.
 """
 
 import asyncio
+import base64
 import contextlib
 import logging
 import os
@@ -15,6 +16,125 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# Per-platform file-upload caps. Slack file API rejects > 25 MiB outright;
+# Telegram's Bot API does the same without a local-bot-API server. We
+# enforce a single cross-platform cap so the runner can decide before
+# materialising the payload whether to attach or annotate-and-skip.
+_ARTIFACT_UPLOAD_MAX_BYTES: int = 25 * 1024 * 1024
+
+
+async def _resolve_artifact_bytes(art: Any) -> tuple[bytes | None, str]:
+    """Return ``(content_bytes, reason)`` for an :class:`AutomationRunArtifact`.
+
+    On success returns ``(<bytes>, "ok")``. On any failure returns
+    ``(None, <reason>)`` so the caller can render a "(file not
+    attached: <reason>)" line in the approval card body.
+
+    Storage routing matches :mod:`app.services.automations.artifacts`:
+
+    * ``inline``      — base64-decode ``storage_ref`` directly. Always
+                        succeeds for live rows.
+    * ``cas``         — best-effort fetch via the volume-hub blob API
+                        when present; today the helper returns
+                        ``(None, "cas_unavailable")`` because the RPC
+                        isn't wired (see ``artifacts._upload_to_cas``
+                        for the symmetric write path).
+    * ``s3``          — best-effort GET on ``storage_ref`` (assumed to
+                        be a presigned URL). No bearer is sent — these
+                        URLs MUST self-authenticate.
+    * ``external_url`` — bytes are NOT fetched (the runner posts the
+                        link itself in the card body); returns
+                        ``(None, "external_url")``.
+    """
+    storage_mode = str(getattr(art, "storage_mode", "") or "").lower()
+    storage_ref = getattr(art, "storage_ref", None)
+
+    if not storage_ref:
+        return None, "missing_storage_ref"
+
+    if storage_mode == "inline":
+        try:
+            return base64.b64decode(storage_ref), "ok"
+        except Exception:
+            logger.warning(
+                "[GATEWAY] artifact %s inline storage_ref failed b64 decode",
+                getattr(art, "id", None),
+            )
+            return None, "decode_failed"
+
+    if storage_mode == "external_url":
+        # External URLs are surfaced in the card body verbatim — we
+        # don't proxy-download them.
+        return None, "external_url"
+
+    if storage_mode in ("cas", "s3"):
+        # Best-effort fetch. The CAS layer's PutBlob RPC isn't wired
+        # yet (see services/automations/artifacts.py); for now we
+        # surface a skip reason so the card body can explain it.
+        if storage_mode == "s3":
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(storage_ref)
+                    if resp.status_code != 200:
+                        return None, f"s3_status_{resp.status_code}"
+                    return resp.content, "ok"
+            except Exception as exc:
+                logger.warning(
+                    "[GATEWAY] artifact %s s3 fetch failed: %s",
+                    getattr(art, "id", None),
+                    exc,
+                )
+                return None, "s3_fetch_failed"
+        # CAS — placeholder until services.hub_client.get_blob lands.
+        return None, "cas_unavailable"
+
+    return None, f"unsupported_storage_mode:{storage_mode}"
+
+
+async def _upload_artifact_to_adapter(
+    *,
+    adapter: Any,
+    target_chat_id: str,
+    art: Any,
+    content: bytes,
+) -> dict[str, Any]:
+    """Dispatch ``content`` to the adapter's platform-native file upload.
+
+    Returns the adapter's response dict (``{"ok": ..., "error": ...}``)
+    so the caller can audit per-artifact delivery. If the adapter has
+    no recognised file-upload method we return ``{"ok": False,
+    "error": "no_upload_method"}`` so the caller can fall back to a
+    text note.
+    """
+    name = getattr(art, "name", None) or f"artifact-{getattr(art, 'id', 'unknown')}"
+    mime = getattr(art, "mime_type", None)
+    preview = (getattr(art, "preview_text", None) or "")[:200]
+
+    # Slack — uses files.upload_v2 flow.
+    if hasattr(adapter, "upload_file"):
+        return await adapter.upload_file(
+            channel_id=target_chat_id,
+            filename=name,
+            content=content,
+            title=name,
+            initial_comment=preview or None,
+        )
+
+    # Telegram — uses sendDocument.
+    if hasattr(adapter, "send_document"):
+        return await adapter.send_document(
+            chat_id=target_chat_id,
+            filename=name,
+            content=content,
+            caption=preview or None,
+            mime_type=mime,
+        )
+
+    return {"ok": False, "error": "no_upload_method"}
 
 _PENDING_SENTINEL = object()
 _RECONNECT_BACKOFF_BASE = 30  # seconds
@@ -978,11 +1098,63 @@ class GatewayRunner:
         from ...models import ChannelConfig
         from ...models_automations import (
             AutomationApprovalRequest,
+            AutomationRunArtifact,
             CommunicationDestination,
         )
 
+        # Gather artifact UUIDs to attach. Two sources: the envelope
+        # (artifact_refs[]) and the AutomationApprovalRequest row's
+        # context_artifacts column. We union both, deduplicate, and
+        # resolve once below.
+        envelope_refs = list(parsed.get("artifact_refs") or [])
+
         delivered: list[dict] = []
         async with self._db_factory() as db:
+            # Load context_artifacts off the approval row so we attach
+            # whatever the contract author registered against the
+            # decision, regardless of producer-side wiring.
+            db_artifact_ids: list[str] = []
+            try:
+                req_for_arts = await db.scalar(
+                    select(AutomationApprovalRequest).where(
+                        AutomationApprovalRequest.id == uuid.UUID(input_id)
+                    )
+                )
+                if req_for_arts is not None and req_for_arts.context_artifacts:
+                    db_artifact_ids = [
+                        str(x) for x in (req_for_arts.context_artifacts or [])
+                    ]
+            except Exception:
+                logger.warning(
+                    "[GATEWAY] approval_card context_artifacts load failed input=%s",
+                    input_id,
+                    exc_info=True,
+                )
+
+            # Union + dedupe (preserve order: envelope wins on first
+            # occurrence so producers can override row-level defaults).
+            seen: set[str] = set()
+            artifact_ids: list[str] = []
+            for ref in (*envelope_refs, *db_artifact_ids):
+                key = str(ref)
+                if key not in seen:
+                    seen.add(key)
+                    artifact_ids.append(key)
+
+            # Resolve to live AutomationRunArtifact rows.
+            artifacts: list[Any] = []
+            for ref in artifact_ids:
+                try:
+                    art_uuid = uuid.UUID(ref)
+                except Exception:
+                    continue
+                art = await db.scalar(
+                    select(AutomationRunArtifact).where(
+                        AutomationRunArtifact.id == art_uuid
+                    )
+                )
+                if art is not None:
+                    artifacts.append(art)
             for dest_id_raw in dest_ids:
                 try:
                     dest_uuid = uuid.UUID(str(dest_id_raw))
@@ -1031,15 +1203,159 @@ class GatewayRunner:
                     or config.get("channel_id")
                     or config.get("dm_user_id")
                 )
+
+                # Phase 4: upload artifacts BEFORE the card so the user
+                # sees the files appear above the actionable card. Skip
+                # reasons (size cap, no-upload-method, fetch fail) get
+                # rolled into ``annotated_summary`` so the card body
+                # documents what could not be attached.
+                #
+                # Slack DM path can't easily upload (we'd need to
+                # resolve the IM channel first, then upload, then
+                # post the card into the same channel — kept off the
+                # initial cut to avoid a 3-RTT path that doesn't yet
+                # have a primary user). Channel/group destinations get
+                # the full upload path. The DM path falls through to
+                # text-only delivery with a note.
+                annotated_summary = summary
+                upload_audit: list[dict[str, Any]] = []
+                supports_dm = dest.kind in ("slack_dm",) and config.get("user_id")
+                can_upload_here = (
+                    artifacts
+                    and not supports_dm
+                    and target_chat_id
+                    and (
+                        hasattr(adapter, "upload_file")
+                        or hasattr(adapter, "send_document")
+                    )
+                )
+
+                if can_upload_here:
+                    skip_notes: list[str] = []
+                    attached_count = 0
+                    for art in artifacts:
+                        name = (
+                            getattr(art, "name", None)
+                            or f"artifact-{getattr(art, 'id', 'unknown')}"
+                        )
+                        size = int(getattr(art, "size_bytes", 0) or 0)
+                        if size and size > _ARTIFACT_UPLOAD_MAX_BYTES:
+                            skip_notes.append(
+                                f"`{name}`: file too large to attach "
+                                f"({size // (1024 * 1024)} MiB > 25 MiB cap)"
+                            )
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": False,
+                                    "error": "size_cap",
+                                }
+                            )
+                            continue
+
+                        content, reason = await _resolve_artifact_bytes(art)
+                        if content is None:
+                            if reason == "external_url":
+                                # External URL — surface the link
+                                # rather than upload bytes we don't
+                                # have.
+                                ref = getattr(art, "storage_ref", "") or ""
+                                skip_notes.append(f"`{name}`: {ref}")
+                            else:
+                                skip_notes.append(
+                                    f"`{name}`: not attached ({reason})"
+                                )
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": False,
+                                    "error": reason,
+                                }
+                            )
+                            continue
+
+                        # Final size guard against a producer that wrote
+                        # a row with size_bytes=0 but actually has bulk
+                        # bytes.
+                        if len(content) > _ARTIFACT_UPLOAD_MAX_BYTES:
+                            skip_notes.append(
+                                f"`{name}`: file too large to attach "
+                                f"({len(content) // (1024 * 1024)} MiB > 25 MiB cap)"
+                            )
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": False,
+                                    "error": "size_cap",
+                                }
+                            )
+                            continue
+
+                        try:
+                            up = await _upload_artifact_to_adapter(
+                                adapter=adapter,
+                                target_chat_id=str(target_chat_id),
+                                art=art,
+                                content=content,
+                            )
+                        except Exception as exc:
+                            logger.exception(
+                                "[GATEWAY] approval_card artifact upload raised "
+                                "destination=%s artifact=%s",
+                                dest_uuid,
+                                getattr(art, "id", None),
+                            )
+                            up = {"ok": False, "error": str(exc)}
+
+                        if up.get("ok"):
+                            attached_count += 1
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": True,
+                                }
+                            )
+                        else:
+                            skip_notes.append(
+                                f"`{name}`: upload failed "
+                                f"({up.get('error') or 'unknown'})"
+                            )
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": False,
+                                    "error": up.get("error") or "unknown",
+                                }
+                            )
+
+                    # Annotate the card body so users always see WHY a
+                    # referenced artifact didn't materialise.
+                    annotation_lines: list[str] = []
+                    if attached_count:
+                        annotation_lines.append(
+                            f"Attached {attached_count} file"
+                            + ("s" if attached_count != 1 else "")
+                        )
+                    if skip_notes:
+                        annotation_lines.append(
+                            "Some files were not attached:\n- "
+                            + "\n- ".join(skip_notes)
+                        )
+                    if annotation_lines:
+                        annotated_summary = (
+                            (summary + "\n\n" if summary else "")
+                            + "\n\n".join(annotation_lines)
+                        )
+
                 try:
-                    if dest.kind in ("slack_dm",) and config.get("user_id"):
+                    if supports_dm:
                         # DM path — open conversation first.
                         ok = await adapter.send_approval_card_to_dm(
                             user_id=str(config["user_id"]),
                             input_id=input_id,
                             automation_id=automation_id,
                             tool_name=tool_name,
-                            summary=summary,
+                            summary=annotated_summary,
                             actions=actions,
                         )
                         result = {"ok": ok}
@@ -1049,7 +1365,7 @@ class GatewayRunner:
                             input_id,
                             automation_id,
                             tool_name,
-                            summary,
+                            annotated_summary,
                             actions=actions,
                         )
                 except Exception:
@@ -1062,14 +1378,15 @@ class GatewayRunner:
                     continue
 
                 if result.get("ok"):
-                    delivered.append(
-                        {
-                            "destination_id": str(dest_uuid),
-                            "kind": dest.kind,
-                            "surface": str(target_chat_id) if target_chat_id else None,
-                            "delivered_at": datetime.now(UTC).isoformat(),
-                        }
-                    )
+                    audit_entry: dict[str, Any] = {
+                        "destination_id": str(dest_uuid),
+                        "kind": dest.kind,
+                        "surface": str(target_chat_id) if target_chat_id else None,
+                        "delivered_at": datetime.now(UTC).isoformat(),
+                    }
+                    if upload_audit:
+                        audit_entry["artifacts"] = upload_audit
+                    delivered.append(audit_entry)
 
             if delivered:
                 # Append to the approval request's delivered_to audit.

@@ -72,6 +72,10 @@ import AdminSubmissionWorkbenchPage from './pages/AdminSubmissionWorkbenchPage';
 import AdminYankCenterPage from './pages/AdminYankCenterPage';
 import AdminCreatorReputationPage from './pages/AdminCreatorReputationPage';
 import AdminAdversarialSuitePage from './pages/AdminAdversarialSuitePage';
+// Phase 5 admin polish
+import SpendDashboard from './pages/admin/SpendDashboard';
+// Phase 5 marketplace polish
+import ContractTemplates from './pages/marketplace/ContractTemplates';
 // Automations (Phase 1 — basic builder)
 import AutomationsListPage from './pages/automations/AutomationsListPage';
 import AutomationCreatePage from './pages/automations/AutomationCreatePage';
@@ -363,6 +367,15 @@ function AppContent() {
           <Route path="/admin/marketplace/yanks" element={<AdminYankCenterPage />} />
           <Route path="/admin/marketplace/reputation" element={<AdminCreatorReputationPage />} />
           <Route path="/admin/marketplace/adversarial" element={<AdminAdversarialSuitePage />} />
+
+          {/* Phase 5 admin polish — spend rollup dashboard. */}
+          <Route path="/admin/spend" element={<SpendDashboard />} />
+
+          {/* Phase 5 marketplace polish — contract templates. */}
+          <Route
+            path="/marketplace/contract-templates"
+            element={<ContractTemplates />}
+          />
 
           {/* Automations (Phase 1) — list + create + detail + run-detail */}
           <Route path="/automations" element={<AutomationsListPage />} />

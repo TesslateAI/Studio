@@ -21,6 +21,7 @@ from .oauth import get_available_oauth_clients
 from .routers import (
     admin,
     admin_marketplace,
+    admin_spend,
     agent,
     agents,
     app_actions,
@@ -42,6 +43,7 @@ from .routers import (
     channels,
     communication_destinations,
     chat,
+    contract_templates,
     creators,
     deployment_credentials,
     deployment_oauth,
@@ -1174,6 +1176,8 @@ app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
 app.include_router(creators.router)  # /api/creators - already prefixed in router
 app.include_router(admin.router, prefix="/api", tags=["admin"])
+app.include_router(admin_spend.router, tags=["admin-spend"])  # /api/admin/spend
+app.include_router(contract_templates.router, tags=["contract-templates"])  # /api/contract-templates
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
 app.include_router(git_providers.router, prefix="/api", tags=["git-providers"])
@@ -1274,13 +1278,30 @@ app.include_router(
 # app_instance_links positive-list grants. See services/apps/composition.py.
 app.include_router(app_composition.router)  # /api/v1/composition/installs/...
 
-# --- Connector Proxy (Phase 3) ---------------------------------------------
-# Mounted on the orchestrator for Phase 3; Phase 4 lifts this into a
-# dedicated `opensail-runtime` Deployment + Service. App pods reach it via
-# `OPENSAIL_RUNTIME_URL` env, which today resolves to the orchestrator.
+# --- Connector Proxy (Phase 3 → Phase 4) -----------------------------------
+# Two topologies live behind the same router code:
+#   * embedded  — mounted on the orchestrator at
+#                 ``/api/v1/connector-proxy``.  Used by desktop +
+#                 docker-compose where everything is one process.
+#   * dedicated — served by the standalone ``opensail-runtime`` Deployment
+#                 (``python -m app.services.apps.connector_proxy``).  In
+#                 this mode the orchestrator does NOT expose the proxy —
+#                 app pods reach it directly at the in-cluster Service so
+#                 NetworkPolicy can isolate it from arbitrary cluster
+#                 traffic. The ``OPENSAIL_RUNTIME_URL`` env injected into
+#                 app pods (see services/apps/installer.py) routes to the
+#                 right surface either way.
 from .services.apps.connector_proxy import router as connector_proxy_router  # noqa: E402
 
-app.include_router(connector_proxy_router)  # /api/v1/connector-proxy/connectors/{id}/{path}
+if not settings.is_connector_proxy_dedicated:
+    app.include_router(
+        connector_proxy_router
+    )  # /api/v1/connector-proxy/connectors/{id}/{path}
+else:
+    logger.info(
+        "Connector Proxy: CONNECTOR_PROXY_MODE=dedicated — router not "
+        "mounted; pods talk to opensail-runtime:8400 directly"
+    )
 
 # Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
 try:

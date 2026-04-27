@@ -41,11 +41,16 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models_automations import (
+    AppAction,
+    AppInstance,
     AppRuntimeDeployment,
+    AutomationAction,
     AutomationApprovalRequest,
+    AutomationDefinition,
     AutomationRun,
 )
 
@@ -256,20 +261,64 @@ async def _create_compute_unavailable_approval(
 async def _resolve_runtime(
     db: AsyncSession, run: AutomationRun
 ) -> AppRuntimeDeployment | None:
-    """Best-effort lookup of the AppRuntimeDeployment for this run.
+    """Walk the automation graph to find the AppRuntimeDeployment for ``run``.
 
-    Phase 1 dispatcher does not always populate the deployment ref on the
-    run row, so we walk via ``AutomationDefinition → AppAction → AppVersion``
-    only when needed; for direct project/agent runs (no AppAction) the
-    caller passes the deployment via ``deployment_override`` and this
-    lookup returns None.
+    Path::
+
+        AutomationRun.automation_id
+            → AutomationAction WHERE action_type='app.invoke' (first row)
+            → AppAction (via app_action_id)
+            → AppInstance WHERE app_version_id matches AND
+              installer_user_id == automation.owner_user_id
+            → AppRuntimeDeployment (via app_instances.runtime_deployment_id)
+
+    Returns ``None`` when:
+
+    * the automation has no ``app.invoke`` action (direct agent.run /
+      gateway.send runs — there is no deployment to wake), or
+    * the install row has no ``runtime_deployment_id`` (legacy installs
+      that predate Phase 3), or
+    * any link in the chain is missing (deleted FK target — fail closed).
+
+    The caller can still pass ``deployment_override`` to bypass this
+    walk; the override path stays the canonical entry point for
+    dispatchers that already hold a deployment reference (e.g. the
+    action dispatcher's per-install cold-start path).
     """
-    # The plan defers the run→deployment FK to a later wave; the current
-    # surface keeps ``deployment_override`` as the canonical input. We
-    # leave this hook so the wave that wires the FK doesn't need a
-    # separate lookup module.
-    _ = db, run
-    return None
+    automation_action = (
+        await db.execute(
+            select(AutomationAction)
+            .where(AutomationAction.automation_id == run.automation_id)
+            .where(AutomationAction.action_type == "app.invoke")
+            .where(AutomationAction.app_action_id.is_not(None))
+            .order_by(AutomationAction.ordinal.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if automation_action is None or automation_action.app_action_id is None:
+        return None
+
+    app_action = await db.get(AppAction, automation_action.app_action_id)
+    if app_action is None:
+        return None
+
+    automation = await db.get(AutomationDefinition, run.automation_id)
+    if automation is None:
+        return None
+
+    install = (
+        await db.execute(
+            select(AppInstance)
+            .where(AppInstance.app_version_id == app_action.app_version_id)
+            .where(AppInstance.installer_user_id == automation.owner_user_id)
+            .where(AppInstance.state == "installed")
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if install is None or install.runtime_deployment_id is None:
+        return None
+
+    return await db.get(AppRuntimeDeployment, install.runtime_deployment_id)
 
 
 async def provision_for_run(

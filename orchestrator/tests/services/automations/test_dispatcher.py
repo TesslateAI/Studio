@@ -225,6 +225,78 @@ async def _load_run(db, run_id: uuid.UUID):
     ).scalar_one()
 
 
+async def _seed_app_action_for_owner(
+    db,
+    *,
+    owner_user_id: uuid.UUID,
+    action_name: str = "summarize",
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Seed MarketplaceApp + AppVersion + AppAction + AppInstance.
+
+    Returns ``(app_action_id, app_instance_id)``. The dispatcher's
+    ``_dispatch_app_action`` looks up these rows by FK before invoking
+    ``services.apps.action_dispatcher.dispatch_app_action``, so any test
+    that exercises the app.invoke route needs the chain to exist.
+    """
+    from app.models import AppVersion, MarketplaceApp
+    from app.models_automations import AppAction, AppInstance
+
+    suffix = uuid.uuid4().hex[:6]
+    app_id = uuid.uuid4()
+    db.add(
+        MarketplaceApp(
+            id=app_id,
+            slug=f"test-app-{suffix}",
+            handle=f"test-app-{suffix}",
+            name="Test App",
+            description="test",
+            category="productivity",
+            state="published",
+            creator_user_id=owner_user_id,
+        )
+    )
+
+    app_version_id = uuid.uuid4()
+    db.add(
+        AppVersion(
+            id=app_version_id,
+            app_id=app_id,
+            version="0.1.0",
+            manifest_schema_version="2026-05",
+            manifest_json={},
+            manifest_hash=f"sha256:test-{suffix}",
+            feature_set_hash=f"sha256:fs-{suffix}",
+            bundle_hash=f"cas://test-{suffix}",
+            approval_state="approved",
+        )
+    )
+
+    app_action_id = uuid.uuid4()
+    db.add(
+        AppAction(
+            id=app_action_id,
+            app_version_id=app_version_id,
+            name=action_name,
+            handler={"kind": "http_post", "container": "api", "path": "/x"},
+            input_schema=None,
+            output_schema=None,
+        )
+    )
+
+    instance_id = uuid.uuid4()
+    db.add(
+        AppInstance(
+            id=instance_id,
+            app_id=app_id,
+            app_version_id=app_version_id,
+            installer_user_id=owner_user_id,
+            state="active",
+        )
+    )
+    await db.flush()
+    return app_action_id, instance_id
+
+
 async def _count_artifacts(db, run_id: uuid.UUID) -> int:
     from app.models_automations import AutomationRunArtifact
 
@@ -603,27 +675,25 @@ def test_app_invoke_calls_action_dispatcher_when_present(
     stub_redis: _StubRedis,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """app.invoke routes to ``services.apps.action_dispatcher.dispatch``.
+    """app.invoke routes to ``services.apps.action_dispatcher.dispatch_app_action``.
 
-    The real module ships in Wave 2B; here we install an in-memory shim so
-    the dispatcher's branch is exercised without the actual implementation.
+    The dispatcher resolves ``automation_actions.app_action_id`` to the
+    matching ``AppAction`` row, then looks up the installer's
+    ``AppInstance`` and forwards the call. We seed the chain and stub
+    only the leaf ``dispatch_app_action`` coroutine.
     """
     from app.services.automations import (
         DispatchStatus,
         dispatch_automation,
     )
 
-    # Install a fake action_dispatcher module under services.apps.
     fake_module = type(sys)("app.services.apps.action_dispatcher")
-    fake_module.dispatch = AsyncMock(
+    fake_module.dispatch_app_action = AsyncMock(
         return_value={"action_type": "app.invoke", "ok": True, "body": "done"}
     )
     monkeypatch.setitem(
         sys.modules, "app.services.apps.action_dispatcher", fake_module
     )
-
-    # Also make the parent package expose it as an attribute so that
-    # ``from ..apps import action_dispatcher`` resolves.
     import app.services.apps as apps_pkg
 
     monkeypatch.setattr(
@@ -635,30 +705,36 @@ def test_app_invoke_calls_action_dispatcher_when_present(
             user_id = await _seed_user(db)
             automation_id = await _seed_automation(db, owner_user_id=user_id)
             event_id = await _seed_event(db, automation_id=automation_id)
-            # app.invoke needs an app_action_id -- forge a random UUID since
-            # the stub never inspects it.
+            app_action_id, instance_id = await _seed_app_action_for_owner(
+                db, owner_user_id=user_id, action_name="summarize"
+            )
             await _seed_action(
                 db,
                 automation_id=automation_id,
                 action_type="app.invoke",
                 config={"input": {"x": 1}},
-                app_action_id=uuid.uuid4(),
+                app_action_id=app_action_id,
             )
             await db.commit()
 
         async with session_maker() as db:
-            return await dispatch_automation(
-                db,
-                automation_id=automation_id,
-                event_id=event_id,
+            return (
+                await dispatch_automation(
+                    db,
+                    automation_id=automation_id,
+                    event_id=event_id,
+                ),
+                instance_id,
             )
 
-    result = asyncio.run(go())
+    result, expected_instance_id = asyncio.run(go())
     assert result.status == DispatchStatus.SUCCEEDED
-    fake_module.dispatch.assert_awaited_once()
-    kwargs = fake_module.dispatch.await_args.kwargs
+    fake_module.dispatch_app_action.assert_awaited_once()
+    kwargs = fake_module.dispatch_app_action.await_args.kwargs
     assert kwargs["run_id"] == result.run_id
     assert kwargs["input"] == {"x": 1}
+    assert kwargs["app_instance_id"] == expected_instance_id
+    assert kwargs["action_name"] == "summarize"
 
 
 @pytest.mark.unit
@@ -668,7 +744,9 @@ def test_app_invoke_without_action_dispatcher_marks_failed(
     stub_redis: _StubRedis,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When Wave 2B isn't synthesised, app.invoke fails cleanly with reason."""
+    """When the action_dispatcher module is unimportable, the run fails
+    cleanly with a reason mentioning action_dispatcher (matches the Wave-2B
+    stub path even now that the module exists for real)."""
     from app.services.automations import (
         DispatchStatus,
         dispatch_automation,
@@ -687,12 +765,15 @@ def test_app_invoke_without_action_dispatcher_marks_failed(
             user_id = await _seed_user(db)
             automation_id = await _seed_automation(db, owner_user_id=user_id)
             event_id = await _seed_event(db, automation_id=automation_id)
+            app_action_id, _ = await _seed_app_action_for_owner(
+                db, owner_user_id=user_id
+            )
             await _seed_action(
                 db,
                 automation_id=automation_id,
                 action_type="app.invoke",
                 config={"input": {}},
-                app_action_id=uuid.uuid4(),
+                app_action_id=app_action_id,
             )
             await db.commit()
 

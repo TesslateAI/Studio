@@ -1,0 +1,16 @@
+# OpenSail Connector Proxy — dedicated runtime
+#
+# Standalone Deployment + Service that serves
+# ``/api/v1/connector-proxy`` so app pods never share a process with the
+# orchestrator's full surface.  Reaches the same DB / secrets the
+# orchestrator uses (same Secret/ConfigMap refs); see deployment.yaml.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tesslate
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - network-policy.yaml

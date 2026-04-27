@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -67,6 +68,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...agent.tools.contract_gate import ContractBreachException
 from ...models_automations import (
+    AppAction,
+    AppInstance,
     AutomationAction,
     AutomationApprovalRequest,
     AutomationDefinition,
@@ -387,6 +390,84 @@ async def _dispatch_agent_run(
     return {"action_type": "agent.run", "task_id": str(run.id), "enqueued": True}
 
 
+async def _dispatch_agent_run_tier1(
+    db: AsyncSession,
+    *,
+    run: AutomationRun,
+    automation: AutomationDefinition,
+    action: AutomationAction,
+    event_payload: dict[str, Any],
+    budget_allocation: Any | None = None,
+) -> dict[str, Any]:
+    """Run an ``agent.run`` action inside a Tier-1 ephemeral pod.
+
+    Splits the standard ``_dispatch_agent_run`` path: instead of
+    enqueueing ``execute_agent_task`` (which the per-tenant worker
+    pool consumes), we provision a one-shot pod in the compute pool,
+    block on its terminal phase, harvest the write-tracker sidecar's
+    log into ``automation_run_artifacts``, and return the structured
+    result.
+
+    Why a separate function (vs. a flag inside ``_dispatch_agent_run``):
+    the two paths share zero post-routing surface — Tier-1 owns the
+    pod lifecycle, the standard path owns the queue lifecycle. Sharing
+    the same function would double the conditional surface for no
+    deduplication win.
+    """
+    from ...config import get_settings
+    from .ephemeral_pod import FilesystemGrant, run_in_ephemeral_pod
+
+    settings = get_settings()
+
+    config = action.config or {}
+    image = config.get("image") or settings.k8s_devserver_image
+
+    # The grant resolver lands in a sibling wave; until then we derive
+    # a conservative default: workspace mount when the automation
+    # targets a project (target_project_id set), no mount otherwise.
+    # The narrow ``FilesystemGrant`` shape decouples this module from
+    # the eventual full grant model — the resolver swap is a single
+    # call site change.
+    grant = FilesystemGrant(
+        has_filesystem=False,
+        pvc_name=None,
+        read_only=False,
+        volume_id=None,
+    )
+
+    extra_env: dict[str, str] = {}
+    if budget_allocation is not None and getattr(
+        budget_allocation, "litellm_key_value", None
+    ):
+        # Stamp the per-run LiteLLM key on the agent container so the
+        # in-pod runtime can issue model calls without a separate
+        # secret-fetch step. The key has a budget cap and a TTL so
+        # leaking it via the pod env is bounded-blast-radius.
+        extra_env["OPENSAIL_LITELLM_KEY"] = str(budget_allocation.litellm_key_value)
+
+    result = await run_in_ephemeral_pod(
+        run_id=run.id,
+        automation_id=automation.id,
+        image=image,
+        grant=grant,
+        db=db,
+        extra_env=extra_env or None,
+    )
+
+    return {
+        "action_type": "agent.run",
+        "tier": 1,
+        "pod_name": result.pod_name,
+        "namespace": result.namespace,
+        "terminal_phase": result.terminal_phase,
+        "exit_code": result.exit_code,
+        "duration_seconds": result.duration_seconds,
+        "tracker_warning_count": len(result.tracker_warnings),
+        "tracker_artifact_id": str(result.artifact_id) if result.artifact_id else None,
+        "reason": result.reason,
+    }
+
+
 async def _dispatch_app_action(
     db: AsyncSession,
     *,
@@ -395,23 +476,29 @@ async def _dispatch_app_action(
     action: AutomationAction,
     event_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Defer to ``services.apps.action_dispatcher`` (Wave 2B).
+    """Resolve the install + action name, then call ``dispatch_app_action``.
 
-    The real module is being built in a parallel wave. Until it ships,
-    every ``app.invoke`` action surfaces as a typed
-    :class:`NotImplementedError` so the failure path is exercised in tests.
-    The synthesis step swaps this stub for a direct call once Wave 2B
-    lands; nothing else in the dispatcher changes.
+    ``automation_actions.app_action_id`` points at a row in ``app_actions``
+    which carries ``app_version_id`` + ``name``. To dispatch we need the
+    *installed* row (``app_instances``) for this automation's owner; one
+    AppVersion can have many installs, so the resolution rule is:
+
+        AppInstance WHERE app_version_id = action.app_version_id
+                      AND user_id        = automation.owner_user_id
+
+    Optional override: ``action.config.app_instance_id`` lets a builder
+    pin a specific install (e.g., for shared installs that aren't owned
+    by the automation's user). When set, the override wins.
     """
     try:
-        # The plan calls this module ``services.apps.action_dispatcher`` and
-        # exposes a ``dispatch`` async coroutine. Import lazily so the
-        # absence of the module never breaks dispatcher import.
-        from ..apps import action_dispatcher  # type: ignore[attr-defined]
-    except ImportError as exc:  # pragma: no cover - exercised once Wave 2B lands
+        from ..apps import action_dispatcher
+    except ImportError as exc:
+        # The outer dispatcher catches NotImplementedError and surfaces it
+        # as "action_dispatcher unavailable: …" — same UX as the Wave 2B
+        # stub path, so the failure mode reads identically whether the
+        # module is missing or the import itself blew up.
         raise NotImplementedError(
-            "app.invoke handler not available yet "
-            "(services.apps.action_dispatcher belongs to Wave 2B)"
+            f"services.apps.action_dispatcher unavailable: {exc}"
         ) from exc
 
     config = action.config or {}
@@ -421,12 +508,69 @@ async def _dispatch_app_action(
             "automation_actions.app_action_id is required for action_type='app.invoke'"
         )
 
-    return await action_dispatcher.dispatch(  # type: ignore[no-any-return]
+    app_action_row = (
+        await db.execute(select(AppAction).where(AppAction.id == app_action_id))
+    ).scalar_one_or_none()
+    if app_action_row is None:
+        raise ContractInvalid(
+            f"automation_actions.app_action_id={app_action_id} does not exist"
+        )
+
+    override_instance_id = config.get("app_instance_id")
+    if override_instance_id is not None:
+        try:
+            instance_id = uuid.UUID(str(override_instance_id))
+        except (TypeError, ValueError) as exc:
+            raise ContractInvalid(
+                "automation_actions.config.app_instance_id is not a UUID"
+            ) from exc
+    else:
+        instance_row = (
+            await db.execute(
+                select(AppInstance).where(
+                    AppInstance.app_version_id == app_action_row.app_version_id,
+                    AppInstance.installer_user_id == automation.owner_user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if instance_row is None:
+            raise ContractInvalid(
+                f"no AppInstance found for owner={automation.owner_user_id} "
+                f"version={app_action_row.app_version_id}; either install the "
+                "app or pin config.app_instance_id"
+            )
+        instance_id = instance_row.id
+
+    # InvocationSubject is resolved separately by the credit/billing path
+    # and stored with ``automation_run_id`` pointing back at the run. Look
+    # it up best-effort; the action dispatcher tolerates ``None`` (used
+    # for spend attribution only — not on the critical path).
+    from ...models_automations import InvocationSubject
+
+    subject_row = (
+        await db.execute(
+            select(InvocationSubject).where(
+                InvocationSubject.automation_run_id == run.id
+            )
+        )
+    ).scalar_one_or_none()
+    invocation_subject_id = subject_row.id if subject_row is not None else None
+
+    result = await action_dispatcher.dispatch_app_action(
         db,
-        app_action_id=app_action_id,
-        input=config.get("input", event_payload),
+        app_instance_id=instance_id,
+        action_name=app_action_row.name,
+        input=config.get("input", event_payload) or {},
         run_id=run.id,
+        invocation_subject_id=invocation_subject_id,
     )
+    if hasattr(result, "model_dump"):
+        return result.model_dump()  # type: ignore[no-any-return]
+    if hasattr(result, "dict"):
+        return result.dict()  # type: ignore[no-any-return]
+    if isinstance(result, dict):
+        return result
+    return {"action_type": "app.invoke", "result": str(result)}
 
 
 async def _dispatch_gateway_send(
@@ -932,14 +1076,33 @@ async def dispatch_automation(
 
     try:
         if action.action_type == "agent.run":
-            action_result = await _dispatch_agent_run(
-                db,
-                run=run,
-                automation=automation,
-                action=action,
-                event_payload=event_payload,
-                budget_allocation=budget_allocation,
-            )
+            # Tier-1 ephemeral pod path (Phase 4). Tier-0 stays on the
+            # in-process worker enqueue; Tier-2+ goes through wake.py.
+            # Dispatcher branches here because the routing decision
+            # depends on the contract (which dispatcher already has)
+            # rather than on per-runtime state — keeps wake.py the
+            # single source of truth for "wake an existing
+            # Deployment", and ephemeral_pod the single source of
+            # truth for "spawn a one-shot pod".
+            tier = automation.contract.get("max_compute_tier", 0)
+            if isinstance(tier, int) and tier == 1:
+                action_result = await _dispatch_agent_run_tier1(
+                    db,
+                    run=run,
+                    automation=automation,
+                    action=action,
+                    event_payload=event_payload,
+                    budget_allocation=budget_allocation,
+                )
+            else:
+                action_result = await _dispatch_agent_run(
+                    db,
+                    run=run,
+                    automation=automation,
+                    action=action,
+                    event_payload=event_payload,
+                    budget_allocation=budget_allocation,
+                )
         elif action.action_type == "app.invoke":
             action_result = await _dispatch_app_action(
                 db,

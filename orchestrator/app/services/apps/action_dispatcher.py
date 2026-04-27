@@ -16,13 +16,17 @@ action's ``output_schema`` before returning. It persists each declared
 in Phase 1; CAS routing lands Phase 3) and emits a single ``SpendRecord``
 attribution row.
 
-Phase 1 simplifications (called out so Phase 3 doesn't have to grep):
+Phase 3 expansion notes:
 
-* ``shared_singleton`` and ``per_invocation`` tenancy reject with
-  :class:`ActionHandlerNotSupported`. Phase 3 introduces
-  ``AppRuntimeDeployment`` to make those reachable.
-* ``http_post`` does not wake a scaled-to-zero pod — Phase 3 adds
-  ``provision_for_run`` cold-start.
+* ``shared_singleton`` tenancy routes to a single shared deployment
+  (one ``AppRuntimeDeployment`` per ``app_version_id``) and signs an
+  ``X-OpenSail-User`` header so the shared container can identify the
+  caller. See :func:`_dispatch_shared_singleton`.
+* ``per_invocation`` tenancy spins a one-shot K8s Job per call (no
+  persistent pod). See :func:`_dispatch_per_invocation`.
+* ``http_post`` (and ``shared_singleton``) wake a scaled-to-zero
+  ``AppRuntimeDeployment`` via :func:`provision_for_run` before issuing
+  the request — bounded readiness timeout, clean error on failure.
 * ``k8s_job`` requires ``DEPLOYMENT_MODE=kubernetes``; Docker runs the
   same handler shape only when Phase 4 wires Docker job execution.
 * Connector Proxy injection is Phase 3 — the dispatcher does not append
@@ -51,7 +55,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models import AppVersion, Container, Project
-from ...models_automations import AppAction, AppInstance
+from ...models_automations import (
+    AppAction,
+    AppInstance,
+    AppRuntimeDeployment,
+    AutomationRunArtifact,
+)
 from . import billing_dispatcher
 from .runtime_urls import container_url
 from .template_render import RenderError, get_render_client
@@ -442,6 +451,147 @@ async def _record_spend_safe(
 
 
 # ---------------------------------------------------------------------------
+# Cold-start wake helper (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+def _is_k8s_runtime_available() -> bool:
+    """Best-effort: True iff the orchestrator is configured to drive K8s.
+
+    Cold-start wake patches a Deployment via the kubernetes Python client.
+    Outside K8s mode (desktop / docker dev) there is no Deployment to
+    scale, so we skip the wake hook and let the HTTP POST proceed against
+    whatever target the caller already has running. Mirrors the gating
+    pattern used by ``services/apps/runtime.py`` and the connector-proxy
+    auth resolver.
+    """
+    try:
+        from ...config import get_settings
+
+        settings = get_settings()
+        return bool(getattr(settings, "is_kubernetes_mode", False))
+    except Exception:  # noqa: BLE001 — defensive; never block dispatch on settings
+        return False
+
+
+async def _load_runtime_deployment_for_instance(
+    db: AsyncSession, instance: AppInstance
+) -> AppRuntimeDeployment | None:
+    """Load the deployment row referenced by ``instance.runtime_deployment_id``.
+
+    Returns ``None`` when the install predates Phase 3 (no FK populated)
+    or when the row was deleted out from under us. Either case means the
+    cold-start wake hook should no-op — the HTTP POST is what surfaces a
+    real "no runtime" error.
+    """
+    deployment_id = getattr(instance, "runtime_deployment_id", None)
+    if deployment_id is None:
+        return None
+    return await db.get(AppRuntimeDeployment, deployment_id)
+
+
+def _deployment_is_scaled_to_zero(deployment: AppRuntimeDeployment) -> bool:
+    """A deployment counts as scaled-to-zero when EITHER:
+
+    * ``scaled_to_zero_at`` is stamped (the idle reaper marker), OR
+    * ``desired_replicas`` is 0 (controller hasn't scaled it up yet).
+
+    Both can be true at the same time after a reaper pass; either is
+    enough on its own to require a wake before the HTTP POST.
+    """
+    if getattr(deployment, "scaled_to_zero_at", None) is not None:
+        return True
+    return int(getattr(deployment, "desired_replicas", 0) or 0) == 0
+
+
+async def _wake_deployment_if_needed(
+    db: AsyncSession,
+    *,
+    deployment: AppRuntimeDeployment,
+    run_id: UUID | None,
+    instance_id: UUID,
+) -> None:
+    """Ask the wake module to scale up + wait-for-ready when scaled-to-zero.
+
+    No-op when the deployment is already warm or when no K8s client is
+    available (desktop / docker mode). On readiness failure, raises
+    :class:`ActionDispatchFailed` so the caller can surface the reason on
+    the run row instead of getting a vague httpx ``ConnectError``.
+    """
+    if not _deployment_is_scaled_to_zero(deployment):
+        return
+    if not _is_k8s_runtime_available():
+        # Non-K8s deployment modes don't have the underlying primitives
+        # (Deployment + Endpoints) the wake hook patches. Trust the caller.
+        logger.debug(
+            "action_dispatcher: skipping cold-start wake instance=%s deployment=%s "
+            "(not in kubernetes mode)",
+            instance_id,
+            deployment.id,
+        )
+        return
+
+    # Late import keeps the wake module + kubernetes client off the import
+    # path for callers that never hit a scaled-to-zero deployment.
+    from ..automations.wake import provision_for_run as _wake
+
+    try:
+        from ..orchestration.kubernetes.client import KubernetesClient
+
+        k8s = KubernetesClient()
+    except Exception as exc:  # noqa: BLE001 — wake handles None client
+        logger.warning(
+            "action_dispatcher: K8s client init failed for cold-start wake "
+            "instance=%s deployment=%s err=%r",
+            instance_id,
+            deployment.id,
+            exc,
+        )
+        k8s = None
+
+    logger.info(
+        "action_dispatcher: cold-start wake instance=%s deployment=%s run=%s",
+        instance_id,
+        deployment.id,
+        run_id,
+    )
+    result = await _wake(
+        run_id if run_id is not None else uuid4(),
+        db,
+        k8s,
+        deployment_override=deployment,
+    )
+    if not result.ready:
+        raise ActionDispatchFailed(
+            f"cold-start wake failed: reason={result.reason}",
+            status=None,
+            body=None,
+        )
+
+
+async def _maybe_wake_deployment(
+    db: AsyncSession,
+    *,
+    instance: AppInstance,
+    run_id: UUID | None,
+) -> None:
+    """Convenience wrapper used by per-install dispatch paths.
+
+    Resolves the deployment via ``instance.runtime_deployment_id``; if no
+    row is found (legacy install / Phase 1 baseline) the wake hook
+    no-ops. The shared_singleton + per_invocation paths build their own
+    deployment handle and call :func:`_wake_deployment_if_needed`
+    directly.
+    """
+    deployment = await _load_runtime_deployment_for_instance(db, instance)
+    if deployment is None:
+        return
+    await _wake_deployment_if_needed(
+        db, deployment=deployment, run_id=run_id, instance_id=instance.id
+    )
+
+
+# ---------------------------------------------------------------------------
 # Handler implementations
 # ---------------------------------------------------------------------------
 
@@ -475,41 +625,12 @@ async def _dispatch_http_post(
     headers["X-OpenSail-Instance-Id"] = str(instance.id)
 
     # Phase 3 cold-start wake. If the AppRuntimeDeployment is scaled to
-    # zero, ask wake.provision_for_run() to scale it up and wait for
+    # zero (either ``scaled_to_zero_at`` is stamped or ``desired_replicas``
+    # is 0), ask ``wake.provision_for_run()`` to scale it up and wait for
     # readiness BEFORE the HTTP POST. Bounded readiness timeout inside
     # provision_for_run; on failure, surface a clean ActionDispatchFailed
-    # with paused_reason hint instead of a vague httpx ConnectError.
-    runtime_deployment = getattr(instance, "runtime_deployment", None)
-    if (
-        run_id is not None
-        and runtime_deployment is not None
-        and runtime_deployment.scaled_to_zero_at is not None
-    ):
-        from ..automations.wake import provision_for_run as _wake
-
-        logger.info(
-            "action_dispatcher.http_post: cold-start wake instance=%s deployment=%s",
-            instance.id,
-            runtime_deployment.id,
-        )
-        try:
-            from ..k8s_client import get_k8s_client
-            k8s = get_k8s_client()
-        except Exception:  # noqa: BLE001 — wake handles None client gracefully
-            k8s = None
-
-        result = await _wake(
-            run_id,
-            db,
-            k8s,
-            deployment_override=runtime_deployment,
-        )
-        if not result.ready:
-            raise ActionDispatchFailed(
-                f"cold-start wake failed: reason={result.reason}",
-                status=None,
-                body=None,
-            )
+    # instead of a vague httpx ConnectError.
+    await _maybe_wake_deployment(db, instance=instance, run_id=run_id)
 
     logger.info(
         "action_dispatcher.http_post target=%s instance=%s run=%s",
@@ -851,6 +972,375 @@ async def _dispatch_hosted_agent(
 
 
 # ---------------------------------------------------------------------------
+# Tenancy-specific dispatch (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+async def _load_shared_singleton_deployment(
+    db: AsyncSession, *, app_version_id: UUID
+) -> AppRuntimeDeployment:
+    """Resolve the single shared deployment row for a shared-singleton app.
+
+    The installer mints exactly one ``AppRuntimeDeployment`` per
+    ``(app_id, app_version_id)`` pair when ``tenancy_model='shared_singleton'``;
+    every install of that app then points at it via
+    ``AppInstance.runtime_deployment_id``. We look it up by
+    ``app_version_id`` so the dispatcher doesn't need the install row in
+    hand to find the runtime target.
+    """
+    row = (
+        await db.execute(
+            select(AppRuntimeDeployment)
+            .where(AppRuntimeDeployment.app_version_id == app_version_id)
+            .where(AppRuntimeDeployment.tenancy_model == "shared_singleton")
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise ActionDispatchFailed(
+            f"shared_singleton deployment for app_version={app_version_id} not found "
+            "(installer must mint one before dispatch)"
+        )
+    return row
+
+
+def _build_deployment_url(
+    project: Project, container: Container | None, handler: dict
+) -> str:
+    """Build the externally-reachable URL for a shared deployment's container.
+
+    Same shape as :func:`_build_container_url` — we go through the shared
+    project's slug + container directory/name so ingress routing matches
+    whatever the runtime orchestrator stamped on the shared project at
+    materialization time.
+    """
+    from ...config import get_settings
+
+    settings = get_settings()
+    protocol = getattr(settings, "k8s_container_url_protocol", "http")
+    domain = settings.app_domain
+    if container is not None:
+        dir_or_name = container.directory or container.name
+    else:
+        dir_or_name = handler.get("container") or "app"
+    return container_url(
+        project_slug=project.slug,
+        container_dir_or_name=dir_or_name,
+        app_domain=domain,
+        protocol=protocol,
+    )
+
+
+async def _dispatch_shared_singleton(
+    db: AsyncSession,
+    *,
+    instance: AppInstance,
+    handler: dict,
+    input_value: dict,
+    timeout_seconds: int,
+    run_id: UUID | None,
+) -> dict:
+    """Dispatch an action against a shared-singleton runtime.
+
+    One Deployment serves N installs. We sign ``X-OpenSail-User`` (HMAC
+    over user/instance/exp keyed by the per-app signing key — see
+    :mod:`.shared_singleton_router`) so the shared container can verify
+    which installer is calling. Otherwise the shape mirrors
+    :func:`_dispatch_http_post`: validate target, wake if scaled-to-zero,
+    POST JSON, parse JSON response.
+    """
+    deployment = await _load_shared_singleton_deployment(
+        db, app_version_id=instance.app_version_id
+    )
+
+    if deployment.runtime_project_id is None:
+        raise ActionDispatchFailed(
+            f"shared_singleton deployment {deployment.id} has no runtime_project_id "
+            "(installer skipped materialization)"
+        )
+    project = await db.get(Project, deployment.runtime_project_id)
+    if project is None:
+        raise ActionDispatchFailed(
+            f"shared_singleton runtime project {deployment.runtime_project_id} not found"
+        )
+
+    container_name = handler.get("container")
+    container: Container | None = None
+    if container_name:
+        container = (
+            await db.execute(
+                select(Container)
+                .where(Container.project_id == project.id)
+                .where(Container.name == container_name)
+            )
+        ).scalar_one_or_none()
+        if container is None:
+            raise ActionDispatchFailed(
+                f"handler.container={container_name!r} did not match any "
+                f"Container on shared project {project.id}"
+            )
+    else:
+        container = (
+            (
+                await db.execute(
+                    select(Container)
+                    .where(Container.project_id == project.id)
+                    .order_by(Container.created_at.asc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+        # ``container`` may legitimately be None for shared singletons that
+        # haven't materialized container rows yet (e.g. during a partial
+        # install rollback) — fall through to URL build with handler default.
+
+    base_url = _build_deployment_url(project, container, handler)
+    path = handler.get("path") or "/"
+    target = base_url.rstrip("/") + "/" + path.lstrip("/")
+
+    # Wake the shared deployment if scaled to zero. The shared row is the
+    # one the reaper sweeps, so this is the right granularity for the
+    # cold-start gate.
+    await _wake_deployment_if_needed(
+        db, deployment=deployment, run_id=run_id, instance_id=instance.id
+    )
+
+    # Mint X-OpenSail-User header. The shared container verifies this
+    # against the per-app signing key (deterministic derivation in dev,
+    # K8s Secret in prod) so it can route the request to the right
+    # installer's data without trusting client-supplied user IDs.
+    from .shared_singleton_router import (
+        SHARED_USER_HEADER,
+        sign_user_header,
+    )
+
+    header_value = await sign_user_header(
+        instance.installer_user_id,
+        instance.id,
+    )
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-OpenSail-Action": "1",
+        "X-OpenSail-Instance-Id": str(instance.id),
+        SHARED_USER_HEADER: header_value,
+    }
+    if run_id is not None:
+        headers["X-OpenSail-Run-Id"] = str(run_id)
+
+    logger.info(
+        "action_dispatcher.shared_singleton target=%s instance=%s deployment=%s run=%s",
+        target,
+        instance.id,
+        deployment.id,
+        run_id,
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            resp = await client.post(target, json=input_value, headers=headers)
+    except httpx.HTTPError as exc:
+        raise ActionDispatchFailed(
+            f"shared_singleton transport error: {exc!r}",
+            status=None,
+            body=None,
+        ) from exc
+
+    body_text = resp.text
+    if resp.status_code < 200 or resp.status_code >= 300:
+        raise ActionDispatchFailed(
+            f"shared_singleton target returned {resp.status_code}",
+            status=resp.status_code,
+            body=body_text[:4000],
+        )
+    if not body_text.strip():
+        return {}
+    try:
+        parsed = resp.json()
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ActionDispatchFailed(
+            f"shared_singleton target returned non-JSON body: {exc}",
+            status=resp.status_code,
+            body=body_text[:4000],
+        ) from exc
+    if not isinstance(parsed, dict):
+        return {"value": parsed}
+    return parsed
+
+
+async def _dispatch_per_invocation(
+    db: AsyncSession,
+    *,
+    instance: AppInstance,
+    handler: dict,
+    input_value: dict,
+    timeout_seconds: int,
+    run_id: UUID | None,
+) -> dict:
+    """Dispatch an action whose tenancy is ``per_invocation``.
+
+    No persistent pod exists. We materialize a one-shot K8s Job (or, in
+    desktop / docker mode, a local subprocess) using the action's
+    container image, pass ``input`` as ``OPENSAIL_ACTION_INPUT`` env
+    JSON, wait up to ``timeout_seconds`` for completion, and parse the
+    last JSON line of stdout as the typed output.
+
+    The per-invocation handler shape is intentionally close to the
+    existing ``k8s_job`` handler so creators can move between the two by
+    flipping their manifest's ``runtime.tenancy_model`` without rewriting
+    their image's stdout convention. The differences are:
+
+    * No PVC (per-invocation is stateless by manifest constraint).
+    * Image comes from ``handler.image`` first, falling back to the
+      app's primary container row when the install materialized one.
+    * Namespace defaults to the orchestrator's bookkeeping namespace —
+      ``AppRuntimeDeployment.runtime_project_id`` is NULL for
+      per-invocation deployments by design.
+    """
+    from ...config import get_settings
+
+    settings = get_settings()
+    if not settings.is_kubernetes_mode:
+        # Desktop / docker mode: per_invocation isn't wired to a local
+        # subprocess runner yet. Fail loudly with the typed error so the
+        # caller routes to the K8s mode that supports it. Same gating
+        # pattern as ``_dispatch_k8s_job``.
+        raise ActionHandlerNotSupported(
+            "per_invocation handler requires DEPLOYMENT_MODE=kubernetes "
+            "(local-subprocess runner lands when desktop wires Job execution)",
+            kind="per_invocation",
+            current_mode=settings.deployment_mode,
+        )
+
+    image = handler.get("image")
+    if not image:
+        # Fall back to the install's primary container image — covers the
+        # case where the manifest declared compute.containers[] for
+        # bookkeeping even though tenancy is per_invocation.
+        if instance.primary_container_id is not None:
+            ctr = await db.get(Container, instance.primary_container_id)
+            if ctr is not None:
+                image = _resolve_job_image(ctr)
+    if not image:
+        raise ActionDispatchFailed(
+            "per_invocation handler requires handler.image (or a primary "
+            "container with a resolvable image)"
+        )
+
+    command = handler.get("command") or handler.get("path") or "true"
+
+    from kubernetes import client as k8s_client_lib
+
+    from ..orchestration.kubernetes.client import KubernetesClient
+
+    k8s = KubernetesClient()
+
+    # per_invocation deployments don't own a project namespace. Run jobs
+    # in the orchestrator namespace (settings.kubernetes_namespace)
+    # because there's no per-install namespace to scope to.
+    namespace = (
+        getattr(settings, "kubernetes_namespace", None) or "tesslate"
+    )
+
+    job_name = f"piv-{str(instance.id)[:8]}-{int(time.time())}"
+
+    env_vars = [
+        k8s_client_lib.V1EnvVar(
+            name="OPENSAIL_ACTION_INPUT", value=json.dumps(input_value)
+        ),
+        k8s_client_lib.V1EnvVar(name="OPENSAIL_INSTANCE_ID", value=str(instance.id)),
+    ]
+    if run_id is not None:
+        env_vars.append(
+            k8s_client_lib.V1EnvVar(name="OPENSAIL_RUN_ID", value=str(run_id))
+        )
+
+    # Per-invocation pods are stateless by manifest constraint — tmpfs at
+    # /tmp + read-only root keeps the documented contract enforceable.
+    volumes = [
+        k8s_client_lib.V1Volume(
+            name="ephemeral-tmp",
+            empty_dir=k8s_client_lib.V1EmptyDirVolumeSource(
+                medium="Memory", size_limit="256Mi"
+            ),
+        )
+    ]
+    volume_mounts = [
+        k8s_client_lib.V1VolumeMount(name="ephemeral-tmp", mount_path="/tmp")
+    ]
+    sec_ctx = k8s_client_lib.V1SecurityContext(
+        read_only_root_filesystem=True,
+        allow_privilege_escalation=False,
+    )
+
+    job_container = k8s_client_lib.V1Container(
+        name="action",
+        image=image,
+        command=["sh", "-c", command],
+        env=env_vars,
+        volume_mounts=volume_mounts,
+        security_context=sec_ctx,
+    )
+    pod_spec = k8s_client_lib.V1PodSpec(
+        restart_policy="Never",
+        containers=[job_container],
+        volumes=volumes,
+    )
+    job = k8s_client_lib.V1Job(
+        api_version="batch/v1",
+        kind="Job",
+        metadata=k8s_client_lib.V1ObjectMeta(
+            name=job_name,
+            labels={
+                "opensail.app-action": "true",
+                "opensail.tenancy": "per_invocation",
+            },
+        ),
+        spec=k8s_client_lib.V1JobSpec(
+            ttl_seconds_after_finished=600,
+            active_deadline_seconds=timeout_seconds,
+            backoff_limit=0,
+            template=k8s_client_lib.V1PodTemplateSpec(
+                metadata=k8s_client_lib.V1ObjectMeta(
+                    labels={
+                        "opensail.app-action": "true",
+                        "opensail.tenancy": "per_invocation",
+                        "job-name": job_name,
+                    }
+                ),
+                spec=pod_spec,
+            ),
+        ),
+    )
+
+    created = await k8s.create_job(namespace, job)
+    if created is None:
+        raise ActionDispatchFailed(
+            f"per_invocation job {job_name}: create returned None"
+        )
+
+    deadline = asyncio.get_event_loop().time() + timeout_seconds
+    job_status = "running"
+    while asyncio.get_event_loop().time() < deadline:
+        job_status = await k8s.get_job_status(job_name, namespace)
+        if job_status in {"succeeded", "failed"}:
+            break
+        await asyncio.sleep(_JOB_POLL_INTERVAL_SECONDS)
+
+    if job_status != "succeeded":
+        log = await _read_job_pod_log(k8s, namespace, job_name)
+        raise ActionDispatchFailed(
+            f"per_invocation job {job_name} status={job_status}",
+            status=None,
+            body=(log or "")[:4000],
+        )
+
+    log = await _read_job_pod_log(k8s, namespace, job_name)
+    return _parse_job_output(log)
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -879,19 +1369,15 @@ async def dispatch_app_action(
     instance = await _load_app_instance(db, app_instance_id)
     action = await _load_app_action(db, instance.app_version_id, action_name)
 
-    # Phase 1: Reject tenancy modes that need AppRuntimeDeployment.
+    # Resolve tenancy from the manifest. Pre-Phase-3 manifests omit the
+    # runtime block and behave as ``per_install`` — same default the
+    # installer uses for legacy schemas.
+    tenancy = "per_install"
     version = await db.get(AppVersion, instance.app_version_id)
     if version is not None:
         manifest = version.manifest_json or {}
         runtime_block = manifest.get("runtime") or {}
-        tenancy = runtime_block.get("tenancy_model")
-        if tenancy in {"shared_singleton", "per_invocation"}:
-            raise ActionHandlerNotSupported(
-                f"tenancy_model={tenancy!r} requires AppRuntimeDeployment "
-                "(lands in Phase 3)",
-                kind="tenancy",
-                current_mode=tenancy,
-            )
+        tenancy = str(runtime_block.get("tenancy_model") or "per_install")
 
     # Step 2 — input validation.
     if not isinstance(input, dict):
@@ -900,7 +1386,10 @@ async def dispatch_app_action(
         )
     _validate_schema(action.input_schema, input, error_cls=ActionInputInvalid)
 
-    # Step 3 — route to handler.
+    # Step 3 — route to handler. Tenancy ``shared_singleton`` and
+    # ``per_invocation`` short-circuit the handler.kind dispatch because
+    # they own their own transport choice (signed HTTP / Job per call).
+    # ``per_install`` falls through to the existing kind-based router.
     handler = action.handler or {}
     if not isinstance(handler, dict):
         raise ActionDispatchFailed(
@@ -909,7 +1398,25 @@ async def dispatch_app_action(
     kind = handler.get("kind")
     timeout_seconds = action.timeout_seconds or _DEFAULT_TIMEOUT_SECONDS
 
-    if kind == "http_post":
+    if tenancy == "shared_singleton":
+        output = await _dispatch_shared_singleton(
+            db,
+            instance=instance,
+            handler=handler,
+            input_value=input,
+            timeout_seconds=timeout_seconds,
+            run_id=run_id,
+        )
+    elif tenancy == "per_invocation":
+        output = await _dispatch_per_invocation(
+            db,
+            instance=instance,
+            handler=handler,
+            input_value=input,
+            timeout_seconds=timeout_seconds,
+            run_id=run_id,
+        )
+    elif kind == "http_post":
         output = await _dispatch_http_post(
             db,
             instance=instance,

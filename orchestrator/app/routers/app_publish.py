@@ -41,7 +41,15 @@ from ..services.apps.manifest_parser import (
     ManifestValidationError,
     parse as parse_manifest,
 )
-from ..services.apps.managed_resources import ManagedDbResult, add_postgres
+from ..services.apps.managed_resources import (
+    ManagedDbResult,
+    ManagedKvResult,
+    ManagedObjectStorageResult,
+    ManagedResourcesNotConfigured,
+    add_kv,
+    add_object_storage,
+    add_postgres,
+)
 from ..services.apps.publish_checker import (
     StateModelVerdict,
     check_state_model,
@@ -317,6 +325,28 @@ class UpgradeAddPostgresResponse(BaseModel):
     notes: list[str]
 
 
+class UpgradeAddObjectStorageResponse(BaseModel):
+    secret_name: str
+    secret_namespace: str
+    endpoint: str
+    region: str
+    bucket: str
+    manifest_patch: dict[str, Any]
+    manifest_path: str | None
+    is_stub_provisioner: bool
+    notes: list[str]
+
+
+class UpgradeAddKvResponse(BaseModel):
+    secret_name: str
+    secret_namespace: str
+    prefix: str
+    manifest_patch: dict[str, Any]
+    manifest_path: str | None
+    is_stub_provisioner: bool
+    notes: list[str]
+
+
 async def _load_or_infer_manifest_for_check(
     project, override: Any | None
 ) -> AppManifest2026_05:
@@ -456,18 +486,100 @@ async def upgrade_add_postgres(
     """Provision per-app Postgres and patch the workspace manifest.
 
     Permission: PROJECT_EDIT. The K8s Secret write is real (when a
-    kubeconfig is loadable); the actual Postgres provisioning is
-    STUBBED in Phase 5 — see :mod:`services.apps.managed_resources` for
-    the explicit contract.
+    kubeconfig is loadable). When ``MANAGED_POSTGRES_ADMIN_URL`` is
+    configured the database itself is real; otherwise the call returns
+    412 Precondition Failed (or, if ``MANAGED_POSTGRES_ALLOW_STUB=1``,
+    falls back to a sentinel-DNS stub that fails loudly in pods).
     """
     project = await _get_project_for_edit(slug, db, user)
-    result: ManagedDbResult = await add_postgres(db, project=project, user=user)
+    try:
+        result: ManagedDbResult = await add_postgres(
+            db, project=project, user=user
+        )
+    except ManagedResourcesNotConfigured as exc:
+        raise HTTPException(
+            status_code=412, detail=str(exc)
+        ) from exc
     return UpgradeAddPostgresResponse(
         secret_name=result.secret_name,
         secret_namespace=result.secret_namespace,
         manifest_patch=result.manifest_patch,
         manifest_path=result.manifest_path,
         migration_script_path=result.migration_script_path,
+        is_stub_provisioner=result.is_stub_provisioner,
+        notes=result.notes,
+    )
+
+
+@router.post(
+    "/projects/{slug}/publish-app/upgrade/add-object-storage",
+    response_model=UpgradeAddObjectStorageResponse,
+    summary="Provision per-app object storage (S3 bucket) + patch the manifest",
+)
+async def upgrade_add_object_storage(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_active_user),
+) -> UpgradeAddObjectStorageResponse:
+    """Provision per-app S3 bucket + scoped credentials + patch manifest.
+
+    Permission: PROJECT_EDIT. Returns 412 when the managed pool admin
+    credentials aren't configured (and ``MANAGED_OBJECT_STORAGE_ALLOW_STUB``
+    is off).
+    """
+    project = await _get_project_for_edit(slug, db, user)
+    try:
+        result: ManagedObjectStorageResult = await add_object_storage(
+            db, project=project, user=user
+        )
+    except ManagedResourcesNotConfigured as exc:
+        raise HTTPException(
+            status_code=412, detail=str(exc)
+        ) from exc
+    return UpgradeAddObjectStorageResponse(
+        secret_name=result.secret_name,
+        secret_namespace=result.secret_namespace,
+        endpoint=result.endpoint,
+        region=result.region,
+        bucket=result.bucket,
+        manifest_patch=result.manifest_patch,
+        manifest_path=result.manifest_path,
+        is_stub_provisioner=result.is_stub_provisioner,
+        notes=result.notes,
+    )
+
+
+@router.post(
+    "/projects/{slug}/publish-app/upgrade/add-kv",
+    response_model=UpgradeAddKvResponse,
+    summary="Provision per-app KV (Redis prefix) + patch the manifest",
+)
+async def upgrade_add_kv(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(current_active_user),
+) -> UpgradeAddKvResponse:
+    """Provision per-app KV namespace on the managed Redis pool + patch
+    manifest.
+
+    Permission: PROJECT_EDIT. Returns 412 when ``MANAGED_REDIS_URL`` is
+    not configured (and ``MANAGED_REDIS_ALLOW_STUB`` is off).
+    """
+    project = await _get_project_for_edit(slug, db, user)
+    try:
+        result: ManagedKvResult = await add_kv(
+            db, project=project, user=user
+        )
+    except ManagedResourcesNotConfigured as exc:
+        raise HTTPException(
+            status_code=412, detail=str(exc)
+        ) from exc
+    return UpgradeAddKvResponse(
+        secret_name=result.secret_name,
+        secret_namespace=result.secret_namespace,
+        prefix=result.prefix,
+        manifest_patch=result.manifest_patch,
+        manifest_path=result.manifest_path,
         is_stub_provisioner=result.is_stub_provisioner,
         notes=result.notes,
     )

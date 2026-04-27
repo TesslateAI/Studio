@@ -674,8 +674,15 @@ async def install_app(
             and materialize_compute
         )
     ):
+        # ``connector_proxy_runtime_url`` resolves to the standalone
+        # ``opensail-runtime:8400`` Service in dedicated mode and to the
+        # embedded mount (``tesslate-backend-service:8000/api/v1/connector-proxy``)
+        # in desktop / docker mode. The SDK appends
+        # ``/connectors/{id}/{path}`` either way.
+        from ...config import get_settings as _get_runtime_settings
+
         runtime_env_overlay["OPENSAIL_RUNTIME_URL"] = (
-            "http://opensail-runtime:8400"
+            _get_runtime_settings().connector_proxy_runtime_url
         )
 
     for entry in container_specs:

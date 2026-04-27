@@ -130,20 +130,41 @@ def stub_redis(monkeypatch: pytest.MonkeyPatch) -> _StubRedis:
 @pytest.fixture
 def stub_app_action_dispatcher(monkeypatch: pytest.MonkeyPatch):
     """Provide a minimal ``services.apps.action_dispatcher`` so the resume
-    redispatch path doesn't trip the Wave-2B NotImplementedError stub."""
+    redispatch path doesn't depend on a real app pod existing.
+
+    Captures the kwargs the dispatcher forwards to ``dispatch_app_action``
+    (the new signature: ``app_instance_id``, ``action_name``, ``input``,
+    ``run_id`` …)."""
     captured: list[dict[str, Any]] = []
 
-    async def _dispatch(db, *, app_action_id, input, run_id):
+    async def _dispatch_app_action(
+        db,
+        *,
+        app_instance_id,
+        action_name,
+        input,
+        run_id,
+        invocation_subject_id=None,
+    ):
         captured.append(
-            {"app_action_id": app_action_id, "input": dict(input), "run_id": run_id}
+            {
+                "app_instance_id": app_instance_id,
+                "action_name": action_name,
+                "input": dict(input),
+                "run_id": run_id,
+            }
         )
-        return {"action_type": "app.invoke", "output": {"ok": True}, "input": dict(input)}
+        return {
+            "action_type": "app.invoke",
+            "output": {"ok": True},
+            "input": dict(input),
+        }
 
-    fake = types.SimpleNamespace(dispatch=_dispatch)
-    # Patch the import target — dispatcher does ``from ..apps import action_dispatcher``.
-    # Two levels of cache to clobber:
-    #   * ``sys.modules["app.services.apps.action_dispatcher"]`` for any code
-    #     path that does ``import ...action_dispatcher`` directly.
+    fake = types.SimpleNamespace(dispatch_app_action=_dispatch_app_action)
+    # Patch the import target — dispatcher does
+    # ``from ..apps import action_dispatcher``. Two caches to clobber:
+    #   * ``sys.modules["app.services.apps.action_dispatcher"]`` for any
+    #     code path that does ``import ...action_dispatcher`` directly.
     #   * The ``action_dispatcher`` attribute on the parent package — the
     #     ``from ..apps import action_dispatcher`` form returns the cached
     #     attribute when the real module has already been imported by an
@@ -184,6 +205,78 @@ async def _seed_user(db) -> uuid.UUID:
     )
     await db.flush()
     return user_id
+
+
+async def _seed_app_action_for_owner(
+    db,
+    *,
+    owner_user_id: uuid.UUID,
+    action_name: str = "summarize",
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Seed MarketplaceApp + AppVersion + AppAction + AppInstance.
+
+    Returns ``(app_action_id, app_instance_id)``. The dispatcher's
+    ``_dispatch_app_action`` looks up these rows by FK before calling
+    ``dispatch_app_action``, so any test that exercises the app.invoke
+    redispatch path needs the chain to exist.
+    """
+    from app.models import AppVersion, MarketplaceApp
+    from app.models_automations import AppAction, AppInstance
+
+    suffix = uuid.uuid4().hex[:6]
+    app_id = uuid.uuid4()
+    db.add(
+        MarketplaceApp(
+            id=app_id,
+            slug=f"resume-app-{suffix}",
+            handle=f"resume-app-{suffix}",
+            name="Resume Test App",
+            description="test",
+            category="productivity",
+            state="published",
+            creator_user_id=owner_user_id,
+        )
+    )
+
+    app_version_id = uuid.uuid4()
+    db.add(
+        AppVersion(
+            id=app_version_id,
+            app_id=app_id,
+            version="0.1.0",
+            manifest_schema_version="2026-05",
+            manifest_json={},
+            manifest_hash=f"sha256:resume-{suffix}",
+            feature_set_hash=f"sha256:fs-{suffix}",
+            bundle_hash=f"cas://resume-{suffix}",
+            approval_state="approved",
+        )
+    )
+
+    app_action_id = uuid.uuid4()
+    db.add(
+        AppAction(
+            id=app_action_id,
+            app_version_id=app_version_id,
+            name=action_name,
+            handler={"kind": "http_post", "container": "api", "path": "/x"},
+            input_schema=None,
+            output_schema=None,
+        )
+    )
+
+    instance_id = uuid.uuid4()
+    db.add(
+        AppInstance(
+            id=instance_id,
+            app_id=app_id,
+            app_version_id=app_version_id,
+            installer_user_id=owner_user_id,
+            state="active",
+        )
+    )
+    await db.flush()
+    return app_action_id, instance_id
 
 
 async def _seed_paused_run(
@@ -262,11 +355,15 @@ def test_resume_app_invoke_redispatches_with_saved_input(
     )
 
     saved_input = {"customer_id": "cust-123", "amount": "5.00"}
-    saved_app_action_id = uuid.uuid4()
 
     async def go():
         async with session_maker() as db:
             owner = await _seed_user(db)
+            saved_app_action_id, expected_instance_id = (
+                await _seed_app_action_for_owner(
+                    db, owner_user_id=owner, action_name="charge_card"
+                )
+            )
             automation_id, run_id = await _seed_paused_run(
                 db,
                 owner_id=owner,
@@ -311,16 +408,17 @@ def test_resume_app_invoke_redispatches_with_saved_input(
                     select(AutomationRun).where(AutomationRun.id == run_id)
                 )
             ).scalar_one()
-        return result, final
+        return result, final, expected_instance_id
 
-    result, final = asyncio.run(go())
+    result, final, expected_instance_id = asyncio.run(go())
 
     assert result.status == DispatchStatus.SUCCEEDED
     assert final.status == "succeeded"
     # The fake action_dispatcher captured the saved input.
     assert len(stub_app_action_dispatcher) == 1
     assert stub_app_action_dispatcher[0]["input"] == saved_input
-    assert stub_app_action_dispatcher[0]["app_action_id"] == saved_app_action_id
+    assert stub_app_action_dispatcher[0]["app_instance_id"] == expected_instance_id
+    assert stub_app_action_dispatcher[0]["action_name"] == "charge_card"
 
 
 @pytest.mark.unit

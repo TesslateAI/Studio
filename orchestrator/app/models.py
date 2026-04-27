@@ -2960,6 +2960,41 @@ class ScheduleTriggerEvent(Base):
     schedule = relationship("AgentSchedule", back_populates="trigger_events")
 
 
+class ContractTemplate(Base):
+    """Reusable starter contract for the AutomationCreatePage builder.
+
+    Phase 5 polish — the ``ContractEditor`` form lets users browse a
+    catalog of curated contracts (allowed_tools / spend caps / max
+    iterations). Templates are user-creatable; ``is_published=True``
+    means the row shows up in
+    ``GET /api/contract-templates`` for the marketplace browse list.
+
+    The ``contract_json`` column stores the full contract object the
+    dispatcher's ContractGate consumes — applying a template just copies
+    this dict into the new automation's ``contract`` field.
+    """
+
+    __tablename__ = "contract_templates"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    name = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    # Free-form taxonomy — common values are 'research', 'coding', 'ops',
+    # 'general'. Frontend filters by category but doesn't enforce a
+    # closed set so seeds can ship new categories without an API change.
+    category = Column(String(48), nullable=False, server_default="general")
+    contract_json = Column(JSON, nullable=False)
+    created_by_user_id = Column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    is_published = Column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 # Import team models so they're included in Base.metadata (same pattern as models_kanban)
 from .models_team import (  # noqa: F401, E402
     AuditLog,

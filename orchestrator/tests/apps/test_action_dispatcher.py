@@ -550,7 +550,14 @@ async def test_artifacts_persisted_when_run_id_given(monkeypatch) -> None:
     assert persisted.kind == "markdown"
     assert persisted.name == "summary.md"
     assert persisted.storage_mode == "inline"
-    assert persisted.storage_ref == "everything is fine"
+    # Inline storage_ref is base64-encoded so the TEXT column can carry
+    # binary payloads verbatim — see services/automations/artifacts.py.
+    import base64
+
+    assert (
+        base64.b64decode(persisted.storage_ref).decode("utf-8")
+        == "everything is fine"
+    )
 
 
 @pytest.mark.asyncio
@@ -638,8 +645,17 @@ async def test_missing_action_raises(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_shared_singleton_tenancy_rejected(monkeypatch) -> None:
-    """tenancy_model=shared_singleton needs AppRuntimeDeployment (Phase 3)."""
+async def test_shared_singleton_tenancy_dispatches_via_shared_handler(
+    monkeypatch,
+) -> None:
+    """tenancy_model=shared_singleton routes through the shared dispatcher.
+
+    Phase 3 implements ``_dispatch_shared_singleton``; this test asserts
+    that the dispatcher reaches the shared-deployment lookup (not the
+    legacy ``ActionHandlerNotSupported`` Phase 1 reject path). The
+    detailed shared-handler behaviour is covered by
+    ``tests/services/apps/test_action_dispatcher_tenancy.py``.
+    """
     instance = _mk_instance()
     action = _mk_action()
     version = _mk_version(
@@ -649,17 +665,23 @@ async def test_shared_singleton_tenancy_rejected(monkeypatch) -> None:
         results=[
             _Result(scalar=instance),
             _Result(scalar=action),
+            _Result(scalar=None),  # _load_shared_singleton_deployment misses
         ],
         objects={(action_dispatcher.AppVersion, instance.app_version_id): version},
     )
     _patch_settings(monkeypatch)
     _patch_billing_noop(monkeypatch)
 
-    with pytest.raises(ActionHandlerNotSupported) as excinfo:
+    # No shared deployment row → the dispatcher surfaces a clean
+    # ActionDispatchFailed (not ActionHandlerNotSupported, which would
+    # mean "Phase 1 reject" — that branch is gone).
+    from app.services.apps.action_dispatcher import ActionDispatchFailed
+
+    with pytest.raises(ActionDispatchFailed) as excinfo:
         await dispatch_app_action(
             db,  # type: ignore[arg-type]
             app_instance_id=instance.id,
             action_name="do_thing",
             input={},
         )
-    assert excinfo.value.kind == "tenancy"
+    assert "shared_singleton deployment" in str(excinfo.value)

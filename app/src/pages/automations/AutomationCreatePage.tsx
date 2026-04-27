@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ArrowLeft } from '@phosphor-icons/react';
 import { automationsApi } from '../../lib/api';
+import {
+  APPLY_STORAGE_KEY,
+  type ApplyHandoff,
+} from '../marketplace/ContractTemplates';
 import type {
   AutomationActionIn,
   AutomationDefinitionIn,
@@ -66,6 +70,40 @@ export default function AutomationCreatePage() {
     ordinal: 0,
   });
   const [contractText, setContractText] = useState<string>(DEFAULT_CONTRACT);
+  const [appliedTemplateName, setAppliedTemplateName] = useState<string | null>(
+    null
+  );
+
+  // Phase 5: marketplace ContractTemplates page hands the contract over via
+  // sessionStorage (URL stays human-readable). Read once on mount; clear
+  // immediately so a refresh doesn't re-apply.
+  useEffect(() => {
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem(APPLY_STORAGE_KEY);
+      if (raw) sessionStorage.removeItem(APPLY_STORAGE_KEY);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    try {
+      const handoff = JSON.parse(raw) as ApplyHandoff;
+      if (
+        handoff &&
+        typeof handoff === 'object' &&
+        handoff.contract &&
+        typeof handoff.contract === 'object'
+      ) {
+        setContractText(JSON.stringify(handoff.contract, null, 2));
+        setAppliedTemplateName(handoff.template_name ?? null);
+        toast.success(
+          `Applied template: ${handoff.template_name ?? 'contract template'}`
+        );
+      }
+    } catch {
+      // Stale/malformed handoff — silently ignore.
+    }
+  }, []);
   // Phase 4: pick a stored CommunicationDestination via DestinationPicker
   // (drop-down + inline create). Empty string = "no delivery target".
   const [deliveryDestinationId, setDeliveryDestinationId] = useState('');
@@ -302,6 +340,25 @@ export default function AutomationCreatePage() {
             title="Contract"
             description="Required guard rails. Dispatcher refuses to run without a contract."
           >
+            {appliedTemplateName && (
+              <div
+                className="mb-2 px-2 py-1.5 text-[11px] text-[var(--text)] bg-[var(--primary)]/10 border border-[var(--primary)]/30 rounded-[var(--radius-small)] flex items-center gap-2"
+                data-testid="applied-template-badge"
+              >
+                <span className="font-medium">Applied template:</span>
+                <span className="font-mono">{appliedTemplateName}</span>
+                <button
+                  type="button"
+                  className="ml-auto text-[10px] text-[var(--text-subtle)] hover:text-[var(--text)] underline"
+                  onClick={() => {
+                    setContractText(DEFAULT_CONTRACT);
+                    setAppliedTemplateName(null);
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            )}
             <ContractEditor value={contractText} onChange={setContractText} />
           </Section>
 

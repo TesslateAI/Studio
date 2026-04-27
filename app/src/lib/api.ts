@@ -4969,4 +4969,92 @@ export const communicationDestinationsApi = {
 // ===== /Automations =====
 // =============================================================================
 
+// =============================================================================
+// ===== Contract templates (Phase 5 marketplace) =====
+// =============================================================================
+
+export interface ContractTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  contract_json: Record<string, unknown>;
+  created_by_user_id: string | null;
+  is_published: boolean;
+}
+
+export interface ContractTemplateApplyResponse {
+  template_id: string;
+  template_name: string;
+  contract: Record<string, unknown>;
+}
+
+export const contractTemplatesApi = {
+  async list(params: { category?: string } = {}): Promise<ContractTemplate[]> {
+    const response = await api.get('/api/contract-templates', { params });
+    return response.data;
+  },
+  async get(templateId: string): Promise<ContractTemplate> {
+    const response = await api.get(`/api/contract-templates/${templateId}`);
+    return response.data;
+  },
+  async create(body: {
+    name: string;
+    description?: string | null;
+    category?: string;
+    contract_json: Record<string, unknown>;
+    is_published?: boolean;
+  }): Promise<ContractTemplate> {
+    const response = await api.post('/api/contract-templates', body);
+    return response.data;
+  },
+  async remove(templateId: string): Promise<void> {
+    await api.delete(`/api/contract-templates/${templateId}`);
+  },
+  async apply(templateId: string): Promise<ContractTemplateApplyResponse> {
+    const response = await api.post(`/api/contract-templates/${templateId}/apply`);
+    return response.data;
+  },
+};
+
+// =============================================================================
+// ===== Admin spend rollup (Phase 5) =====
+// =============================================================================
+
+export type SpendRollupGroupBy = 'user' | 'app' | 'team';
+
+export interface SpendRollupRow {
+  user_id?: string | null;
+  user_email?: string | null;
+  app_instance_id?: string | null;
+  app_name?: string | null;
+  team_id?: string | null;
+  total_usd: string;
+  currency: string;
+}
+
+export interface SpendRollupTotals {
+  all_users_usd: string;
+  currency: string;
+}
+
+export interface SpendRollupResponse {
+  rows: SpendRollupRow[];
+  totals: SpendRollupTotals;
+  group_by: SpendRollupGroupBy;
+  start: string;
+  end: string;
+}
+
+export const adminSpendApi = {
+  async rollup(params: {
+    start?: string;
+    end?: string;
+    group_by?: SpendRollupGroupBy;
+  } = {}): Promise<SpendRollupResponse> {
+    const response = await api.get('/api/admin/spend/rollup', { params });
+    return response.data;
+  },
+};
+
 export default api;

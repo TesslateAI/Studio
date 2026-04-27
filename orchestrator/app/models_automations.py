@@ -181,6 +181,21 @@ class AutomationAction(Base):
     """Action ordered within an automation (v1 = single row, v2 = DAG).
 
     ``app_action_id`` is set when ``action_type='app.invoke'``; null otherwise.
+
+    Phase 5 added two DAG-prep columns reserved for the Phase 6 dispatcher:
+
+    * ``parent_action_id`` — self-FK with ``ON DELETE SET NULL``. When a
+      parent action row is deleted the edge breaks but children stay around
+      so partial DAGs surface as broken-link errors at dispatch time
+      instead of silently disappearing.
+    * ``branch_condition`` — JSON expression evaluated by the Phase 6
+      dispatcher to decide whether the child runs. Phase 5 ignores it.
+
+    The CHECK on ``action_type`` was widened to also accept
+    ``'workflow.run'`` — the Phase 6 entrypoint that fans out via
+    ``parent_action_id``. Today the dispatcher rejects that value at the
+    application layer; the CHECK is permissive so future schema rolls can
+    insert rows without another migration round.
     """
 
     __tablename__ = "automation_actions"
@@ -194,7 +209,7 @@ class AutomationAction(Base):
     )
     ordinal = Column(Integer, nullable=False, default=0, server_default="0")
 
-    # agent.run | app.invoke | gateway.send
+    # agent.run | app.invoke | gateway.send | workflow.run (Phase 6)
     action_type = Column(String(32), nullable=False)
     config = Column(JSON, nullable=False)
 
@@ -202,13 +217,24 @@ class AutomationAction(Base):
         GUID(), ForeignKey("app_actions.id", ondelete="SET NULL"), nullable=True
     )
 
+    # Phase 5 DAG prep — Phase 6 dispatcher reads these. Today they are
+    # nullable & unenforced.
+    parent_action_id = Column(
+        GUID(),
+        ForeignKey("automation_actions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    branch_condition = Column(JSON, nullable=True)
+
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     __table_args__ = (
         CheckConstraint(
-            "action_type IN ('agent.run', 'app.invoke', 'gateway.send')",
+            "action_type IN ('agent.run', 'app.invoke', 'gateway.send', "
+            "'workflow.run')",
             name="ck_automation_actions_action_type",
         ),
     )

@@ -22,6 +22,28 @@ interface Props {
    * the toolbar button reflects the project's new app_source role.
    */
   onPublished?: (result: { appId: string; versionId: string }) => void;
+  /**
+   * Phase 5 inspector jump: when the parent (ArchitectureView) provides this,
+   * "Fix" buttons whose ``fix_action`` carries an inspector hint
+   * (``container_name``, ``action_name``, ``connector_id``) close the drawer
+   * and ask the canvas to open ContainerPropertiesPanel for the affected
+   * container, scrolled to the relevant editor row.
+   *
+   * When omitted the drawer falls back to "Fix in YAML editor" exactly like
+   * pre-Phase-5.
+   */
+  onJumpToInspector?: (target: InspectorJumpTarget) => void;
+}
+
+/** Resolved jump target the canvas understands. Only the kinds the
+ *  inspector knows how to focus today are exposed; other fix actions stay
+ *  YAML-only. */
+export interface InspectorJumpTarget {
+  containerName: string;
+  /** Optional — when set, the inspector scrolls to that action editor row. */
+  actionName?: string;
+  /** Optional — when set, the inspector scrolls to that connector row. */
+  connectorId?: string;
 }
 
 const STATUS_ICONS: Record<ChecklistStatus, React.ReactElement> = {
@@ -47,12 +69,48 @@ const STATUS_LABELS: Record<ChecklistStatus, string> = {
  *      /api/projects/{slug}/publish-app, which round-trips through the
  *      existing publisher.publish_version() pipeline.
  */
+/**
+ * Decide whether a checklist item's ``fix_action`` carries inspector
+ * jump metadata. Returns the resolved :class:`InspectorJumpTarget` when
+ * yes; null when the action belongs in the YAML editor.
+ *
+ * The publish_inferrer emits a few well-known kinds today —
+ * ``open_canvas``, ``declare_exposure``, ``edit_yaml``, ``add_postgres`` —
+ * but only the first two are actionable from the canvas inspector.
+ * ``connector_no_exposure`` / ``action_missing_schema`` are the new
+ * Phase 5 kinds that already include ``container_name`` directly.
+ */
+function resolveJumpTarget(item: ChecklistItem): InspectorJumpTarget | null {
+  const fix = item.fix_action;
+  if (!fix) return null;
+  const containerName =
+    typeof fix.container_name === 'string' && fix.container_name.length > 0
+      ? fix.container_name
+      : null;
+  if (!containerName) return null;
+  const actionName =
+    typeof fix.action_name === 'string' ? fix.action_name : undefined;
+  const connectorId =
+    typeof fix.connector_id === 'string' ? fix.connector_id : undefined;
+  // Validate kind against the small set we know how to handle. Unknown
+  // kinds keep the YAML fallback even if container_name happens to be set.
+  const KNOWN_KINDS = new Set([
+    'action_missing_schema',
+    'connector_no_exposure',
+    'open_canvas',
+    'declare_exposure',
+  ]);
+  if (!KNOWN_KINDS.has(fix.kind)) return null;
+  return { containerName, actionName, connectorId };
+}
+
 export default function PublishAsAppDrawer({
   projectSlug,
   projectName,
   initialDraft = null,
   onClose,
   onPublished,
+  onJumpToInspector,
 }: Props) {
   const [draft, setDraft] = useState<PublishDraftResponse | null>(initialDraft);
   const [yamlText, setYamlText] = useState<string>(initialDraft?.yaml ?? '');
@@ -201,7 +259,23 @@ export default function PublishAsAppDrawer({
                 </h3>
                 <ul className="space-y-2">
                   {draft.checklist.map((item) => (
-                    <ChecklistRow key={item.id} item={item} onEditYaml={() => setEditing(true)} />
+                    <ChecklistRow
+                      key={item.id}
+                      item={item}
+                      onEditYaml={() => setEditing(true)}
+                      onJumpToInspector={
+                        onJumpToInspector
+                          ? (target) => {
+                              // Close the drawer first so the canvas
+                              // gets focus; the parent's handler is
+                              // responsible for actually selecting the
+                              // container + emitting the focus event.
+                              onClose();
+                              onJumpToInspector(target);
+                            }
+                          : undefined
+                      }
+                    />
                   ))}
                 </ul>
               </section>
@@ -292,10 +366,17 @@ export default function PublishAsAppDrawer({
 interface ChecklistRowProps {
   item: ChecklistItem;
   onEditYaml: () => void;
+  /** Optional inspector-jump handler — surfaces a "Fix in inspector"
+   *  button when the fix_action carries enough metadata. */
+  onJumpToInspector?: (target: InspectorJumpTarget) => void;
 }
 
-function ChecklistRow({ item, onEditYaml }: ChecklistRowProps) {
+function ChecklistRow({ item, onEditYaml, onJumpToInspector }: ChecklistRowProps) {
   const showFix = item.status !== 'pass' && item.fix_action;
+  // Only surface the inspector-jump button when (a) the parent provided a
+  // handler and (b) the fix_action actually has a container target the
+  // inspector can navigate to. Otherwise fall through to YAML.
+  const jumpTarget = onJumpToInspector ? resolveJumpTarget(item) : null;
   return (
     <li className="flex items-start gap-3 p-3 rounded-md border border-[var(--border)] bg-[var(--bg)]/40">
       {STATUS_ICONS[item.status]}
@@ -316,7 +397,17 @@ function ChecklistRow({ item, onEditYaml }: ChecklistRowProps) {
         </div>
         <p className="text-xs text-[var(--text)]/70 mt-1 leading-relaxed">{item.detail}</p>
         {showFix && (
-          <div className="mt-2">
+          <div className="mt-2 flex items-center gap-2">
+            {jumpTarget && onJumpToInspector ? (
+              <button
+                type="button"
+                onClick={() => onJumpToInspector(jumpTarget)}
+                className="text-xs px-2 py-1 rounded border border-[var(--primary)]/40 text-[var(--primary)] hover:bg-[var(--primary)]/10"
+                data-testid={`fix-in-inspector-${item.id}`}
+              >
+                Fix in inspector
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onEditYaml}

@@ -3,7 +3,10 @@
 The supervisor owns the leader-election loop and, while leader, runs the
 controller's child loops as a single :func:`asyncio.gather` tree:
 
-* :func:`cron_producer.run_loop` — claims due cron triggers
+* :func:`_leader_tick_loop` — periodic tick that runs, in order,
+  the cron producer, the heartbeat sweep, and the approval-timeout
+  sweep. Folded into one task so that a single LeaseLost from any
+  sub-step stands the leader down cleanly.
 * :func:`sweep_on_acquire.sweep_once` — one-shot at promote
 * :func:`missed_event_drain.run_loop` — recovery sweep
 * :func:`intents.reconciler.run_loop` — applies pending intents
@@ -42,6 +45,7 @@ import socket
 import uuid
 from typing import Any, Callable, Optional
 
+from .intents import LeaseLost
 from .lease import Lease, LeaseToken, get_lease_backend
 
 logger = logging.getLogger(__name__)
@@ -186,7 +190,7 @@ async def _run_as_leader(
         return current_token.term
 
     # Lazy imports keep test surface small.
-    from . import cron_producer, missed_event_drain, sweep_on_acquire
+    from . import missed_event_drain, sweep_on_acquire
     from .intents import reconciler as intents_reconciler
 
     # One-shot sweep at promote — flush any rows stuck queued during
@@ -200,14 +204,13 @@ async def _run_as_leader(
 
     children = [
         asyncio.create_task(
-            cron_producer.run_loop(
+            _leader_tick_loop(
                 db_factory=db_factory,
                 arq_pool=arq_pool,
-                lease_backend=lease_backend,
                 token_provider=lambda: current_token,
                 shutdown_event=lease_lost,
             ),
-            name="controller.cron_producer",
+            name="controller.leader_tick",
         ),
         asyncio.create_task(
             missed_event_drain.run_loop(
@@ -259,6 +262,90 @@ async def _run_as_leader(
         )
     except Exception:
         logger.warning("[CONTROLLER] release failed", exc_info=True)
+
+
+_LEADER_TICK_INTERVAL_SECONDS = 60
+
+
+async def _leader_tick_loop(
+    *,
+    db_factory: Callable[[], Any],
+    arq_pool: Any | None,
+    token_provider: Callable[[], Any],
+    shutdown_event: asyncio.Event,
+    interval_seconds: int = _LEADER_TICK_INTERVAL_SECONDS,
+) -> None:
+    """Single periodic tick that drives every leader-side periodic step.
+
+    Folds the cron producer and the two heartbeat / approval-timeout
+    sweeps into one task so:
+
+    * any :class:`LeaseLost` from any sub-step short-circuits the rest
+      of the tick and stands the leader down via the shared
+      ``shutdown_event``;
+    * we don't multiply the ``asyncio.create_task`` surface for what
+      are conceptually three branches of the same heartbeat.
+
+    Errors that aren't ``LeaseLost`` are logged per sub-step so a
+    transient DB blip in (say) the approval sweep doesn't suppress the
+    cron tick on the same iteration.
+    """
+    from . import approval_timeout_sweep, cron_producer, heartbeat_sweep
+
+    logger.info("[LEADER-TICK] starting (interval=%ds)", interval_seconds)
+
+    while not shutdown_event.is_set():
+        try:
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
+            return
+        except TimeoutError:
+            pass
+
+        current_term = int(token_provider().term)
+
+        # ---- Cron producer ----------------------------------------------
+        try:
+            await cron_producer.tick(
+                db_factory=db_factory,
+                arq_pool=arq_pool,
+                current_term=current_term,
+            )
+        except LeaseLost:
+            logger.warning("[LEADER-TICK] lease lost in cron tick; standing down")
+            return
+        except Exception:
+            logger.exception("[LEADER-TICK] cron tick failed")
+
+        # ---- Heartbeat sweep --------------------------------------------
+        try:
+            async with db_factory() as db:
+                await heartbeat_sweep.sweep_stale_running(
+                    db,
+                    queue=arq_pool,
+                    current_term=current_term,
+                )
+        except LeaseLost:
+            logger.warning(
+                "[LEADER-TICK] lease lost in heartbeat sweep; standing down"
+            )
+            return
+        except Exception:
+            logger.exception("[LEADER-TICK] heartbeat sweep failed")
+
+        # ---- Approval-timeout sweep -------------------------------------
+        try:
+            async with db_factory() as db:
+                await approval_timeout_sweep.sweep_expired_approvals(
+                    db,
+                    current_term=current_term,
+                )
+        except LeaseLost:
+            logger.warning(
+                "[LEADER-TICK] lease lost in approval sweep; standing down"
+            )
+            return
+        except Exception:
+            logger.exception("[LEADER-TICK] approval-timeout sweep failed")
 
 
 async def _wait_for_either(a: asyncio.Event, b: asyncio.Event) -> None:

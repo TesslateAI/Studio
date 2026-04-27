@@ -399,6 +399,154 @@ class SlackChannel(GatewayAdapter):
             if owns_client:
                 await client.aclose()
 
+    # ---- Phase 4 file upload (approval-card artifacts) -----------------
+
+    # Slack's documented file-upload size limit. Larger payloads need
+    # the chunked external upload flow which we don't currently use;
+    # the runner skips artifacts above this cap and surfaces the skip
+    # in the card body.
+    SLACK_FILE_UPLOAD_MAX_BYTES: int = 25 * 1024 * 1024  # 25 MiB
+
+    async def upload_file(
+        self,
+        *,
+        channel_id: str,
+        filename: str,
+        content: bytes,
+        title: str | None = None,
+        initial_comment: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> dict[str, Any]:
+        """Upload a binary blob to ``channel_id`` via Slack's
+        ``files.getUploadURLExternal`` / ``files.completeUploadExternal``
+        flow (the v2 file API, since ``files.upload`` was deprecated).
+
+        Three-step flow:
+
+        1. ``files.getUploadURLExternal`` returns a one-shot upload URL
+           and a ``file_id`` we'll need at completion time.
+        2. ``POST <upload_url>`` with the raw bytes uploads them.
+        3. ``files.completeUploadExternal`` materialises the file and
+           shares it into ``channel_id``.
+
+        Returns ``{"ok": ..., "file_id": ..., "permalink": ..., "error": ...}``
+        so the caller can attach a file reference to a follow-up post.
+
+        Size policy: caller MUST pre-check ``len(content) <=
+        SLACK_FILE_UPLOAD_MAX_BYTES``. We fail closed on oversize so a
+        bug doesn't burn a Slack tier-3 quota call only to be rejected.
+        """
+        if len(content) > self.SLACK_FILE_UPLOAD_MAX_BYTES:
+            return {
+                "ok": False,
+                "error": "file_too_large",
+                "file_id": None,
+                "permalink": None,
+            }
+
+        owns_client = http_client is None
+        client = http_client or httpx.AsyncClient(timeout=30.0)
+        try:
+            # Step 1 — request an upload URL.
+            getu = await client.get(
+                f"{SLACK_API}/files.getUploadURLExternal",
+                headers={"Authorization": f"Bearer {self.bot_token}"},
+                params={"filename": filename, "length": str(len(content))},
+            )
+            getu_data = getu.json()
+            if not getu_data.get("ok"):
+                logger.warning(
+                    "[SLACK] files.getUploadURLExternal failed file=%s: %s",
+                    filename,
+                    getu_data.get("error"),
+                )
+                return {
+                    "ok": False,
+                    "error": getu_data.get("error") or "get_url_failed",
+                    "file_id": None,
+                    "permalink": None,
+                }
+            upload_url = getu_data.get("upload_url")
+            file_id = getu_data.get("file_id")
+            if not upload_url or not file_id:
+                return {
+                    "ok": False,
+                    "error": "missing_upload_url",
+                    "file_id": None,
+                    "permalink": None,
+                }
+
+            # Step 2 — upload the bytes. The signed URL doesn't accept
+            # the bot bearer; passing it here would trigger a 401.
+            up = await client.post(
+                upload_url,
+                content=content,
+            )
+            if up.status_code >= 400:
+                logger.warning(
+                    "[SLACK] file upload POST failed file=%s status=%s",
+                    filename,
+                    up.status_code,
+                )
+                return {
+                    "ok": False,
+                    "error": f"upload_status_{up.status_code}",
+                    "file_id": file_id,
+                    "permalink": None,
+                }
+
+            # Step 3 — complete the upload + share to channel.
+            complete_body: dict[str, Any] = {
+                "files": [{"id": file_id, "title": title or filename}],
+                "channel_id": channel_id,
+            }
+            if initial_comment:
+                complete_body["initial_comment"] = initial_comment
+
+            complete = await client.post(
+                f"{SLACK_API}/files.completeUploadExternal",
+                headers={"Authorization": f"Bearer {self.bot_token}"},
+                json=complete_body,
+            )
+            complete_data = complete.json()
+            if not complete_data.get("ok"):
+                logger.warning(
+                    "[SLACK] files.completeUploadExternal failed file=%s: %s",
+                    filename,
+                    complete_data.get("error"),
+                )
+                return {
+                    "ok": False,
+                    "error": complete_data.get("error") or "complete_failed",
+                    "file_id": file_id,
+                    "permalink": None,
+                }
+
+            # ``files`` array carries the materialised file objects.
+            files_arr = complete_data.get("files") or []
+            permalink = (files_arr[0] or {}).get("permalink") if files_arr else None
+            return {
+                "ok": True,
+                "file_id": file_id,
+                "permalink": permalink,
+                "error": None,
+            }
+        except Exception as exc:
+            logger.exception(
+                "[SLACK] upload_file raised file=%s channel=%s",
+                filename,
+                channel_id,
+            )
+            return {
+                "ok": False,
+                "error": str(exc),
+                "file_id": None,
+                "permalink": None,
+            }
+        finally:
+            if owns_client:
+                await client.aclose()
+
     async def send_approval_card(
         self,
         channel_id: str,

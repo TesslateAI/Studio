@@ -26,7 +26,9 @@ import { DeploymentTargetNode } from '../DeploymentTargetNode';
 import { GraphCanvas } from '../GraphCanvas';
 import { MarketplaceSidebar } from '../MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../ContainerPropertiesPanel';
-import PublishAsAppDrawer from '../apps/PublishAsAppDrawer';
+import PublishAsAppDrawer, {
+  type InspectorJumpTarget,
+} from '../apps/PublishAsAppDrawer';
 import { Rocket } from '@phosphor-icons/react';
 import { publishApi } from '../../lib/api';
 import type { PublishDraftResponse } from '../../types/publish';
@@ -48,6 +50,7 @@ import { useTheme } from '../../theme/ThemeContext';
 import { fileEvents } from '../../utils/fileEvents';
 import { connectionEvents } from '../../utils/connectionEvents';
 import { nodeConfigEvents } from '../../utils/nodeConfigEvents';
+import { inspectorFocusEvents } from '../../utils/inspectorFocusEvents';
 import { useNodeConfigPending } from '../../contexts/NodeConfigPendingContext';
 import toast from 'react-hot-toast';
 import {
@@ -1088,6 +1091,48 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       }
     }, []);
 
+    /**
+     * Phase 5: PublishAsAppDrawer "Fix in inspector" handler.
+     *
+     * The drawer hands us a container *name* (manifest-side identifier) plus
+     * an optional action / connector to focus. We resolve the React Flow
+     * node by name (case-sensitive — manifest names round-trip exactly),
+     * select it, and emit an inspector-focus-request so the inspector's
+     * effect can scroll the App Contract section to the right row once
+     * it mounts.
+     *
+     * Non-blocking: if no node matches the name, surface a toast and bail
+     * — the drawer has already closed itself per its contract, so the user
+     * isn't stuck.
+     */
+    const handleJumpToInspector = useCallback((target: InspectorJumpTarget) => {
+      const containerNode = nodesRef.current.find(
+        (n) => (n.data?.name as string | undefined) === target.containerName
+      );
+      if (!containerNode) {
+        toast.error(`Container "${target.containerName}" not found on canvas`);
+        return;
+      }
+      setSelectedContainer({
+        id: containerNode.id,
+        name: containerNode.data.name as string,
+        status: containerNode.data.status as string,
+        port: containerNode.data.port as number | undefined,
+        containerType: containerNode.data.containerType as 'base' | 'service' | undefined,
+      });
+      // Defer the focus request one tick so the panel mounts before its
+      // effect listener subscribes. Without the delay, the event fires
+      // before the panel's useEffect attaches its handler.
+      const detail = {
+        containerId: containerNode.id,
+        kind: (target.actionName ? 'action' : 'connector') as 'action' | 'connector',
+        name: target.actionName ?? target.connectorId,
+      };
+      requestAnimationFrame(() => {
+        inspectorFocusEvents.emit('inspector-focus-request', detail);
+      });
+    }, []);
+
     const handleOpenBuilder = useCallback(
       (containerId: string) => {
         onNavigateToContainer(containerId);
@@ -2074,6 +2119,11 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
               // Refresh project info so the toolbar button reflects the new
               // app_source role + the existing-app id for republish.
               fetchProjectDataRef.current?.();
+            }}
+            onJumpToInspector={(target) => {
+              setIsPublishOpen(false);
+              setPublishDraft(null);
+              handleJumpToInspector(target);
             }}
           />
         )}
