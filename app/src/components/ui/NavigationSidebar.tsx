@@ -7,7 +7,6 @@ import { motion } from 'framer-motion';
 import {
   Home,
   FolderOpen,
-  Boxes,
   BookOpen,
   PanelLeft,
   ChevronDown,
@@ -94,7 +93,6 @@ const LIBRARY_ITEMS: Array<{
   label: string;
   icon: ComponentType<SidebarIconProps>;
 }> = [
-  { key: 'apps', label: 'Apps', icon: Boxes },
   { key: 'agents', label: 'Agents', icon: AgentFaceIcon },
   { key: 'bases', label: 'Bases', icon: Rocket },
   { key: 'skills', label: 'Skills', icon: Zap },
@@ -131,7 +129,7 @@ export function NavigationSidebar({
     top: number;
     left: number;
   }>({ open: false, top: 0, left: 0 });
-  const libraryButtonRef = useRef<HTMLDivElement>(null);
+  const libraryButtonRef = useRef<HTMLButtonElement>(null);
   const libraryFlyoutRef = useRef<HTMLDivElement>(null);
   const libraryCloseTimer = useRef<number | null>(null);
 
@@ -814,33 +812,33 @@ export function NavigationSidebar({
             {/* Library — flyout (#307 follow-up). Hover OR click opens a
                 popover anchored to the right of the sidebar listing all
                 library tabs; the sidebar itself never expands inline. */}
-            <div
-              ref={libraryButtonRef}
-              onMouseEnter={openLibraryFlyout}
-              onMouseLeave={scheduleLibraryClose}
-            >
-              {!isExpanded ? (
-                <Tooltip content="Library" shortcut={`${modKey} L`} side="right" delay={200}>
-                  <button
-                    onClick={openLibraryFlyout}
-                    className={navButtonClassCollapsed(activePage === 'library')}
-                  >
-                    <BookOpen size={16} className={iconClass(activePage === 'library')} />
-                  </button>
-                </Tooltip>
-              ) : (
+            {!isExpanded ? (
+              <Tooltip content="Library" shortcut={`${modKey} L`} side="right" delay={200}>
                 <button
+                  ref={libraryButtonRef}
                   onClick={openLibraryFlyout}
-                  className={navButtonClass(activePage === 'library')}
+                  onMouseEnter={openLibraryFlyout}
+                  onMouseLeave={scheduleLibraryClose}
+                  className={navButtonClassCollapsed(activePage === 'library')}
                 >
-                  <BookOpen
-                    size={16}
-                    className={`flex-shrink-0 ${iconClass(activePage === 'library')}`}
-                  />
-                  <span className={labelClass(activePage === 'library')}>Library</span>
+                  <BookOpen size={16} className={iconClass(activePage === 'library')} />
                 </button>
-              )}
-            </div>
+              </Tooltip>
+            ) : (
+              <button
+                ref={libraryButtonRef}
+                onClick={openLibraryFlyout}
+                onMouseEnter={openLibraryFlyout}
+                onMouseLeave={scheduleLibraryClose}
+                className={navButtonClass(activePage === 'library')}
+              >
+                <BookOpen
+                  size={16}
+                  className={`flex-shrink-0 ${iconClass(activePage === 'library')}`}
+                />
+                <span className={labelClass(activePage === 'library')}>Library</span>
+              </button>
+            )}
 
             {/* Feedback and Docs moved to HelpMenu (sidebar "?" button) */}
 
