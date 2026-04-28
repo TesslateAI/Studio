@@ -122,6 +122,30 @@ Agents are how OpenSail turns personal process knowledge into durable software. 
 
 ---
 
+## Turn best practices into shared agents
+
+Turn institutional knowledge into agents the whole team can run.
+
+<p align="center">
+  <img src="assets/at-mention.png" alt="@-mention any tool, MCP, app, or agent on your platform from chat" width="85%" />
+</p>
+
+Knowledge is scattered across people and systems. OpenSail gives teams a way to turn that knowledge into a reusable agent or workflow that follows the right process, uses the right tools, and can be shared across the organization.
+
+Build once, improve through use, then share or duplicate for new workflows. Because agents have memory and can be guided and corrected in conversation, they get better as teams use them.
+
+**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists.
+
+<p align="center">
+  <img src="assets/marketplace-agents.png" alt="Browse the agents marketplace — install, fork, and customize what your team has built" width="85%" />
+</p>
+
+**Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
+
+**Scale a working process.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
+
+---
+
 ## Apps
 
 One workspace in. One installable app out.
@@ -319,30 +343,6 @@ The panel renders `.tesslate/config.json`. Both humans and agents read and write
 The AI agent needs a structured, parseable, roundtrippable target. The panel gives both humans and agents a typed graph they can read and write. Credentials and secrets are visible in the graph as `env_injection` edges. Multi-container topology is first-class and visible alongside Docker/Kubernetes configuration. For apps, the panel is the authoring surface: publish serializes the graph into the manifest, install restores it into a new project with the same graph.
 
 One canvas. One config file. Agents, humans, secrets, deployments, and apps all share one structured representation.
-
----
-
-## Turn best practices into shared agents
-
-Turn institutional knowledge into agents the whole team can run.
-
-<p align="center">
-  <img src="assets/at-mention.png" alt="@-mention any tool, MCP, app, or agent on your platform from chat" width="85%" />
-</p>
-
-Knowledge is scattered across people and systems. OpenSail gives teams a way to turn that knowledge into a reusable agent or workflow that follows the right process, uses the right tools, and can be shared across the organization.
-
-Build once, improve through use, then share or duplicate for new workflows. Because agents have memory and can be guided and corrected in conversation, they get better as teams use them.
-
-**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists.
-
-<p align="center">
-  <img src="assets/marketplace-agents.png" alt="Browse the agents marketplace — install, fork, and customize what your team has built" width="85%" />
-</p>
-
-**Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
-
-**Scale a working process.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
 
 ---
 
