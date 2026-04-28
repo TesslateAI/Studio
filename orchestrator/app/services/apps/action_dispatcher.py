@@ -59,7 +59,6 @@ from ...models_automations import (
     AppAction,
     AppInstance,
     AppRuntimeDeployment,
-    AutomationRunArtifact,
 )
 from . import billing_dispatcher
 from .runtime_urls import container_url
@@ -168,9 +167,7 @@ async def _load_app_instance(db: AsyncSession, app_instance_id: UUID) -> AppInst
     return inst
 
 
-async def _load_app_action(
-    db: AsyncSession, app_version_id: UUID, action_name: str
-) -> AppAction:
+async def _load_app_action(db: AsyncSession, app_version_id: UUID, action_name: str) -> AppAction:
     row = (
         await db.execute(
             select(AppAction)
@@ -185,7 +182,9 @@ async def _load_app_action(
     return row
 
 
-def _validate_schema(schema: dict | None, value: Any, *, error_cls: type[ActionDispatchError]) -> None:
+def _validate_schema(
+    schema: dict | None, value: Any, *, error_cls: type[ActionDispatchError]
+) -> None:
     """Validate ``value`` against ``schema`` (a JSON Schema dict).
 
     No-op when ``schema`` is None — the manifest parser allows schemaless
@@ -291,40 +290,49 @@ async def _resolve_handler_container(
         .first()
     )
     if ctr is None:
-        raise ActionDispatchFailed(
-            f"no Container row resolves for app_instance {instance.id}"
-        )
+        raise ActionDispatchFailed(f"no Container row resolves for app_instance {instance.id}")
     return ctr
 
 
-def _build_container_url(project: Project, container: Container) -> str:
-    """Build the externally-reachable URL for a container.
+async def _build_container_url(db: AsyncSession, project: Project, container: Container) -> str:
+    """Build the URL the dispatcher uses to POST actions to a container.
 
-    Reuses ``runtime_urls.container_url`` so the dispatcher stays in
-    lockstep with how ingress + the existing scheduled-invocation path
-    construct the same URL. Phase 3's Connector Proxy + cold-start wake
-    will replace this with a ``primary_url`` resolver on
-    ``AppRuntimeDeployment`` — but the shape stays the same.
+    In Kubernetes mode the dispatcher runs inside the cluster, so it must use
+    the ClusterIP service DNS (``dev-{dir}.proj-{uuid}.svc.cluster.local:{port}``).
+    The ingress hostname (``{app}-{creator}.{domain}``) only resolves from outside
+    via minikube tunnel / cloud load balancer and is not reachable in-cluster.
+
+    In Docker/desktop modes the ingress/proxy hostname is routable, so we use
+    the branded app URL for app-runtime projects or the legacy slug shape otherwise.
     """
     from ...config import get_settings
+    from ..compute_manager import resolve_k8s_container_dir
 
     settings = get_settings()
     protocol = getattr(settings, "k8s_container_url_protocol", "http")
-    domain = settings.app_domain
-    # Mirror the ingress hostname builder. ``resolve_k8s_container_dir``
-    # owns the canonical algorithm (sanitize ``container.directory``;
-    # fall back to ``container.id[:12]`` when directory is "."/empty).
-    # Computing ``container.directory or container.name`` here drifts
-    # from the ingress for any app whose .tesslate/config.json has
-    # directory="." — the ingress lands on ``{slug}-{shortHex}`` while
-    # this would build ``{slug}-..`` and 404.
-    from ..compute_manager import resolve_k8s_container_dir
+
+    if settings.is_kubernetes_mode:
+        # Internal cluster dispatch — ClusterIP service is always reachable.
+        dir_or_name = resolve_k8s_container_dir(container)
+        service_name = f"dev-{dir_or_name}"
+        namespace = f"proj-{project.id}"
+        port = container.port or container.internal_port or 3000
+        return f"{protocol}://{service_name}.{namespace}.svc.cluster.local:{port}"
+
+    from ...models import PROJECT_KIND_APP_RUNTIME
+
+    if getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME:
+        from .runtime_urls import resolve_app_url_for_container
+
+        branded = await resolve_app_url_for_container(db, container, protocol=protocol)
+        if branded:
+            return branded
 
     dir_or_name = resolve_k8s_container_dir(container)
     return container_url(
         project_slug=project.slug,
         container_dir_or_name=dir_or_name,
-        app_domain=domain,
+        app_domain=settings.app_domain,
         protocol=protocol,
     )
 
@@ -370,11 +378,7 @@ async def _persist_artifacts(
         from_path = spec.get("from")
         mime_type = spec.get("mime_type")
 
-        if from_path:
-            value = _resolve_dot_path(root, from_path)
-        else:
-            # Default behavior: persist the whole output blob.
-            value = output
+        value = _resolve_dot_path(root, from_path) if from_path else output
 
         if value is None:
             logger.debug(
@@ -621,7 +625,7 @@ async def _dispatch_http_post(
         raise ActionDispatchFailed(f"project {instance.project_id} not found")
 
     container = await _resolve_handler_container(db, instance, handler.get("container"))
-    base_url = _build_container_url(project, container)
+    base_url = await _build_container_url(db, project, container)
     path = handler.get("path") or "/"
     target = base_url.rstrip("/") + "/" + path.lstrip("/")
 
@@ -698,8 +702,7 @@ def _resolve_job_image(container: Container) -> str:
     if fallback:
         return fallback
     raise ActionDispatchFailed(
-        "k8s_job container has no resolvable image "
-        "(installer must populate Container.image)"
+        "k8s_job container has no resolvable image (installer must populate Container.image)"
     )
 
 
@@ -778,8 +781,7 @@ async def _dispatch_k8s_job(
     settings = get_settings()
     if not settings.is_kubernetes_mode:
         raise ActionHandlerNotSupported(
-            "k8s_job handler requires DEPLOYMENT_MODE=kubernetes "
-            "(Docker support lands in Phase 4)",
+            "k8s_job handler requires DEPLOYMENT_MODE=kubernetes (Docker support lands in Phase 4)",
             kind="k8s_job",
             current_mode=settings.deployment_mode,
         )
@@ -792,12 +794,7 @@ async def _dispatch_k8s_job(
 
     container = await _resolve_handler_container(db, instance, handler.get("container"))
     image = _resolve_job_image(container)
-    command = (
-        handler.get("command")
-        or handler.get("path")
-        or container.startup_command
-        or "true"
-    )
+    command = handler.get("command") or handler.get("path") or container.startup_command or "true"
     mount_path = handler.get("mount_path") or "/app"
 
     # Late imports keep the kubernetes client off the import path for
@@ -831,9 +828,7 @@ async def _dispatch_k8s_job(
                 ),
             )
         )
-        volume_mounts.append(
-            k8s_client_lib.V1VolumeMount(name="app-data", mount_path=mount_path)
-        )
+        volume_mounts.append(k8s_client_lib.V1VolumeMount(name="app-data", mount_path=mount_path))
 
     # Phase 4: tmpfs at /tmp + read-only root for ephemeral / Tier-1
     # action runs. See ``app_invocations.py`` for the same pattern. Any
@@ -842,14 +837,10 @@ async def _dispatch_k8s_job(
     volumes.append(
         k8s_client_lib.V1Volume(
             name="ephemeral-tmp",
-            empty_dir=k8s_client_lib.V1EmptyDirVolumeSource(
-                medium="Memory", size_limit="256Mi"
-            ),
+            empty_dir=k8s_client_lib.V1EmptyDirVolumeSource(medium="Memory", size_limit="256Mi"),
         )
     )
-    volume_mounts.append(
-        k8s_client_lib.V1VolumeMount(name="ephemeral-tmp", mount_path="/tmp")
-    )
+    volume_mounts.append(k8s_client_lib.V1VolumeMount(name="ephemeral-tmp", mount_path="/tmp"))
     _ephemeral_sec_ctx = k8s_client_lib.V1SecurityContext(
         read_only_root_filesystem=True,
         allow_privilege_escalation=False,
@@ -1013,9 +1004,7 @@ async def _load_shared_singleton_deployment(
     return row
 
 
-def _build_deployment_url(
-    project: Project, container: Container | None, handler: dict
-) -> str:
+def _build_deployment_url(project: Project, container: Container | None, handler: dict) -> str:
     """Build the externally-reachable URL for a shared deployment's container.
 
     Same shape as :func:`_build_container_url` — we go through the shared
@@ -1060,9 +1049,7 @@ async def _dispatch_shared_singleton(
     :func:`_dispatch_http_post`: validate target, wake if scaled-to-zero,
     POST JSON, parse JSON response.
     """
-    deployment = await _load_shared_singleton_deployment(
-        db, app_version_id=instance.app_version_id
-    )
+    deployment = await _load_shared_singleton_deployment(db, app_version_id=instance.app_version_id)
 
     if deployment.runtime_project_id is None:
         raise ActionDispatchFailed(
@@ -1225,14 +1212,13 @@ async def _dispatch_per_invocation(
         )
 
     image = handler.get("image")
-    if not image:
+    if not image and instance.primary_container_id is not None:
         # Fall back to the install's primary container image — covers the
         # case where the manifest declared compute.containers[] for
         # bookkeeping even though tenancy is per_invocation.
-        if instance.primary_container_id is not None:
-            ctr = await db.get(Container, instance.primary_container_id)
-            if ctr is not None:
-                image = _resolve_job_image(ctr)
+        ctr = await db.get(Container, instance.primary_container_id)
+        if ctr is not None:
+            image = _resolve_job_image(ctr)
     if not image:
         raise ActionDispatchFailed(
             "per_invocation handler requires handler.image (or a primary "
@@ -1250,36 +1236,26 @@ async def _dispatch_per_invocation(
     # per_invocation deployments don't own a project namespace. Run jobs
     # in the orchestrator namespace (settings.kubernetes_namespace)
     # because there's no per-install namespace to scope to.
-    namespace = (
-        getattr(settings, "kubernetes_namespace", None) or "tesslate"
-    )
+    namespace = getattr(settings, "kubernetes_namespace", None) or "tesslate"
 
     job_name = f"piv-{str(instance.id)[:8]}-{int(time.time())}"
 
     env_vars = [
-        k8s_client_lib.V1EnvVar(
-            name="OPENSAIL_ACTION_INPUT", value=json.dumps(input_value)
-        ),
+        k8s_client_lib.V1EnvVar(name="OPENSAIL_ACTION_INPUT", value=json.dumps(input_value)),
         k8s_client_lib.V1EnvVar(name="OPENSAIL_INSTANCE_ID", value=str(instance.id)),
     ]
     if run_id is not None:
-        env_vars.append(
-            k8s_client_lib.V1EnvVar(name="OPENSAIL_RUN_ID", value=str(run_id))
-        )
+        env_vars.append(k8s_client_lib.V1EnvVar(name="OPENSAIL_RUN_ID", value=str(run_id)))
 
     # Per-invocation pods are stateless by manifest constraint — tmpfs at
     # /tmp + read-only root keeps the documented contract enforceable.
     volumes = [
         k8s_client_lib.V1Volume(
             name="ephemeral-tmp",
-            empty_dir=k8s_client_lib.V1EmptyDirVolumeSource(
-                medium="Memory", size_limit="256Mi"
-            ),
+            empty_dir=k8s_client_lib.V1EmptyDirVolumeSource(medium="Memory", size_limit="256Mi"),
         )
     ]
-    volume_mounts = [
-        k8s_client_lib.V1VolumeMount(name="ephemeral-tmp", mount_path="/tmp")
-    ]
+    volume_mounts = [k8s_client_lib.V1VolumeMount(name="ephemeral-tmp", mount_path="/tmp")]
     sec_ctx = k8s_client_lib.V1SecurityContext(
         read_only_root_filesystem=True,
         allow_privilege_escalation=False,
@@ -1327,9 +1303,7 @@ async def _dispatch_per_invocation(
 
     created = await k8s.create_job(namespace, job)
     if created is None:
-        raise ActionDispatchFailed(
-            f"per_invocation job {job_name}: create returned None"
-        )
+        raise ActionDispatchFailed(f"per_invocation job {job_name}: create returned None")
 
     deadline = asyncio.get_event_loop().time() + timeout_seconds
     job_status = "running"
@@ -1392,9 +1366,7 @@ async def dispatch_app_action(
 
     # Step 2 — input validation.
     if not isinstance(input, dict):
-        raise ActionInputInvalid(
-            f"input must be a dict, got {type(input).__name__}"
-        )
+        raise ActionInputInvalid(f"input must be a dict, got {type(input).__name__}")
     _validate_schema(action.input_schema, input, error_cls=ActionInputInvalid)
 
     # Step 3 — route to handler. Tenancy ``shared_singleton`` and
@@ -1540,5 +1512,3 @@ __all__ = [
     "AppInstanceNotFound",
     "dispatch_app_action",
 ]
-
-

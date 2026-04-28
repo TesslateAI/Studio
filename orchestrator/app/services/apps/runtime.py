@@ -85,9 +85,7 @@ async def _load_runnable_instance(
             f"app_instance {app_instance_id} state={instance.state!r}, expected 'installed'"
         )
     if app.state in _UNRUNNABLE_APP_STATES:
-        raise AppNotRunnableError(
-            f"app {app.id} state={app.state!r} is not runnable"
-        )
+        raise AppNotRunnableError(f"app {app.id} state={app.state!r} is not runnable")
     return instance, app
 
 
@@ -103,7 +101,7 @@ async def _begin(
 ) -> SessionHandle:
     instance, app = await _load_runnable_instance(db, app_instance_id)
     session_id = uuid4()
-    row = await litellm_keys.mint(
+    result = await litellm_keys.mint_with_secret(
         db,
         delegate=delegate,
         tier=tier,
@@ -114,20 +112,22 @@ async def _begin(
         ttl_seconds=ttl_seconds,
         meta={"app_id": str(app.id)},
     )
-    # api_key isn't stored on the ledger; fetch from delegate response via meta preview won't work.
-    # Re-call delegate? No — litellm_keys.mint stores only preview. We read from the LAST
-    # delegate.minted entry if it's a FakeDelegate (tests). For prod, the caller passes a
-    # delegate that echoes the api_key through to its own state.
-    api_key = _extract_api_key(delegate, row.key_id)
+    if not result.api_key:
+        raise ApiKeyExtractionError(
+            f"LiteLLM mint returned empty api_key for key_id={result.ledger.key_id!r}"
+        )
     logger.info(
         "apps.runtime.begin tier=%s app_instance=%s session=%s key=%s",
-        tier.value, instance.id, session_id, row.key_id,
+        tier.value,
+        instance.id,
+        session_id,
+        result.ledger.key_id,
     )
     return SessionHandle(
         session_id=session_id,
         app_instance_id=instance.id,
-        litellm_key_id=row.key_id,
-        api_key=api_key,
+        litellm_key_id=result.ledger.key_id,
+        api_key=result.api_key,
         budget_usd=Decimal(budget_usd),
         ttl_seconds=ttl_seconds,
     )
@@ -210,13 +210,9 @@ async def begin_invocation(
     )
 
 
-async def _settle_by_session(
-    db: AsyncSession, *, session_id: UUID, delegate, reason: str
-) -> None:
+async def _settle_by_session(db: AsyncSession, *, session_id: UUID, delegate, reason: str) -> None:
     row = (
-        await db.execute(
-            select(LiteLLMKeyLedger).where(LiteLLMKeyLedger.session_id == session_id)
-        )
+        await db.execute(select(LiteLLMKeyLedger).where(LiteLLMKeyLedger.session_id == session_id))
     ).scalar_one_or_none()
     if row is None:
         logger.warning("apps.runtime.settle: no ledger row for session=%s", session_id)
@@ -234,7 +230,7 @@ async def end_session(
     await _settle_by_session(db, session_id=session_id, delegate=delegate, reason=reason)
 
 
-async def end_invocation(
-    db: AsyncSession, *, session_id: UUID, delegate
-) -> None:
-    await _settle_by_session(db, session_id=session_id, delegate=delegate, reason="invocation_complete")
+async def end_invocation(db: AsyncSession, *, session_id: UUID, delegate) -> None:
+    await _settle_by_session(
+        db, session_id=session_id, delegate=delegate, reason="invocation_complete"
+    )

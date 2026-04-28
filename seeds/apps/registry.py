@@ -85,6 +85,14 @@ SEED_APPS: list[SeedApp] = [
             "dashboard with a built-in demo-data layer (no database required)."
         ),
     ),
+    SeedApp(
+        slug="geopin",
+        assets_dir=SEEDS_ROOT / "geopin",
+        description=(
+            "Interactive GeoJSON map editor: add pins, lines, and polygons with "
+            "labels and colors. Leaflet + OpenStreetMap, per-install volume storage."
+        ),
+    ),
 ]
 
 
