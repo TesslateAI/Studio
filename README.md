@@ -5,24 +5,28 @@
 <h1 align="center">OpenSail</h1>
 
 <p align="center">
-OpenSail is the open platform for building AI apps, agents, workflows, and automations you can own.<br />
+OpenSail is the open-source alternative to Codex App, Claude Desktop, Cursor, and Cowork for agentic software work.<br />
+<p align="center">
+  <a href="https://docs.tesslate.com"><strong>Docs</strong></a> ·
+  <a href="https://docs.tesslate.com/quickstart"><strong>Quickstart</strong></a> ·
+  <a href="https://discord.gg/DkzMzwBTaw"><strong>Join Discord</strong></a> ·
+  <a href="https://github.com/TesslateAI/opensail/releases"><strong>Releases</strong></a>
+</p>
+
+<p align="center">
+Build AI apps, agents, workflows, and automations you can inspect, run, share, and own.<br />
 Turn recurring work from Slack, email, spreadsheets, tickets, approvals, and internal tools into runnable software.<br />
 Manage your fleet of agents. Connect real systems. Add approvals, budgets, permissions, logs, schedules, and human review.<br />
 Run it on your infrastructure. Use any model. Open source. Your cloud, your code, your control.
 </p>
 
-<p align="center">
-  <a href="https://docs.tesslate.com"><strong>Docs</strong></a> ·
-  <a href="https://docs.tesslate.com/quickstart"><strong>Quickstart</strong></a> ·
-  <a href="https://discord.gg/DkzMzwBTaw"><strong>Discord</strong></a> ·
-  <a href="https://github.com/TesslateAI/opensail/releases"><strong>Releases</strong></a>
-</p>
+
 
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/License-Apache_2.0-green?style=flat-square" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-blue?style=flat-square" alt="Platform" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Runtime-Kubernetes_Native-purple?style=flat-square" alt="Runtime" /></a>
-  <a href="https://discord.gg/DkzMzwBTaw"><img src="https://img.shields.io/discord/000000000?label=Discord&style=flat-square" alt="Discord" /></a>
+  <a href="https://discord.gg/DkzMzwBTaw"><img src="https://img.shields.io/badge/Join_Discord-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join Discord" /></a>
 </p>
 
 ---
@@ -82,11 +86,43 @@ Examples:
 
 OpenSail is for developers, operators, founders, legal teams, support teams, and anyone who can describe the work, knows what "good" looks like, and needs a safe way to make AI do it again tomorrow.
 
+<p align="center">
+  <img src="assets/home-page.png" alt="OpenSail home page" width="85%" />
+</p>
+
+---
+
+## Turn best practices into shared agents
+
+Turn institutional knowledge into agents the whole team can run.
+
+<p align="center">
+  <img src="assets/at-mention.png" alt="@-mention any tool, MCP, app, or agent on your platform from chat" width="85%" />
+</p>
+
+Knowledge is scattered across people and systems. OpenSail gives teams a way to turn that knowledge into a reusable agent or workflow that follows the right process, uses the right tools, and can be shared across the organization.
+
+Build once, improve through use, then share or duplicate for new workflows. Because agents have memory and can be guided and corrected in conversation, they get better as teams use them.
+
+**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists.
+
+<p align="center">
+  <img src="assets/marketplace-agents.png" alt="Browse the agents marketplace — install, fork, and customize what your team has built" width="85%" />
+</p>
+
+**Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
+
+**Scale a working process.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
+
 ---
 
 ## Agents
 
 Give recurring work a capable owner, then manage your fleet as it grows.
+
+<p align="center">
+  <img src="assets/agents-autonomous.png" alt="OpenSail agents working autonomously" width="85%" />
+</p>
 
 OpenSail agents are built for the messy jobs that move through files, apps, people, approvals, and business systems. Describe the outcome, attach the tools it needs, set the rules for when it should ask, and let it work from a real sandboxed workspace with source, state, terminals, connectors, schedules, and run history.
 
@@ -104,6 +140,10 @@ An agent can research a lead, prepare a client intake packet, route product feed
 
 Agents are how OpenSail turns personal process knowledge into durable software. The person closest to the work can describe what should happen, and the platform turns that into something that runs, improves, and scales.
 
+<p align="center">
+  <img src="assets/agents-code-diffs.png" alt="An agent building an app, with reviewable code diffs" width="85%" />
+</p>
+
 ---
 
 ## Apps
@@ -111,7 +151,7 @@ Agents are how OpenSail turns personal process knowledge into durable software. 
 One workspace in. One installable app out.
 
 <p align="center">
-  <img src="assets/opensail-apps.png" alt="OpenSail Apps" width="80%" />
+  <img src="assets/apps.png" alt="Browse Apps on OpenSail" width="80%" />
 </p>
 
 An app on OpenSail is a versioned, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, containers, runtime contract, permissions, and billing policy.
@@ -138,11 +178,19 @@ An app on OpenSail is a versioned, manifest-described bundle. Build it in a work
 
 **Bundles:** Group multiple apps into a starter pack. "Install Lawyer Starter" installs 10 apps with consolidated OAuth consent (one Gmail authorization covers all of them), sane defaults, and a dashboard app at the center that embeds the others via signed iframes.
 
+<p align="center">
+  <img src="assets/run-apps.png" alt="Running an installed App" width="85%" />
+</p>
+
 ---
 
 ## Automation Runtime
 
 Triggers, agents, apps, delivery, approvals, and spend in one runtime.
+
+<p align="center">
+  <img src="assets/automations.png" alt="OpenSail automations dashboard" width="85%" />
+</p>
 
 OpenSail's Automation Runtime is the durable execution layer for work that keeps happening. It turns a schedule, webhook, manual run, app event, or channel message into an event, creates a run, executes actions, records artifacts and spend, and delivers the result.
 
@@ -164,6 +212,10 @@ The mental model is `Trigger -> Event -> Run -> Action -> Delivery`: `agent.run`
 
 Describe the system you want, and let OpenSail draft the agent, automation, connectors, schedule, permissions, and review flow.
 
+<p align="center">
+  <img src="assets/agent-builder.png" alt="Agent Builder authoring a new agent from chat" width="85%" />
+</p>
+
 OpenSail includes built-in agents that help people turn intent into reusable team assets.
 
 **Agent Builder:** Mention `@agent-builder`, describe the agent you want, and it drafts a user-owned agent with a name, instructions, model preference, connected MCP servers, skills, and tool permissions. It uses the user's installed resources, produces a review card, and publishes after approval.
@@ -174,6 +226,10 @@ OpenSail includes built-in agents that help people turn intent into reusable tea
 
 These builders make the marketplace practical for everyday teams: build an agent, attach the right systems, schedule it, review it, and share it from the same chat surface.
 
+<p align="center">
+  <img src="assets/agent-builder-details.png" alt="Agent Builder review card with the full agent configuration expanded" width="85%" />
+</p>
+
 ---
 
 ## Workspaces
@@ -181,7 +237,7 @@ These builders make the marketplace practical for everyday teams: build an agent
 Fork a running environment in seconds.
 
 <p align="center">
-  <img src="assets/opensail-workspaces.png" alt="OpenSail Workspaces" width="80%" />
+  <img src="assets/workspaces-in-chats.png" alt="Connect a workspace to a chat" width="85%" />
 </p>
 
 Every agent, app, and workflow runs inside a workspace. One workspace = one app. Multiple agents can collaborate inside the same workspace (frontend agent, backend agent, test agent working on the same codebase), but the workspace publishes as a single unit.
@@ -189,6 +245,10 @@ Every agent, app, and workflow runs inside a workspace. One workspace = one app.
 Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything fast, portable, and persistent.
 
 **Instant snapshots.** Fork a workspace in seconds. Roll back to any point in time. Branch off a working agent to try something new while the current version keeps serving users. Up to 5 snapshots retained per project for a built-in timeline.
+
+<p align="center">
+  <img src="assets/checkpointing.png" alt="Checkpoint timeline for a project — roll back to any prior state" width="85%" />
+</p>
 
 **Desktop to cloud.** Connect your local OpenSail instance to your own cloud infrastructure. Build locally, push to the cloud, run at scale. Same workspace, same state, smooth handoff.
 
@@ -203,12 +263,16 @@ Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything
 Code, ship, and operate from the same workspace.
 
 <p align="center">
-  <img src="assets/opensail-chat.png" alt="OpenSail Agentic Coding" width="85%" />
+  <img src="assets/agents-chat.png" alt="Agent chat alongside the editor and live preview" width="85%" />
 </p>
 
 OpenSail is a full coding environment and product operating surface in one window. You get a real editor, terminal, containers, live preview, deployments, schedules, permissions, run history, and channel integrations. Agents can drive the work, collaborate with you, or hand control back to the human operator.
 
 **Full workspace IDE.** Monaco editor with multi-language syntax support, autocomplete, find-in-files, and refactor support. A terminal attached to the running container. A file tree that mirrors the container's filesystem exactly. Live preview with hot module reload. Git panel with diff, blame, history, and branch switching.
+
+<p align="center">
+  <img src="assets/code-editor.png" alt="Code editor with file tree, diff, and live preview" width="85%" />
+</p>
 
 **Shared context with agents.** The agent sees the same tree, files, shell output, app preview, and architecture graph as you do. Every edit the agent makes is a reviewable diff you can accept, revise, or keep editing. Every command the agent runs shows up in your terminal. The agent's work is your work, in the same checkout.
 
@@ -227,10 +291,6 @@ OpenSail is a full coding environment and product operating surface in one windo
 ## Design engineer
 
 Click a pixel in your running app, jump to the JSX line that rendered it.
-
-<p align="center">
-  <img src="assets/opensail-design-engineer.png" alt="OpenSail Design Engineer" width="85%" />
-</p>
 
 The Design Engineer is a live-editing canvas that runs alongside the code editor. It loads your dev server in an iframe, injects a bridge script into the running app, and turns every rendered element into something you can select, edit, and push back to source.
 
@@ -255,7 +315,7 @@ The Design Engineer is a live-editing canvas that runs alongside the code editor
 One canvas. One config file. Two authors. Shared state.
 
 <p align="center">
-  <img src="assets/opensail-architecture-panel.png" alt="OpenSail Architecture Panel" width="85%" />
+  <img src="assets/architecture-panel.png" alt="Architecture panel — view your entire project topology on one canvas" width="85%" />
 </p>
 
 The Architecture Panel is a visual node-graph canvas built on React Flow where you design, wire, and manage the full topology of your project. Every project has one. It is the single source of truth for what your app is: what containers run, how they connect, where secrets flow, and where the whole thing deploys.
@@ -286,29 +346,13 @@ One canvas. One config file. Agents, humans, secrets, deployments, and apps all 
 
 ---
 
-## Turn best practices into shared agents
-
-Turn institutional knowledge into agents the whole team can run.
-
-<p align="center">
-  <img src="assets/opensail-agent-library.png" alt="OpenSail Agent Library" width="80%" />
-</p>
-
-Knowledge is scattered across people and systems. OpenSail gives teams a way to turn that knowledge into a reusable agent or workflow that follows the right process, uses the right tools, and can be shared across the organization.
-
-Build once, improve through use, then share or duplicate for new workflows. Because agents have memory and can be guided and corrected in conversation, they get better as teams use them.
-
-**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists.
-
-**Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
-
-**Scale a working process.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
-
----
-
 ## Cloud sandboxes for agents
 
 Run your own sandboxing engine.
+
+<p align="center">
+  <img src="assets/terminal.png" alt="Project terminal backed by Tier 1 / Tier 2 sandboxed compute" width="85%" />
+</p>
 
 Running agents means giving them compute. OpenSail provides the infrastructure for cost-aware execution.
 
@@ -327,6 +371,10 @@ The whole system is backed by a custom CSI driver built on BtrFS that handles sn
 **Multi-container by default.** Each project gets its own K8s namespace. Every container gets its own Deployment, Service, and Ingress. Pod affinity pins all containers in a project to the same node so they can share the BtrFS volume. Inter-container networking uses cluster DNS (`backend.proj-abc123.svc.cluster.local:8000`). Infrastructure containers (Postgres, Redis) get their own isolated PVCs. Start a project and the orchestrator creates the namespace, provisions the PVC, deploys the file manager, clones repos, and spins up all containers with readiness probes gating traffic.
 
 **Hibernation is volume-level.** Hibernate a project and it snapshots the entire shared volume, then tears down the namespace. Restore from snapshot and all containers come back together with their files intact. Atomic save and restore for multi-container projects.
+
+<p align="center">
+  <img src="assets/agents-parallel.png" alt="Agents running in parallel — close the tab and they keep working" width="85%" />
+</p>
 
 ---
 
@@ -347,7 +395,7 @@ OpenSail exposes your running instance to the outside world through two interfac
 Every tool your agent needs, already wired.
 
 <p align="center">
-  <img src="assets/opensail-connectors.png" alt="OpenSail Connectors" width="80%" />
+  <img src="assets/connectors.png" alt="Connect any tool, API, MCP server, or webhook" width="85%" />
 </p>
 
 Agents can gather context and take action across dozens of tools. OpenSail supports MCP (Model Context Protocol) natively.
@@ -447,7 +495,7 @@ OpenSail is model-agnostic. All model calls route through LiteLLM. Switch provid
 Ship to 22 places by drawing an edge.
 
 <p align="center">
-  <img src="assets/opensail-deployment-targets.png" alt="OpenSail Deployment Targets" width="85%" />
+  <img src="assets/deployment-targets.png" alt="Pick from 22 deployment providers — serverless, container, static, and registry targets" width="85%" />
 </p>
 
 Deploy from the Architecture Panel. Draw an edge from a container to a deployment target. A/B deployments work naturally: connect the same container to two targets (Vercel for production, Cloudflare for preview) and each gets independent deployment history and rollback.
@@ -470,7 +518,7 @@ Each target is a registry entry. Adding a new provider is one config block.
 Deploy agents where your team already talks.
 
 <p align="center">
-  <img src="assets/opensail-communication-gateways.png" alt="OpenSail Communication Gateways" width="80%" />
+  <img src="assets/communication-channels.png" alt="Deploy agents to Slack, Telegram, WhatsApp, Signal, Discord, and more" width="85%" />
 </p>
 
 Deploy agents to the channels where your team already works. Each channel is a `GatewayAdapter` subclass, hot-reloaded via Redis pub/sub.
@@ -485,6 +533,24 @@ Deploy agents to the channels where your team already works. Each channel is a `
 | **CLI WebSocket** | For headless usage, external agents, and the Tesslate TUI |
 
 Set agents to run on a schedule, or let them listen for messages and respond as they come in. Delivery routing supports per-schedule targets: origin, telegram:chat_id, discord:channel_id, and more.
+
+---
+
+## Themes and whitelabel
+
+Make OpenSail look like your platform.
+
+<p align="center">
+  <img src="assets/theme-switcher.png" alt="Switch the OpenSail UI to any installed theme" width="85%" />
+</p>
+
+OpenSail ships with a theme system that lets you restyle the entire UI — colors, typography, spacing, animations — without touching code. Pick a theme from the marketplace, install it locally, or author your own. The same theme presets travel across desktop and cloud.
+
+<p align="center">
+  <img src="assets/theme-whitelabel.png" alt="Whitelabel OpenSail with your own theme and brand" width="85%" />
+</p>
+
+**Whitelabel for your team.** Run OpenSail as your company's all-in-one AI platform. Apply your brand, set internal defaults, curate the marketplace your team sees, and give everyone a single sanctioned place to build agents, apps, and automations. Same software, your identity.
 
 ---
 
