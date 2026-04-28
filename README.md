@@ -8,7 +8,7 @@
 Build AI software for the messy work your team still does by hand.<br />
 Turn Slack threads, inboxes, spreadsheets, tickets, approvals, and one-off scripts into apps, agents, and automations.<br />
 Connect the tools where work already happens. Put approvals, budgets, permissions, and logs around every run.<br />
-Run it on your infrastructure. Use any model. Open source. No vendor lock-in.
+Run it on your infrastructure. Use any model. Open source. Your cloud, your code, your control.
 </p>
 
 <p align="center">
@@ -29,19 +29,19 @@ Run it on your infrastructure. Use any model. Open source. No vendor lock-in.
 
 OpenSail is an open platform for building, running, and sharing AI workflows, apps, agents, and automations you can inspect and own.
 
-It is for anyone with a process that keeps coming back: a founder chasing follow-ups, an operator buried in handoffs, a lawyer managing intake and documents, a support team routing issues, a developer building internal tools, or a company trying to give people useful AI without creating shadow IT.
+It is for anyone with a process that keeps coming back: a founder chasing follow-ups, an operator buried in handoffs, a lawyer managing intake and documents, a support team routing issues, a developer building internal tools, or a company giving people a sanctioned place to build useful AI.
 
 Start with a workflow in plain English: "every morning, check these sources, summarize what changed, update Linear, and send the result to Slack." OpenSail turns that into a real runnable system with a trigger, an agent or app action, selected tools and connectors, delivery targets, approval gates, budget limits, run history, and a sandboxed workspace when the workflow needs files, code, or services.
 
 For builders, OpenSail is a way to turn useful AI experiments into durable software. For leaders, it is a control plane for letting teams move fast while keeping data, infrastructure, cost, permissions, and auditability under control.
 
-Under the hood, OpenSail runs on portable, snapshot-backed workspaces. Agents and apps can sleep when idle, wake when needed, keep state across runs, and move from your local desktop to your own cloud without being rebuilt from scratch.
+Under the hood, OpenSail runs on portable, snapshot-backed workspaces. Agents and apps can sleep when idle, wake when needed, keep state across runs, and move from your local desktop to your own cloud with the same project state intact.
 
 ---
 
 ## What OpenSail Helps You Run
 
-OpenSail workflows can be scheduled, triggered, connected, approved, budgeted, tracked, packaged, and reused. The point is not another automation builder. The point is turning useful AI work into durable software your team can trust.
+OpenSail workflows can be scheduled, triggered, connected, approved, budgeted, tracked, packaged, and reused. The goal is durable AI software your team can trust.
 
 Start small:
 
@@ -56,9 +56,9 @@ Add control when the work gets serious:
 
 - Require approval before risky actions happen, then approve from Slack, email, or the web app
 - Pause and resume runs at approval boundaries instead of tying up the system
-- Set per-run and daily budgets so AI and compute spend cannot run away
+- Set per-run and daily budgets so AI and compute spend stays bounded
 - See what ran, what it cost, what systems it touched, what it produced, and who approved it
-- Keep credentials safe behind the Connector Proxy so apps can use tools without seeing raw tokens
+- Keep credentials safe behind the Connector Proxy so apps use tools through scoped runtime calls
 - Let lightweight jobs stay cheap, and give heavier jobs a real workspace when they need files, code, terminals, databases, or running services
 
 Package what works:
@@ -80,7 +80,7 @@ Examples:
 - **Third-Party Risk Manager** - researches vendors, checks policy and reputational risk, produces a structured report, and keeps the approval trail
 - **Multi-container Internal App** - ships a real frontend, backend, database, agent, and dashboard as one installable app
 
-OpenSail is not only for developers or enterprise buyers. It is for anyone who can describe the work, knows what "good" looks like, and needs a safe way to make AI actually do it again tomorrow.
+OpenSail is for developers, operators, founders, legal teams, support teams, and anyone who can describe the work, knows what "good" looks like, and needs a safe way to make AI do it again tomorrow.
 
 ---
 
@@ -92,19 +92,63 @@ One workspace in. One installable app out.
   <img src="assets/opensail-apps.png" alt="OpenSail Apps" width="80%" />
 </p>
 
-An app on OpenSail is a versioned, immutable, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, its own containers, and its own permissions.
+An app on OpenSail is a versioned, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, containers, runtime contract, permissions, and billing policy.
 
-**The lifecycle:** build in a workspace, publish a version (immutable, content-addressed), go through the approval pipeline, list on the marketplace (or keep private/team-only), install per-user, run, update, fork.
+**The lifecycle:** build in a workspace, publish a content-addressed version, pass the approval pipeline, list on the marketplace or keep it private/team-only, install per-user, run, update, fork.
 
-**Surfaces:** Every app declares what shape it takes. A single app can be a UI (full web app), a chat interface, a scheduled job (cron), a triggered webhook handler, or an MCP tool callable by other agents. These are not different products. They are surface declarations in the same manifest.
+**Functions:** Apps expose typed actions: JSON-schema-validated functions that agents, automations, dashboards, or other apps can call. An action can call an HTTP handler, run a Kubernetes Job, or invoke a hosted agent. Inputs and outputs are validated, artifacts can be persisted, result templates can format the response, and spend is recorded per invocation.
 
-**Billing:** The creator decides who pays. Each billing dimension (AI compute, general compute, platform fee) can be set independently to creator-pays, installer-pays, platform-subsidized, or BYOK (bring your own key, bypass routing entirely). Promotional budgets let creators sponsor the first N users, then flip to installer-pays when the fund runs out. Caps and overage behavior are per-dimension.
+**Views:** Apps expose embeddable views for cards, drawers, and full pages. Dashboards can compose views from other installed apps through signed embed tokens and scoped grants.
 
-**Approval pipeline:** Every published version goes through staged review before it reaches the public marketplace. Automated agent scans check for overbroad OAuth scopes, known-bad code patterns, leaked secrets, and dependency vulnerabilities. A sandbox evaluation runs the app against synthetic inputs with a cheap model to catch crashes, cost blowouts, and prompt injection vulnerabilities. Then a human reviewer signs off. Private and team installs skip the public listing gate, so your first apps ship immediately.
+**Data resources:** Apps expose cached, typed reads backed by actions. A dashboard can ask another app for "current pipeline status" or "last billing review result" and reuse the cached data across runs.
+
+**Dependencies:** Apps can call other apps through positive grants. Parent apps can invoke child app actions, embed child views, and query child data resources while spend rolls up to the parent run.
+
+**Connectors:** Apps declare the external systems they need: Slack, GitHub, Gmail, Linear, Salesforce, internal APIs, MCP servers, OAuth, API keys, and webhooks. Proxy-mode connectors let app code call approved services while OpenSail handles secrets, scopes, rotation, and consent.
+
+**Automation templates:** Apps can ship recommended schedules, manual buttons, and webhook triggers. When a user installs the app, selected templates become user-owned automations they can pause, edit, approve, budget, and monitor.
+
+**Billing:** The creator decides who pays. Each billing dimension (AI compute, general compute, platform fee) can be set independently to creator-pays, installer-pays, platform-subsidized, or BYOK (bring your own key, routed directly to your provider). Promotional budgets let creators sponsor the first N users, then flip to installer-pays when the fund runs out. Caps and overage behavior are per-dimension.
+
+**Approval pipeline:** Every published version goes through staged review before it reaches the public marketplace. Automated scans review OAuth scopes, source patterns, dependency posture, and credential handling. Sandbox evaluations run the app against synthetic inputs to measure reliability, cost behavior, and prompt-injection resilience. Human reviewers handle the final sign-off. Private and team installs use a faster internal path, so your first apps ship quickly.
 
 **Forking:** If the creator allows it, anyone can fork an app. Fork creates a new workspace with full source access and a `forked_from` provenance link. The marketplace shows fork trees. A lawyer takes a starter "intake" app, forks it to "intake-estate-planning," and republishes for their firm.
 
 **Bundles:** Group multiple apps into a starter pack. "Install Lawyer Starter" installs 10 apps with consolidated OAuth consent (one Gmail authorization covers all of them), sane defaults, and a dashboard app at the center that embeds the others via signed iframes.
+
+---
+
+## Automation Runtime
+
+Triggers, agents, apps, delivery, approvals, and spend in one runtime.
+
+OpenSail's Automation Runtime is the durable execution layer for work that keeps happening. It turns a schedule, webhook, manual run, app event, or channel message into an event, creates a run, executes actions, records artifacts and spend, and delivers the result.
+
+**Triggers:** Start workflows from cron schedules, manual buttons, webhooks, app events, Slack, email, or other connected channels.
+
+**Actions:** Run an agent, invoke an installed app function, or send a result through the gateway. Lightweight runs stay in Tier 0. Work that needs files, shell commands, services, or previews can wake a sandboxed workspace.
+
+**Contracts:** Each automation carries an execution contract: allowed tools, allowed MCP servers, allowed apps, compute tier, approval rules, and spend caps. Risky steps pause at approval boundaries and resume from checkpoints after a human decision.
+
+**Delivery:** Send outputs to Slack, email, webhook endpoints, the OpenSail inbox, or another app. Results can include approval cards, reports, structured JSON, files, screenshots, and delivery receipts.
+
+**Observability:** Every run keeps its trigger, status, checkpoint, artifacts, spend, touched systems, and approval trail visible to the user who owns it.
+
+---
+
+## Builder Agents
+
+Create agents and schedules from chat.
+
+OpenSail includes built-in agents that help people turn intent into reusable team assets.
+
+**Agent Builder:** Mention `@agent-builder`, describe the agent you want, and it drafts a user-owned agent with a name, instructions, model preference, connected MCP servers, skills, and tool permissions. It uses the user's installed resources, produces a review card, and publishes after approval.
+
+**Automation Builder:** Mention `@automation-builder`, choose one of your existing agents, describe the schedule and output target, and it drafts a user-owned automation. It attaches the cron trigger, prompt template, delivery targets, compute tier, and spend cap, then waits for the publish-and-activate review.
+
+**Service Integrator:** Use the Service Integrator agent to connect services, configure MCPs and channels, and make sure agents have the tools they need before a workflow goes live.
+
+These builders make the marketplace practical for everyday teams: build an agent, attach the right systems, schedule it, review it, and share it from the same chat surface.
 
 ---
 
@@ -120,11 +164,11 @@ Every agent, app, and workflow runs inside a workspace. One workspace = one app.
 
 Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything fast, portable, and persistent.
 
-**Instant snapshots.** Fork a workspace in seconds. Roll back to any point in time. Branch off a working agent to try something new without breaking what's already running. Up to 5 snapshots retained per project for a built-in timeline.
+**Instant snapshots.** Fork a workspace in seconds. Roll back to any point in time. Branch off a working agent to try something new while the current version keeps serving users. Up to 5 snapshots retained per project for a built-in timeline.
 
-**Desktop to cloud.** Connect your local OpenSail instance to your own cloud infrastructure. Build locally, push to the cloud, run at scale. Same workspace, same state, no re-setup.
+**Desktop to cloud.** Connect your local OpenSail instance to your own cloud infrastructure. Build locally, push to the cloud, run at scale. Same workspace, same state, smooth handoff.
 
-**Share anything.** Workspaces are self-contained. Share an agent with your team and they get the full environment: code, state, config, dependencies. Not just a link.
+**Share anything.** Workspaces are self-contained. Share an agent with your team and they get the full environment: code, state, config, dependencies, and runtime settings.
 
 **Stay in control.** You decide what tools and data an agent can use, what actions it can take, and when it needs approval. For sensitive steps, require the agent to ask before moving forward. Analytics show you how agents are being used, how many runs they've completed, and who's using them.
 
