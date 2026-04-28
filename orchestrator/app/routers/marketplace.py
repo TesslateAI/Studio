@@ -1566,15 +1566,16 @@ async def update_custom_agent(
             )
             db.add(purchase)
 
-            # Remove original from active library
+            # Remove original from every team-scoped library this user has —
+            # forking should hide the upstream agent everywhere, not just in
+            # whichever row sqlalchemy happens to return first.
             original_purchase_result = await db.execute(
                 select(UserPurchasedAgent).where(
                     UserPurchasedAgent.user_id == current_user.id,
                     UserPurchasedAgent.agent_id == agent_id,
                 )
             )
-            original_purchase = original_purchase_result.scalar_one_or_none()
-            if original_purchase:
+            for original_purchase in original_purchase_result.scalars().all():
                 original_purchase.is_active = False
 
             await db.commit()
@@ -1618,12 +1619,14 @@ async def update_custom_agent(
             else UserPurchasedAgent.user_id == current_user.id
         )
         purchase_result = await db.execute(
-            select(UserPurchasedAgent).where(
+            select(UserPurchasedAgent)
+            .where(
                 purchase_filter,
                 UserPurchasedAgent.agent_id == agent_id,
             )
+            .limit(1)
         )
-        purchase = purchase_result.scalar_one_or_none()
+        purchase = purchase_result.scalars().first()
         if purchase:
             purchase.selected_model = update_data["model"]
     # Merge config (features, etc.) - deep merge so partial updates work
@@ -1743,19 +1746,22 @@ async def toggle_agent(
     """
     Toggle an agent enabled/disabled in user's library.
     """
-    # Find the purchase record
+    # Find ALL purchase rows for this (user, agent) pair — a user can have
+    # one row per team they belong to, and the toggle should affect every
+    # team-scoped copy uniformly. Returning the first and ignoring siblings
+    # would silently leave a stale ``is_active=True`` row in another team.
     result = await db.execute(
         select(UserPurchasedAgent).where(
             UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.agent_id == agent_id
         )
     )
-    purchase = result.scalar_one_or_none()
+    purchases = result.scalars().all()
 
-    if not purchase:
+    if not purchases:
         raise HTTPException(status_code=404, detail="Agent not in your library")
 
-    # Update enabled status
-    purchase.is_active = enabled
+    for purchase in purchases:
+        purchase.is_active = enabled
     await db.commit()
 
     return {

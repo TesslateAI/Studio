@@ -5,14 +5,10 @@
 <h1 align="center">OpenSail</h1>
 
 <p align="center">
-Build agents, software, apps, workflows, automations, and schedules.<br />
-Deploy them to any provider. No vendor lock-in.<br />
-See your entire architecture on one canvas.<br />
-Containers, preview windows, deploy targets, agents, and their wiring, all in one graph.<br />
-Run it on your infrastructure. Share it across your team.<br />
-Become your own sandboxing cloud.<br />
-Governance, audit, and permissions built in.<br />
-Open source. Any model.
+Build AI software for the messy work your team still does by hand.<br />
+Turn Slack threads, inboxes, spreadsheets, tickets, approvals, and one-off scripts into apps, agents, and automations.<br />
+Connect the tools where work already happens. Put approvals, budgets, permissions, and logs around every run.<br />
+Run it on your infrastructure. Use any model. Open source. No vendor lock-in.
 </p>
 
 <p align="center">
@@ -31,35 +27,60 @@ Open source. Any model.
 
 ---
 
-OpenSail is an open platform for building, running, and sharing AI-powered software. Build an agent that does your job for you. Turn it into an app. Share it with your team. Deploy it to hundreds of users. Connect it to everything.
+OpenSail is an open platform for building, running, and sharing AI workflows, apps, agents, and automations you can inspect and own.
 
-It runs on a snapshot-based filesystem that makes workspaces portable, shareable, and persistent. Connect your local desktop to your own cloud. Run agents in sandboxed environments that cost almost nothing when idle. Ship workflows that keep working while you sleep.
+It is for anyone with a process that keeps coming back: a founder chasing follow-ups, an operator buried in handoffs, a lawyer managing intake and documents, a support team routing issues, a developer building internal tools, or a company trying to give people useful AI without creating shadow IT.
 
-OpenSail also exposes a Gateway API and an MCP server (in development), so external agents and humans can interact with your running instance using an API key. They get their own sandboxed containers, can use agents, and publish apps (coming soon) directly from their own coding tools.
+Start with a workflow in plain English: "every morning, check these sources, summarize what changed, update Linear, and send the result to Slack." OpenSail turns that into a real runnable system with a trigger, an agent or app action, selected tools and connectors, delivery targets, approval gates, budget limits, run history, and a sandboxed workspace when the workflow needs files, code, or services.
+
+For builders, OpenSail is a way to turn useful AI experiments into durable software. For leaders, it is a control plane for letting teams move fast while keeping data, infrastructure, cost, permissions, and auditability under control.
+
+Under the hood, OpenSail runs on portable, snapshot-backed workspaces. Agents and apps can sleep when idle, wake when needed, keep state across runs, and move from your local desktop to your own cloud without being rebuilt from scratch.
 
 ---
 
-## What you can build
+## What OpenSail Helps You Run
 
-Describe the job. Ship the app.
+OpenSail workflows can be scheduled, triggered, connected, approved, budgeted, tracked, packaged, and reused. The point is not another automation builder. The point is turning useful AI work into durable software your team can trust.
 
-Describe the job you want done or drop in a file. OpenSail helps turn it into a working agent, app, or workflow: defining the steps, connecting the right tools, adding skills, and testing it until it works the way you expect.
+Start small:
 
-An "app" on OpenSail is anything you build and ship: a piece of software, an agent, a scheduled automation, a triggered webhook handler, or an MCP tool that other agents can call. Every app is a versioned, installable bundle produced from a workspace project.
+- Run a task on a schedule, from a button, from a webhook, from Slack or email, or when an app event happens
+- Assign the work to an agent, an installed app action, or a lightweight connector-only automation
+- Use built-in builder agents to create agents, wire connectors, and attach schedules from chat
+- Give the agent only the skills, tools, connectors, and apps it needs for that job
+- Connect business systems like Slack, Linear, GitHub, Salesforce, Gmail, internal APIs, and MCP servers
+- Send the result to Slack, email, a webhook, the OpenSail inbox, or another app
 
-Agents do more than answer a prompt. They can write and run code, use connected apps, remember what they've learned, and continue work across multiple steps. They run in sandboxed cloud environments and keep going even when you close your laptop.
+Add control when the work gets serious:
 
-A few things people are building today:
+- Require approval before risky actions happen, then approve from Slack, email, or the web app
+- Pause and resume runs at approval boundaries instead of tying up the system
+- Set per-run and daily budgets so AI and compute spend cannot run away
+- See what ran, what it cost, what systems it touched, what it produced, and who approved it
+- Keep credentials safe behind the Connector Proxy so apps can use tools without seeing raw tokens
+- Let lightweight jobs stay cheap, and give heavier jobs a real workspace when they need files, code, terminals, databases, or running services
 
-- **Software Reviewer** - Reviews employee software requests, checks them against approved tools and policies, recommends next steps, and files tickets when needed
-- **Product Feedback Router** - Monitors Slack, support channels, and public forums, then turns feedback into prioritized tickets and weekly product summaries
-- **Weekly Metrics Reporter** - Pulls data every Friday, creates charts, writes the summary, and shares a report with the team
-- **Lead Outreach Agent** - Researches inbound leads, scores them against your qualification rubric, drafts personalized follow-ups, and updates your CRM
-- **Client Onboarding Agent** - Walks through intake forms, pulls in context from past projects, and drafts a kickoff doc
-- **Third-Party Risk Manager** - Researches vendors, assesses sanctions exposure, financial health, and reputational risk, and produces a structured report
-- **Multi-container CRM** - Next.js frontend + Node API + Postgres, with an embedded AI chat drawer, deployed as a single installable app
+Package what works:
 
-You can also start from templates for finance, sales, marketing, operations, and more.
+- Publish a workspace project as an installable app
+- Expose typed actions, views, and data resources that other apps, agents, and dashboards can reuse
+- Install an app and run one of its actions inside an automation
+- Let an agent call an app when the job needs structured, reliable work
+- Fork useful apps, share them with a team, or turn them into reusable building blocks
+
+Examples:
+
+- **Software Request Reviewer** - checks new tool requests against policy, budget, security requirements, and approved vendors, then files the next step
+- **Product Feedback Router** - watches support, Slack, GitHub, and customer calls, groups recurring pain, and turns it into tickets and weekly summaries
+- **Weekly Metrics Reporter** - pulls data every Friday, creates charts, writes the story, and sends it to the right people
+- **Lead Follow-up Agent** - researches inbound leads, scores fit, drafts replies, updates the CRM, and asks before sending anything sensitive
+- **Client Intake Assistant** - collects forms, checks missing documents, drafts kickoff notes, and keeps status visible
+- **Billing Review Workflow** - compares activity, matter context, invoices, and payment status so teams catch leakage before it becomes a write-off
+- **Third-Party Risk Manager** - researches vendors, checks policy and reputational risk, produces a structured report, and keeps the approval trail
+- **Multi-container Internal App** - ships a real frontend, backend, database, agent, and dashboard as one installable app
+
+OpenSail is not only for developers or enterprise buyers. It is for anyone who can describe the work, knows what "good" looks like, and needs a safe way to make AI actually do it again tomorrow.
 
 ---
 
@@ -411,19 +432,118 @@ No per-seat pricing that scales against you. No credit system that makes you thi
 
 ---
 
-## Get started
+## Run OpenSail
 
-Clone the repo and run locally:
+Pick the path that matches what you are trying to do. OpenSail can run as a simple local Docker stack, as a desktop app, on local Kubernetes for platform testing, or on a production Kubernetes cluster. Those are different levels of commitment, not different products.
+
+| You want to... | Use this path | Best for |
+|----------------|---------------|----------|
+| Try OpenSail or develop the web app locally | Docker Compose | Most contributors and first-time users |
+| Let a script set up macOS dependencies | macOS installer | People who want a guided local setup |
+| Run the desktop app | Desktop release or desktop dev mode | Local-first workflows and desktop packaging work |
+| Test the real Kubernetes runtime locally | Minikube | Platform/runtime contributors |
+| Run your own production instance | AWS EKS Terraform + Kustomize | Teams operating OpenSail in their own cloud |
+
+### Docker Compose
+
+This is the most realistic first run for most people. It starts the frontend, backend, worker, gateway, Postgres, Redis, Traefik, and the devserver image used by user project containers.
+
+Use Docker Desktop on macOS or Windows, Docker Engine on Linux, or Colima on macOS. On Windows, run the commands from WSL2 so bind mounts and project paths behave like Linux paths.
 
 ```bash
 git clone https://github.com/TesslateAI/opensail.git
 cd opensail
-./install.sh
+cp .env.example .env
 ```
 
-Then open `http://localhost:3000` and start building.
+Edit `.env` before first boot:
 
-Read the full setup guide in the [docs](https://docs.tesslate.com).
+- `SECRET_KEY` should be a real random value.
+- `LITELLM_API_BASE` and `LITELLM_MASTER_KEY` are needed for agent/model calls. The app can boot without a working model proxy, but the agent experience will not be useful.
+
+Then start the stack:
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Open `http://localhost`. API docs are at `http://localhost:8000/docs`.
+
+The fuller Docker walkthrough is in [docs/guides/docker-setup.md](docs/guides/docker-setup.md). After your first setup, the helper script is handy:
+
+```bash
+./scripts/docker.sh start
+./scripts/docker.sh status
+./scripts/docker.sh logs backend
+```
+
+### Guided macOS Setup
+
+If you are on macOS and want the repo to help install local tooling, use the interactive installer. It installs Homebrew dependencies, starts Colima, helps create `.env`, and lets you choose Docker Compose or Minikube.
+
+```bash
+git clone https://github.com/TesslateAI/opensail.git
+cd opensail
+./scripts/install-macos.sh
+```
+
+Use Docker Compose unless you specifically need Kubernetes behavior.
+
+### Desktop App
+
+The desktop app is local-first: no Docker and no Kubernetes required for the default local runtime. It is a Tauri shell around the same React frontend and FastAPI orchestrator, with a local SQLite database under `OPENSAIL_HOME`.
+
+If a signed installer is attached to a release, that is the easiest path for non-server users: install it like any other desktop app and start building locally.
+
+If you are working on the desktop app itself or building local installers from source:
+
+```bash
+git clone https://github.com/TesslateAI/opensail.git
+cd opensail
+./desktop/scripts/dev.sh
+```
+
+The desktop toolchain needs Rust, Node 20+, pnpm, `uv`, and Tauri dependencies. See [docs/desktop/development.md](docs/desktop/development.md) for the exact setup and installer build steps.
+
+### Local Kubernetes With Minikube
+
+Use Minikube when you need to test the Kubernetes runtime: namespaces, ingress, Volume Hub, btrfs CSI, snapshots, MinIO-backed object storage, worker behavior, and project containers. This is heavier than Docker Compose and is not the fastest way to try the product.
+
+```bash
+git clone https://github.com/TesslateAI/opensail.git
+cd opensail
+./scripts/minikube.sh init
+```
+
+Edit the generated secret files under `k8s/overlays/minikube/secrets/`, `k8s/overlays/minikube/minio/`, and `services/btrfs-csi/overlays/minikube/`. Then:
+
+```bash
+./scripts/minikube.sh start
+./scripts/minikube.sh tunnel
+```
+
+Leave the tunnel running and open `http://localhost`. The complete step-by-step guide is [docs/guides/minikube-setup.md](docs/guides/minikube-setup.md).
+
+### Production / Self-Hosted Kubernetes
+
+There is no maintained Helm chart in this repo today. The production path is Terraform for cloud infrastructure and Kustomize for Kubernetes manifests.
+
+The maintained production-class path is AWS EKS:
+
+```bash
+./scripts/terraform/secrets.sh download shared
+./scripts/aws-deploy.sh terraform shared
+
+./scripts/terraform/secrets.sh download beta
+./scripts/aws-deploy.sh terraform beta
+./scripts/aws-deploy.sh build beta
+./scripts/aws-deploy.sh deploy-k8s beta
+```
+
+Use `production` instead of `beta` when you are ready to operate the production environment.
+
+For non-EKS clusters, treat `k8s/base/` and the overlays as the starting point, not a one-command installer. You need to provide the same real pieces yourself: image registry, ingress controller, TLS/DNS, object storage, Postgres/Redis strategy, secrets, storage class, snapshot support, and the Volume Hub/btrfs CSI layer. The EKS guide is the best reference for what has to exist before OpenSail is healthy: [docs/guides/aws-deployment.md](docs/guides/aws-deployment.md).
 
 ---
 
@@ -468,7 +588,7 @@ flowchart TB
     class AP,WS,TC,AR,MK,PS cluster;
 ```
 
-`helm install opensail TesslateAI/opensail` gets you the whole stack on your own cluster. Pair desktop apps to it for Codex-style cloud sandboxing, owned end to end by you.
+Kubernetes installs currently use Kustomize overlays, not Helm. For local cluster testing, use [Minikube](docs/guides/minikube-setup.md). For production on AWS, use the Terraform and deployment helpers in [docs/guides/aws-deployment.md](docs/guides/aws-deployment.md). Pair desktop apps to a cloud instance when you want local-first control with cloud sandboxing behind it.
 
 ## Contributing
 

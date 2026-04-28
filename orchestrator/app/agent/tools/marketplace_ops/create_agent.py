@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, datetime
+import secrets
 from typing import Any
+
+from sqlalchemy import select
 
 from ....services.automations.scopes import MARKETPLACE_AUTHOR
 from ....models import MarketplaceAgent, UserPurchasedAgent
@@ -27,10 +29,32 @@ logger = logging.getLogger(__name__)
 _VALID_ITEM_TYPES = {"agent", "subagent"}
 
 
-def _slugify(name: str, user_id: str) -> str:
-    """Slug compatible with the existing ``create_custom_agent`` router."""
-    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "agent"
-    return f"{base}-{user_id}-{datetime.now(UTC).timestamp()}"
+def _slugify_base(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "agent"
+
+
+async def _allocate_slug(db, name: str) -> str:
+    """Allocate a short, mention-friendly slug.
+
+    The legacy ``create_custom_agent`` router uses
+    ``{name}-{user_id}-{timestamp}`` which produces 60-char slugs that are
+    impossible to type as a chat mention. Agent-builder is the
+    user-facing path, so we trade the deterministic legacy form for a
+    short ``{name}-{4-char hex}`` slug with a uniqueness retry loop.
+    """
+    base = _slugify_base(name)
+    for _ in range(8):
+        candidate = f"{base}-{secrets.token_hex(2)}"
+        existing = (
+            await db.execute(
+                select(MarketplaceAgent.id).where(MarketplaceAgent.slug == candidate)
+            )
+        ).first()
+        if existing is None:
+            return candidate
+    # Defensive fallback — 6 hex bytes is 16M; effectively impossible to
+    # exhaust naturally, but we don't want an infinite loop.
+    return f"{base}-{secrets.token_hex(6)}"
 
 
 async def create_agent_executor(
@@ -60,7 +84,7 @@ async def create_agent_executor(
     # already strip this tool when the run lacks the scope, but we
     # verify here so a misconfigured registry can't bypass the gate.
     allowed_scopes = set(context.get("allowed_scopes") or [])
-    if allowed_scopes and MARKETPLACE_AUTHOR not in allowed_scopes:
+    if MARKETPLACE_AUTHOR not in allowed_scopes:
         return error_output(
             message=f"missing required scope: {MARKETPLACE_AUTHOR}"
         )
@@ -77,7 +101,7 @@ async def create_agent_executor(
         return error_output(message="tool_allowlist must be a list")
 
     automation_id = context.get("automation_id")
-    slug = _slugify(name, str(user_id))
+    slug = await _allocate_slug(db, name)
 
     agent = MarketplaceAgent(
         name=name,
@@ -137,7 +161,12 @@ async def create_agent_executor(
         automation_id,
     )
     return success_output(
-        message=f"Drafted agent {agent.name!r}",
+        message=(
+            f"Drafted agent {agent.name!r}. "
+            f"agent_id={agent.id} slug={agent.slug} is_published=False. "
+            f"Use this exact agent_id for any subsequent assign_mcp / "
+            f"assign_skill / attach_schedule / request_review call."
+        ),
         agent_id=str(agent.id),
         slug=agent.slug,
         draft_url=draft_url,

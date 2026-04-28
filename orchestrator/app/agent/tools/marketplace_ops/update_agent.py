@@ -79,7 +79,7 @@ async def update_agent_executor(
         return error_output(message="missing db/user_id in execution context")
 
     allowed_scopes = set(context.get("allowed_scopes") or [])
-    if allowed_scopes and MARKETPLACE_AUTHOR not in allowed_scopes:
+    if MARKETPLACE_AUTHOR not in allowed_scopes:
         return error_output(message=f"missing required scope: {MARKETPLACE_AUTHOR}")
 
     try:

@@ -1771,6 +1771,15 @@ class ComputeManager:
                 extra_env=extra_env,
             )
 
+            # App runtimes have no live agent to fix a crashed dev server, so
+            # tsinit must self-heal. User workspaces keep "never" so their
+            # agent can attach and diagnose the failure in place.
+            from ..models import PROJECT_KIND_APP_RUNTIME
+
+            tsinit_restart_policy = (
+                "always" if project.project_kind == PROJECT_KIND_APP_RUNTIME else "never"
+            )
+
             deployment = create_v2_dev_deployment(
                 namespace=namespace,
                 project_id=project.id,
@@ -1787,6 +1796,7 @@ class ComputeManager:
                 extra_env=extra_env,
                 preferred_node=node_name,
                 spec_hash=spec_hash,
+                tsinit_restart_policy=tsinit_restart_policy,
             )
             await k8s.create_deployment(deployment, namespace)
 

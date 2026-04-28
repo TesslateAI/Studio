@@ -82,7 +82,7 @@ async def request_review_executor(
         return error_output(message="missing db/user_id in execution context")
 
     allowed_scopes = set(context.get("allowed_scopes") or [])
-    if allowed_scopes and MARKETPLACE_AUTHOR not in allowed_scopes:
+    if MARKETPLACE_AUTHOR not in allowed_scopes:
         return error_output(message=f"missing required scope: {MARKETPLACE_AUTHOR}")
 
     # Resolve + validate the agent. Reject built-in / system rows so a
@@ -114,7 +114,7 @@ async def request_review_executor(
         if str(automation_row.owner_user_id) != str(user_id):
             return error_output(message="automation is owned by another user")
         # Activating an automation requires automations.write.
-        if allowed_scopes and AUTOMATIONS_WRITE not in allowed_scopes:
+        if AUTOMATIONS_WRITE not in allowed_scopes:
             return error_output(
                 message=f"missing required scope: {AUTOMATIONS_WRITE}"
             )
@@ -219,28 +219,57 @@ async def request_review_executor(
             agent_id,
             automation_row is not None,
         )
+        # Build a message that matches what actually happened — don't
+        # claim an automation was activated when none was attached.
+        # Embed the literal mention token verbatim so the calling agent
+        # quotes the real slug rather than inventing one from the name.
+        mention_token = f"@{agent_row.slug}"
+        if automation_row is not None:
+            msg = (
+                f"Published {agent_row.name!r} and activated its automation. "
+                f"In your final reply to the user, copy this sentence VERBATIM "
+                f"(do not rewrite the mention token, do not substitute the "
+                f"display name): "
+                f"\"Done — {agent_row.name} is live and the schedule is "
+                f"active. Mention it as `{mention_token}` in any chat or find "
+                f"it at /library?tab=agents.\""
+            )
+        else:
+            msg = (
+                f"Published {agent_row.name!r}. In your final reply to the "
+                f"user, copy this sentence VERBATIM (do not rewrite the "
+                f"mention token, do not substitute the display name): "
+                f"\"Done — {agent_row.name} is live. Mention it as "
+                f"`{mention_token}` in any chat or find it at "
+                f"/library?tab=agents.\""
+            )
         return success_output(
-            message=f"Published {agent_row.name!r} and activated its automation.",
+            message=msg,
             outcome="published",
             agent_id=str(agent_id),
             agent_slug=agent_row.slug,
+            agent_name=agent_row.name,
             automation_id=str(automation_id) if automation_id else None,
             is_published=True,
             is_active=automation_row.is_active if automation_row else None,
+            library_url="/library?tab=agents",
+            mention_token=f"@{agent_row.slug}",
         )
 
     if outcome == "save_draft":
         return success_output(
             message=(
-                f"Saved {agent_row.name!r} as a draft. The user can publish "
-                "it later from /library?tab=agents."
+                f"Saved {agent_row.name!r} as a draft at /library?tab=agents. "
+                "The user can publish it from there when ready."
             ),
             outcome="saved_draft",
             agent_id=str(agent_id),
             agent_slug=agent_row.slug,
+            agent_name=agent_row.name,
             automation_id=str(automation_id) if automation_id else None,
             is_published=False,
             is_active=False if automation_row else None,
+            library_url="/library?tab=agents",
         )
 
     if outcome == "timeout":

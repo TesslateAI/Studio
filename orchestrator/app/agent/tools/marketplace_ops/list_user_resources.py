@@ -23,6 +23,7 @@ Required scope: ``marketplace.author``.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -51,7 +52,7 @@ async def list_user_resources_executor(
         return error_output(message="missing db/user_id in execution context")
 
     allowed_scopes = set(context.get("allowed_scopes") or [])
-    if allowed_scopes and MARKETPLACE_AUTHOR not in allowed_scopes:
+    if MARKETPLACE_AUTHOR not in allowed_scopes:
         return error_output(message=f"missing required scope: {MARKETPLACE_AUTHOR}")
 
     # Connected MCPs — joined to MarketplaceAgent for slug + name. Filtered
@@ -164,22 +165,30 @@ async def list_user_resources_executor(
         len(available_skills),
     )
 
+    payload = {
+        "connected_mcps": connected_mcps,
+        "user_owned_agents": user_owned_agents,
+        "communication_destinations": communication_destinations,
+        "available_skills": available_skills,
+        "limits": {
+            "max_depth": 1,
+            "default_max_compute_tier": 0,
+            "default_max_spend_per_run_usd": "0.10",
+            "draft_only": True,
+        },
+    }
     return success_output(
         message=(
             f"User has {len(connected_mcps)} connected MCP(s), "
             f"{len(user_owned_agents)} owned agent(s), "
             f"{len(communication_destinations)} communication destination(s)."
         ),
-        connected_mcps=connected_mcps,
-        user_owned_agents=user_owned_agents,
-        communication_destinations=communication_destinations,
-        available_skills=available_skills,
-        limits={
-            "max_depth": 1,
-            "default_max_compute_tier": 0,
-            "default_max_spend_per_run_usd": "0.10",
-            "draft_only": True,
-        },
+        # ``content`` is propagated to the LLM by format_tool_result; the
+        # ``connected_mcps`` etc. top-level fields are stripped on the
+        # agent side, so we serialize the structured data here so the
+        # model can actually read slugs and IDs.
+        content=json.dumps(payload, indent=2),
+        **payload,
     )
 
 

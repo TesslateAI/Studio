@@ -588,13 +588,20 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             model_name = payload.model_name
             if not model_name:
                 user_id = UUID(payload.user_id)
+                # ``.first()`` (not ``scalar_one_or_none``) — a user can
+                # legitimately have one row per team for the same agent,
+                # and any one of them carries the same ``selected_model``
+                # we care about here. Crashing on duplicates would block
+                # all delegated agent runs.
                 result = await db.execute(
-                    select(UserPurchasedAgent).where(
+                    select(UserPurchasedAgent)
+                    .where(
                         UserPurchasedAgent.user_id == user_id,
                         UserPurchasedAgent.agent_id == agent_model.id,
                     )
+                    .limit(1)
                 )
-                user_purchase = result.scalar_one_or_none()
+                user_purchase = result.scalars().first()
                 model_name = (
                     user_purchase.selected_model
                     if user_purchase and user_purchase.selected_model
@@ -943,6 +950,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
             _BUILTIN_AGENT_SCOPES: dict[str, set[str]] = {
                 "agent-builder": {MARKETPLACE_AUTHOR, AUTOMATIONS_WRITE},
+                "automation-builder": {MARKETPLACE_AUTHOR, AUTOMATIONS_WRITE},
             }
             _agent_slug = getattr(agent_model, "slug", None)
             _admin_scopes = _BUILTIN_AGENT_SCOPES.get(_agent_slug)

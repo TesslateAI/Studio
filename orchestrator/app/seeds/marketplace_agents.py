@@ -79,11 +79,12 @@ Before promising anything, call `list_user_resources`. The only MCP slugs, agent
 4. For each connector the new agent needs: `assign_mcp(agent_id, mcp_config_id)`. Loop only over `connected_mcps`.
 5. (optional) For each skill the new agent needs: `assign_skill(agent_id, skill_id)`.
 6. (optional) `update_agent(agent_id, patch)` to refine system_prompt or other safe fields after the user reacts.
-7. `attach_schedule(agent_id, trigger={kind:"cron", config:{cron:"<expr>", tz:"UTC"}}, prompt_template, contract={...}, delivery_targets, max_compute_tier:0)`. Defaults: max_spend_per_run_usd=0.10, max_compute_tier=0. The contract must NOT contain marketplace.author or automations.write (positive-list inheritance).
-8. `request_review(agent_id, automation_id, summary)` — surfaces the in-chat publish card and BLOCKS until the user clicks. The summary should include: name, description, mcps:[{slug,name}], schedule:{cron,tz,humanized}, delivery_targets, draft_url.
-9. Read the tool's outcome and write one short final message:
-   - outcome=published → "Done — <name> is live and the schedule is active."
-   - outcome=saved_draft → "Saved as draft. You can publish later from /library?tab=agents."
+7. ONLY IF THE USER ASKED FOR A SCHEDULE: `attach_schedule(agent_id, trigger={kind:"cron", config:{cron:"<expr>", tz:"UTC"}}, prompt_template, contract={...}, delivery_targets, max_compute_tier:0)`. Defaults: max_spend_per_run_usd=0.10, max_compute_tier=0. The contract must NOT contain marketplace.author or automations.write. If the user did NOT ask for a schedule, SKIP this step — direct invocation via @-mention is the default usage pattern, and adding an unwanted automation surprises the user.
+8. `request_review(agent_id, automation_id, summary)` — surfaces the in-chat publish card and BLOCKS until the user clicks. Pass `automation_id` ONLY if you actually called `attach_schedule`; omit it otherwise. The summary should include: name, description, mcps:[{slug,name}], schedule:{cron,tz,humanized} (omit if no schedule), delivery_targets.
+9. Read the tool's outcome dict. The tool returns `agent_name`, `mention_token`, and `library_url` — quote those EXACTLY so the user knows where the agent lives. Write ONE short final message:
+   - outcome=published WITH automation → "Done — {agent_name} is live and the schedule is active. Mention it as `{mention_token}` in any chat or find it at {library_url}."
+   - outcome=published WITHOUT automation → "Done — {agent_name} is live. Mention it as `{mention_token}` in any chat or find it at {library_url}."
+   - outcome=saved_draft → "Saved {agent_name} as a draft at {library_url}. Publish it from there when ready."
    - outcome=cancel → "Holding off. Want me to revise it?"
    - outcome=timeout → "No response yet. The draft is saved; mention me again when ready."
 
@@ -116,6 +117,76 @@ Before promising anything, call `list_user_resources`. The only MCP slugs, agent
 
 # Fallback
 If you're unsure about a tool's exact contract, call `load_skill("agent-builder")` to pull the canonical SKILL.md at runtime. Don't guess parameter shapes.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Automation Builder — built-in conversational agent that attaches cron
+# schedules to EXISTING user-owned agents. Sibling of @agent-builder.
+# ---------------------------------------------------------------------------
+
+_AUTOMATION_BUILDER_TOOL_ALLOWLIST = [
+    "attach_schedule",
+    "request_grant",
+    "list_user_resources",
+    "request_review",
+    "todo_read",
+    "todo_write",
+    "save_plan",
+    "web_fetch",
+    "web_search",
+    "load_skill",
+]
+
+
+_AUTOMATION_BUILDER_SYSTEM_PROMPT = """You are Automation Builder — a built-in Tesslate agent that schedules existing agents to run on a cron trigger. You do NOT create new agents (that's @agent-builder's job). You take an agent the user already owns and wire a recurring automation to it, with a clean in-chat publish review.
+
+# Identity
+- You are admin-tier. You have automations.write so you can DRAFT a child AutomationDefinition for an existing user-owned agent. Drafts are inactive until the user clicks Publish & Activate on the in-chat review card.
+- You are conversational and concise. Plan, ask up to three short clarifying questions only when intent is genuinely ambiguous, then act.
+
+# Mandatory first move
+Before promising anything, call `list_user_resources`. It returns the user's owned agents (`user_owned_agents`), connected MCPs (`connected_mcps`), and communication destinations (`communication_destinations`). You may only schedule an agent that appears in `user_owned_agents`. If none appear, tell the user to create an agent first (mention `@agent-builder` to do it from chat).
+
+# What you do
+1. Identify the target agent. If the user names an agent that isn't in `user_owned_agents`, list what they own and ask which one.
+2. Determine the trigger cron expression and timezone.
+3. Determine the prompt_template — what the agent should be told to do on each run. Keep it concrete (e.g., "Fetch <URL>, summarize the top 5 items, and post to the configured destination.").
+4. Determine delivery_targets (optional). The user picks zero or more `communication_destinations` IDs. Empty list = silent run; the user reads results from the UI.
+5. `attach_schedule(agent_id, trigger={kind:"cron", config:{cron:"<expr>", tz:"<TZ>"}}, prompt_template, contract={...}, delivery_targets, max_compute_tier:0)`. Defaults: max_spend_per_run_usd=0.10, max_compute_tier=0. Contract MUST NOT contain marketplace.author or automations.write.
+6. `request_review(agent_id, automation_id, summary)` — surfaces the in-chat publish card and BLOCKS until the user clicks. The summary should include: name, description, mcps:[], schedule:{cron,tz,humanized}, delivery_targets, draft_url:"/library?tab=automations".
+7. Read the tool's outcome and write one short final message:
+   - outcome=published → "Done — schedule is active. Next run at <time>."
+   - outcome=saved_draft → "Saved as draft. Activate later from /library?tab=automations."
+   - outcome=cancel → "Holding off. Want me to revise it?"
+   - outcome=timeout → "No response yet. The draft is saved; mention me again when ready."
+
+# Hard rules
+- DRAFTS ONLY. is_active=False on creation. Activation happens via the user's click on the review card.
+- ONLY user-owned agents. Built-in agents (Tesslate Agent, Librarian, etc.) are not schedulable by you — they would have to be forked first. If the user wants to schedule a built-in, tell them to fork it from /library and try again.
+- DEPTH-1 CAP. attach_schedule rejects depth-2 attempts; never try to nest.
+- POSITIVE-LIST INHERITANCE. Child contracts may carry only: tools.execute, read_file, write_file, bash_exec, web_fetch, web_search, send_message, app.invoke, and any mcp.* prefix.
+- BUDGET. Default child cap: max_spend_per_run_usd=0.10, max_compute_tier=0. The user can raise these later in the UI.
+- CRON CLARITY. Always include a humanized form in the review summary (e.g., "Every day at 6:00 AM UTC"). Use UTC unless the user specifies a timezone.
+
+# Refusals
+- Never activate without an explicit user click on the review card.
+- Never schedule an agent the user doesn't own. Stop and tell them.
+- Never invent agent ids — quote only what `list_user_resources` returned.
+
+# Examples
+1) "Schedule my 'Daily Web Digest' agent to run at 6am UTC every day."
+   → list_user_resources → 'Daily Web Digest' present in user_owned_agents.
+   → attach_schedule(agent_id=<id>, trigger={kind:"cron",config:{cron:"0 6 * * *",tz:"UTC"}}, prompt_template="Run the daily digest now and post the results.", contract={allowed_scopes:["web_fetch","mcp.notion.write"], max_spend_per_run_usd:0.10}, delivery_targets:[], max_compute_tier:0)
+   → request_review → user clicks Publish & Activate → "Done — schedule is active. Next run at <time>."
+
+2) "Schedule @tesslate-agent to run something every hour." (built-in, not user-owned)
+   → list_user_resources → 'Tesslate Agent' is built-in and not in user_owned_agents.
+   → STOP. Reply: "I can only schedule agents you own. Fork Tesslate Agent from /library first, then mention me again."
+   → No DB writes.
+
+# Fallback
+If you're unsure about a tool's contract or edge case, call `load_skill("agent-builder")` to pull the canonical SKILL.md (the same skill covers both builders). Don't guess parameter shapes.
 """
 
 
@@ -269,7 +340,7 @@ Final message reads like a teammate update:
 - If there's an obvious next step, suggest it briefly.""",
         "mode": "agent",
         "agent_type": "TesslateAgent",
-        "model": None,  # Set dynamically from LITELLM_DEFAULT_MODELS at seed time
+        "model": "kimi-k2.5",
         "icon": "\U0001f916",
         "preview_image": None,
         "pricing_type": "free",
@@ -738,6 +809,44 @@ Keep preambles short. Keep your final report readable: what you wired, which fil
         "is_builtin": True,
         "tools": _AGENT_BUILDER_TOOL_ALLOWLIST,
     },
+    {
+        "name": "Automation Builder",
+        "slug": "automation-builder",
+        "description": "Wires cron schedules to existing agents from chat.",
+        "long_description": (
+            "Automation Builder is the conversational way to add a recurring "
+            "schedule to an agent you already own. Mention "
+            "@automation-builder in chat, point at one of your agents, "
+            "describe the cron and prompt, and it drafts a child "
+            "AutomationDefinition with an in-chat review card. The schedule "
+            "stays inactive until you click Publish & Activate."
+        ),
+        "category": "builder",
+        "system_prompt": _AUTOMATION_BUILDER_SYSTEM_PROMPT,
+        "mode": "agent",
+        "agent_type": "TesslateAgent",
+        "model": None,
+        "icon": "⏰",
+        "preview_image": None,
+        "pricing_type": "free",
+        "price": 0,
+        "source_type": "open",
+        "is_forkable": False,
+        "requires_user_keys": False,
+        "features": [
+            "Attaches cron schedules to existing agents",
+            "In-chat publish review",
+            "Connected-only delivery targets",
+            "Depth-1 contract enforcement",
+        ],
+        "required_models": ["gpt-4o-mini"],
+        "tags": ["official", "builder", "automations", "open-source"],
+        "is_featured": True,
+        "is_active": True,
+        "is_system": False,
+        "is_builtin": True,
+        "tools": _AUTOMATION_BUILDER_TOOL_ALLOWLIST,
+    },
 ]
 
 
@@ -785,7 +894,7 @@ async def seed_marketplace_agents(db: AsyncSession) -> int:
         result = await db.execute(
             select(MarketplaceAgent).where(MarketplaceAgent.slug == agent_data["slug"])
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
 
         if existing:
             for key, value in agent_data.items():
@@ -815,11 +924,21 @@ async def seed_marketplace_agents(db: AsyncSession) -> int:
 
 
 async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
-    """Add the Tesslate Agent to all users who don't have it yet.
+    """Add the Tesslate Agent to all users who don't have it yet, and pin it
+    as the top-ordered entry in every library.
 
-    Returns:
-        Number of users who received the agent.
+    Library order is `purchase_date DESC`; the chat picks `library[0]` as the
+    default agent. Refreshing `purchase_date` to NOW() on every seed run keeps
+    Tesslate Agent at the top regardless of when other auto-add functions
+    seeded their rows.
+
+    Also clears `selected_model` so users always fall back to the agent's
+    canonical model (currently kimi-k2.5).
     """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update
+
     result = await db.execute(
         select(MarketplaceAgent).where(MarketplaceAgent.slug == "tesslate-agent")
     )
@@ -833,20 +952,17 @@ async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
     added = 0
 
     for user in users:
-        # Check for existing record (with or without team_id)
         result = await db.execute(
             select(UserPurchasedAgent).where(
                 UserPurchasedAgent.user_id == user.id,
                 UserPurchasedAgent.agent_id == tesslate_agent.id,
             )
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
 
         if existing:
-            # Backfill team_id on records that were created before team existed
             if existing.team_id is None and user.default_team_id is not None:
                 existing.team_id = user.default_team_id
-                added += 1
             continue
 
         purchase = UserPurchasedAgent(
@@ -859,11 +975,19 @@ async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
         db.add(purchase)
         added += 1
 
+    # Pin to the top of every library on every restart, and clear per-user
+    # model overrides so the canonical model takes effect.
+    await db.execute(
+        update(UserPurchasedAgent)
+        .where(UserPurchasedAgent.agent_id == tesslate_agent.id)
+        .values(purchase_date=datetime.now(timezone.utc), selected_model=None)
+    )
+
+    await db.commit()
     if added:
-        await db.commit()
-        logger.info("Added/fixed Tesslate Agent for %d users", added)
+        logger.info("Added Tesslate Agent for %d users; refreshed top-pin for all", added)
     else:
-        logger.info("All users already have Tesslate Agent")
+        logger.info("All users already have Tesslate Agent; refreshed top-pin for all")
 
     return added
 
@@ -891,7 +1015,7 @@ async def auto_add_librarian_agent_to_users(db: AsyncSession) -> int:
                 UserPurchasedAgent.agent_id == librarian_agent.id,
             )
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
 
         if existing:
             # Backfill team_id on records that were created before team existed
@@ -945,7 +1069,7 @@ async def auto_add_agent_builder_to_users(db: AsyncSession) -> int:
                 UserPurchasedAgent.agent_id == agent_builder.id,
             )
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
 
         if existing:
             if existing.team_id is None and user.default_team_id is not None:
@@ -968,5 +1092,105 @@ async def auto_add_agent_builder_to_users(db: AsyncSession) -> int:
         logger.info("Added/fixed Agent Builder for %d users", added)
     else:
         logger.info("All users already have Agent Builder")
+
+    return added
+
+
+async def auto_add_automation_builder_to_users(db: AsyncSession) -> int:
+    """Add the Automation Builder to all users who don't have it yet.
+
+    Mirrors the Agent Builder auto-add. Every user gets the
+    @automation-builder mention available without manual install.
+    """
+    result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.slug == "automation-builder")
+    )
+    automation_builder = result.scalar_one_or_none()
+    if not automation_builder:
+        logger.warning("Automation Builder not found, skipping auto-add")
+        return 0
+
+    result = await db.execute(select(User))
+    users = result.scalars().all()
+    added = 0
+
+    for user in users:
+        result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == user.id,
+                UserPurchasedAgent.agent_id == automation_builder.id,
+            )
+        )
+        existing = result.scalars().first()
+
+        if existing:
+            if existing.team_id is None and user.default_team_id is not None:
+                existing.team_id = user.default_team_id
+                added += 1
+            continue
+
+        purchase = UserPurchasedAgent(
+            user_id=user.id,
+            team_id=user.default_team_id,
+            agent_id=automation_builder.id,
+            purchase_type="free",
+            is_active=True,
+        )
+        db.add(purchase)
+        added += 1
+
+    if added:
+        await db.commit()
+        logger.info("Added/fixed Automation Builder for %d users", added)
+    else:
+        logger.info("All users already have Automation Builder")
+
+    return added
+
+
+async def auto_add_service_integrator_to_users(db: AsyncSession) -> int:
+    """Add the Service Integrator agent to all users who don't have it yet."""
+    result = await db.execute(
+        select(MarketplaceAgent).where(MarketplaceAgent.slug == "service-integrator")
+    )
+    service_integrator = result.scalar_one_or_none()
+    if not service_integrator:
+        logger.warning("Service Integrator not found, skipping auto-add")
+        return 0
+
+    result = await db.execute(select(User))
+    users = result.scalars().all()
+    added = 0
+
+    for user in users:
+        result = await db.execute(
+            select(UserPurchasedAgent).where(
+                UserPurchasedAgent.user_id == user.id,
+                UserPurchasedAgent.agent_id == service_integrator.id,
+            )
+        )
+        existing = result.scalars().first()
+
+        if existing:
+            if existing.team_id is None and user.default_team_id is not None:
+                existing.team_id = user.default_team_id
+                added += 1
+            continue
+
+        purchase = UserPurchasedAgent(
+            user_id=user.id,
+            team_id=user.default_team_id,
+            agent_id=service_integrator.id,
+            purchase_type="free",
+            is_active=True,
+        )
+        db.add(purchase)
+        added += 1
+
+    if added:
+        await db.commit()
+        logger.info("Added/fixed Service Integrator for %d users", added)
+    else:
+        logger.info("All users already have Service Integrator")
 
     return added

@@ -1329,6 +1329,7 @@ def create_v2_dev_deployment(
     extra_env: dict[str, str] | None = None,
     preferred_node: str | None = None,
     spec_hash: str | None = None,
+    tsinit_restart_policy: str = "never",
 ) -> client.V1Deployment:
     """
     Create a v2 dev container deployment using CSI-backed PVC volumes.
@@ -1399,7 +1400,7 @@ def create_v2_dev_deployment(
             "--grace-period",
             "10s",
             "--restart-policy",
-            "never",
+            tsinit_restart_policy,
             "--sock-path",
             "/tmp/tsinit.sock",
         ],

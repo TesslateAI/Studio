@@ -84,7 +84,7 @@ async def attach_schedule_executor(
         return error_output(message="missing db/user_id in execution context")
 
     allowed_scopes = set(context.get("allowed_scopes") or [])
-    if allowed_scopes and AUTOMATIONS_WRITE not in allowed_scopes:
+    if AUTOMATIONS_WRITE not in allowed_scopes:
         return error_output(message=f"missing required scope: {AUTOMATIONS_WRITE}")
 
     try:
@@ -250,7 +250,12 @@ async def attach_schedule_executor(
         user_id,
     )
     return success_output(
-        message=f"Drafted automation {automation.name!r}",
+        message=(
+            f"Drafted automation {automation.name!r}. "
+            f"automation_id={automation.id} agent_id={agent_id} "
+            f"depth={automation.depth} is_active=False. "
+            f"Use this exact automation_id for the next request_review call."
+        ),
         automation_id=str(automation.id),
         depth=automation.depth,
         parent_automation_id=str(parent_id) if parent_id else None,

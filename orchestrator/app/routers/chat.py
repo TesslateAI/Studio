@@ -990,15 +990,19 @@ async def agent_chat(
                 detail="User does not have a LiteLLM API key. Please contact support.",
             )
 
-        # 2.5. Get user's selected model override (if any)
+        # 2.5. Get user's selected model override (if any). Use ``.first()``
+        # so users with multiple team-scoped rows for the same agent don't
+        # crash the run.
         try:
             user_purchase_result = await db.execute(
-                select(UserPurchasedAgent).where(
+                select(UserPurchasedAgent)
+                .where(
                     UserPurchasedAgent.user_id == current_user.id,
                     UserPurchasedAgent.agent_id == agent_model.id,
                 )
+                .limit(1)
             )
-            user_purchase = user_purchase_result.scalar_one_or_none()
+            user_purchase = user_purchase_result.scalars().first()
         except Exception as e:
             logger.error(f"[HTTP-AGENT] Error fetching user purchase: {e}", exc_info=True)
             await db.rollback()
@@ -2950,13 +2954,18 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     try:
         logger.info("[UNIFIED-CHAT] Creating agent instance via factory")
 
-        # Get user's selected model override (if any)
+        # Get user's selected model override (if any). Use ``.first()`` so a
+        # user with multiple team-scoped purchase rows for the same agent
+        # doesn't crash the chat run — any row carries the same
+        # ``selected_model``.
         user_purchase_result = await db.execute(
-            select(UserPurchasedAgent).where(
+            select(UserPurchasedAgent)
+            .where(
                 UserPurchasedAgent.user_id == user.id, UserPurchasedAgent.agent_id == agent_model.id
             )
+            .limit(1)
         )
-        user_purchase = user_purchase_result.scalar_one_or_none()
+        user_purchase = user_purchase_result.scalars().first()
 
         # Use user's selected model if available, otherwise use agent's default model
         model_name = (
