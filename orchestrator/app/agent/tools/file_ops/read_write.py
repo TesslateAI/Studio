@@ -45,8 +45,9 @@ async def read_file_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
     if not file_path:
         raise ValueError("file_path parameter is required")
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    pid = context.get("project_id")
+    project_id = str(pid) if pid is not None else None
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
     container_name = context.get("container_name")
@@ -72,6 +73,12 @@ async def read_file_tool(params: dict[str, Any], context: dict[str, Any]) -> dic
         )
 
         if content is not None:
+            try:
+                from ....services.recent_files import get_recent_file_tracker
+
+                await get_recent_file_tracker().record(context, file_path)
+            except Exception:
+                pass
             return success_output(
                 message=f"Read {format_file_size(len(content))} from '{file_path}'",
                 file_path=file_path,
@@ -113,8 +120,9 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     if content is None:
         raise ValueError("content parameter is required")
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    pid = context.get("project_id")
+    project_id = str(pid) if pid is not None else None
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")  # Container subdir for scoped agents
     container_name = context.get("container_name")
@@ -139,21 +147,23 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
     )
 
     from ....services.orchestration import get_orchestrator
+    from ._write_fence import fence_file
 
     try:
         orchestrator = get_orchestrator()
-        success = await orchestrator.write_file(
-            user_id=user_id,
-            project_id=project_id,
-            container_name=container_name,
-            file_path=file_path,
-            content=content,
-            project_slug=project_slug,
-            subdir=container_directory,
-            # Volume routing hints
-            volume_id=context.get("volume_id"),
-            cache_node=context.get("cache_node"),
-        )
+        async with fence_file(str(project_id) if project_id else "", file_path):
+            success = await orchestrator.write_file(
+                user_id=user_id,
+                project_id=project_id,
+                container_name=container_name,
+                file_path=file_path,
+                content=content,
+                project_slug=project_slug,
+                subdir=container_directory,
+                # Volume routing hints
+                volume_id=context.get("volume_id"),
+                cache_node=context.get("cache_node"),
+            )
 
         if success:
             if file_path.rstrip("/").endswith(".tesslate/config.json"):
@@ -161,6 +171,13 @@ async def write_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
                     "[WRITE-FILE] .tesslate/config.json written — "
                     "call apply_setup_config to sync the container graph"
                 )
+
+            try:
+                from ....services.recent_files import get_recent_file_tracker
+
+                await get_recent_file_tracker().record(context, file_path)
+            except Exception:
+                pass
 
             return success_output(
                 message=f"Wrote {pluralize(len(lines), 'line')} ({format_file_size(len(content))}) to '{file_path}'",
@@ -204,6 +221,10 @@ def register_read_write_tools(registry):
             },
             executor=read_file_tool,
             category=ToolCategory.FILE_OPS,
+            # Input is a path; output is file content text — fully JSON-serializable.
+            state_serializable=True,
+            # No persistent handle; each call returns fresh content.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "read_file", "parameters": {"file_path": "package.json"}}',
                 '{"tool_name": "read_file", "parameters": {"file_path": "src/components/Header.jsx"}}',
@@ -236,6 +257,10 @@ def register_read_write_tools(registry):
             },
             executor=write_file_tool,
             category=ToolCategory.FILE_OPS,
+            # Path + content strings in, success/error dict out — JSON-clean.
+            state_serializable=True,
+            # Atomic write through container backend; no persistent handle held.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "write_file", "parameters": {"file_path": "src/NewComponent.jsx", "content": "import React from \'react\'..."}}'
             ],

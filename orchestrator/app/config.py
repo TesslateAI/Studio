@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     worker_job_timeout: int = 600  # Agent run timeout in seconds (10 min default)
     worker_max_tries: int = 2  # Retry failed jobs once (transient errors)
 
+    # Parallel-agent concurrency limits (enforced at enqueue time).
+    # Protects against runaway users / projects starving the worker pool.
+    user_max_concurrent_agents: int = 10
+    project_max_concurrent_agents: int = 20
+    # Per-user enqueue rate limit (sliding window) — caps how fast one user
+    # can spam new agents. Expressed as max enqueues per 10-second window.
+    user_enqueue_rate_per_10s: int = 20
+
     # Node-config (agent-driven user input) — how long we wait for the user
     # to submit the form before giving up and cancelling the paused task.
     node_config_input_timeout_seconds: int = 1800  # 30 minutes
@@ -117,6 +125,38 @@ class Settings(BaseSettings):
     def is_desktop_mode(self) -> bool:
         """Check if running inside the Tauri desktop shell."""
         return self.deployment_mode.lower() == "desktop"
+
+    # Connector Proxy deployment topology.
+    #   "embedded"  — orchestrator mounts the proxy router at
+    #                  ``/api/v1/connector-proxy``.  Used by desktop and
+    #                  docker-compose where there is only one process.
+    #   "dedicated" — proxy runs as its own ``opensail-runtime`` Deployment
+    #                  reachable at ``opensail-runtime:8400``.  Orchestrator
+    #                  does NOT mount the router — pods talk to the dedicated
+    #                  Service and an isolated NetworkPolicy bounds egress.
+    # Default keeps backwards compatibility (today's behavior is embedded).
+    connector_proxy_mode: str = "embedded"
+
+    @property
+    def is_connector_proxy_dedicated(self) -> bool:
+        """True when the proxy runs in its own ``opensail-runtime`` pod."""
+        return self.connector_proxy_mode.lower() == "dedicated"
+
+    @property
+    def connector_proxy_runtime_url(self) -> str:
+        """In-cluster URL the SDK uses to reach the proxy.
+
+        Apps read this through the ``OPENSAIL_RUNTIME_URL`` env var the
+        installer injects — they never read the setting directly. Dedicated
+        mode points at the standalone ``opensail-runtime`` Service; embedded
+        mode points at the orchestrator's mounted router so desktop / docker
+        users keep working without extra wiring.
+        """
+        if self.is_connector_proxy_dedicated:
+            return "http://opensail-runtime:8400"
+        return (
+            "http://tesslate-backend-service:8000/api/v1/connector-proxy"
+        )
 
     # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_level: str = "INFO"
@@ -743,6 +783,39 @@ class Settings(BaseSettings):
     # cluster can pull from ECR. Images that already contain "/" (registry
     # path) are left untouched.
     app_image_registry_prefix: str = ""
+
+    # ==========================================================================
+    # Managed Resources (Apps "Make scalable" upgrade flow)
+    # ==========================================================================
+    # Used by app.services.apps.managed_resources to back the Publish Drawer's
+    # "Add Postgres / Object Storage / KV" upgrade buttons with real
+    # provisioning. When the corresponding env var is unset, the provisioner
+    # raises ManagedResourcesNotConfigured — the *_ALLOW_STUB escape hatch
+    # exists so desktop-mode tests + UX dev can exercise the wiring without
+    # a real backing pool.
+
+    # Postgres pool admin DSN, e.g.
+    # "postgresql://admin:pw@managed-postgres-pool.opensail.svc:5432/postgres"
+    managed_postgres_admin_url: str = ""
+    # When True, _provision_postgres_db falls back to the pre-Phase-5 stub
+    # (deterministic-shape URL pointed at non-resolving DNS). Default off.
+    managed_postgres_allow_stub: bool = False
+
+    # Object storage admin credentials. Endpoint may be an S3-compatible
+    # MinIO URL (dev) or empty for AWS S3 default. Region is required for
+    # both. The admin key/secret are used to create per-app buckets +
+    # scoped IAM users; they are NOT propagated into app pods.
+    managed_object_storage_endpoint: str = ""
+    managed_object_storage_region: str = ""
+    managed_object_storage_admin_key_id: str = ""
+    managed_object_storage_admin_secret: str = ""
+    managed_object_storage_allow_stub: bool = False
+
+    # Redis pool URL, e.g. "redis://managed-redis-pool.opensail.svc:6379/0"
+    # The provisioner connects to verify reachability and mints a
+    # per-app key prefix (logical isolation; Redis logical DBs only go to 15).
+    managed_redis_url: str = ""
+    managed_redis_allow_stub: bool = False
 
     class Config:
         # For Docker Compose: environment variables are passed directly

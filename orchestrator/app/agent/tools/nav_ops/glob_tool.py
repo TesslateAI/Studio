@@ -7,12 +7,19 @@ exclusions already applied), then filters them with ``fnmatch`` /
 ``pathlib.PurePath.match`` and sorts by modification time or name.
 """
 
+from __future__ import annotations
+
 import fnmatch
 import logging
 from pathlib import PurePosixPath
 from typing import Any
 
-from ..output_formatter import error_output, pluralize, success_output
+from ....services.orchestration import get_orchestrator
+from ..output_formatter import (
+    error_output,
+    pluralize,
+    success_output,
+)
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
@@ -134,8 +141,6 @@ async def glob_tool(params: dict[str, Any], context: dict[str, Any]) -> dict[str
         limit,
         sort_mode,
     )
-
-    from ....services.orchestration import get_orchestrator
 
     try:
         orchestrator = get_orchestrator()
@@ -266,6 +271,10 @@ def register_glob_tool(registry) -> None:
             },
             executor=glob_tool,
             category=ToolCategory.NAV_OPS,
+            # Pattern + options in, list of paths out — JSON-clean.
+            state_serializable=True,
+            # Stateless directory traversal; no persistent index held.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "glob", "parameters": {"pattern": "**/*.py"}}',
                 '{"tool_name": "glob", "parameters": {"pattern": "*.ts", "path": "src", "recursive": false}}',

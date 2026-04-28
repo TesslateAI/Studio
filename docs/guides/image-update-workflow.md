@@ -28,7 +28,7 @@ minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
 
 # Step 2: Delete local image and rebuild with --no-cache
 docker rmi -f tesslate-backend:latest
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 
 # Step 3: Load new image to minikube
 minikube -p tesslate image load tesslate-backend:latest
@@ -71,7 +71,7 @@ The devserver runs user project containers:
 # NOTE: Dockerfile is in orchestrator/, not devserver/
 minikube -p tesslate ssh -- docker rmi -f tesslate-devserver:latest
 docker rmi -f tesslate-devserver:latest
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver .
 minikube -p tesslate image load tesslate-devserver:latest
 
 # No pod restart needed - new user containers will use new image
@@ -83,7 +83,7 @@ minikube -p tesslate image load tesslate-devserver:latest
 # Backend
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
 docker rmi -f tesslate-backend:latest
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 kubectl delete pod -n tesslate -l app=tesslate-backend
 
@@ -97,7 +97,7 @@ kubectl delete pod -n tesslate -l app=tesslate-frontend
 # Devserver
 minikube -p tesslate ssh -- docker rmi -f tesslate-devserver:latest
 docker rmi -f tesslate-devserver:latest
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver .
 minikube -p tesslate image load tesslate-devserver:latest
 
 # Wait for all pods
@@ -215,7 +215,7 @@ git checkout <previous-commit-hash>
 
 # Rebuild and deploy
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 kubectl delete pod -n tesslate -l app=tesslate-backend
 
@@ -229,12 +229,12 @@ git checkout -
 
 **Wrong:**
 ```powershell
-docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build -t tesslate-backend:latest -f orchestrator/Dockerfile .
 ```
 
 **Right:**
 ```powershell
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 ```
 
 ### 2. Not Deleting Minikube Image First
@@ -279,16 +279,16 @@ kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
 
 | Image | Dockerfile | Context Directory |
 |-------|-----------|-------------------|
-| tesslate-backend | `orchestrator/Dockerfile` | `orchestrator/` |
+| tesslate-backend | `orchestrator/Dockerfile` | `.` (repo root) |
 | tesslate-frontend | `app/Dockerfile.prod` | `app/` |
-| tesslate-devserver | `orchestrator/Dockerfile.devserver` | `orchestrator/` |
+| tesslate-devserver | `orchestrator/Dockerfile.devserver` | `.` (repo root) |
 
 ## Quick Reference
 
 ### Minikube One-Liner (Backend)
 
 ```powershell
-minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest; docker rmi -f tesslate-backend:latest; docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/; minikube -p tesslate image load tesslate-backend:latest; kubectl delete pod -n tesslate -l app=tesslate-backend
+minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest; docker rmi -f tesslate-backend:latest; docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .; minikube -p tesslate image load tesslate-backend:latest; kubectl delete pod -n tesslate -l app=tesslate-backend
 ```
 
 ### AWS One-Liner (Backend)

@@ -769,8 +769,8 @@ function SkillCard({
       role="article"
       aria-label={`${skill.name} skill`}
       onClick={onSelect}
-      className={`flex flex-col p-4 bg-[var(--surface-hover)] rounded-[var(--radius)] border transition-colors cursor-pointer ${
-        isSelected ? 'border-[var(--border-hover)]' : 'border-[var(--border)] hover:border-[var(--border-hover)]'
+      className={`group relative flex flex-col h-full p-4 bg-[var(--surface)] rounded-[var(--radius)] border border-[var(--border)] transition-all duration-200 hover:-translate-y-1 hover:bg-[var(--card-hover)] cursor-pointer ${
+        isSelected ? 'border-[var(--primary)] ring-1 ring-[var(--primary)]/20' : ''
       }`}
     >
       <div className="flex items-center gap-3 mb-3">

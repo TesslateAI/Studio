@@ -5,14 +5,14 @@ import { forwardRef, type ReactNode } from 'react';
 import { cardEntrance, featuredEntrance, cardSpring } from './motion';
 
 const surfaceVariants = cva(
-  'group relative flex flex-col cursor-pointer transition-colors duration-200 ease-out',
+  'group relative flex flex-col h-full cursor-pointer transition-all duration-200 ease-out',
   {
     variants: {
       variant: {
         standard:
-          'bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 sm:p-5 hover:border-[rgba(var(--primary-rgb),0.25)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]',
+          'bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 sm:p-5 hover:bg-[var(--card-hover)]',
         featured:
-          'bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 sm:p-6 hover:border-[rgba(var(--primary-rgb),0.25)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]',
+          'bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 sm:p-6 hover:bg-[var(--card-hover)]',
         stat: 'bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-4 sm:p-5 overflow-hidden',
       },
     },
@@ -43,7 +43,7 @@ export const CardSurface = forwardRef<HTMLDivElement, CardSurfaceProps>(function
       variants={entrance}
       initial="initial"
       animate="animate"
-      whileHover={disableHoverLift ? undefined : { y: -3, transition: cardSpring }}
+      whileHover={disableHoverLift ? undefined : { y: -4, transition: cardSpring }}
       whileTap={{ scale: 0.98 }}
       className={clsx(
         surfaceVariants({ variant }),

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -167,6 +167,10 @@ class Project(ProjectBase):
     )
     hibernated_at: datetime | None = None
     compute_tier: str = "none"  # none | ephemeral | environment
+    # Tesslate Apps lifecycle role of this Project: workspace (default
+    # user project), app_source (creator authoring), app_runtime
+    # (installed app instance — hidden from the regular Projects list).
+    project_kind: str = "workspace"
 
     class Config:
         from_attributes = True
@@ -685,6 +689,13 @@ class AgentCommandStatsResponse(BaseModel):
 class ChatAttachmentSchema(BaseModel):
     """Attachment sent alongside a chat message."""
 
+    # Per-attachment size caps. These are defense-in-depth against very large
+    # pastes/images inflating a single turn past the model's context window or
+    # blowing up Redis payload size. Frontend should enforce similar limits
+    # for UX but these are the source of truth.
+    MAX_PASTED_TEXT_CHARS: ClassVar[int] = 100_000
+    MAX_IMAGE_BASE64_CHARS: ClassVar[int] = 20_000_000  # ~15 MB raw; typical screenshots
+
     type: str  # "image", "pasted_text", "file_reference"
     content: str | None = None  # base64 for images, full text for pasted_text
     mime_type: str | None = None
@@ -696,6 +707,42 @@ class ChatAttachmentSchema(BaseModel):
     def validate_type(cls, v):
         if v not in ("image", "pasted_text", "file_reference"):
             raise ValueError("type must be one of: image, pasted_text, file_reference")
+        return v
+
+    @model_validator(mode="after")
+    def validate_content_size(self):
+        content_len = len(self.content) if self.content else 0
+        if self.type == "pasted_text" and content_len > self.MAX_PASTED_TEXT_CHARS:
+            raise ValueError(
+                f"Pasted text attachment too large: {content_len} chars "
+                f"(max {self.MAX_PASTED_TEXT_CHARS})"
+            )
+        if self.type == "image" and content_len > self.MAX_IMAGE_BASE64_CHARS:
+            raise ValueError(
+                f"Image attachment too large: {content_len} base64 chars "
+                f"(max {self.MAX_IMAGE_BASE64_CHARS})"
+            )
+        return self
+
+
+class ChatMentionSchema(BaseModel):
+    """Structured @-mention from the chat input picker.
+
+    Carried alongside ``message`` rather than parsed out of it. The display
+    token (e.g. ``@coworker``) stays in ``message`` for chat history; the
+    backend uses this structured array for run semantics.
+    """
+
+    kind: str  # 'agent' | 'mcp' | 'app'
+    ref_id: str  # MarketplaceAgent.id | UserMcpConfig.id | AppInstance.id
+    display: str = ""
+    offset: int = 0
+
+    @field_validator("kind")
+    @classmethod
+    def validate_kind(cls, v):
+        if v not in ("agent", "mcp", "app"):
+            raise ValueError("mention kind must be 'agent', 'mcp', or 'app'")
         return v
 
 
@@ -712,6 +759,7 @@ class AgentChatRequest(BaseModel):
     edit_mode: str | None = "ask"  # Edit control mode: 'allow', 'ask', 'plan' (default: ask)
     view_context: str | None = None  # UI view context: 'graph', 'builder', 'terminal', 'kanban'
     attachments: list[ChatAttachmentSchema] | None = None
+    mentions: list[ChatMentionSchema] | None = None
 
     @model_validator(mode="after")
     def validate_message_or_attachments(self):

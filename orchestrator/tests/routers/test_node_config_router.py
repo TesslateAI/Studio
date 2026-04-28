@@ -425,6 +425,355 @@ def test_reveal_missing_key_returns_404(authenticated_client):
     assert resp.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# Restart-on-save hook
+# ---------------------------------------------------------------------------
+
+
+async def _create_consumer_with_env_injection(
+    project_id: UUID,
+    source_container_id: UUID,
+    *,
+    consumer_name: str = "backend",
+    consumer_deployment_mode: str = "container",
+) -> UUID:
+    """Add a sibling container connected to ``source`` via env_injection."""
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+        create_async_engine,
+    )
+
+    from app.models import Container, ContainerConnection
+
+    engine = create_async_engine(
+        "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
+        pool_pre_ping=True,
+    )
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with Session() as db:
+        consumer = Container(
+            id=uuid4(),
+            project_id=project_id,
+            name=consumer_name,
+            directory=".",
+            container_name=f"proj-{consumer_name}",
+            container_type="base",
+            deployment_mode=consumer_deployment_mode,
+            environment_vars={},
+            status="stopped",
+        )
+        db.add(consumer)
+        await db.flush()
+        connection = ContainerConnection(
+            id=uuid4(),
+            project_id=project_id,
+            source_container_id=source_container_id,
+            target_container_id=consumer.id,
+            connector_type="env_injection",
+            config={},
+        )
+        db.add(connection)
+        await db.commit()
+        consumer_id = consumer.id
+    await engine.dispose()
+    return consumer_id
+
+
+@pytest.mark.integration
+def test_patch_dispatches_restart_to_env_injection_consumer(
+    authenticated_client, monkeypatch
+):
+    """PATCHing an external service that's wired into a container via
+    env_injection should schedule a restart of that consumer and emit a
+    `containers_restarting` SSE event with the consumer in ``restart_target_ids``.
+    """
+    _reset_manager()
+    client, user_data = authenticated_client
+    project_id, source_id = _run(
+        _create_project_and_container(UUID(user_data["id"]))
+    )
+    consumer_id = _run(_create_consumer_with_env_injection(project_id, source_id))
+
+    # Replace the orchestrator-touching restart with a no-op so we don't
+    # actually try to start docker containers in tests. We assert
+    # `dispatch_restart_after_config_change` correctly identifies + schedules.
+    scheduled: list[UUID] = []
+
+    async def _fake_restart_one(container_id, *args, **kwargs):
+        scheduled.append(container_id)
+
+    from app.routers import node_config as node_config_router
+
+    monkeypatch.setattr(node_config_router, "_restart_one", _fake_restart_one)
+
+    # Capture the SSE event emitted on restart dispatch.
+    class _Recorder:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, dict]] = []
+
+        async def publish_agent_event(self, target: str, event: dict) -> None:
+            self.events.append((target, event))
+
+    recorder = _Recorder()
+    from app.services import pubsub as pubsub_module
+
+    monkeypatch.setattr(pubsub_module, "get_pubsub", lambda: recorder)
+
+    resp = client.patch(
+        f"/api/projects/{project_id}/containers/{source_id}/config",
+        json={
+            "preset": "supabase",
+            "values": {
+                "SUPABASE_URL": "https://restart.supabase.co",
+                "SUPABASE_ANON_KEY": "anon-restart-key-1234",
+            },
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Restart payload merged into the response shape
+    assert consumer_id is not None
+    assert str(consumer_id) in body["restart_target_ids"]
+    assert "backend" in body["container_names"]
+
+    # Background restart task fired against the consumer, not the source
+    # (source is external — we never restart externals).
+    # The asyncio.create_task is fire-and-forget; flush the loop briefly.
+    async def _drain() -> None:
+        for _ in range(10):
+            if scheduled:
+                return
+            await asyncio.sleep(0.01)
+
+    _run(_drain())
+    assert consumer_id in scheduled
+    assert source_id not in scheduled  # external source is never a target
+
+    # And a `containers_restarting` event was published on the project channel.
+    types = [ev[1].get("type") for ev in recorder.events]
+    assert "containers_restarting" in types
+    restart_ev = next(ev[1] for ev in recorder.events if ev[1]["type"] == "containers_restarting")
+    assert str(consumer_id) in restart_ev["data"]["restart_target_ids"]
+
+
+@pytest.mark.integration
+def test_patch_internal_container_restarts_itself(authenticated_client, monkeypatch):
+    """Editing env on an internal container (deployment_mode=container) restarts
+    that container itself — even with no env_injection consumers."""
+    _reset_manager()
+    client, user_data = authenticated_client
+
+    # Build an internal Postgres-style container (no preset; synthetic schema).
+    async def _create_internal() -> tuple[UUID, UUID]:
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import (
+            AsyncSession,
+            async_sessionmaker,
+            create_async_engine,
+        )
+
+        from app.models import Container, Project
+        from app.models_team import TeamMembership
+
+        engine = create_async_engine(
+            "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
+            pool_pre_ping=True,
+        )
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with Session() as db:
+            team_row = (
+                await db.execute(
+                    select(TeamMembership)
+                    .where(TeamMembership.user_id == UUID(user_data["id"]))
+                    .limit(1)
+                )
+            ).scalar_one()
+            project = Project(
+                id=uuid4(),
+                name="internal-restart-test",
+                slug=f"internal-restart-{uuid4().hex[:6]}",
+                owner_id=UUID(user_data["id"]),
+                team_id=team_row.team_id,
+            )
+            db.add(project)
+            await db.flush()
+            container = Container(
+                id=uuid4(),
+                project_id=project.id,
+                name="postgres",
+                directory=".",
+                container_name=f"{project.slug}-postgres",
+                container_type="base",
+                deployment_mode="container",
+                environment_vars={"POSTGRES_DB": "old"},
+                status="running",
+            )
+            db.add(container)
+            await db.commit()
+            ids = (project.id, container.id)
+        await engine.dispose()
+        return ids
+
+    project_id, container_id = _run(_create_internal())
+
+    scheduled: list[UUID] = []
+
+    async def _fake_restart_one(cid, *args, **kwargs):
+        scheduled.append(cid)
+
+    from app.routers import node_config as node_config_router
+
+    monkeypatch.setattr(node_config_router, "_restart_one", _fake_restart_one)
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.events: list[dict] = []
+
+        async def publish_agent_event(self, _target, event):
+            self.events.append(event)
+
+    recorder = _Recorder()
+    from app.services import pubsub as pubsub_module
+
+    monkeypatch.setattr(pubsub_module, "get_pubsub", lambda: recorder)
+
+    resp = client.patch(
+        f"/api/projects/{project_id}/containers/{container_id}/config",
+        json={
+            # No preset — exercise the synthetic-schema path on edit.
+            "overrides": [
+                {"key": "POSTGRES_DB", "label": "DB", "type": "text"},
+            ],
+            "values": {"POSTGRES_DB": "newdb"},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert str(container_id) in resp.json()["restart_target_ids"]
+
+    async def _drain() -> None:
+        for _ in range(10):
+            if scheduled:
+                return
+            await asyncio.sleep(0.01)
+
+    _run(_drain())
+    assert container_id in scheduled
+
+
+@pytest.mark.integration
+def test_patch_external_with_no_consumers_schedules_no_restarts(
+    authenticated_client, monkeypatch
+):
+    """External service with zero env_injection consumers → no restart targets,
+    no ``containers_restarting`` event."""
+    _reset_manager()
+    client, user_data = authenticated_client
+    project_id, container_id = _run(
+        _create_project_and_container(UUID(user_data["id"]))
+    )
+
+    scheduled: list[UUID] = []
+
+    async def _fake_restart_one(cid, *args, **kwargs):
+        scheduled.append(cid)
+
+    from app.routers import node_config as node_config_router
+
+    monkeypatch.setattr(node_config_router, "_restart_one", _fake_restart_one)
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.events: list[dict] = []
+
+        async def publish_agent_event(self, _target, event):
+            self.events.append(event)
+
+    recorder = _Recorder()
+    from app.services import pubsub as pubsub_module
+
+    monkeypatch.setattr(pubsub_module, "get_pubsub", lambda: recorder)
+
+    resp = client.patch(
+        f"/api/projects/{project_id}/containers/{container_id}/config",
+        json={
+            "preset": "supabase",
+            "values": {"SUPABASE_URL": "https://lonely.supabase.co"},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["restart_target_ids"] == []
+    assert body["container_names"] == []
+
+    # Give any (non-)scheduled tasks a tick — there should be none.
+    async def _settle() -> None:
+        await asyncio.sleep(0.02)
+
+    _run(_settle())
+    assert scheduled == []
+
+    types = [ev.get("type") for ev in recorder.events]
+    assert "containers_restarting" not in types
+
+
+@pytest.mark.integration
+def test_patch_with_no_changed_keys_skips_restart_dispatch(
+    authenticated_client, monkeypatch
+):
+    """If the merge produced an empty ``updated_keys`` set (e.g. only the
+    sentinel was sent), restart dispatch is a no-op — neither targets nor
+    SSE event."""
+    _reset_manager()
+    client, user_data = authenticated_client
+    project_id, source_id = _run(
+        _create_project_and_container(UUID(user_data["id"]))
+    )
+    # Add a consumer so we'd notice if the dispatch fired incorrectly.
+    _run(_create_consumer_with_env_injection(project_id, source_id))
+
+    scheduled: list[UUID] = []
+
+    async def _fake_restart_one(cid, *args, **kwargs):
+        scheduled.append(cid)
+
+    from app.routers import node_config as node_config_router
+
+    monkeypatch.setattr(node_config_router, "_restart_one", _fake_restart_one)
+
+    class _Recorder:
+        def __init__(self) -> None:
+            self.events: list[dict] = []
+
+        async def publish_agent_event(self, _target, event):
+            self.events.append(event)
+
+    recorder = _Recorder()
+    from app.services import pubsub as pubsub_module
+
+    monkeypatch.setattr(pubsub_module, "get_pubsub", lambda: recorder)
+
+    # Submit only the sentinel for the secret + omit URL — no changes apply.
+    resp = client.patch(
+        f"/api/projects/{project_id}/containers/{source_id}/config",
+        json={
+            "preset": "supabase",
+            "values": {"SUPABASE_ANON_KEY": "__SET__"},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated_keys"] == []
+    assert body["restart_target_ids"] == []
+
+    async def _settle() -> None:
+        await asyncio.sleep(0.02)
+
+    _run(_settle())
+    assert scheduled == []
+    assert "containers_restarting" not in [ev.get("type") for ev in recorder.events]
+
+
 @pytest.mark.integration
 def test_reveal_rejects_external_api_key_auth(authenticated_client):
     """Plan invariant: reveal is user-JWT-only. A session holding an

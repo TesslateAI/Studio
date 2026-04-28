@@ -42,42 +42,47 @@ async def _mint_invocation_key(
     installer_user_id: UUID,
     app_instance_id: UUID,
     budget_usd: Decimal,
-) -> str | None:
+) -> str:
     """Mint an invocation-tier LiteLLM key, returning the ``key_id``.
 
     Prefers ``litellm_keys.mint_invocation``; falls back to the generic
     ``mint`` helper on the ``invocation`` tier if the specialized helper
     isn't present yet.
+
+    Raises:
+        Any exception raised by the underlying mint path (e.g.
+        ``KeyMintError`` / ``KeyTransitionError`` from the lifecycle state
+        machine, or upstream LiteLLM transport errors). Callers MUST surface
+        these as a typed invocation failure rather than swallowing them — a
+        missing key means the invocation cannot authenticate to LiteLLM, and
+        silent failure here was previously hiding mint regressions in run
+        history.
     """
     from ...services import litellm_keys
     from ...services.litellm_service import LiteLLMService
 
     delegate = LiteLLMService()  # LiteLLMDelegate implementation
 
-    try:
-        mint_invocation = getattr(litellm_keys, "mint_invocation", None)
-        if mint_invocation is not None:
-            row = await mint_invocation(
-                db,
-                delegate=delegate,
-                installer_user_id=installer_user_id,
-                app_instance_id=app_instance_id,
-                budget_usd=budget_usd,
-            )
-        else:
-            # Fallback: base mint on the invocation tier.
-            row = await litellm_keys.mint(
-                db,
-                delegate=delegate,
-                tier="invocation",
-                user_id=installer_user_id,
-                app_instance_id=app_instance_id,
-                budget_usd=budget_usd,
-            )
-        return row.key_id
-    except Exception:
-        logger.exception("app_invocations.mint failed instance=%s", app_instance_id)
-        return None
+    mint_invocation = getattr(litellm_keys, "mint_invocation", None)
+    if mint_invocation is not None:
+        row = await mint_invocation(
+            db,
+            delegate=delegate,
+            installer_user_id=installer_user_id,
+            app_instance_id=app_instance_id,
+            budget_usd=budget_usd,
+        )
+    else:
+        # Fallback: base mint on the invocation tier.
+        row = await litellm_keys.mint(
+            db,
+            delegate=delegate,
+            tier="invocation",
+            user_id=installer_user_id,
+            app_instance_id=app_instance_id,
+            budget_usd=budget_usd,
+        )
+    return row.key_id
 
 
 async def _resolve_env(container: Container) -> list[Any]:
@@ -145,12 +150,40 @@ def _build_job_manifest(
         )
         volume_mounts.append(k8s_client.V1VolumeMount(name="app-data", mount_path="/app"))
 
+    # Phase 4: every ephemeral / Tier-1 pod gets ``/tmp`` as a tmpfs
+    # ``emptyDir { medium: Memory, sizeLimit: 256Mi }``. Writes outside
+    # ``/tmp`` (and outside ``/app`` when a per-install volume is
+    # mounted) are NOT persisted — that's the documented stateless
+    # contract. The size cap protects the node from a runaway write
+    # filling RAM.
+    volumes.append(
+        k8s_client.V1Volume(
+            name="ephemeral-tmp",
+            empty_dir=k8s_client.V1EmptyDirVolumeSource(
+                medium="Memory", size_limit="256Mi"
+            ),
+        )
+    )
+    volume_mounts.append(
+        k8s_client.V1VolumeMount(name="ephemeral-tmp", mount_path="/tmp")
+    )
+
+    # Read-only root FS where compatible — most language runtimes accept
+    # it once /tmp is writable. We deliberately leave AllowPrivilegeEscalation
+    # and capabilities defaults alone; the platform-wide PodSecurityPolicy
+    # / Pod Security Standard owns those.
+    sec_ctx = k8s_client.V1SecurityContext(
+        read_only_root_filesystem=True,
+        allow_privilege_escalation=False,
+    )
+
     container = k8s_client.V1Container(
         name="runner",
         image=image,
         command=["sh", "-c", command],
         env=env_vars,
         volume_mounts=volume_mounts,
+        security_context=sec_ctx,
     )
     pod_spec = k8s_client.V1PodSpec(
         restart_policy="Never",
@@ -242,20 +275,24 @@ async def invoke_app_instance_task(
         execution = trig_cfg.get("execution", "job")
         entrypoint = trig_cfg.get("entrypoint") or ""
 
-        # Mint invocation key for this run (budget bookkeeping).
-        invocation_key_id = await _mint_invocation_key(
-            db,
-            installer_user_id=instance.installer_user_id,
-            app_instance_id=instance.id,
-            budget_usd=_DEFAULT_INVOCATION_BUDGET_USD,
-        )
-        await db.commit()
-
         status = "failed"
         error: str | None = None
         summary: dict[str, Any] = {}
+        invocation_key_id: str | None = None
 
         try:
+            # Mint invocation key for this run (budget bookkeeping).
+            # Domain failures (KeyMintError, KeyTransitionError, etc.) must
+            # surface in run history, so the mint lives inside the same
+            # try/except that captures execution-path failures below.
+            invocation_key_id = await _mint_invocation_key(
+                db,
+                installer_user_id=instance.installer_user_id,
+                app_instance_id=instance.id,
+                budget_usd=_DEFAULT_INVOCATION_BUDGET_USD,
+            )
+            await db.commit()
+
             if execution == "http-post":
                 import httpx
 

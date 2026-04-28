@@ -46,7 +46,7 @@ export function ToolDropdown({ icon, tools }: ToolDropdownProps) {
         className="
           input-icon-btn
           w-9 h-9 rounded-xl
-          bg-white/5 border border-white/10
+          bg-white/5 border border-[var(--border)]
           text-gray-400
           flex items-center justify-center
           transition-all
@@ -60,7 +60,7 @@ export function ToolDropdown({ icon, tools }: ToolDropdownProps) {
         <div className="
           icon-dropdown absolute bottom-full left-0 mb-2
           bg-[rgba(20,20,20,0.98)] backdrop-blur-xl
-          border border-white/10 rounded-xl
+          border border-[var(--border)] rounded-xl
           min-w-[200px] z-[1000]
           shadow-lg overflow-hidden
         ">
@@ -87,7 +87,7 @@ export function ToolDropdown({ icon, tools }: ToolDropdownProps) {
           )}
 
           {actions.length > 0 && toolItems.length > 0 && (
-            <div className="border-t border-white/10 my-2" />
+            <div className="border-t border-[var(--border)] my-2" />
           )}
 
           {toolItems.length > 0 && (

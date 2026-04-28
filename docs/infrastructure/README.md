@@ -136,7 +136,7 @@ http://{container}.localhost
 minikube start -p tesslate --driver=docker
 
 # Build and load images
-docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 
 # Deploy
@@ -155,7 +155,7 @@ minikube -p tesslate tunnel
 
 # Manual build (ALWAYS use --platform linux/amd64)
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-docker buildx build --platform linux/amd64 --no-cache -t <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:production -f orchestrator/Dockerfile orchestrator/ --push
+docker buildx build --platform linux/amd64 --no-cache -t <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:production -f orchestrator/Dockerfile . --push
 
 # Force pod restart
 kubectl delete pod -n tesslate -l app=tesslate-backend
@@ -274,7 +274,7 @@ kubectl create secret generic tesslate-secrets -n tesslate \
 # Delete from minikube first
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
 # Then rebuild and load
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 kubectl delete pod -n tesslate -l app=tesslate-backend
 ```

@@ -12,9 +12,9 @@ Docker:
   docker cp scripts/seed/seed_marketplace_agents.py tesslate-orchestrator:/tmp/
   docker exec -e PYTHONPATH=/app tesslate-orchestrator python /tmp/seed_marketplace_agents.py
 
-Kubernetes:
-  kubectl cp scripts/seed/seed_marketplace_agents.py tesslate/tesslate-backend-<pod-id>:/tmp/
-  kubectl exec -n tesslate tesslate-backend-<pod-id> -- python /tmp/seed_marketplace_agents.py
+Kubernetes (the tesslate-backend pod has 2 containers; specify -c backend):
+  kubectl --context=tesslate cp scripts/seed/seed_marketplace_agents.py tesslate/tesslate-backend-<pod-id>:/tmp/ -c backend
+  kubectl --context=tesslate exec -n tesslate tesslate-backend-<pod-id> -c backend -- env PYTHONPATH=/app python /tmp/seed_marketplace_agents.py
 """
 
 import asyncio

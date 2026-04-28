@@ -190,6 +190,13 @@ body,
   height: 100%;
   margin: 0;
   padding: 0;
+  /* App-shell layout: the page itself never scrolls. Any scrolling
+     happens inside explicit overflow-auto containers (sidebar list,
+     chat thread, etc.). Without this, wheel events that fall on
+     non-scrollable areas (e.g., the sidebar header / team-switcher row)
+     bubble up to the document and yank the whole layout. */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -810,6 +817,24 @@ textarea {
 
 .tiptap-editor.ProseMirror a:hover {
   color: #fa9f35;
+}
+
+/* Pulse highlight used by MarketplaceSidebar when the Deploy hub deep-links
+   the user to a specific category (e.g., "Deploy Targets"). The header
+   briefly glows so the focus signal is visible above the canvas. */
+@keyframes marketplace-category-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent);
+    background-color: var(--sidebar-hover);
+  }
+  35% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 35%, transparent);
+    background-color: color-mix(in srgb, var(--primary) 16%, var(--sidebar-hover));
+  }
+}
+
+.marketplace-category-header.is-pulsing {
+  animation: marketplace-category-pulse 0.7s ease-in-out 2;
 }
 
 /* Prevent mobile zoom on input focus while maintaining accessibility */

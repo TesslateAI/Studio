@@ -1,28 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Cpu,
-  Plus,
-  Key,
-  Trash,
-  LockKey,
-  Rocket,
-  Plugs,
-  Eye,
-  EyeSlash,
-  X,
-  MagnifyingGlass,
-  ToggleLeft,
-  ToggleRight,
-} from '@phosphor-icons/react';
+import { motion } from 'framer-motion';
+import { LockKeyhole, Plus, Rocket, Search, Server, X } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { LoadingSpinner } from '../../components/PulsingGridSpinner';
 import {
   CustomProviderCard,
   CustomProviderModal,
   type CustomProvider,
 } from '../../components/settings/CustomProviderComponents';
+import { ProviderTile, type ProviderTileStatus } from '../../components/models/ProviderTile';
+import { ProviderSetupDrawer } from '../../components/models/ProviderSetupDrawer';
+import { ActiveModelRow } from '../../components/models/ActiveModelRow';
+import { resolveProviderMeta } from '../../components/models/providers';
+import { staggerContainer, staggerItem } from '../../components/cards';
 import { marketplaceApi, secretsApi } from '../../lib/api';
-import toast from 'react-hot-toast';
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -61,315 +53,42 @@ export interface Provider {
   api_type?: string;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────
-
-function formatCreditsPerMillion(usdPer1M: number): string {
-  const credits = usdPer1M * 100;
-  if (credits === 0) return '0';
-  if (Number.isInteger(credits)) return credits.toLocaleString();
-  return credits.toFixed(1);
+interface TileEntry {
+  provider: Provider;
+  /** Only set when this tile represents a user-created custom provider. */
+  customProvider?: CustomProvider;
 }
 
-function getProviderLabel(provider: string, providerName?: string): string {
-  if (providerName) return providerName;
-  const labels: Record<string, string> = {
-    internal: 'Tesslate',
-    openai: 'OpenAI',
-    anthropic: 'Anthropic',
-    groq: 'Groq',
-    together: 'Together AI',
-    deepseek: 'DeepSeek',
-    fireworks: 'Fireworks',
-    openrouter: 'OpenRouter',
-    'nano-gpt': 'NanoGPT',
-  };
-  return labels[provider] || provider.charAt(0).toUpperCase() + provider.slice(1);
-}
-
-// ─── ModelCard ──────────────────────────────────────────────────────
-
-function ModelCard({
-  model,
-  onToggle,
-  onDelete,
-}: {
-  model: ModelInfo;
-  onToggle: (id: string, enabled: boolean) => void;
-  onDelete?: (customId: string) => void;
-}) {
-  const isDisabled = model.disabled;
-  const displayName = model.name.includes('/') ? model.name.split('/').pop() : model.name;
-
-  return (
-    <div
-      className={`bg-[var(--surface-hover)] border rounded-[var(--radius)] p-3 transition-all ${
-        isDisabled
-          ? 'border-[var(--border)] opacity-50'
-          : 'border-[var(--border)] hover:border-[var(--border-hover)]'
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span
-            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-              model.health === 'operational'
-                ? 'bg-[var(--status-success)]'
-                : model.health === 'unhealthy'
-                  ? 'bg-[var(--status-error)]'
-                  : isDisabled
-                    ? 'bg-[var(--text-subtle)]'
-                    : 'bg-[var(--text-muted)]'
-            }`}
-          />
-          <div className="min-w-0">
-            <div className="text-xs font-medium text-[var(--text)] truncate">{displayName}</div>
-            {model.pricing && (model.pricing.input > 0 || model.pricing.output > 0) && (
-              <div className="text-[10px] text-[var(--text-subtle)] font-mono mt-0.5">
-                {formatCreditsPerMillion(model.pricing.input)}/
-                {formatCreditsPerMillion(model.pricing.output)} per 1M
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {model.custom_id && onDelete && (
-            <button
-              onClick={() => onDelete(model.custom_id!)}
-              className="btn btn-icon btn-sm btn-danger"
-              title="Remove"
-            >
-              <X size={12} />
-            </button>
-          )}
-          <button
-            onClick={() => onToggle(model.id, !!isDisabled)}
-            className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
-            title={isDisabled ? 'Enable model' : 'Disable model'}
-          >
-            {isDisabled ? (
-              <ToggleLeft size={18} />
-            ) : (
-              <ToggleRight size={18} className="text-[var(--primary)]" />
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── ApiKeyCard ─────────────────────────────────────────────────────
-
-function ApiKeyCard({ apiKey, onReload }: { apiKey: ApiKey; onReload: () => void }) {
-  const [showDelete, setShowDelete] = useState(false);
-
-  const handleDelete = async () => {
-    try {
-      await secretsApi.deleteApiKey(Number(apiKey.id));
-      toast.success('API key deleted');
-      onReload();
-    } catch {
-      toast.error('Failed to delete API key');
-    }
-  };
-
-  return (
-    <div className="bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius)] p-3 flex items-center justify-between">
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="w-1.5 h-1.5 rounded-full bg-[var(--status-success)] flex-shrink-0" />
-        <div className="min-w-0">
-          <div className="text-xs font-medium text-[var(--text)] capitalize">{apiKey.provider}</div>
-          {apiKey.key_name && (
-            <div className="text-[11px] text-[var(--text-muted)]">{apiKey.key_name}</div>
-          )}
-          <div className="text-[10px] text-[var(--text-subtle)] font-mono mt-0.5">
-            {apiKey.key_preview}
-          </div>
-        </div>
-      </div>
-
-      <button onClick={() => setShowDelete(true)} className="btn btn-icon btn-sm btn-danger">
-        <Trash size={12} />
-      </button>
-
-      {showDelete && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] p-5 max-w-sm">
-            <h3 className="text-xs font-semibold text-[var(--text)] mb-2">Delete API Key?</h3>
-            <p className="text-xs text-[var(--text-muted)] mb-4">
-              Delete this {apiKey.provider} key? This cannot be undone.
-            </p>
-            <div className="flex items-center gap-2 justify-end">
-              <button onClick={() => setShowDelete(false)} className="btn">
-                Cancel
-              </button>
-              <button onClick={handleDelete} className="btn btn-danger">
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── AddApiKeyModal ─────────────────────────────────────────────────
-
-function AddApiKeyModal({
-  providers,
-  customProviders = [],
-  onClose,
-  onSuccess,
-}: {
+interface ModelsPageProps {
+  models: ModelInfo[];
+  apiKeys: ApiKey[];
   providers: Provider[];
-  customProviders?: CustomProvider[];
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [provider, setProvider] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [keyName, setKeyName] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const selectedCustomProvider = customProviders.find((p) => p.slug === provider);
-  const isCustomProvider = !!selectedCustomProvider;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await secretsApi.addApiKey({
-        provider,
-        api_key: apiKey,
-        key_name: keyName || undefined,
-        base_url: baseUrl || undefined,
-      });
-      toast.success('API key added');
-      onSuccess();
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { detail?: string } } };
-      toast.error(err.response?.data?.detail || 'Failed to add API key');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] max-w-md w-full p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xs font-semibold text-[var(--text)]">Add API Key</h2>
-          <button onClick={onClose} className="btn btn-icon btn-sm">
-            <X size={14} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">
-              Provider
-            </label>
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
-              required
-            >
-              <option value="">Select a provider...</option>
-              <optgroup label="Built-in Providers">
-                {providers
-                  .filter((p) => p.requires_key)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </optgroup>
-              {customProviders.length > 0 && (
-                <optgroup label="Custom Providers">
-                  {customProviders.map((p) => (
-                    <option key={p.slug} value={p.slug}>
-                      {p.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">
-              API Key
-            </label>
-            <div className="relative">
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="w-full px-2 py-1.5 pr-8 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                placeholder="sk-..."
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-subtle)] hover:text-[var(--text-muted)]"
-              >
-                {showKey ? <EyeSlash size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">
-              Name (optional)
-            </label>
-            <input
-              type="text"
-              value={keyName}
-              onChange={(e) => setKeyName(e.target.value)}
-              className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
-              placeholder="My API Key"
-            />
-          </div>
-
-          {isCustomProvider && (
-            <div>
-              <label className="block text-[11px] font-medium text-[var(--text-muted)] mb-1">
-                Base URL (optional)
-              </label>
-              <input
-                type="url"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                placeholder={selectedCustomProvider?.base_url || 'https://api.example.com/v1'}
-              />
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 justify-end pt-3 border-t border-[var(--border)]">
-            <button type="button" onClick={onClose} disabled={loading} className="btn">
-              Cancel
-            </button>
-            <button type="submit" disabled={loading} className="btn btn-filled">
-              {loading ? (
-                'Adding...'
-              ) : (
-                <>
-                  <Plus size={14} /> Add Key
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
+  customProviders: CustomProvider[];
+  byokEnabled: boolean | null;
+  onToggleModel: (modelId: string, currentlyDisabled: boolean) => void;
+  /** Reload api keys + providers list. */
+  onReload: () => void;
+  /** Reload custom provider list. */
+  onReloadProviders: () => void;
+  /** Reload models list. */
+  onReloadModels: () => void;
 }
+
+// ─── Synthetic Tesslate provider ──────────────────────────────────────
+//
+// The Tesslate (system) tile isn't returned by /api/secrets/providers
+// because it doesn't accept a key — we synthesize one so it gets the
+// same tile treatment as built-ins.
+
+const TESSLATE_PROVIDER: Provider = {
+  id: 'internal',
+  name: 'Tesslate',
+  description:
+    'Frontier and open-source models metered against your subscription credits. No setup required.',
+  auth_type: 'none',
+  website: 'https://tesslate.com',
+  requires_key: false,
+};
 
 // ─── Main ModelsPage ────────────────────────────────────────────────
 
@@ -383,55 +102,127 @@ export default function ModelsPage({
   onReload,
   onReloadProviders,
   onReloadModels,
-}: {
-  models: ModelInfo[];
-  apiKeys: ApiKey[];
-  providers: Provider[];
-  customProviders: CustomProvider[];
-  byokEnabled: boolean | null;
-  onToggleModel: (modelId: string, enable: boolean) => void;
-  onReload: () => void;
-  onReloadProviders: () => void;
-  onReloadModels: () => void;
-}) {
+}: ModelsPageProps) {
   const navigate = useNavigate();
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [activeProviderKey, setActiveProviderKey] = useState<string | null>(null);
   const [showProviderModal, setShowProviderModal] = useState(false);
   const [editingProvider, setEditingProvider] = useState<CustomProvider | null>(null);
-  const [modelSearch, setModelSearch] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
-  const [addingModelProvider, setAddingModelProvider] = useState<string | null>(null);
-  const [newModelId, setNewModelId] = useState('');
-  const [addingModelLoading, setAddingModelLoading] = useState(false);
-  const [subTab, setSubTab] = useState<'models' | 'keys' | 'providers'>('models');
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [search, setSearch] = useState('');
+  const [filterProvider, setFilterProvider] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (showSearch) searchInputRef.current?.focus();
-  }, [showSearch]);
+  // Build the tile-grid entries: Tesslate first, then built-ins, then custom providers.
+  const tileEntries = useMemo<TileEntry[]>(() => {
+    const builtIn: TileEntry[] = [TESSLATE_PROVIDER, ...providers].map((p) => ({ provider: p }));
+    const custom: TileEntry[] = customProviders.map((cp) => ({
+      provider: {
+        id: cp.slug,
+        name: cp.name,
+        description: `Custom ${cp.api_type || 'OpenAI-compatible'} endpoint at ${cp.base_url}`,
+        auth_type: 'api_key',
+        website: '',
+        requires_key: true,
+        base_url: cp.base_url,
+        api_type: cp.api_type,
+      },
+      customProvider: cp,
+    }));
+    return [...builtIn, ...custom];
+  }, [providers, customProviders]);
 
-  const handleAddModel = async (provider: string) => {
-    if (!newModelId.trim()) return;
-    setAddingModelLoading(true);
+  // Group models by provider for fast lookups.
+  const modelsByProvider = useMemo(() => {
+    const map: Record<string, ModelInfo[]> = {};
+    for (const m of models) {
+      const key = m.source === 'system' ? 'internal' : m.provider;
+      if (!map[key]) map[key] = [];
+      map[key].push(m);
+    }
+    return map;
+  }, [models]);
+
+  const enabledModels = useMemo(() => models.filter((m) => !m.disabled), [models]);
+
+  const activeModels = useMemo(() => {
+    let list = enabledModels;
+    if (filterProvider) {
+      list = list.filter((m) =>
+        m.source === 'system' ? filterProvider === 'internal' : m.provider === filterProvider
+      );
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [enabledModels, filterProvider, search]);
+
+  // Provider chip filter shows only providers that actually have enabled models.
+  const filterChips = useMemo(() => {
+    const seen = new Set<string>();
+    const chips: { key: string; name: string; count: number }[] = [];
+    for (const m of enabledModels) {
+      const key = m.source === 'system' ? 'internal' : m.provider;
+      if (seen.has(key)) {
+        const existing = chips.find((c) => c.key === key);
+        if (existing) existing.count += 1;
+      } else {
+        seen.add(key);
+        const meta = resolveProviderMeta(key, m.provider_name);
+        chips.push({ key, name: meta.name, count: 1 });
+      }
+    }
+    return chips;
+  }, [enabledModels]);
+
+  const computeTileStatus = (
+    hasKey: boolean,
+    requiresKey: boolean
+  ): ProviderTileStatus => {
+    if (!requiresKey) return 'builtin';
+    if (hasKey) return 'connected';
+    if (byokEnabled === false) return 'locked';
+    return 'available';
+  };
+
+  const computeCheapest = (
+    list: ModelInfo[]
+  ): { input: number; output: number } | null => {
+    let cheapest: { input: number; output: number } | null = null;
+    for (const m of list) {
+      if (!m.pricing) continue;
+      const total = m.pricing.input + m.pricing.output;
+      if (
+        !cheapest ||
+        total < cheapest.input + cheapest.output
+      ) {
+        cheapest = m.pricing;
+      }
+    }
+    return cheapest;
+  };
+
+  const handleTileClick = (entry: TileEntry) => {
+    const requiresKey = entry.provider.requires_key;
+    if (byokEnabled === false && requiresKey) {
+      navigate('/settings/billing');
+      return;
+    }
+    setActiveProviderKey(entry.provider.id);
+  };
+
+  const handleDeleteCustomProvider = async (providerId: string) => {
     try {
-      await marketplaceApi.addCustomModel({
-        model_id: newModelId.trim(),
-        model_name: newModelId.trim(),
-        provider,
-      });
-      toast.success('Model added');
-      setNewModelId('');
-      setAddingModelProvider(null);
-      onReloadModels();
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } };
-      toast.error(axiosErr.response?.data?.detail || 'Failed to add model');
-    } finally {
-      setAddingModelLoading(false);
+      await secretsApi.deleteCustomProvider(providerId);
+      toast.success('Endpoint removed');
+      onReloadProviders();
+    } catch {
+      toast.error('Failed to remove endpoint');
     }
   };
 
-  const handleDeleteModel = async (customId: string) => {
+  const handleDeleteCustomModel = async (customId: string) => {
     try {
       await marketplaceApi.deleteCustomModel(customId);
       toast.success('Model removed');
@@ -441,362 +232,250 @@ export default function ModelsPage({
     }
   };
 
-  const handleDeleteProvider = async (providerId: string) => {
-    try {
-      await secretsApi.deleteCustomProvider(providerId);
-      toast.success('Provider deleted');
-      onReloadProviders();
-    } catch {
-      toast.error('Failed to delete provider');
-    }
+  const handleProviderChanged = () => {
+    onReload();
+    onReloadModels();
+    onReloadProviders();
   };
 
-  // Filter + group models
-  const filteredModels = models.filter(
-    (m) =>
-      !modelSearch ||
-      m.name.toLowerCase().includes(modelSearch.toLowerCase()) ||
-      m.id.toLowerCase().includes(modelSearch.toLowerCase())
-  );
-  const systemModels = filteredModels.filter((m) => m.source === 'system');
-  const providerModels = filteredModels.filter((m) => m.source === 'provider');
-  const customModels = filteredModels.filter((m) => m.source === 'custom');
-
-  const providerGroups: Record<string, { label: string; models: ModelInfo[] }> = {};
-  for (const m of providerModels) {
-    if (!providerGroups[m.provider])
-      providerGroups[m.provider] = {
-        label: getProviderLabel(m.provider, m.provider_name),
-        models: [],
-      };
-    providerGroups[m.provider].models.push(m);
-  }
-  for (const k of apiKeys) {
-    if (!providerGroups[k.provider] && k.provider !== 'internal')
-      providerGroups[k.provider] = { label: getProviderLabel(k.provider), models: [] };
-  }
-
-  if (byokEnabled === null)
+  if (byokEnabled === null) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <LoadingSpinner />
+      <div className="flex flex-1 items-center justify-center">
+        <LoadingSpinner message="Loading models…" size={60} />
       </div>
     );
+  }
+
+  const activeEntry = activeProviderKey
+    ? tileEntries.find((e) => e.provider.id === activeProviderKey)
+    : null;
+  const activeMeta = activeEntry
+    ? resolveProviderMeta(activeEntry.provider.id, activeEntry.provider.name)
+    : null;
+  const activeKey = activeEntry
+    ? apiKeys.find((k) => k.provider === activeEntry.provider.id)
+    : undefined;
+  const activeProviderModels = activeEntry
+    ? modelsByProvider[activeEntry.provider.id] || []
+    : [];
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col">
-      {/* Toolbar */}
-      <div
-        className="h-10 flex items-center justify-between flex-shrink-0"
-        style={{ paddingLeft: '7px', paddingRight: '10px' }}
-      >
-        <div
-          className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none"
-          style={{
-            maskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)',
-            WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 24px), transparent)',
-          }}
-        >
-          <button
-            onClick={() => setSubTab('models')}
-            className={`btn shrink-0 ${subTab === 'models' ? 'btn-tab-active' : 'btn-tab'}`}
-          >
-            Models <span className="text-[10px] opacity-50 ml-0.5">{models.length}</span>
-          </button>
-          <button
-            onClick={() => setSubTab('keys')}
-            className={`btn shrink-0 ${subTab === 'keys' ? 'btn-tab-active' : 'btn-tab'}`}
-          >
-            API Keys <span className="text-[10px] opacity-50 ml-0.5">{apiKeys.length}</span>
-          </button>
-          {byokEnabled !== false && (
-            <button
-              onClick={() => setSubTab('providers')}
-              className={`btn shrink-0 ${subTab === 'providers' ? 'btn-tab-active' : 'btn-tab'}`}
-            >
-              Providers{' '}
-              <span className="text-[10px] opacity-50 ml-0.5">
-                {customProviders.length + providers.length}
-              </span>
-            </button>
-          )}
-        </div>
+    <div className="flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+        {/* Header */}
+        <header className="mb-6">
+          <h1 className="text-lg font-semibold text-[var(--text)]">Models</h1>
+          <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-[var(--text-muted)]">
+            Choose which models power your agents. Bring your own provider keys for direct access,
+            or run with the bundled Tesslate models metered against your subscription credits.
+          </p>
+        </header>
 
-        <div className="flex items-center gap-[2px]">
-          {subTab === 'models' &&
-            (showSearch ? (
-              <div className="flex items-center gap-1.5 bg-[var(--surface)] border border-[var(--border)] rounded-full px-2.5 h-[29px]">
-                <MagnifyingGlass size={16} className="text-[var(--text-subtle)]" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={modelSearch}
-                  onChange={(e) => setModelSearch(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      setModelSearch('');
-                      setShowSearch(false);
-                    }
-                  }}
-                  placeholder="Search..."
-                  className="bg-transparent border-none outline-none text-xs w-24 sm:w-32 text-[var(--text)]"
+        {/* BYOK upsell banner */}
+        {byokEnabled === false && (
+          <div className="mb-6 flex items-center gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-amber-500/10">
+              <LockKeyhole size={16} className="text-amber-500" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-[var(--text)]">
+                Bring your own keys is on paid plans
+              </div>
+              <p className="text-[11.5px] text-[var(--text-muted)]">
+                Use the bundled Tesslate models below. Upgrade to connect OpenAI, Anthropic, and
+                custom endpoints with your own keys.
+              </p>
+            </div>
+            <button
+              onClick={() => navigate('/settings/billing')}
+              className="btn btn-filled btn-sm flex-shrink-0"
+            >
+              <Rocket size={12} />
+              Upgrade
+            </button>
+          </div>
+        )}
+
+        {/* Provider tile grid */}
+        <motion.div
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          variants={staggerContainer}
+          initial="hidden"
+          animate="visible"
+        >
+          {tileEntries.map((entry) => {
+            const meta = resolveProviderMeta(entry.provider.id, entry.provider.name);
+            const list = modelsByProvider[entry.provider.id] || [];
+            const hasKey = apiKeys.some((k) => k.provider === entry.provider.id);
+            const status = computeTileStatus(hasKey, entry.provider.requires_key);
+            return (
+              <motion.div key={entry.provider.id} variants={staggerItem}>
+                <ProviderTile
+                  meta={meta}
+                  tagline={entry.provider.description}
+                  status={status}
+                  modelCount={list.length}
+                  sampleModels={list.slice(0, 3)}
+                  cheapestPrice={computeCheapest(list)}
+                  onClick={() => handleTileClick(entry)}
                 />
+              </motion.div>
+            );
+          })}
+        </motion.div>
+
+        {/* Active models section */}
+        <section className="mt-8">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              Active models
+              <span className="ml-2 normal-case tracking-normal text-[var(--text-subtle)]">
+                {activeModels.length} of {enabledModels.length}
+              </span>
+            </h2>
+            <div className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 h-[29px]">
+              <Search size={12} className="text-[var(--text-subtle)]" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search active models"
+                className="w-32 border-none bg-transparent text-[11.5px] text-[var(--text)] placeholder:text-[var(--text-subtle)] outline-none sm:w-48"
+              />
+              {search && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setModelSearch('');
-                    setShowSearch(false);
-                  }}
+                  onClick={() => setSearch('')}
+                  className="text-[var(--text-subtle)] hover:text-[var(--text)]"
+                  aria-label="Clear search"
                 >
-                  <X size={12} className="text-[var(--text-subtle)]" />
+                  <X size={12} />
                 </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowSearch(true)}
-                className={`btn btn-icon ${modelSearch ? 'btn-active' : ''}`}
-              >
-                <MagnifyingGlass size={16} />
-              </button>
-            ))}
-          {subTab === 'keys' && byokEnabled !== false && (
-            <button onClick={() => setShowAddModal(true)} className="btn btn-filled">
-              <Plus size={14} /> Add Key
-            </button>
-          )}
-          {subTab === 'providers' && byokEnabled !== false && (
-            <button
-              onClick={() => {
-                setEditingProvider(null);
-                setShowProviderModal(true);
-              }}
-              className="btn"
-            >
-              <Plus size={14} /> Add Provider
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        {/* Models */}
-        {subTab === 'models' &&
-          (models.length === 0 ? (
-            <div className="text-center py-12">
-              <Cpu size={28} className="mx-auto mb-3 text-[var(--text-subtle)]" />
-              <p className="text-xs text-[var(--text-muted)]">No models available</p>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {systemModels.length > 0 && (
-                <div>
-                  <h4 className="text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider mb-2">
-                    Tesslate (System)
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {systemModels.map((m) => (
-                      <ModelCard key={m.id} model={m} onToggle={onToggleModel} />
-                    ))}
-                  </div>
-                </div>
               )}
-
-              {Object.entries(providerGroups).map(([key, group]) => (
-                <div key={key}>
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
-                      {group.label}
-                    </h4>
-                    <button
-                      onClick={() => {
-                        setAddingModelProvider(addingModelProvider === key ? null : key);
-                        setNewModelId('');
-                      }}
-                      className="btn btn-sm"
-                    >
-                      <Plus size={12} /> Add Model
-                    </button>
-                  </div>
-                  {addingModelProvider === key && (
-                    <div className="flex items-center gap-2 mb-3">
-                      <input
-                        value={newModelId}
-                        onChange={(e) => setNewModelId(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleAddModel(key);
-                          if (e.key === 'Escape') {
-                            setAddingModelProvider(null);
-                            setNewModelId('');
-                          }
-                        }}
-                        placeholder="e.g. gpt-4o-audio-preview"
-                        autoFocus
-                        className="flex-1 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)]"
-                      />
-                      <button
-                        onClick={() => handleAddModel(key)}
-                        disabled={!newModelId.trim() || addingModelLoading}
-                        className="btn btn-filled btn-sm"
-                      >
-                        {addingModelLoading ? '...' : 'Add'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setAddingModelProvider(null);
-                          setNewModelId('');
-                        }}
-                        className="btn btn-sm"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {group.models.map((m) => (
-                      <ModelCard
-                        key={m.id}
-                        model={m}
-                        onToggle={onToggleModel}
-                        onDelete={handleDeleteModel}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-
-              {customModels.length > 0 && (
-                <div>
-                  <h4 className="text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider mb-2">
-                    Custom Models
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-                    {customModels.map((m) => (
-                      <ModelCard
-                        key={m.id}
-                        model={m}
-                        onToggle={onToggleModel}
-                        onDelete={handleDeleteModel}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {filteredModels.length === 0 && modelSearch && (
-                <p className="text-xs text-[var(--text-muted)] text-center py-4">
-                  No models matching &ldquo;{modelSearch}&rdquo;
-                </p>
-              )}
-            </div>
-          ))}
-
-        {/* API Keys */}
-        {subTab === 'keys' &&
-          (byokEnabled === false ? (
-            <div className="text-center py-12">
-              <LockKey size={28} className="mx-auto mb-3 text-[var(--text-subtle)]" />
-              <p className="text-xs font-medium text-[var(--text)] mb-1">Bring Your Own Key</p>
-              <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto mb-4">
-                Use your own API keys for OpenAI, Anthropic, and more. Available on paid plans.
-              </p>
-              <button onClick={() => navigate('/settings/billing')} className="btn btn-filled">
-                <Rocket size={14} /> Upgrade Plan
-              </button>
-            </div>
-          ) : apiKeys.length === 0 ? (
-            <div className="text-center py-12">
-              <Key size={28} className="mx-auto mb-3 text-[var(--text-subtle)]" />
-              <p className="text-xs text-[var(--text-muted)] mb-3">No API keys configured</p>
-              <button onClick={() => setShowAddModal(true)} className="btn btn-filled">
-                Add Your First API Key
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {apiKeys.map((key) => (
-                <ApiKeyCard key={key.id} apiKey={key} onReload={onReload} />
-              ))}
-            </div>
-          ))}
-
-        {/* Providers */}
-        {subTab === 'providers' && byokEnabled !== false && (
-          <div className="space-y-5">
-            {customProviders.length > 0 ? (
-              <div>
-                <h4 className="text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider mb-2">
-                  Custom Providers
-                </h4>
-                <div className="space-y-2">
-                  {customProviders.map((cp) => (
-                    <CustomProviderCard
-                      key={cp.id}
-                      provider={cp}
-                      onEdit={() => {
-                        setEditingProvider(cp);
-                        setShowProviderModal(true);
-                      }}
-                      onDelete={handleDeleteProvider}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Plugs size={24} className="mx-auto mb-2 text-[var(--text-subtle)]" />
-                <p className="text-xs text-[var(--text-muted)] mb-1">No custom providers</p>
-                <p className="text-[11px] text-[var(--text-subtle)]">
-                  Connect Ollama, vLLM, or any OpenAI-compatible API
-                </p>
-              </div>
-            )}
-
-            <div>
-              <h4 className="text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider mb-2">
-                Supported Providers
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {providers.map((p) => {
-                  const hasKey = apiKeys.some((k) => k.provider === p.id);
-                  return (
-                    <div
-                      key={p.id}
-                      className="bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius-medium)] p-3"
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${hasKey ? 'bg-[var(--status-success)]' : 'bg-[var(--text-subtle)]'}`}
-                        />
-                        <span className="text-xs font-medium text-[var(--text)]">{p.name}</span>
-                        {hasKey && (
-                          <span className="text-[10px] text-[var(--text-subtle)] ml-auto">
-                            Connected
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-[var(--text-muted)]">{p.description}</p>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
           </div>
+
+          {filterChips.length > 1 && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setFilterProvider(null)}
+                className={`btn btn-sm ${filterProvider === null ? 'btn-tab-active' : 'btn-tab'}`}
+              >
+                All <span className="ml-1 opacity-50">{enabledModels.length}</span>
+              </button>
+              {filterChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() =>
+                    setFilterProvider(filterProvider === chip.key ? null : chip.key)
+                  }
+                  className={`btn btn-sm ${filterProvider === chip.key ? 'btn-tab-active' : 'btn-tab'}`}
+                >
+                  {chip.name} <span className="ml-1 opacity-50">{chip.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {enabledModels.length === 0 ? (
+            <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-12 text-center">
+              <p className="text-[12.5px] text-[var(--text-muted)]">No models enabled yet.</p>
+              <p className="mt-1 text-[11px] text-[var(--text-subtle)]">
+                Connect a provider above to start enabling models.
+              </p>
+            </div>
+          ) : activeModels.length === 0 ? (
+            <p className="py-8 text-center text-[12px] text-[var(--text-muted)]">
+              {search ? `No models match "${search}".` : 'No models in this filter.'}
+            </p>
+          ) : (
+            <div className="overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
+              <ul className="divide-y divide-[var(--border)]">
+                {activeModels.map((m) => {
+                  const providerKey = m.source === 'system' ? 'internal' : m.provider;
+                  const meta = resolveProviderMeta(providerKey, m.provider_name);
+                  return (
+                    <ActiveModelRow
+                      key={m.id}
+                      model={m}
+                      providerMeta={meta}
+                      onToggle={onToggleModel}
+                      onDelete={m.custom_id ? handleDeleteCustomModel : undefined}
+                    />
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </section>
+
+        {/* Custom endpoints section */}
+        {byokEnabled !== false && (
+          <section className="mt-8">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                  Custom endpoints
+                </h2>
+                <p className="mt-1 text-[11.5px] text-[var(--text-muted)]">
+                  Connect Ollama, vLLM, or any OpenAI-compatible service running on your own infra.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingProvider(null);
+                  setShowProviderModal(true);
+                }}
+                className="btn btn-sm flex-shrink-0"
+              >
+                <Plus size={12} />
+                Add endpoint
+              </button>
+            </div>
+
+            {customProviders.length === 0 ? (
+              <div className="rounded-[var(--radius)] border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-8 text-center">
+                <Server size={20} className="mx-auto mb-2 text-[var(--text-subtle)]" />
+                <p className="text-[12px] text-[var(--text-muted)]">No custom endpoints yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {customProviders.map((cp) => (
+                  <CustomProviderCard
+                    key={cp.id}
+                    provider={cp}
+                    onEdit={() => {
+                      setEditingProvider(cp);
+                      setShowProviderModal(true);
+                    }}
+                    onDelete={handleDeleteCustomProvider}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         )}
       </div>
 
-      {showAddModal && (
-        <AddApiKeyModal
-          providers={providers}
-          customProviders={customProviders}
-          onClose={() => setShowAddModal(false)}
-          onSuccess={() => {
-            setShowAddModal(false);
-            onReload();
-            onReloadModels();
-          }}
+      {/* Drawer */}
+      {activeEntry && activeMeta && (
+        <ProviderSetupDrawer
+          open
+          meta={activeMeta}
+          providerId={activeEntry.provider.id}
+          requiresKey={activeEntry.provider.requires_key}
+          existingKey={activeKey}
+          providerModels={activeProviderModels}
+          onClose={() => setActiveProviderKey(null)}
+          onToggleModel={onToggleModel}
+          onChanged={handleProviderChanged}
         />
       )}
+
+      {/* Custom provider modal (create/edit) */}
       {showProviderModal && (
         <CustomProviderModal
           existing={editingProvider}

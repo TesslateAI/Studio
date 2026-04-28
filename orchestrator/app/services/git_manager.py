@@ -58,6 +58,21 @@ class GitManager:
         Raises:
             RuntimeError: If command execution fails or git returns non-zero exit code
         """
+        # Serialize git ops per-project so concurrent agents can't corrupt
+        # the index. Sub-second ops + blocking acquire = negligible overhead
+        # in the single-agent case; prevents "fatal: Unable to create
+        # '.git/index.lock'" when multiple agents run in parallel.
+        from .distributed_lock import get_distributed_lock
+
+        dlock = get_distributed_lock()
+        async with dlock.wait_for(
+            f"git:{self.project_id}",
+            ttl_seconds=max(timeout, 60),
+            max_wait_seconds=float(timeout),
+        ):
+            return await self._execute_git_command_inner(git_args, timeout)
+
+    async def _execute_git_command_inner(self, git_args: list[str], timeout: int) -> str:
         from .orchestration import is_local_mode
 
         if is_local_mode():

@@ -31,9 +31,10 @@ export function SettingsLayout() {
       ? location.pathname === '/settings/messaging'
       : location.pathname === path;
 
+  // Channels live in Library → Channels (not Settings) — they're now a
+  // first-class library section, not a settings panel.
   const messagingSubTabs = [
     { label: 'Connections', path: '/settings/messaging' },
-    { label: 'Channels', path: '/settings/messaging/channels' },
     { label: 'Schedules', path: '/settings/messaging/schedules' },
   ];
 

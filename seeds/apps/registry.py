@@ -70,27 +70,19 @@ SEED_APPS: list[SeedApp] = [
         ),
     ),
     SeedApp(
-        slug="markitdown",
-        assets_dir=SEEDS_ROOT / "markitdown",
+        slug="damian-app",
+        assets_dir=SEEDS_ROOT / "damian-app",
         description=(
-            "Microsoft MarkItDown wrapped in a minimal FastAPI upload UI — "
-            "converts PDF/Office/media files to Markdown for LLM pipelines."
+            "Next.js 16 + React 19 + Tailwind starter on the nextjs-16-base "
+            "template. Boots a live dev server with Turbopack; ready to hack on."
         ),
     ),
     SeedApp(
-        slug="deer-flow",
-        assets_dir=SEEDS_ROOT / "deer-flow",
+        slug="law-onboarding",
+        assets_dir=SEEDS_ROOT / "law-onboarding",
         description=(
-            "ByteDance DeerFlow 2.0 — open-source deep-research super-agent "
-            "harness. Runs from a pre-built image; configure an LLM key."
-        ),
-    ),
-    SeedApp(
-        slug="mirofish",
-        assets_dir=SEEDS_ROOT / "mirofish",
-        description=(
-            "MiroFish swarm-intelligence prediction engine. Multi-agent "
-            "simulation with a web UI; requires an LLM API key."
+            "Legal client-intake + document-redline demo. Next.js 16 + NextAuth "
+            "dashboard with a built-in demo-data layer (no database required)."
         ),
     ),
 ]

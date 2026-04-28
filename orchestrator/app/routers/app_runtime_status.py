@@ -28,13 +28,16 @@ from ..auth import get_current_active_user_or_query
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
-    AgentSchedule,
     AppInstance,
     Container,
     ContainerConnection,
     Project,
-    ScheduleTriggerEvent,
     User,
+)
+from ..models_automations import (
+    AutomationDefinition,
+    AutomationEvent,
+    AutomationTrigger,
 )
 from ..permissions import Permission, get_effective_project_role, has_permission
 from ..services.apps.runtime_urls import (
@@ -142,11 +145,16 @@ def _build_runtime_payload(
     only_primary = len(containers) <= 1
     use_app_url = bool(app_handle and creator_handle)
 
+    # Reuse the Ingress builder's directory resolution so the UI's URL
+    # always matches the hostname the Ingress was created with. Without
+    # this, a container with ``directory='.'`` lands ingress under
+    # ``{project_slug}-{uuid_prefix}.{domain}`` but the legacy lookup
+    # ``c.directory or c.name`` evaluates ``"."`` truthy and renders
+    # ``{project_slug}-..{domain}`` — DNS NXDOMAIN, no working preview.
+    from ..services.compute_manager import resolve_k8s_container_dir
+
     for c in containers:
-        # Use directory when present (matches ingress creation in
-        # compute_manager), falling back to sanitized name for service
-        # containers that historically lacked a directory.
-        dir_or_name = c.directory or c.name
+        dir_or_name = resolve_k8s_container_dir(c)
         if use_app_url:
             url = app_container_url(
                 app_handle=app_handle,
@@ -369,6 +377,7 @@ async def start_runtime(
                 },
             )
 
+    from ..services.apps.installer import create_per_pod_signing_key
     from ..services.compute_manager import current_app_instance_id
     from ..services.orchestration import get_orchestrator
 
@@ -378,6 +387,29 @@ async def start_runtime(
     token = current_app_instance_id.set(inst.id)
     try:
         await orchestrator.start_project(project, containers, connections, user.id, db)
+        # Mint the per-pod HMAC signing-key Secret AFTER the namespace
+        # exists. The install router can't write this Secret because the
+        # ``proj-{id}`` namespace is created here, not at install time.
+        # The pod template has already rendered the env reference
+        # ``${secret:app-pod-key-{instance_id}/token}``; if the pod hit
+        # CreateContainerConfigError first because the Secret was missing,
+        # kubelet auto-retries on Secret appearance — the pod will start
+        # within seconds of this call returning.
+        try:
+            await create_per_pod_signing_key(
+                app_instance_id=inst.id,
+                target_namespace=f"proj-{project.id}",
+            )
+        except Exception:
+            logger.warning(
+                "app_runtime_status: per-pod signing-key creation failed "
+                "instance=%s ns=proj-%s (proxy will fall back to "
+                "deterministic-derivation key, but the pod template's "
+                "secretKeyRef will fail to resolve)",
+                inst.id,
+                project.id,
+                exc_info=True,
+            )
     except RuntimeError as e:
         # Concurrent /start — another request holds the env lock and is already
         # bringing the environment up. Return the current rollup idempotently.
@@ -441,16 +473,72 @@ class TriggerEnqueued(BaseModel):
     status: str
 
 
-def _schedule_to_row(s: AgentSchedule) -> ScheduleRow:
-    return ScheduleRow(
-        id=s.id,
-        name=s.name,
-        cron=s.cron_expression,
-        trigger_kind=s.trigger_kind,
-        last_run_at=s.last_run_at,
-        last_status=s.last_status,
-        enabled=bool(s.is_active),
+async def _list_instance_schedules(
+    db: AsyncSession, *, target_project_id: UUID
+) -> list[ScheduleRow]:
+    """Project automation_definitions scoped to an install's runtime project.
+
+    The install's automation_definitions are the ones the installer (or the
+    install-time template materializer) created with
+    ``target_project_id == instance.project_id``. Each row is paired with
+    its first ``automation_triggers`` row to surface ``cron`` / ``kind`` to
+    the existing UI shape — the legacy ``ScheduleRow`` carried a single
+    ``cron`` + ``trigger_kind``, so collapsing the multi-trigger model to
+    "first trigger wins" matches what the UI already renders.
+    """
+    rows = (
+        (
+            await db.execute(
+                select(AutomationDefinition)
+                .where(AutomationDefinition.target_project_id == target_project_id)
+                .order_by(AutomationDefinition.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
     )
+    if not rows:
+        return []
+    triggers_by_definition: dict[UUID, AutomationTrigger] = {}
+    if rows:
+        trigger_rows = (
+            (
+                await db.execute(
+                    select(AutomationTrigger)
+                    .where(
+                        AutomationTrigger.automation_id.in_([r.id for r in rows])
+                    )
+                    .order_by(AutomationTrigger.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for trig in trigger_rows:
+            triggers_by_definition.setdefault(trig.automation_id, trig)
+
+    out: list[ScheduleRow] = []
+    for defn in rows:
+        trig = triggers_by_definition.get(defn.id)
+        cron_expr: str | None = None
+        trigger_kind = "manual"
+        last_run_at = None
+        if trig is not None:
+            trigger_kind = trig.kind
+            cron_expr = (trig.config or {}).get("cron") if isinstance(trig.config, dict) else None
+            last_run_at = trig.last_run_at
+        out.append(
+            ScheduleRow(
+                id=defn.id,
+                name=defn.name,
+                cron=cron_expr,
+                trigger_kind=trigger_kind,
+                last_run_at=last_run_at,
+                last_status=None,
+                enabled=bool(defn.is_active),
+            )
+        )
+    return out
 
 
 @router.get("/{instance_id}/schedules", response_model=list[ScheduleRow])
@@ -461,18 +549,9 @@ async def list_schedules(
 ) -> list[ScheduleRow]:
     inst = await _load_instance(db, instance_id)
     await _authorize(db, inst, user)
-    rows = (
-        (
-            await db.execute(
-                select(AgentSchedule)
-                .where(AgentSchedule.app_instance_id == instance_id)
-                .order_by(AgentSchedule.created_at.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return [_schedule_to_row(s) for s in rows]
+    if inst.project_id is None:
+        return []
+    return await _list_instance_schedules(db, target_project_id=inst.project_id)
 
 
 @router.patch("/{instance_id}/schedules/{schedule_id}", response_model=ScheduleRow)
@@ -485,21 +564,26 @@ async def patch_schedule(
 ) -> ScheduleRow:
     inst = await _load_instance(db, instance_id)
     await _authorize(db, inst, user)
-    sched = (
+    if inst.project_id is None:
+        raise HTTPException(status_code=404, detail="schedule not found")
+    defn = (
         await db.execute(
-            select(AgentSchedule).where(
-                AgentSchedule.id == schedule_id,
-                AgentSchedule.app_instance_id == instance_id,
+            select(AutomationDefinition).where(
+                AutomationDefinition.id == schedule_id,
+                AutomationDefinition.target_project_id == inst.project_id,
             )
         )
     ).scalar_one_or_none()
-    if sched is None:
+    if defn is None:
         raise HTTPException(status_code=404, detail="schedule not found")
     if body.enabled is not None:
-        sched.is_active = body.enabled
+        defn.is_active = body.enabled
     await db.commit()
-    await db.refresh(sched)
-    return _schedule_to_row(sched)
+    rows = await _list_instance_schedules(db, target_project_id=inst.project_id)
+    matching = next((r for r in rows if r.id == schedule_id), None)
+    if matching is None:
+        raise HTTPException(status_code=404, detail="schedule not found")
+    return matching
 
 
 @router.post(
@@ -514,34 +598,47 @@ async def trigger_schedule_manually(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_active_user),
 ) -> TriggerEnqueued:
-    """Manual "Run now" — inserts a ScheduleTriggerEvent directly.
+    """Manual "Run now" — mints an ``AutomationEvent`` (kind=manual) and
+    enqueues ``dispatch_automation_task``.
 
-    Authenticated UI call; the HMAC check lives on the public webhook path.
+    Mirrors the manual-run path on ``/api/automations/{id}/run`` so the
+    install-detail UI doesn't have to do its own dispatcher dance —
+    same primitives, same ARQ queue.
     """
     inst = await _load_instance(db, instance_id)
     await _authorize(db, inst, user)
-    sched = (
+    if inst.project_id is None:
+        raise HTTPException(status_code=404, detail="schedule not found")
+    defn = (
         await db.execute(
-            select(AgentSchedule).where(
-                AgentSchedule.id == schedule_id,
-                AgentSchedule.app_instance_id == instance_id,
+            select(AutomationDefinition).where(
+                AutomationDefinition.id == schedule_id,
+                AutomationDefinition.target_project_id == inst.project_id,
             )
         )
     ).scalar_one_or_none()
-    if sched is None:
+    if defn is None:
         raise HTTPException(status_code=404, detail="schedule not found")
 
-    event = ScheduleTriggerEvent(
+    event = AutomationEvent(
         id=uuid.uuid4(),
-        schedule_id=sched.id,
+        automation_id=defn.id,
+        trigger_id=None,
         payload=payload or {},
+        trigger_kind="manual",
         received_at=datetime.now(tz=UTC),
     )
     db.add(event)
     await db.commit()
+
+    from ..task_queue import get_task_queue
+
+    await get_task_queue().enqueue(
+        "dispatch_automation_task", str(defn.id), str(event.id)
+    )
     logger.info(
-        "app_runtime_status.trigger_schedule_manually schedule=%s event=%s user=%s",
-        schedule_id,
+        "app_runtime_status.trigger_schedule_manually automation=%s event=%s user=%s",
+        defn.id,
         event.id,
         user.id,
     )

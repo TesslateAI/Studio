@@ -38,9 +38,9 @@ export default function AgentStep({ step, toolCallsCollapsed }: AgentStepProps) 
                 <span className="text-[var(--text)]/70">{getToolLabel(toolCall.name)}</span>
                 {hasResult &&
                   (success ? (
-                    <CheckCircle size={12} className="text-green-500" />
+                    <CheckCircle size={12} className="text-[var(--status-success)]" />
                   ) : (
-                    <XCircle size={12} className="text-red-500" />
+                    <XCircle size={12} className="text-[var(--status-error)]" />
                   ))}
                 {(() => {
                   const badge = getTierBadge(toolCall);

@@ -88,6 +88,19 @@ dev = [
     "respx>=0.22.0",
     "ruff>=0.8.4",
     "pyright>=1.1.391",
+    "fakeredis>=2.35.0",
+    "lupa>=2.8",
+]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.21.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "pytest-mock>=3.15.1",
+    "respx>=0.23.1",
+    "fakeredis>=2.35.0",
+    "lupa>=2.8",
 ]
 
 # ============================================================================

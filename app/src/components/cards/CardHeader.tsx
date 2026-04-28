@@ -33,14 +33,14 @@ export function CardHeader({
         <div
           className={clsx(
             iconSizes[iconSize],
-            'rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center overflow-hidden shrink-0 transition-colors group-hover:border-[rgba(var(--primary-rgb),0.3)]'
+            'rounded-xl bg-[var(--bg)] border border-[var(--border)] flex items-center justify-center overflow-hidden shrink-0 transition-colors'
           )}
         >
           {icon}
         </div>
       )}
       <div className="flex-1 min-w-0">
-        <h4 className="font-heading text-sm font-semibold text-[var(--text)] line-clamp-1 group-hover:text-[var(--primary)] transition-colors">
+        <h4 className="font-heading text-sm font-semibold text-[var(--text)] line-clamp-1 transition-colors">
           {title}
         </h4>
         {subtitle &&

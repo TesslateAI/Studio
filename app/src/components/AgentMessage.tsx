@@ -77,9 +77,9 @@ export default function AgentMessage({
             <div
               className={`inline-flex gap-1 px-3 py-2 bg-white/5 rounded-2xl ${stepsToDisplay.length > 0 || agentData.currentThinking ? 'mt-1' : ''}`}
             >
-              <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing"></div>
-              <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-200"></div>
-              <div className="w-2 h-2 rounded-full bg-gray-500 animate-typing animation-delay-400"></div>
+              <div className="w-2 h-2 rounded-full bg-[var(--text-muted)] animate-typing"></div>
+              <div className="w-2 h-2 rounded-full bg-[var(--text-muted)] animate-typing animation-delay-200"></div>
+              <div className="w-2 h-2 rounded-full bg-[var(--text-muted)] animate-typing animation-delay-400"></div>
             </div>
           </>
         )}
@@ -105,11 +105,11 @@ export default function AgentMessage({
                   code: ({ children }) => {
                     const inline = !String(children).includes('\n');
                     return inline ? (
-                      <code className="bg-black/20 px-1.5 py-0.5 rounded text-xs font-mono">
+                      <code className="bg-[var(--code-inline-bg)] text-[var(--code-inline-text)] px-1.5 py-0.5 rounded text-xs font-mono">
                         {children}
                       </code>
                     ) : (
-                      <code className="block bg-black/20 px-3 py-2 rounded my-2 text-xs font-mono overflow-x-auto">
+                      <code className="block bg-[var(--code-block-bg)] text-[var(--code-block-text)] border border-[var(--code-block-border)] px-3 py-2 rounded my-2 text-xs font-mono overflow-x-auto">
                         {children}
                       </code>
                     );

@@ -1328,6 +1328,8 @@ def create_v2_dev_deployment(
     image_pull_secret: str = None,
     extra_env: dict[str, str] | None = None,
     preferred_node: str | None = None,
+    spec_hash: str | None = None,
+    tsinit_restart_policy: str = "never",
 ) -> client.V1Deployment:
     """
     Create a v2 dev container deployment using CSI-backed PVC volumes.
@@ -1398,7 +1400,7 @@ def create_v2_dev_deployment(
             "--grace-period",
             "10s",
             "--restart-policy",
-            "never",
+            tsinit_restart_policy,
             "--sock-path",
             "/tmp/tsinit.sock",
         ],
@@ -1475,8 +1477,17 @@ def create_v2_dev_deployment(
             )
         )
 
+    deployment_annotations = (
+        {"tesslate.io/spec-hash": spec_hash} if spec_hash else None
+    )
+
     return client.V1Deployment(
-        metadata=client.V1ObjectMeta(name=deployment_name, namespace=namespace, labels=labels),
+        metadata=client.V1ObjectMeta(
+            name=deployment_name,
+            namespace=namespace,
+            labels=labels,
+            annotations=deployment_annotations,
+        ),
         spec=client.V1DeploymentSpec(
             replicas=1,
             selector=client.V1LabelSelector(match_labels=selector_labels),

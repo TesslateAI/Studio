@@ -526,7 +526,7 @@ export function ProviderConnectModal({
             <div className="space-y-2">
               {providers.map((provider) => {
                 const info = PROVIDER_INFO[provider.name] || {
-                  icon: '🚀',
+                  icon: '◆',
                   color: 'text-white',
                   bgColor: 'bg-purple-500',
                 };

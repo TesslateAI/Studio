@@ -9,6 +9,7 @@ Steps:
 2. Acquire source files (template snapshot, cache, git clone, or archive).
 3. Resolve project configuration (.tesslate/config.json → fallback).
 4. Place files into Docker volume or K8s btrfs volume.
+5. Initialize git in the project root if no `.git/` already exists.
 
 Container creation is deferred to the Setup page where the user
 can review and adjust the config before committing.
@@ -16,8 +17,14 @@ can review and adjust the config before committing.
 
 from __future__ import annotations
 
+import asyncio
+import io
 import logging
 import os
+import shutil
+import subprocess
+import tarfile
+import tempfile
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -336,6 +343,23 @@ async def setup_project(
                 # Volume already created (shouldn't happen except template_snapshot above)
                 placed = PlacedFiles(volume_id=source.volume_id, node_name=source.node_name)
 
+        # Step 5: Ensure the project has a working git repo.
+        # Every project — base / template / archive / git import — should
+        # have `.git/` so the Repository panel renders local history and
+        # the agent can commit/diff without an extra setup step. Acquired
+        # sources have their `.git/` stripped (intentional — they're
+        # templates, not forks), so we re-init.
+        task.update_progress(85, 100, "Initializing repository...")
+        try:
+            await _ensure_git_initialized(placed, settings)
+        except Exception as exc:  # noqa: BLE001
+            # Non-blocking: file placement already succeeded — the project
+            # is usable without git. The user can run /api/projects/{id}/git/init
+            # manually from the Repository panel if needed.
+            logger.warning(
+                "[PIPELINE] git init skipped (best-effort): %s", exc
+            )
+
         # Container creation deferred to Setup page
         task.update_progress(90, 100, "Finalizing...")
         primary_id, all_ids = None, []
@@ -345,8 +369,16 @@ async def setup_project(
             db_project.volume_id = placed.volume_id
         if spec.kind == "template_snapshot":
             db_project.compute_tier = "none"
-        if spec.git_url:
-            db_project.has_git_repo = True
+
+        # has_git_repo: every project gets a local `.git/` from Step 5.
+        db_project.has_git_repo = True
+
+        # git_remote_url is the *user's* remote, only set when they
+        # explicitly imported their own repo. Base templates / archives
+        # are copies, not forks — recording the upstream URL here would
+        # make the Repository panel try to render the template's GitHub
+        # history as if it were the user's project.
+        if project_data.source_type in ("github", "gitlab", "bitbucket") and spec.git_url:
             db_project.git_remote_url = spec.git_url
         await db.commit()
 
@@ -355,3 +387,127 @@ async def setup_project(
     finally:
         if source:
             await source.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# Git initialization (Step 5)
+# ---------------------------------------------------------------------------
+
+
+async def _ensure_git_initialized(placed: PlacedFiles, settings) -> None:
+    """Make sure the placed project has a working `.git/` directory.
+
+    Idempotent — if `.git/` already exists (e.g. user imported a project via
+    `import_path`), this is a no-op.
+
+    Mode handling:
+    - local / docker (placed.project_path set): run `git init` directly
+      against the on-disk path. The orchestrator container has direct
+      filesystem access to both paths.
+    - kubernetes (placed.volume_id set): build a `.git/` skeleton on the
+      orchestrator host (via real `git init` in a tempdir) and stream it
+      to the btrfs volume via FileOps `tar_extract`. Avoids needing an
+      Exec RPC on the CSI driver.
+    """
+    if placed.project_path:
+        await _init_git_local_path(placed.project_path)
+        return
+    if placed.volume_id and placed.node_name:
+        await _init_git_volume(placed.volume_id, placed.node_name)
+        return
+    logger.info("[PIPELINE] git init: nothing to initialize (no path or volume)")
+
+
+async def _init_git_local_path(project_path: str) -> None:
+    """Run `git init -b main` in the on-disk project root if missing."""
+    git_dir = os.path.join(project_path, ".git")
+    if os.path.exists(git_dir):
+        logger.info("[PIPELINE] git init: %s already has .git, skipping", project_path)
+        return
+
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "-c",
+        "init.defaultBranch=main",
+        "init",
+        "-b",
+        "main",
+        cwd=project_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"git init failed (exit {proc.returncode}): {stderr.decode(errors='replace')[:300]}"
+        )
+    logger.info("[PIPELINE] git init: initialized %s", project_path)
+
+
+async def _init_git_volume(volume_id: str, node_name: str) -> None:
+    """Push a `.git/` skeleton to a btrfs volume via FileOps tar_extract.
+
+    We can't run subprocesses against a btrfs volume from the orchestrator,
+    and the FileOps gRPC service doesn't expose an Exec RPC. So we run a
+    real `git init -b main` in a tempdir on the orchestrator host, tar up
+    the resulting `.git/` directory, and ship it via the existing
+    `tar_extract` RPC. The result on the volume is byte-identical to a
+    fresh local `git init`.
+    """
+    from ...services.fileops_client import FileOpsClient
+    from ...services.node_discovery import NodeDiscovery
+
+    # Cheap idempotency check — list the volume root and see if `.git`
+    # already exists. Skips network round-trip on the actual init when not
+    # needed.
+    discovery = NodeDiscovery()
+    address = await discovery.get_fileops_address(node_name)
+    async with FileOpsClient(address) as client:
+        try:
+            entries = await client.list_dir(volume_id, ".")
+            if any(getattr(e, "name", None) == ".git" for e in entries):
+                logger.info("[PIPELINE] git init: volume %s already has .git", volume_id)
+                return
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[PIPELINE] git init: list_dir probe failed (%s) — continuing", exc)
+
+        tar_bytes = await asyncio.to_thread(_build_empty_git_tar)
+        await client.tar_extract(volume_id, ".", tar_bytes)
+    logger.info(
+        "[PIPELINE] git init: pushed .git skeleton to volume %s (%d bytes)",
+        volume_id,
+        len(tar_bytes),
+    )
+
+
+def _build_empty_git_tar() -> bytes:
+    """Run `git init -b main` in a tempdir and tar up the resulting `.git/`.
+
+    Synchronous — caller wraps in `asyncio.to_thread`. Uses an empty repo
+    on disk as the source of truth so the tar's contents always match what
+    a real `git init` produces (avoids hand-coded skeletons going stale
+    against future git versions).
+    """
+    tmp = tempfile.mkdtemp(prefix="tesslate-gitinit-")
+    try:
+        result = subprocess.run(
+            ["git", "-c", "init.defaultBranch=main", "init", "-b", "main", tmp],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git init in tempdir failed (exit {result.returncode}): "
+                f"{result.stderr.decode(errors='replace')[:300]}"
+            )
+        git_dir = os.path.join(tmp, ".git")
+        if not os.path.isdir(git_dir):
+            raise RuntimeError("git init did not produce a .git directory")
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            tar.add(git_dir, arcname=".git")
+        return buf.getvalue()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

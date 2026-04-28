@@ -55,7 +55,7 @@ minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
 
 # 2. Rebuild with --no-cache
 docker rmi -f tesslate-backend:latest
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 
 # 3. Load to minikube
 minikube -p tesslate image load tesslate-backend:latest
@@ -67,7 +67,7 @@ kubectl delete pod -n tesslate -l app=tesslate-backend
 **Solution (AWS EKS)**:
 ```powershell
 # Build with --no-cache and push
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 

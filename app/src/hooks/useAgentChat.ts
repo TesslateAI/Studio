@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { chatApi } from '../lib/api';
 import type {
   AgentMessageData,
@@ -6,12 +7,14 @@ import type {
   DBMessage,
   ToolCallDetail,
   AgentStep,
+  ChatMention,
 } from '../types/agent';
 import type { ChatAgent } from '../types/chat';
 import type { EditMode } from '../components/chat/EditModeStatus';
 import { nodeConfigEvents } from '../utils/nodeConfigEvents';
 import type {
   ArchitectureNodeAddedEvent,
+  ContainersRestartingEvent,
   NodeConfigCancelledEvent,
   NodeConfigResumedEvent,
   SecretRotatedEvent,
@@ -23,10 +26,7 @@ import type {
  * ProjectPage can manage dock tabs / canvas pulses without pulling in
  * UI dependencies here.
  */
-function dispatchNodeConfigEvent(
-  type: string,
-  data: Record<string, unknown> | undefined
-): boolean {
+function dispatchNodeConfigEvent(type: string, data: Record<string, unknown> | undefined): boolean {
   if (!data) return false;
   switch (type) {
     case 'architecture_node_added':
@@ -36,27 +36,21 @@ function dispatchNodeConfigEvent(
       );
       return true;
     case 'user_input_required':
-      nodeConfigEvents.emit(
-        'user-input-required',
-        data as unknown as UserInputRequiredEvent
-      );
+      nodeConfigEvents.emit('user-input-required', data as unknown as UserInputRequiredEvent);
       return true;
     case 'node_config_resumed':
-      nodeConfigEvents.emit(
-        'node-config-resumed',
-        data as unknown as NodeConfigResumedEvent
-      );
+      nodeConfigEvents.emit('node-config-resumed', data as unknown as NodeConfigResumedEvent);
       return true;
     case 'node_config_cancelled':
-      nodeConfigEvents.emit(
-        'node-config-cancelled',
-        data as unknown as NodeConfigCancelledEvent
-      );
+      nodeConfigEvents.emit('node-config-cancelled', data as unknown as NodeConfigCancelledEvent);
       return true;
     case 'secret_rotated':
+      nodeConfigEvents.emit('secret-rotated', data as unknown as SecretRotatedEvent);
+      return true;
+    case 'containers_restarting':
       nodeConfigEvents.emit(
-        'secret-rotated',
-        data as unknown as SecretRotatedEvent
+        'containers-restarting',
+        data as unknown as ContainersRestartingEvent
       );
       return true;
     default:
@@ -79,9 +73,18 @@ function formatAgentError(raw: string): string {
   return raw.length > 120 ? raw.slice(0, 120) + '...' : raw;
 }
 
+export interface BuilderReviewSummary {
+  name: string;
+  description?: string;
+  mcps?: { slug?: string; name?: string }[];
+  schedule?: { cron?: string; tz?: string; humanized?: string };
+  delivery_targets?: { kind?: string; name?: string }[];
+  draft_url?: string;
+}
+
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'ai' | 'approval_request';
+  type: 'user' | 'ai' | 'approval_request' | 'builder_review_request';
   content: string;
   attachments?: SerializedAttachment[];
   agentData?: AgentMessageData;
@@ -92,6 +95,10 @@ export interface ChatMessage {
   toolName?: string;
   toolParameters?: Record<string, unknown>;
   toolDescription?: string;
+  // Set on `builder_review_request` messages — drives the chat-side
+  // BuilderReviewCard render. The summary shape mirrors the dict the
+  // `request_review` agent tool emits.
+  builderReviewSummary?: BuilderReviewSummary;
 }
 
 interface UseAgentChatOptions {
@@ -152,15 +159,12 @@ export function useAgentChat({
     const prevChatId = prevChatIdRef.current;
     prevChatIdRef.current = chatId;
 
-    // Only abort/reset when switching BETWEEN real sessions (oldId → newId),
-    // NOT on initial session creation (null → newId) or temp→real ID swap
-    // which coincide with an in-flight sendMessage.
+    // Only reset local UI state when switching between real sessions. We no
+    // longer abort the SSE stream / running task — AgentRunsContext keeps
+    // background streams alive so switching sessions doesn't kill parallel
+    // agents. The hook just stops rendering events for the old chat.
     const isTempSwap = prevChatId?.startsWith('temp-') && chatId && !chatId.startsWith('temp-');
     if (prevChatId !== null && prevChatId !== chatId && !isTempSwap) {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
       if (activeEventSourceRef.current) {
         activeEventSourceRef.current.close();
         activeEventSourceRef.current = null;
@@ -169,6 +173,10 @@ export function useAgentChat({
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
+      // IMPORTANT: do NOT abort abortControllerRef — that would kill an
+      // in-flight agent in the previous chat. The previous chat keeps its
+      // AbortController; the old stream continues in the background via
+      // AgentRunsContext, and this hook just detaches from it.
       isExecutingRef.current = false;
       setIsExecuting(false);
     }
@@ -405,7 +413,22 @@ export function useAgentChat({
               // handled via nodeConfigEvents bus
             } else if (data.type === 'approval_required') {
               const approvalData = data.data || data;
-              if (editModeRef.current === 'allow') {
+              // The `agent-builder` flow surfaces a richer review card
+              // (publish + activate buttons + summary) instead of the
+              // generic allow/deny gate. The backend marks it via
+              // `kind: 'builder_review'` in the same approval envelope.
+              if (approvalData.kind === 'builder_review') {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `builder-review-${crypto.randomUUID()}`,
+                    type: 'builder_review_request',
+                    content: '',
+                    approvalId: approvalData.approval_id,
+                    builderReviewSummary: (approvalData.summary || {}) as BuilderReviewSummary,
+                  },
+                ]);
+              } else if (editModeRef.current === 'allow') {
                 chatApi
                   .sendApprovalResponse(approvalData.approval_id, 'allow_all')
                   .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
@@ -526,7 +549,12 @@ export function useAgentChat({
   }, [chatId, agent]);
 
   const sendMessage = useCallback(
-    async (message: string, overrideChatId?: string, attachments?: SerializedAttachment[]) => {
+    async (
+      message: string,
+      overrideChatId?: string,
+      attachments?: SerializedAttachment[],
+      mentions?: ChatMention[]
+    ) => {
       if ((!message.trim() && (!attachments || attachments.length === 0)) || isExecuting) return;
 
       // Resolve the chat ID — create a session on the fly if needed
@@ -582,6 +610,10 @@ export function useAgentChat({
             max_iterations: undefined,
             edit_mode: editModeRef.current,
             attachments,
+            // @-mention picker entries — backend splits these by kind
+            // into mention_agent_ids / mention_mcp_config_ids /
+            // mention_app_instance_ids on the AgentTaskPayload.
+            mentions: mentions && mentions.length > 0 ? mentions : undefined,
           },
           (event) => {
             if (!isMountedRef.current) return;
@@ -766,6 +798,17 @@ export function useAgentChat({
                   },
                 })
               );
+            } else if (event.type === 'tool_error') {
+              // Non-fatal: a single tool call failed but the agent continues.
+              // Surface as a warning toast so the user knows without breaking
+              // the session or the message stream.
+              const toolErr = event.data as { tool_name?: string; error?: string };
+              const toolLabel = toolErr.tool_name ? `[${toolErr.tool_name}] ` : '';
+              const errMsg = toolErr.error || 'Tool call failed';
+              toast.error(`${toolLabel}${errMsg}`, {
+                duration: 5000,
+                id: `tool-err-${toolErr.tool_name ?? 'unknown'}`,
+              });
             } else if (event.type === 'error') {
               const errorData = event.data || {};
               if ((errorData as { code?: string }).code === 'insufficient_credits') {
@@ -783,7 +826,18 @@ export function useAgentChat({
             ) {
               // handled via nodeConfigEvents bus
             } else if (event.type === 'approval_required') {
-              if (editModeRef.current === 'allow') {
+              const approvalKind = event.data.kind as string | undefined;
+              if (approvalKind === 'builder_review') {
+                const reviewMessage: ChatMessage = {
+                  id: `builder-review-${crypto.randomUUID()}`,
+                  type: 'builder_review_request',
+                  content: '',
+                  approvalId: event.data.approval_id as string,
+                  builderReviewSummary:
+                    (event.data.summary as BuilderReviewSummary | undefined) ?? { name: '' },
+                };
+                setMessages((prev) => [...prev, reviewMessage]);
+              } else if (editModeRef.current === 'allow') {
                 chatApi
                   .sendApprovalResponse(event.data.approval_id as string, 'allow_all')
                   .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
@@ -895,14 +949,29 @@ export function useAgentChat({
   }, []);
 
   const handleApproval = useCallback(
-    async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop') => {
+    async (
+      approvalId: string,
+      response:
+        | 'allow_once'
+        | 'allow_all'
+        | 'stop'
+        | 'publish_and_activate'
+        | 'save_draft'
+        | 'cancel'
+    ) => {
       try {
         await chatApi.sendApprovalResponse(approvalId, response);
       } catch (err) {
         console.error('[APPROVAL] Failed to send response:', err);
       }
       setMessages((prev) =>
-        prev.filter((msg) => !(msg.type === 'approval_request' && msg.approvalId === approvalId))
+        prev.filter(
+          (msg) =>
+            !(
+              (msg.type === 'approval_request' || msg.type === 'builder_review_request') &&
+              msg.approvalId === approvalId
+            )
+        )
       );
     },
     []

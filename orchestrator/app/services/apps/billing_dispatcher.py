@@ -178,6 +178,9 @@ async def record_spend(
     usage_log_id: UUID | None = None,
     is_byok: bool = False,
     meta: dict[str, Any] | None = None,
+    automation_run_id: UUID | None = None,
+    invocation_subject_id: UUID | None = None,
+    agent_id: UUID | None = None,
 ) -> SpendOutcome:
     """Resolve the payer from the instance's wallet_mix and append a
     ``spend_records`` row with ``settled=False``.
@@ -185,6 +188,19 @@ async def record_spend(
     Idempotency: if ``meta["request_id"]`` is provided and a spend_records row
     already exists with the same request_id, the existing row is returned
     without inserting a duplicate.
+
+    Phase 3 widens the signature to accept the three Automation Runtime
+    attribution columns as first-class kwargs:
+
+    * ``automation_run_id`` — FK-less today (target table FK lands in
+      Phase 1's alembic 0074); the column ships now so spend rows
+      between phases never lose attribution.
+    * ``invocation_subject_id`` — Phase 2 column; same FK-less behavior.
+    * ``agent_id`` — Phase 2 column; FK to ``marketplace_agents``.
+
+    Before this widen, callers patched the row in a follow-up UPDATE
+    after the dispatcher returned. That race window is closed: every
+    write now carries attribution from the start.
 
     Does NOT mutate any wallet — that's the settlement worker's job.
     """
@@ -244,6 +260,9 @@ async def record_spend(
         usage_log_id=usage_log_id,
         settled=False,
         meta=meta,
+        automation_run_id=automation_run_id,
+        invocation_subject_id=invocation_subject_id,
+        agent_id=agent_id,
     )
     db.add(row)
     await db.flush()

@@ -25,6 +25,7 @@ import type {
 import type {
   ContainerConfigResponse,
   NodeConfigMode,
+  ProjectConfigResponse,
   RevealSecretResponse,
   SubmittedValues,
 } from '../types/nodeConfig';
@@ -417,6 +418,102 @@ export const tasksApi = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Git / Repository panel response shapes
+// ---------------------------------------------------------------------------
+
+export interface GitAuthor {
+  login: string | null;
+  avatar_url: string | null;
+  name: string | null;
+  email: string | null;
+  date: string | null;
+}
+
+export interface GitCommit {
+  sha: string;
+  short_sha: string;
+  message: string;
+  title: string;
+  html_url: string | null;
+  parents: string[];
+  author: GitAuthor;
+  committer: GitAuthor;
+  files_changed: number | null;
+}
+
+// 'local' = repo has no GitHub remote; payload comes from local `git`.
+// Tabs render the same shape but hide GitHub-specific affordances.
+export type GitApiStatus = 'ready' | 'local' | 'no_remote' | 'error';
+
+export interface GitCommitsResponse {
+  status: GitApiStatus;
+  message?: string;
+  owner?: string;
+  repo?: string;
+  branch?: string | null;
+  html_url?: string;
+  commits?: GitCommit[];
+}
+
+export interface GitBranchSummary {
+  name: string;
+  is_default: boolean;
+  protected: boolean;
+  sha: string | null;
+  html_url: string | null;
+  ahead_by: number | null;
+  behind_by: number | null;
+}
+
+export interface GitBranchesResponse {
+  status: GitApiStatus;
+  message?: string;
+  owner?: string;
+  repo?: string;
+  default_branch?: string;
+  html_url?: string;
+  branches?: GitBranchSummary[];
+}
+
+export interface GitContributor {
+  login: string | null;
+  avatar_url: string | null;
+  contributions: number | null;
+  html_url: string | null;
+}
+
+export interface GitOpenPull {
+  number: number;
+  title: string;
+  html_url: string | null;
+  user: { login: string | null; avatar_url: string | null } | null;
+  created_at: string | null;
+  draft: boolean | null;
+}
+
+export interface GitRepoInfoResponse {
+  status: GitApiStatus;
+  message?: string;
+  owner?: string;
+  repo?: string;
+  html_url?: string;
+  description?: string | null;
+  default_branch?: string;
+  stars?: number | null;
+  watchers?: number | null;
+  forks?: number | null;
+  open_issues?: number | null;
+  pushed_at?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+  is_private?: boolean | null;
+  topics?: string[];
+  contributors?: GitContributor[];
+  open_pulls?: GitOpenPull[];
+  open_pulls_count?: number;
+}
+
 export const projectsApi = {
   getAll: async (teamSlug?: string) => {
     const params = teamSlug ? { team: teamSlug } : {};
@@ -475,8 +572,10 @@ export const projectsApi = {
     const response = await api.get(`/api/projects/${slug}`);
     return response.data;
   },
-  setAppRole: async (slug: string, role: 'app_source' | null) => {
-    const response = await api.patch(`/api/projects/${slug}/app-role`, { app_role: role });
+  setProjectKind: async (slug: string, kind: 'workspace' | 'app_source') => {
+    const response = await api.patch(`/api/projects/${slug}/project-kind`, {
+      project_kind: kind,
+    });
     return response.data;
   },
   delete: async (slug: string) => {
@@ -526,6 +625,48 @@ export const projectsApi = {
     };
 
     return poll(20);
+  },
+  getGitTree: async (slug: string, branch?: string) => {
+    const params: Record<string, string> = {};
+    if (branch) params.branch = branch;
+    const response = await api.get(`/api/projects/${slug}/git/tree`, { params });
+    return response.data as {
+      status: string;
+      source: 'github' | 'local';
+      owner: string | null;
+      repo: string | null;
+      branch: string | null;
+      sha: string | null;
+      truncated: boolean;
+      html_url: string | null;
+      files: Array<{
+        path: string;
+        name: string;
+        is_dir: boolean;
+        size: number;
+        mod_time: number;
+        sha?: string;
+      }>;
+    };
+  },
+  getGitCommits: async (
+    slug: string,
+    opts?: { branch?: string; limit?: number; includeStats?: boolean }
+  ): Promise<GitCommitsResponse> => {
+    const params: Record<string, string | number | boolean> = {};
+    if (opts?.branch) params.branch = opts.branch;
+    if (typeof opts?.limit === 'number') params.limit = opts.limit;
+    if (opts?.includeStats) params.include_stats = true;
+    const response = await api.get(`/api/projects/${slug}/git/commits`, { params });
+    return response.data as GitCommitsResponse;
+  },
+  getGitBranches: async (slug: string): Promise<GitBranchesResponse> => {
+    const response = await api.get(`/api/projects/${slug}/git/branches`);
+    return response.data as GitBranchesResponse;
+  },
+  getGitRepoInfo: async (slug: string): Promise<GitRepoInfoResponse> => {
+    const response = await api.get(`/api/projects/${slug}/git/repo-info`);
+    return response.data as GitRepoInfoResponse;
   },
   getFileContent: async (slug: string, path: string, containerDir?: string) => {
     const params: Record<string, string> = { path };
@@ -847,8 +988,10 @@ export const chatApi = {
     const response = await api.get(`/api/chat/${projectId}/messages`);
     return response.data;
   },
-  clearProjectMessages: async (projectId: string) => {
-    const response = await api.delete(`/api/chat/${projectId}/messages`);
+  clearProjectMessages: async (projectId: string, chatId?: string) => {
+    const response = await api.delete(`/api/chat/${projectId}/messages`, {
+      params: chatId ? { chat_id: chatId } : undefined,
+    });
     return response.data;
   },
   sendAgentMessage: async (request: AgentChatRequest): Promise<AgentChatResponse> => {
@@ -951,10 +1094,31 @@ export const chatApi = {
     return response.data;
   },
 
+  // List ALL active agent tasks across a project's chat sessions.
+  // Powers the sidebar's live run-state dots and cold-start reconnect.
+  getActiveTasksInProject: async (
+    projectId: string
+  ): Promise<{ tasks: { task_id: string; chat_id: string; title: string | null }[] }> => {
+    const response = await api.get('/api/chat/agent/active-in-project', {
+      params: { project_id: projectId },
+    });
+    return response.data;
+  },
+
   // Subscribe to agent events (SSE) for reconnection
   subscribeToTask: (taskId: string, lastEventId?: string) => {
     const params = lastEventId ? `?last_event_id=${lastEventId}` : '';
     const url = `${API_URL}/api/chat/agent/events/${taskId}${params}`;
+    return new EventSource(url, { withCredentials: true });
+  },
+
+  // Multiplexed SSE for every active chat in a project — one connection.
+  // Used as a fallback when the client has too many per-task streams open
+  // (browsers cap SSE to ~6 per origin).
+  subscribeToProject: (projectId: string) => {
+    const url = `${API_URL}/api/chat/agent/stream-project?project_id=${encodeURIComponent(
+      projectId
+    )}`;
     return new EventSource(url, { withCredentials: true });
   },
 
@@ -1054,6 +1218,223 @@ export const chatApi = {
   },
 };
 
+/** Channel platform a chat originated from. NULL for browser sessions. */
+export type SidebarChatPlatform =
+  | 'telegram'
+  | 'discord'
+  | 'slack'
+  | 'whatsapp'
+  | 'signal'
+  | 'cli'
+  | null;
+
+export interface SidebarChat {
+  id: string;
+  title: string;
+  status: string;
+  origin: string;
+  platform: SidebarChatPlatform;
+  project_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SidebarProject {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  visibility: string | null;
+  runtime: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  latest_activity_at: string | null;
+  chats: SidebarChat[];
+}
+
+export interface SidebarAutomation {
+  id: string;
+  name: string;
+  is_active: boolean;
+  target_project_id: string | null;
+  workspace_project_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SidebarTreeResponse {
+  rootChats: SidebarChat[];
+  projects: SidebarProject[];
+  automations: SidebarAutomation[];
+}
+
+// ─── @-mention picker ───────────────────────────────────────────────
+//
+// Aggregates the three categories (agents / mcps / apps) the chat
+// input's @-mention picker needs into a single shape. Each call
+// fans out to the existing per-category endpoints in parallel —
+// failures in one category surface as an empty list for that
+// category, never an exception, so the picker stays responsive
+// even if (e.g.) the MCP service is briefly unreachable.
+
+export type MentionItemKind = 'agent' | 'mcp' | 'app';
+
+export interface MentionItem {
+  kind: MentionItemKind;
+  ref_id: string;
+  slug: string;
+  name: string;
+  // Whether the item is currently usable. Disabled items are still
+  // returned so the picker can grey them out (so users can self-
+  // discover what they could turn on) — selecting a disabled item
+  // routes to the appropriate library page rather than inserting.
+  enabled: boolean;
+  // Optional secondary label (e.g. "needs reauth", "draft").
+  state_label?: string;
+  icon_url?: string | null;
+  description?: string;
+}
+
+export interface MentionSearchResponse {
+  agents: MentionItem[];
+  mcps: MentionItem[];
+  apps: MentionItem[];
+}
+
+export const mentionApi = {
+  /**
+   * Fetch the user's library across all three categories. Used by the
+   * @-mention picker. Results are filtered client-side by the picker;
+   * we don't push the search query to the server because the lists
+   * are small and a single fetch primes all three sections at once.
+   */
+  search: async (): Promise<MentionSearchResponse> => {
+    const safeGet = async <T,>(url: string, params?: Record<string, unknown>) => {
+      try {
+        const r = await api.get(url, { params });
+        return r.data as T;
+      } catch {
+        return null;
+      }
+    };
+
+    type RawAgent = {
+      id: string;
+      slug?: string | null;
+      name?: string | null;
+      description?: string | null;
+      avatar_url?: string | null;
+      is_enabled?: boolean | null;
+      is_published?: boolean | null;
+    };
+    type RawMcp = {
+      id: string;
+      server_slug?: string | null;
+      server_name?: string | null;
+      is_active?: boolean | null;
+      is_connected?: boolean | null;
+      needs_reauth?: boolean | null;
+      icon_url?: string | null;
+    };
+    type RawApp = {
+      id: string;
+      app_slug?: string | null;
+      app_name?: string | null;
+      state?: string | null;
+    };
+
+    const [agentsRaw, mcpsRaw, appsRaw] = await Promise.all([
+      // /my-agents wraps in {agents:[...]} on cloud and returns a flat
+      // list on some routes — accept both shapes so a single normaliser
+      // works against any backend variant the user lands on.
+      safeGet<{ agents?: RawAgent[] } | RawAgent[]>('/api/marketplace/my-agents'),
+      safeGet<RawMcp[]>('/api/mcp/installed'),
+      safeGet<{ items?: RawApp[] } | RawApp[]>('/api/app-installs/mine', {
+        limit: 200,
+      }),
+    ]);
+
+    const agentsList: RawAgent[] = Array.isArray(agentsRaw)
+      ? (agentsRaw as RawAgent[])
+      : ((agentsRaw as { agents?: RawAgent[] })?.agents ?? []);
+    const agents: MentionItem[] = agentsList.map((a) => ({
+      kind: 'agent' as const,
+      ref_id: a.id,
+      slug: a.slug ?? '',
+      name: a.name ?? a.slug ?? 'Unnamed agent',
+      enabled: a.is_enabled !== false,
+      state_label: a.is_enabled === false ? 'disabled' : undefined,
+      icon_url: a.avatar_url ?? null,
+      description: a.description ?? undefined,
+    }));
+
+    const mcps: MentionItem[] = (mcpsRaw ?? []).map((m) => {
+      const usable = m.is_active !== false && m.needs_reauth !== true;
+      let state_label: string | undefined;
+      if (m.needs_reauth) state_label = 'needs reauth';
+      else if (m.is_active === false) state_label = 'disabled';
+      else if (m.is_connected === false) state_label = 'not connected';
+      return {
+        kind: 'mcp' as const,
+        ref_id: m.id,
+        slug: m.server_slug ?? '',
+        name: m.server_name ?? m.server_slug ?? 'Connector',
+        enabled: usable,
+        state_label,
+        icon_url: m.icon_url ?? null,
+      };
+    });
+
+    // /mine response shape is paginated {items: [...]} for some
+    // routers and a flat list for others; normalise.
+    const appsList: RawApp[] = Array.isArray(appsRaw)
+      ? (appsRaw as RawApp[])
+      : ((appsRaw as { items?: RawApp[] })?.items ?? []);
+    const apps: MentionItem[] = appsList
+      // Hide rows that are not in a usable installed state but still
+      // surface "stopped" so the user can discover them.
+      .filter((a) => (a.state ?? 'installed') !== 'uninstalled')
+      .map((a) => ({
+        kind: 'app' as const,
+        ref_id: a.id,
+        slug: a.app_slug ?? '',
+        name: a.app_name ?? a.app_slug ?? 'App',
+        enabled: (a.state ?? 'installed') === 'installed' || (a.state ?? '') === 'running',
+        state_label: a.state && a.state !== 'installed' && a.state !== 'running' ? a.state : undefined,
+      }));
+
+    return { agents, mcps, apps };
+  },
+};
+
+export const sidebarApi = {
+  /** Single-round-trip fetch for the left-nav tree (projects + their chats + root chats + automations). */
+  getTree: async (
+    opts: {
+      projectLimit?: number;
+      rootChatLimit?: number;
+      chatsPerProject?: number;
+      automationLimit?: number;
+    } = {}
+  ): Promise<SidebarTreeResponse> => {
+    const params: Record<string, number> = {};
+    if (opts.projectLimit !== undefined) params.project_limit = opts.projectLimit;
+    if (opts.rootChatLimit !== undefined) params.root_chat_limit = opts.rootChatLimit;
+    if (opts.chatsPerProject !== undefined) params.chats_per_project = opts.chatsPerProject;
+    if (opts.automationLimit !== undefined) params.automation_limit = opts.automationLimit;
+    const response = await api.get('/api/sidebar/tree', { params });
+    const data = response.data as Partial<SidebarTreeResponse>;
+    // Defensive default — older backends won't return `automations`. Falling
+    // back to an empty array keeps the new sidebar resilient if a client is
+    // briefly running ahead of a deploy.
+    return {
+      rootChats: data.rootChats ?? [],
+      projects: data.projects ?? [],
+      automations: data.automations ?? [],
+    };
+  },
+};
+
 export const nodeConfigApi = {
   /** Submit form values for a pending agent `user_input_required`. */
   submit: async (inputId: string, values: SubmittedValues): Promise<void> => {
@@ -1074,13 +1455,24 @@ export const nodeConfigApi = {
     return response.data;
   },
 
+  /** Aggregated project config — every service / container / deployment provider
+   * with its schema and masked initial values. Used by the persistent Config tab. */
+  getProjectConfig: async (projectId: string): Promise<ProjectConfigResponse> => {
+    const response = await api.get(`/api/projects/${projectId}/config`);
+    return response.data;
+  },
+
   /** Apply a direct (non-agent) edit to a container's config. */
   patchContainerConfig: async (
     projectId: string,
     containerId: string,
     body: {
       values: SubmittedValues;
-      overrides?: Record<string, unknown>;
+      /** User-added field metadata appended to the preset schema. Each entry
+       * matches FieldSchema (key, label, type, required?, is_secret?, ...).
+       * The backend merges these into the resolved schema so the value lands
+       * in the right bucket (text → environment_vars, secret → encrypted). */
+      overrides?: Array<Record<string, unknown>>;
       preset?: string;
       mode?: NodeConfigMode;
     }
@@ -2124,6 +2516,12 @@ export interface Theme {
   typography: ThemeTypography;
   spacing: ThemeSpacing;
   animation: ThemeAnimation;
+  /**
+   * When true, all border CSS variables resolve to transparent. Lets
+   * any theme adopt the no-border treatment without rewriting every
+   * color value. Toggleable from the theme editor.
+   */
+  borderless?: boolean;
 }
 
 export interface ThemeListItem {
@@ -3782,6 +4180,30 @@ export const appVersionsApi = {
   },
 };
 
+// --- Publish-as-App (Architecture canvas drawer) ----------------------------
+//
+// These hit /api/projects/{slug}/publish-app/* endpoints registered by
+// orchestrator/app/routers/app_publish.py. Wraps the lower-level
+// /api/app-versions/publish endpoint with project-slug ergonomics + an
+// inferrer that produces a draft manifest from project structure.
+
+import type {
+  PublishDraftResponse,
+  PublishAppRequest,
+  PublishAppResponse,
+} from '../types/publish';
+
+export const publishApi = {
+  async draft(projectSlug: string): Promise<PublishDraftResponse> {
+    const response = await api.post(`/api/projects/${projectSlug}/publish-app/draft`);
+    return response.data;
+  },
+  async publish(projectSlug: string, body: PublishAppRequest): Promise<PublishAppResponse> {
+    const response = await api.post(`/api/projects/${projectSlug}/publish-app`, body);
+    return response.data;
+  },
+};
+
 // --- App Installs -----------------------------------------------------------
 
 export interface InstallRequest {
@@ -4390,5 +4812,449 @@ export const appBundlesApi = {
 // =============================================================================
 // ===== /Tesslate Apps =====
 // =============================================================================
+
+// =============================================================================
+// ===== Automations (Phase 1) =====
+// =============================================================================
+//
+// HTTP client for the Automation Runtime. Endpoint shapes mirror
+// ``orchestrator/app/schemas_automations.py`` — see the matching
+// ``app/src/types/automations.ts`` types.
+//
+// Auth: relies on the same Bearer / cookie/CSRF flow the rest of the file uses
+// via the shared `api` axios instance. No special handling here.
+// =============================================================================
+
+import type {
+  AppActionListResponse,
+  AppActionRow,
+  ApprovalRequest,
+  ApprovalResponse,
+  AutomationDefinitionIn,
+  AutomationDefinitionOut,
+  AutomationDefinitionSummary,
+  AutomationDefinitionUpdate,
+  AutomationRunArtifactOut,
+  AutomationRunDetail,
+  AutomationRunRequest,
+  AutomationRunResponse,
+  AutomationRunSummary,
+  CommunicationDestination,
+  CommunicationDestinationCreate,
+  CommunicationDestinationUpdate,
+  RunSpendRollup,
+  RunStep,
+} from '../types/automations';
+
+// Re-export so page-level imports can pull these from `lib/api` uniformly.
+export type {
+  AppActionListResponse,
+  AppActionRow,
+  AutomationDefinitionSummary,
+  AutomationRunSummary,
+};
+
+export interface ListAutomationsParams {
+  is_active?: boolean;
+  workspace_scope?: string;
+  team_id?: string;
+  app_instance_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListRunsParams {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const automationsApi = {
+  async list(params?: ListAutomationsParams): Promise<AutomationDefinitionSummary[]> {
+    const qs = new URLSearchParams();
+    if (params?.is_active !== undefined) qs.append('is_active', String(params.is_active));
+    if (params?.workspace_scope) qs.append('workspace_scope', params.workspace_scope);
+    if (params?.team_id) qs.append('team_id', params.team_id);
+    if (params?.app_instance_id) qs.append('app_instance_id', params.app_instance_id);
+    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.append('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await api.get(`/api/automations${suffix}`);
+    return response.data;
+  },
+
+  async listRunsByInstall(
+    appInstanceId: string,
+    params?: ListRunsParams
+  ): Promise<AutomationRunSummary[]> {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.append('status', params.status);
+    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.append('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await api.get(
+      `/api/automations/runs/by-install/${appInstanceId}${suffix}`
+    );
+    return response.data;
+  },
+
+  async create(payload: AutomationDefinitionIn): Promise<AutomationDefinitionOut> {
+    const response = await api.post('/api/automations', payload);
+    return response.data;
+  },
+
+  async get(id: string): Promise<AutomationDefinitionOut> {
+    const response = await api.get(`/api/automations/${id}`);
+    return response.data;
+  },
+
+  async update(
+    id: string,
+    payload: AutomationDefinitionUpdate
+  ): Promise<AutomationDefinitionOut> {
+    const response = await api.patch(`/api/automations/${id}`, payload);
+    return response.data;
+  },
+
+  /**
+   * Soft-delete by default (sets is_active=false). Pass `hard=true` to
+   * fully remove a definition that has zero runs (server returns 409 if
+   * any runs exist).
+   */
+  async remove(id: string, hard = false): Promise<{ status: string; id: string; hard: boolean }> {
+    const suffix = hard ? '?hard=true' : '';
+    const response = await api.delete(`/api/automations/${id}${suffix}`);
+    return response.data;
+  },
+
+  async run(id: string, payload?: AutomationRunRequest): Promise<AutomationRunResponse> {
+    const response = await api.post(`/api/automations/${id}/run`, payload ?? {});
+    return response.data;
+  },
+
+  async listRuns(
+    id: string,
+    params?: ListRunsParams
+  ): Promise<AutomationRunSummary[]> {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.append('status', params.status);
+    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.append('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await api.get(`/api/automations/${id}/runs${suffix}`);
+    return response.data;
+  },
+
+  async getRun(id: string, runId: string): Promise<AutomationRunDetail> {
+    const response = await api.get(`/api/automations/${id}/runs/${runId}`);
+    return response.data;
+  },
+
+  async listRunArtifacts(id: string, runId: string): Promise<AutomationRunArtifactOut[]> {
+    const response = await api.get(`/api/automations/${id}/runs/${runId}/artifacts`);
+    return response.data;
+  },
+
+  /**
+   * Per-run spend rollup. The backend returns ``spend_by_source`` (the JSON
+   * blob already on AutomationRun) plus a ``per_app`` breakdown joined from
+   * SpendRecord. The endpoint is a Phase-5 stub today: when the route is
+   * not yet deployed the client returns an empty rollup so the UI can show
+   * an empty-state instead of crashing.
+   */
+  async getRunSpend(id: string, runId: string): Promise<RunSpendRollup> {
+    try {
+      const response = await api.get(`/api/automations/${id}/runs/${runId}/spend`);
+      return response.data;
+    } catch {
+      return { spend_by_source: {}, per_app: [] };
+    }
+  },
+
+  /**
+   * Single-artifact metadata fetch — paired with ``artifactDownloadUrl``.
+   * Useful for the ApprovalDrawer ``context_artifacts`` list which only has
+   * ids and needs to render previews. Falls back to the bulk
+   * ``listRunArtifacts`` server-side endpoint (the same auth gate applies).
+   */
+  async getArtifact(
+    id: string,
+    runId: string,
+    artifactId: string
+  ): Promise<AutomationRunArtifactOut | null> {
+    try {
+      const all = await this.listRunArtifacts(id, runId);
+      return all.find((a) => a.id === artifactId) ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Read-only listing of progressively-persisted agent steps for a run
+   * whose action_type is ``agent.run``. Phase 5 stub: returns ``[]`` if the
+   * server-side endpoint hasn't shipped yet rather than throwing — the UI
+   * renders "No steps recorded" in that case.
+   */
+  async listRunSteps(id: string, runId: string): Promise<RunStep[]> {
+    try {
+      const response = await api.get(`/api/automations/${id}/runs/${runId}/steps`);
+      return Array.isArray(response.data) ? response.data : [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * URL of the artifact-download endpoint. The endpoint either streams
+   * inline content or 307-redirects to a signed S3 URL — easiest for the
+   * UI to just open it in a new tab / treat it as a link target.
+   */
+  artifactDownloadUrl(id: string, runId: string, artifactId: string): string {
+    return `${API_URL}/api/automations/${id}/runs/${runId}/artifacts/${artifactId}`;
+  },
+
+  /**
+   * HITL approval surface. Phase 2 ships these endpoints alongside the
+   * Wave 2A response handler:
+   *
+   * - ``GET /api/automations/approvals/pending`` — cross-automation list
+   *   for the badge + ApprovalsPage.
+   * - ``GET /api/automations/{id}/approvals/{request_id}`` — single
+   *   request fetch (drawer hydration).
+   * - ``POST /api/automations/{id}/approvals/{request_id}/respond`` —
+   *   submit a resolution. Owned by Wave 2A; this client just calls it.
+   */
+  approvals: {
+    /** Cross-automation pending list. Used by the badge + ApprovalsPage. */
+    async listPending(): Promise<ApprovalRequest[]> {
+      const response = await api.get('/api/automations/approvals/pending');
+      // Backend may shape this as either a bare list or { items: [...] }.
+      const data = response.data;
+      if (Array.isArray(data)) return data as ApprovalRequest[];
+      if (Array.isArray(data?.items)) return data.items as ApprovalRequest[];
+      return [];
+    },
+
+    /** Pending count — convenience wrapper for the sidebar badge. */
+    async pendingCount(): Promise<number> {
+      try {
+        const list = await this.listPending();
+        return list.length;
+      } catch {
+        return 0;
+      }
+    },
+
+    /** Single approval fetch — drawer hydration. */
+    async get(automationId: string, requestId: string): Promise<ApprovalRequest> {
+      const response = await api.get(
+        `/api/automations/${automationId}/approvals/${requestId}`
+      );
+      return response.data;
+    },
+
+    /** Submit a resolution (allow/deny/request_changes). */
+    async respond(
+      automationId: string,
+      requestId: string,
+      payload: ApprovalResponse
+    ): Promise<ApprovalRequest> {
+      const response = await api.post(
+        `/api/automations/${automationId}/approvals/${requestId}/respond`,
+        payload
+      );
+      return response.data;
+    },
+  },
+};
+
+export const appActionsApi = {
+  /** GET /api/apps/{app_instance_id}/actions — read-only listing. */
+  async list(appInstanceId: string): Promise<AppActionListResponse> {
+    const response = await api.get(`/api/apps/${appInstanceId}/actions`);
+    return response.data;
+  },
+};
+
+/**
+ * Phase 5 — read-only listing of an install's outbound app dependency
+ * links (the alias → child install map persisted on
+ * ``app_instance_links``). The Modules tab in the App Workspace drawer
+ * uses this to render the recursive dependency tree.
+ *
+ * Backend route lives at
+ * ``GET /api/v1/composition/installs/{install_id}/links``. Returns an
+ * empty list when the install has no outbound links — never null.
+ */
+export interface AppCompositionLink {
+  alias: string;
+  child_install_id: string;
+  child_app_id: string;
+  child_app_slug: string | null;
+  child_app_name: string | null;
+  required: boolean;
+}
+
+export const appCompositionApi = {
+  async listLinks(installId: string): Promise<AppCompositionLink[]> {
+    try {
+      const response = await api.get(
+        `/api/v1/composition/installs/${installId}/links`
+      );
+      return Array.isArray(response.data) ? response.data : [];
+    } catch {
+      // Endpoint is wired in Phase 5; defensive empty-list fallback so
+      // the drawer never crashes when the backend isn't deployed yet.
+      return [];
+    }
+  },
+};
+
+/**
+ * CommunicationDestination CRUD (Phase 4).
+ *
+ * A destination is a stored, NAMED gateway delivery target inside a
+ * ``ChannelConfig`` (one per channel/DM/email/etc.). Endpoints mirror
+ * ``orchestrator/app/routers/communication_destinations.py``.
+ */
+export const communicationDestinationsApi = {
+  async list(params?: {
+    channel_config_id?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<CommunicationDestination[]> {
+    const qs = new URLSearchParams();
+    if (params?.channel_config_id) qs.append('channel_config_id', params.channel_config_id);
+    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.append('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await api.get(`/api/destinations${suffix}`);
+    return response.data;
+  },
+
+  async create(payload: CommunicationDestinationCreate): Promise<CommunicationDestination> {
+    const response = await api.post('/api/destinations', payload);
+    return response.data;
+  },
+
+  async get(id: string): Promise<CommunicationDestination> {
+    const response = await api.get(`/api/destinations/${id}`);
+    return response.data;
+  },
+
+  async update(
+    id: string,
+    payload: CommunicationDestinationUpdate
+  ): Promise<CommunicationDestination> {
+    const response = await api.patch(`/api/destinations/${id}`, payload);
+    return response.data;
+  },
+
+  /**
+   * Delete a destination. Server returns 409 if the destination is
+   * referenced by active automations — pass ``force=true`` to override.
+   */
+  async remove(
+    id: string,
+    force = false
+  ): Promise<{ status: string; id: string }> {
+    const suffix = force ? '?force=true' : '';
+    const response = await api.delete(`/api/destinations/${id}${suffix}`);
+    return response.data;
+  },
+};
+
+// =============================================================================
+// ===== /Automations =====
+// =============================================================================
+
+// =============================================================================
+// ===== Contract templates (Phase 5 marketplace) =====
+// =============================================================================
+
+export interface ContractTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  contract_json: Record<string, unknown>;
+  created_by_user_id: string | null;
+  is_published: boolean;
+}
+
+export interface ContractTemplateApplyResponse {
+  template_id: string;
+  template_name: string;
+  contract: Record<string, unknown>;
+}
+
+export const contractTemplatesApi = {
+  async list(params: { category?: string } = {}): Promise<ContractTemplate[]> {
+    const response = await api.get('/api/contract-templates', { params });
+    return response.data;
+  },
+  async get(templateId: string): Promise<ContractTemplate> {
+    const response = await api.get(`/api/contract-templates/${templateId}`);
+    return response.data;
+  },
+  async create(body: {
+    name: string;
+    description?: string | null;
+    category?: string;
+    contract_json: Record<string, unknown>;
+    is_published?: boolean;
+  }): Promise<ContractTemplate> {
+    const response = await api.post('/api/contract-templates', body);
+    return response.data;
+  },
+  async remove(templateId: string): Promise<void> {
+    await api.delete(`/api/contract-templates/${templateId}`);
+  },
+  async apply(templateId: string): Promise<ContractTemplateApplyResponse> {
+    const response = await api.post(`/api/contract-templates/${templateId}/apply`);
+    return response.data;
+  },
+};
+
+// =============================================================================
+// ===== Admin spend rollup (Phase 5) =====
+// =============================================================================
+
+export type SpendRollupGroupBy = 'user' | 'app' | 'team';
+
+export interface SpendRollupRow {
+  user_id?: string | null;
+  user_email?: string | null;
+  app_instance_id?: string | null;
+  app_name?: string | null;
+  team_id?: string | null;
+  total_usd: string;
+  currency: string;
+}
+
+export interface SpendRollupTotals {
+  all_users_usd: string;
+  currency: string;
+}
+
+export interface SpendRollupResponse {
+  rows: SpendRollupRow[];
+  totals: SpendRollupTotals;
+  group_by: SpendRollupGroupBy;
+  start: string;
+  end: string;
+}
+
+export const adminSpendApi = {
+  async rollup(params: {
+    start?: string;
+    end?: string;
+    group_by?: SpendRollupGroupBy;
+  } = {}): Promise<SpendRollupResponse> {
+    const response = await api.get('/api/admin/spend/rollup', { params });
+    return response.data;
+  },
+};
 
 export default api;

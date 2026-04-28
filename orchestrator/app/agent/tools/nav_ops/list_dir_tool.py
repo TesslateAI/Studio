@@ -13,7 +13,12 @@ import logging
 from collections import deque
 from typing import Any
 
-from ..output_formatter import error_output, pluralize, success_output
+from ....services.orchestration import get_orchestrator
+from ..output_formatter import (
+    error_output,
+    pluralize,
+    success_output,
+)
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
@@ -110,8 +115,6 @@ async def list_dir_tool(params: dict[str, Any], context: dict[str, Any]) -> dict
         include_hidden,
     )
 
-    from ....services.orchestration import get_orchestrator
-
     orchestrator = get_orchestrator()
 
     # Bounded BFS through list_files, capped by ``depth`` levels.
@@ -132,10 +135,6 @@ async def list_dir_tool(params: dict[str, Any], context: dict[str, Any]) -> dict
             message=f"Failed to list directory '{dir_path}': {exc}",
             suggestion="Verify that dir_path exists inside the project root",
         )
-
-    # Determine if dir_path looks valid: list_files returns [] for missing dirs,
-    # so an empty root plus a missing path looks the same as an empty directory.
-    # We accept both as "no entries" rather than erroring.
 
     # Seed the traversal with the root listing so we don't have to re-read it.
     _seeded: dict[str, list[dict[str, Any]]] = {dir_path: root_listing}
@@ -269,6 +268,10 @@ def register_list_dir_tool(registry) -> None:
             },
             executor=list_dir_tool,
             category=ToolCategory.NAV_OPS,
+            # Path + paging in, list of entries dict out — JSON-clean.
+            state_serializable=True,
+            # Stateless directory listing.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "list_dir", "parameters": {"dir_path": "."}}',
                 '{"tool_name": "list_dir", "parameters": {"dir_path": "src", "depth": 3, "limit": 50}}',

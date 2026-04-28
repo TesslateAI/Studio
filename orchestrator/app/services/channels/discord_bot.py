@@ -357,3 +357,184 @@ class DiscordBotChannel(GatewayAdapter):
             "message": f"Configure this as your Interactions Endpoint URL in Discord Developer Portal: {webhook_url}",
             "webhook_url": webhook_url,
         }
+
+    # ------------------------------------------------------------------
+    # Approval cards (Phase 4) — outbound buttons via REST components
+    # ------------------------------------------------------------------
+
+    async def _open_dm_channel(
+        self, user_id: str, *, http_client: httpx.AsyncClient | None = None
+    ) -> str | None:
+        """Resolve a Discord user id to its DM channel id via
+        ``POST /users/@me/channels``. Returns ``None`` on failure."""
+        if not user_id:
+            return None
+        owns_client = http_client is None
+        client = http_client or httpx.AsyncClient(timeout=10.0)
+        try:
+            resp = await client.post(
+                f"{DISCORD_API}/users/@me/channels",
+                headers={
+                    "Authorization": f"Bot {self.bot_token}",
+                    "Content-Type": "application/json",
+                },
+                json={"recipient_id": str(user_id)},
+            )
+            if resp.status_code not in (200, 201):
+                logger.warning(
+                    "[DISCORD] open DM failed user=%s: %s %s",
+                    user_id,
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                return None
+            data = resp.json()
+            return str(data.get("id") or "") or None
+        except Exception:
+            logger.exception("[DISCORD] open DM raised user=%s", user_id)
+            return None
+        finally:
+            if owns_client:
+                await client.aclose()
+
+    async def send_approval_card(
+        self,
+        channel_id: str,
+        input_id: str,
+        automation_id: str,
+        tool_name: str,
+        summary: str,
+        actions: list[str] | None = None,
+        *,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> dict[str, Any]:
+        """Post an interactive approval card to a Discord channel id.
+
+        Discord supports a ``components`` field with action-row buttons
+        whose ``custom_id`` (``approve:<input_id>:<choice>``) is echoed
+        back when clicked. We use the REST API here (not discord.py)
+        because (a) the runner already has an authenticated httpx
+        client, and (b) the approval-card path doesn't need WebSocket
+        events. ``http_client`` is injectable for unit tests.
+        """
+        from .approval_cards import build_discord_components
+
+        components = build_discord_components(
+            input_id=input_id, actions=actions
+        )
+        body = {
+            "content": (
+                f"**Approval needed**\n"
+                f"_tool_: `{tool_name}`\n\n"
+                f"{(summary or '').strip()[:1700]}\n\n"
+                f"_automation_: `{automation_id}` · _input_: `{input_id}`"
+            ),
+            "components": components,
+            "allowed_mentions": {"parse": []},
+        }
+
+        owns_client = http_client is None
+        client = http_client or httpx.AsyncClient(timeout=15.0)
+        try:
+            resp = await client.post(
+                f"{DISCORD_API}/channels/{channel_id}/messages",
+                headers={
+                    "Authorization": f"Bot {self.bot_token}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+        except Exception as exc:
+            logger.exception(
+                "[DISCORD] send_approval_card failed channel=%s input=%s",
+                channel_id,
+                input_id,
+            )
+            return {"ok": False, "error": str(exc), "message_id": None}
+        finally:
+            if owns_client:
+                await client.aclose()
+
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            return {
+                "ok": True,
+                "message_id": data.get("id"),
+                "channel_id": channel_id,
+            }
+        return {
+            "ok": False,
+            "error": resp.text[:500],
+            "status": resp.status_code,
+        }
+
+    async def send_approval_card_to_dm(
+        self,
+        *,
+        user_id: str,
+        input_id: str,
+        automation_id: str,
+        tool_name: str,
+        summary: str,
+        actions: list[str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
+    ) -> bool:
+        """Open a DM with ``user_id`` and post the approval card."""
+        owns_client = http_client is None
+        client = http_client or httpx.AsyncClient(timeout=15.0)
+        try:
+            channel_id = await self._open_dm_channel(
+                user_id, http_client=client
+            )
+            if not channel_id:
+                return False
+            result = await self.send_approval_card(
+                channel_id,
+                input_id,
+                automation_id,
+                tool_name,
+                summary,
+                actions=actions,
+                http_client=client,
+            )
+            return bool(result.get("ok"))
+        finally:
+            if owns_client:
+                await client.aclose()
+
+    # ------------------------------------------------------------------
+    # Inbound discriminator — message_component never enters chat queue
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def is_approval_interaction_payload(payload: dict[str, Any]) -> bool:
+        """Return True iff ``payload`` is a Discord ``message_component``
+        interaction (type=3) from an approval-card button (custom_id
+        starts with ``approve:``).
+        """
+        if not isinstance(payload, dict):
+            return False
+        if payload.get("type") != 3:  # MESSAGE_COMPONENT
+            return False
+        data = payload.get("data") or {}
+        custom_id = data.get("custom_id") if isinstance(data, dict) else None
+        return isinstance(custom_id, str) and custom_id.startswith("approve:")
+
+    @staticmethod
+    def parse_approval_interaction(
+        payload: dict[str, Any],
+    ) -> tuple[str | None, str | None, str | None]:
+        """Extract ``(input_id, choice, discord_user_id)`` from a
+        message_component interaction. Returns ``(None, None, None)`` if
+        the payload doesn't match.
+        """
+        from .approval_cards import parse_action_id
+
+        if not DiscordBotChannel.is_approval_interaction_payload(payload):
+            return None, None, None
+        data = payload.get("data") or {}
+        input_id, choice = parse_action_id(data.get("custom_id") or "")
+        # User is on ``member.user`` for guild interactions, on ``user``
+        # for DM interactions.
+        user = (payload.get("member") or {}).get("user") or payload.get("user") or {}
+        return input_id, choice, str(user.get("id") or "") or None

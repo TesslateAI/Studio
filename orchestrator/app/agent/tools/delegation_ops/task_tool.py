@@ -57,6 +57,7 @@ from ..registry import (
 )
 from .agent_registry import (
     MAX_SUBAGENT_DEPTH,
+    STATUS_CANCELLED,
     STATUS_PENDING,
     STATUS_RUNNING,
     SUBAGENT_REGISTRY,
@@ -180,7 +181,7 @@ def _build_child_context(
     return child_context
 
 
-def _record_event_for_trajectory(recorder, event: dict[str, Any]) -> None:
+def _record_event_for_trajectory(recorder: Any, event: dict[str, Any]) -> None:
     """Feed a child-agent event into the trajectory recorder."""
     etype = event.get("type", "")
     data = event.get("data") or {}
@@ -212,10 +213,10 @@ def _record_event_for_trajectory(recorder, event: dict[str, Any]) -> None:
             result_text = str(result_payload or "")
         recorder.record_tool_result(tc_id, result_text)
 
-    elif etype == "complete":
-        final = (data or {}).get("final_response") or ""
-        if final:
-            recorder.record_assistant(content=final)
+    # `complete` is intentionally not recorded here: the agent always emits
+    # an agent_step (with is_complete=True) before the complete event, so
+    # the final assistant turn is already in the trajectory. Recording it
+    # again from `complete` would create a duplicate ATIF entry.
 
 
 async def _deliver_pending_messages(agent_id: str, child_context: dict[str, Any]) -> None:
@@ -335,8 +336,6 @@ async def _run_subagent(
             record.final_response = final_response
             record.completed_at = datetime.now(UTC)
             # Preserve any status that cancel() set; otherwise mark cancelled.
-            from .agent_registry import STATUS_CANCELLED
-
             record.status = STATUS_CANCELLED
         raise
     except TimeoutError:
@@ -711,6 +710,11 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=task_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # Role+prompt+config in, agent_id (or final response) dict out — JSON-clean.
+            state_serializable=True,
+            # Spawns a child agent run whose asyncio task + LLM stream live
+            # outside this run; cannot be checkpointed mid-flight.
+            holds_external_state=True,
             examples=[
                 '{"role": "explore-codebase", "prompt": "Map every caller of foo()", "wait": false}',
                 '{"role": "refactor-tests", "prompt": "Port tests to pytest-asyncio", "wait": true, "timeout_ms": 300000}',
@@ -743,6 +747,11 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=wait_agent_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # agent_id + timeout in, trajectory dict out — JSON-clean.
+            state_serializable=True,
+            # Operates on a live child agent task; the underlying handle is
+            # external state owned by the delegation manager.
+            holds_external_state=True,
         )
     )
 
@@ -770,6 +779,11 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=send_message_to_agent_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # agent_id + message in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Mutates the in-memory injected_messages buffer of a live child
+            # agent task — external runtime state.
+            holds_external_state=True,
         )
     )
 
@@ -792,6 +806,10 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=close_agent_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # agent_id in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Cancels a live child agent task — external runtime state.
+            holds_external_state=True,
         )
     )
 
@@ -818,6 +836,10 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=list_agents_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # Optional filters in, list of agent metadata dicts out — JSON-clean.
+            state_serializable=True,
+            # Pure inspection of the delegation registry; reads only.
+            holds_external_state=False,
         )
     )
 

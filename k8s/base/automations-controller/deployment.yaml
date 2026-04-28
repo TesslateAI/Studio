@@ -1,0 +1,94 @@
+# automations-controller Deployment (Phase 4)
+#
+# Two replicas — active/passive via the lease backend
+# (CONTROLLER_LEASE_BACKEND={db,redis,k8s}, default db). Only one runs
+# the cron / drain / reconciler loops at a time; the other stands by
+# polling acquire on a 5-15s jittered interval so fail-over completes
+# in <30s.
+#
+# Same image as the backend (just a different entrypoint) — keeps the
+# build pipeline simple and ensures model + ORM parity.
+#
+# Strategy: RollingUpdate so a deploy never leaves us with zero
+# standbys. The lease itself prevents split-brain regardless of pod
+# count.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-automations-controller
+  namespace: tesslate
+  labels:
+    app: tesslate-automations-controller
+    component: automations-controller
+spec:
+  revisionHistoryLimit: 3
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: tesslate-automations-controller
+      component: automations-controller
+  template:
+    metadata:
+      labels:
+        app: tesslate-automations-controller
+        component: automations-controller
+    spec:
+      terminationGracePeriodSeconds: 60
+      serviceAccountName: tesslate-automations-controller-sa
+      containers:
+        - name: controller
+          image: tesslate-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.services.automations.controller_main"]
+          envFrom:
+            - secretRef:
+                name: tesslate-app-secrets
+          env:
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+            - name: KUBERNETES_NAMESPACE
+              value: "tesslate"
+
+            # Lease selection — defaults to db; flip to "k8s" for
+            # production observability via `kubectl get leases`.
+            - name: CONTROLLER_LEASE_BACKEND
+              value: "db"
+
+            - name: REDIS_URL
+              value: "redis://redis:6379/0"
+
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: DATABASE_URL
+
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: SECRET_KEY
+
+            # POD_NAME used by the supervisor to build a stable holder id.
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+
+          # The supervisor exits cleanly on SIGTERM after releasing the
+          # lease. No HTTP probe — the lease is the liveness signal.
+          # If the loop wedges, the lease will expire and another
+          # controller will take over within TTL (60s).

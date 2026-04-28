@@ -171,8 +171,9 @@ async def view_image_tool(params: dict[str, Any], context: dict[str, Any]) -> di
             details={"extension": extension},
         )
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    pid = context.get("project_id")
+    project_id = str(pid) if pid is not None else None
     project_slug = context.get("project_slug")
     container_directory = context.get("container_directory")
     container_name = context.get("container_name")
@@ -270,6 +271,11 @@ def register_view_image_tool(registry) -> None:
             },
             executor=view_image_tool,
             category=ToolCategory.FILE_OPS,
+            # Path in, base64-encoded image payload out — JSON-serializable
+            # (large but bounded at 20 MiB).
+            state_serializable=True,
+            # No persistent image session; one-shot read.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "view_image", "parameters": {"path": "design/mockup.png"}}',
                 '{"tool_name": "view_image", "parameters": {"path": "assets/logo.jpg", "detail": "high"}}',

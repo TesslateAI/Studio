@@ -28,6 +28,8 @@ import {
   copySelection as copyDesignSelection,
   pasteClipboard as pasteDesignClipboard,
   groupSelected as groupDesignSelected,
+  armPendingInsert,
+  clearPendingInsert,
 } from './design/designStore';
 import { detectClassesAtCursor, detectElementAtCursor, type ClassInfo, type ElementInfo } from '../../utils/classDetection';
 import type { FileTreeEntry } from '../../utils/buildFileTree';
@@ -66,8 +68,28 @@ export default function DesignView({
   // ── State ──────────────────────────────────────────────────────────
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [externalOpenFile, setExternalOpenFile] = useState<string | undefined>(undefined);
-  const [openFiles, setOpenFiles] = useState<{ path: string; name: string }[]>([]);
   const editorRefState = useRef<unknown>(null);
+
+  // Narrow-screen layout — file tree + inspector become slide-overs.
+  const [isNarrow, setIsNarrow] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const [mobileFileTreeOpen, setMobileFileTreeOpen] = useState(false);
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
+  // Auto-close any open slide-over when we leave narrow mode.
+  useEffect(() => {
+    if (!isNarrow) {
+      setMobileFileTreeOpen(false);
+      setMobileInspectorOpen(false);
+    }
+  }, [isNarrow]);
 
   // Preview & selection
   const [designMode, setDesignMode] = useState<'select' | 'text' | 'move'>('select');
@@ -94,6 +116,15 @@ export default function DesignView({
   const persistError = useDesignStore((s) => s.lastError);
   const indexLoaded = useDesignStore((s) => s.indexLoaded);
   const indexLoading = useDesignStore((s) => s.indexLoading);
+  const pendingInsert = useDesignStore((s) => s.pendingInsert);
+  const designIndex = useDesignStore((s) => s.index);
+
+  // Pending insert needs to be readable inside callbacks without re-binding
+  // them on every store update — keep a ref in sync.
+  const pendingInsertRef = useRef(pendingInsert);
+  pendingInsertRef.current = pendingInsert;
+  const designIndexRef = useRef(designIndex);
+  designIndexRef.current = designIndex;
 
   const hasFiles = fileTree.length > 0;
   useEffect(() => {
@@ -191,6 +222,12 @@ export default function DesignView({
   useHotkeys(
     'escape',
     () => {
+      // Esc cancels an armed insert before clearing the selection so the
+      // user gets out of placement mode with one keypress.
+      if (pendingInsertRef.current) {
+        clearPendingInsert();
+        return;
+      }
       clearDesignSelection();
     },
     [],
@@ -233,15 +270,113 @@ export default function DesignView({
     return () => disposable.dispose();
   }, []);
 
-  const handleTabsChange = useCallback((tabs: { path: string; name: string }[]) => {
-    setOpenFiles(tabs);
-  }, []);
-
   const handleSelectedFileChange = useCallback((path: string | null) => {
     setSelectedFile(path);
   }, []);
 
+  // Insert flow:
+  //   1. User picks a snippet from InsertPalette → arm placement mode.
+  //   2. PreviewCanvas surfaces a pill + the bridge keeps passing clicks
+  //      through as element-data → handleElementSelect intercepts.
+  // The fallback (no element bridge / no source mapping) drops the
+  // snippet at the current Monaco cursor like before.
+  const insertSnippetAtCursor = useCallback((snippet: string) => {
+    const editor = editorRefState.current as {
+      executeEdits: (source: string, edits: Array<{ range: unknown; text: string }>) => void;
+      getPosition: () => { lineNumber: number; column: number } | null;
+      focus?: () => void;
+    } | null;
+    if (!editor) return false;
+    const position = editor.getPosition();
+    if (!position) return false;
+    const range = {
+      startLineNumber: position.lineNumber,
+      startColumn: position.column,
+      endLineNumber: position.lineNumber,
+      endColumn: position.column,
+    };
+    editor.executeEdits('design-insert', [{ range, text: snippet }]);
+    editor.focus?.();
+    return true;
+  }, []);
+
+  // Insert at the end of a specific (file, line) — used by placement mode.
+  const insertSnippetAtLine = useCallback((targetLine: number, snippet: string) => {
+    const editor = editorRefState.current as {
+      executeEdits: (source: string, edits: Array<{ range: unknown; text: string }>) => void;
+      getModel: () => { getLineContent: (line: number) => string; getLineCount: () => number } | null;
+      setPosition?: (pos: { lineNumber: number; column: number }) => void;
+      revealLineInCenter?: (line: number) => void;
+      focus?: () => void;
+    } | null;
+    if (!editor) return false;
+    const model = editor.getModel();
+    if (!model) return false;
+    const lineCount = model.getLineCount();
+    const line = Math.max(1, Math.min(targetLine, lineCount));
+    const lineText = model.getLineContent(line);
+    // Indent the snippet to match the opening tag's indentation so the
+    // pasted JSX lands flush rather than at column 1.
+    const indentMatch = lineText.match(/^(\s*)/);
+    const indent = indentMatch ? indentMatch[1] : '';
+    const indented = snippet
+      .split('\n')
+      .map((row, i) => (i === 0 ? row : indent + row))
+      .join('\n');
+    const text = '\n' + indent + indented;
+    const endCol = lineText.length + 1;
+    const range = {
+      startLineNumber: line,
+      startColumn: endCol,
+      endLineNumber: line,
+      endColumn: endCol,
+    };
+    editor.executeEdits('design-insert-at-line', [{ range, text }]);
+    editor.setPosition?.({ lineNumber: line + 1, column: endCol });
+    editor.revealLineInCenter?.(line + 1);
+    editor.focus?.();
+    return true;
+  }, []);
+
   const handleElementSelect = useCallback((element: ElementData, opts?: { additive?: boolean }) => {
+    // Placement mode: the next click is a target drop, not a selection.
+    const armed = pendingInsertRef.current;
+    if (armed && !opts?.additive) {
+      const indexEntry = element.oid ? designIndexRef.current[element.oid] : null;
+      const sourceFile = indexEntry?.path || element.reactComponent?.sourceFile || null;
+      const startLine = indexEntry?.start_line ?? null;
+      if (sourceFile) {
+        const filePath = sourceFile
+          .replace(/^\/app\//, '')
+          .replace(/^(\.\/|\/src\/|\/project\/)/, '');
+        const match = fileTree.find((f) =>
+          f.path === filePath ||
+          f.path.endsWith('/' + filePath) ||
+          f.path === 'app/' + filePath ||
+          f.path === 'src/' + filePath ||
+          f.path === 'src/app/' + filePath,
+        );
+        const finalPath = match?.path || filePath;
+        setExternalOpenFile(finalPath);
+        setTimeout(() => setExternalOpenFile(undefined), 0);
+        // Wait for the file to mount in Monaco before inserting.
+        const tryInsert = (attempt = 0) => {
+          const ok = startLine
+            ? insertSnippetAtLine(startLine, armed.snippet)
+            : insertSnippetAtCursor(armed.snippet);
+          if (!ok && attempt < 10) {
+            setTimeout(() => tryInsert(attempt + 1), 60);
+          }
+        };
+        setTimeout(tryInsert, 80);
+      } else {
+        // No source mapping — fall back to current Monaco cursor.
+        insertSnippetAtCursor(armed.snippet);
+      }
+      clearPendingInsert();
+      return;
+    }
+
     setSelectedElement(element);
     setActiveInspectorTab('inspector');
     // Mirror into the design store so hotkeys (delete/copy/group) can
@@ -307,31 +442,16 @@ export default function DesignView({
       setExternalOpenFile(finalPath);
       setTimeout(() => setExternalOpenFile(undefined), 0);
     }
-  }, [fileTree]);
+  }, [fileTree, insertSnippetAtCursor, insertSnippetAtLine]);
 
   const handleElementHover = useCallback((_element: ElementData | null) => {
     // Could update a hover indicator — currently a no-op
   }, []);
 
   const handleInsert = useCallback((snippet: string) => {
-    const editor = editorRefState.current as {
-      executeEdits: (source: string, edits: Array<{ range: unknown; text: string }>) => void;
-      getPosition: () => { lineNumber: number; column: number } | null;
-      getModel: () => { getLineContent: (line: number) => string } | null;
-    } | null;
-    if (!editor) return;
-
-    const position = editor.getPosition();
-    if (!position) return;
-
-    const range = {
-      startLineNumber: position.lineNumber,
-      startColumn: position.column,
-      endLineNumber: position.lineNumber,
-      endColumn: position.column,
-    };
-
-    editor.executeEdits('design-insert', [{ range, text: snippet }]);
+    // Arm placement mode — the next canvas click drops the snippet at
+    // that element's source location. PreviewCanvas shows the pill cue.
+    armPendingInsert(snippet);
   }, []);
 
   const handleTextChanged = useCallback((designId: string, text: string, _sourceFile?: string, _lineNumber?: number) => {
@@ -474,12 +594,148 @@ export default function DesignView({
   }, [handleTextChanged, handleElementMoved]);
 
   // ── Render ─────────────────────────────────────────────────────────
+  const fileTreeNode = (
+    <FileTreePanel
+      fileTree={fileTree}
+      selectedFile={selectedFile}
+      onFileSelect={(p) => {
+        handleFileSelect(p);
+        if (isNarrow) setMobileFileTreeOpen(false);
+      }}
+      onFileCreate={onFileCreate}
+      onFileDelete={onFileDelete}
+      onFileRename={onFileRename}
+      onDirectoryCreate={onDirectoryCreate}
+      isFilesSyncing={isFilesSyncing}
+      slug={slug}
+      projectId={projectId}
+    />
+  );
+
+  const inspectorNode = (
+    <InspectorPanel
+      activeTab={activeInspectorTab}
+      onTabChange={setActiveInspectorTab}
+      cursorClasses={cursorClasses}
+      editorRef={editorRefState.current}
+      selectedElement={selectedElement}
+      cursorElement={cursorElement}
+      onStyleUpdate={handleStyleUpdate}
+      onStyleRemove={handleStyleRemove}
+      onClassUpdate={handleClassUpdate}
+    />
+  );
+
+  const centerColumn = (
+    <div className="h-full flex flex-col overflow-hidden">
+      <DesignToolbar
+        designMode={designMode}
+        onDesignModeChange={setDesignMode}
+        viewportBreakpoint={viewportBreakpoint}
+        onViewportChange={setViewportBreakpoint}
+        onRefresh={onRefreshPreview}
+        onInsert={handleInsert}
+        fileTree={fileTree}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        flushing={flushing}
+        persistError={persistError}
+        indexLoaded={indexLoaded}
+        indexLoading={indexLoading}
+        onUndo={() => { void designUndo(); }}
+        onRedo={() => { void designRedo(); }}
+        showPanelToggles={isNarrow}
+        onToggleFileTree={isNarrow ? () => setMobileFileTreeOpen((v) => !v) : undefined}
+        onToggleInspector={isNarrow ? () => setMobileInspectorOpen((v) => !v) : undefined}
+      />
+
+      <div className="flex-1 min-h-0">
+        <PanelGroup orientation="vertical">
+          <Panel
+            id="design-preview"
+            defaultSize="58"
+            minSize="25"
+            className="overflow-hidden"
+          >
+            <PreviewCanvas
+              devServerUrl={devServerUrl}
+              devServerUrlWithAuth={devServerUrlWithAuth}
+              designMode={designMode}
+              viewportWidth={viewportWidth}
+              onElementSelect={handleElementSelect}
+              onElementHover={handleElementHover}
+              onRefresh={onRefreshPreview}
+              bridgeInstalled={bridgeInstalled}
+              onInstallBridge={handleInstallBridge}
+            />
+          </Panel>
+
+          <PanelResizeHandle className="h-1.5 bg-transparent cursor-row-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
+
+          <Panel
+            id="design-editor"
+            defaultSize="42"
+            minSize="20"
+            collapsible
+            className="overflow-hidden"
+          >
+            <CodeEditor
+              projectId={projectId}
+              slug={slug}
+              fileTree={fileTree}
+              containerDir={containerDir}
+              onFileUpdate={onFileUpdate}
+              onFileCreate={onFileCreate}
+              onFileDelete={onFileDelete}
+              onFileRename={onFileRename}
+              onDirectoryCreate={onDirectoryCreate}
+              isFilesSyncing={isFilesSyncing}
+              showSidebar={false}
+              externalOpenFile={externalOpenFile}
+              onEditorRef={handleEditorRef}
+              onSelectedFileChange={handleSelectedFileChange}
+            />
+          </Panel>
+        </PanelGroup>
+      </div>
+    </div>
+  );
+
+  if (isNarrow) {
+    return (
+      <div className="relative w-full h-full overflow-hidden">
+        {centerColumn}
+
+        {(mobileFileTreeOpen || mobileInspectorOpen) && (
+          <div
+            className="absolute inset-0 z-30 bg-black/40"
+            onClick={() => {
+              setMobileFileTreeOpen(false);
+              setMobileInspectorOpen(false);
+            }}
+          />
+        )}
+
+        <aside
+          className="absolute top-0 left-0 bottom-0 z-40 w-72 max-w-[80vw] border-r border-[var(--border)] bg-[var(--bg)] shadow-2xl transition-transform duration-200"
+          style={{ transform: mobileFileTreeOpen ? 'translateX(0)' : 'translateX(-100%)' }}
+        >
+          {fileTreeNode}
+        </aside>
+
+        <aside
+          className="absolute top-0 right-0 bottom-0 z-40 w-80 max-w-[85vw] border-l border-[var(--border)] bg-[var(--bg)] shadow-2xl transition-transform duration-200"
+          style={{ transform: mobileInspectorOpen ? 'translateX(0)' : 'translateX(100%)' }}
+        >
+          {inspectorNode}
+        </aside>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full overflow-hidden">
-      <PanelGroup
-        orientation="horizontal"
-      >
-        {/* ── Left: File Tree ─────────────────────────────────────── */}
+      <PanelGroup orientation="horizontal">
         <Panel
           id="design-filetree"
           defaultSize="15"
@@ -488,108 +744,17 @@ export default function DesignView({
           collapsible
           className="overflow-hidden"
         >
-          <FileTreePanel
-            fileTree={fileTree}
-            selectedFile={selectedFile}
-            onFileSelect={handleFileSelect}
-            onFileCreate={onFileCreate}
-            onFileDelete={onFileDelete}
-            onFileRename={onFileRename}
-            onDirectoryCreate={onDirectoryCreate}
-            isFilesSyncing={isFilesSyncing}
-            slug={slug}
-            projectId={projectId}
-          />
+          {fileTreeNode}
         </Panel>
 
         <PanelResizeHandle className="w-1.5 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
 
-        {/* ── Center: Toolbar + Preview + Code ────────────────────── */}
         <Panel id="design-center" minSize="40" className="overflow-hidden">
-          <div className="h-full flex flex-col overflow-hidden">
-            {/* Toolbar */}
-            <DesignToolbar
-              openFiles={openFiles}
-              activeFile={selectedFile}
-              onFileSelect={handleFileSelect}
-              designMode={designMode}
-              onDesignModeChange={setDesignMode}
-              viewportBreakpoint={viewportBreakpoint}
-              onViewportChange={setViewportBreakpoint}
-              onRefresh={onRefreshPreview}
-              onInsert={handleInsert}
-              fileTree={fileTree}
-              canUndo={canUndo}
-              canRedo={canRedo}
-              flushing={flushing}
-              persistError={persistError}
-              indexLoaded={indexLoaded}
-              indexLoading={indexLoading}
-              onUndo={() => { void designUndo(); }}
-              onRedo={() => { void designRedo(); }}
-            />
-
-            {/* Preview + Code split */}
-            <div className="flex-1 min-h-0">
-              <PanelGroup
-                orientation="vertical"
-              >
-                {/* Preview Canvas */}
-                <Panel
-                  id="design-preview"
-                  defaultSize="58"
-                  minSize="25"
-                  className="overflow-hidden"
-                >
-                  <PreviewCanvas
-                    devServerUrl={devServerUrl}
-                    devServerUrlWithAuth={devServerUrlWithAuth}
-                    designMode={designMode}
-                    viewportWidth={viewportWidth}
-                    onElementSelect={handleElementSelect}
-                    onElementHover={handleElementHover}
-                    onRefresh={onRefreshPreview}
-                    bridgeInstalled={bridgeInstalled}
-                    onInstallBridge={handleInstallBridge}
-                  />
-                </Panel>
-
-                <PanelResizeHandle className="h-1.5 bg-transparent cursor-row-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
-
-                {/* Code Editor */}
-                <Panel
-                  id="design-editor"
-                  defaultSize="42"
-                  minSize="20"
-                  collapsible
-                  className="overflow-hidden"
-                >
-                  <CodeEditor
-                    projectId={projectId}
-                    slug={slug}
-                    fileTree={fileTree}
-                    containerDir={containerDir}
-                    onFileUpdate={onFileUpdate}
-                    onFileCreate={onFileCreate}
-                    onFileDelete={onFileDelete}
-                    onFileRename={onFileRename}
-                    onDirectoryCreate={onDirectoryCreate}
-                    isFilesSyncing={isFilesSyncing}
-                    showSidebar={false}
-                    externalOpenFile={externalOpenFile}
-                    onEditorRef={handleEditorRef}
-                    onTabsChange={handleTabsChange}
-                    onSelectedFileChange={handleSelectedFileChange}
-                  />
-                </Panel>
-              </PanelGroup>
-            </div>
-          </div>
+          {centerColumn}
         </Panel>
 
         <PanelResizeHandle className="w-1.5 bg-transparent cursor-col-resize [&[data-separator='hover']]:bg-[var(--primary)]/20 [&[data-separator='active']]:bg-[var(--primary)]/40" />
 
-        {/* ── Right: Inspector Panel ──────────────────────────────── */}
         <Panel
           id="design-inspector"
           defaultSize="22"
@@ -598,17 +763,7 @@ export default function DesignView({
           collapsible
           className="overflow-hidden"
         >
-          <InspectorPanel
-            activeTab={activeInspectorTab}
-            onTabChange={setActiveInspectorTab}
-            cursorClasses={cursorClasses}
-            editorRef={editorRefState.current}
-            selectedElement={selectedElement}
-            cursorElement={cursorElement}
-            onStyleUpdate={handleStyleUpdate}
-            onStyleRemove={handleStyleRemove}
-            onClassUpdate={handleClassUpdate}
-          />
+          {inspectorNode}
         </Panel>
       </PanelGroup>
     </div>

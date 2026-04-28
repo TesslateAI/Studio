@@ -109,6 +109,35 @@ end
 return 0
 """
 
+# Lua script: acquire chat lock with takeover from cancelled holders.
+#
+# KEYS[1] = chat lock key (tesslate:chat:lock:{chat_id})
+# ARGV[1] = new task_id
+# ARGV[2] = ttl seconds
+# ARGV[3] = cancel key prefix (tesslate:agent:cancel:)
+#
+# Returns:
+#   1 — acquired (no prior holder)
+#   2 — took over a cancelled zombie holder
+#   0 — blocked by a live holder
+_ACQUIRE_OR_TAKEOVER_SCRIPT = """
+local current = redis.call('get', KEYS[1])
+if not current then
+    redis.call('set', KEYS[1], ARGV[1], 'EX', ARGV[2])
+    return 1
+end
+if current == ARGV[1] then
+    redis.call('expire', KEYS[1], ARGV[2])
+    return 1
+end
+local cancel_key = ARGV[3] .. current
+if redis.call('exists', cancel_key) == 1 then
+    redis.call('set', KEYS[1], ARGV[1], 'EX', ARGV[2])
+    return 2
+end
+return 0
+"""
+
 
 class RedisPubSub:
     """
@@ -313,6 +342,12 @@ class RedisPubSub:
             return None
 
     async def acquire_chat_lock(self, chat_id: str, task_id: str) -> bool:
+        """Acquire or take over a chat lock.
+
+        Returns True if we now own the lock — either because it was free or
+        because the prior holder was flagged cancelled (zombie takeover).
+        Returns False only if a LIVE (non-cancelled) task holds the lock.
+        """
         from ..cache_service import get_redis_client
 
         redis = await get_redis_client()
@@ -321,10 +356,20 @@ class RedisPubSub:
 
         key = f"{CHAT_LOCK_PREFIX}{chat_id}"
         try:
-            result = await redis.set(key, task_id, nx=True, ex=30)
-            if result:
+            result = await redis.eval(
+                _ACQUIRE_OR_TAKEOVER_SCRIPT,
+                1,
+                key,
+                task_id,
+                30,
+                CANCEL_KEY_PREFIX,
+            )
+            code = int(result) if result is not None else 0
+            if code == 2:
+                logger.info(f"Chat lock taken over from cancelled zombie: {chat_id} by {task_id}")
+            elif code == 1:
                 logger.debug(f"Chat lock acquired: {chat_id} by {task_id}")
-            return bool(result)
+            return code > 0
         except Exception as e:
             logger.warning(f"Failed to acquire chat lock: {e}")
             return False

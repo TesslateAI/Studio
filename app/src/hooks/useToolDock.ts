@@ -9,7 +9,12 @@ export type ToolType =
   | 'kanban'
   | 'assets'
   | 'terminal'
-  | 'node-config';
+  | 'repository'
+  | 'node-config'
+  | 'config'
+  | 'volume'
+  | 'notes'
+  | 'settings';
 
 export const TOOL_TYPES: ToolType[] = [
   'architecture',
@@ -19,7 +24,12 @@ export const TOOL_TYPES: ToolType[] = [
   'kanban',
   'assets',
   'terminal',
+  'repository',
   'node-config',
+  'config',
+  'volume',
+  'notes',
+  'settings',
 ];
 
 /** Type-specific tab payload. `node-config` carries the form schema + values. */
@@ -42,8 +52,18 @@ const DEFAULT_STATE: DockState = {
   activeTabId: null,
 };
 
-const storageKey = (slug: string | undefined) =>
-  slug ? `tesslate-dock-${slug}` : null;
+/** Fresh-project dock: open Preview by default so users aren't staring at a
+ * blank canvas on first load. Only used when no persisted state exists for
+ * the slug (i.e., it's this user's first visit to the project). */
+function buildFreshState(): DockState {
+  const id = `preview-initial-${Date.now().toString(36)}`;
+  return {
+    tabs: [{ id, type: 'preview' }],
+    activeTabId: id,
+  };
+}
+
+const storageKey = (slug: string | undefined) => (slug ? `tesslate-dock-${slug}` : null);
 
 function isToolType(value: unknown): value is ToolType {
   return typeof value === 'string' && (TOOL_TYPES as string[]).includes(value);
@@ -78,10 +98,16 @@ function loadInitial(slug: string | undefined): DockState {
   if (!key) return DEFAULT_STATE;
   try {
     const raw = window.localStorage.getItem(key);
-    if (!raw) return DEFAULT_STATE;
-    return sanitize(JSON.parse(raw));
+    // No persisted state for this slug yet → brand new project view for this
+    // user. Seed with Preview so they land on something immediately instead
+    // of an empty dock.
+    if (!raw) return buildFreshState();
+    const restored = sanitize(JSON.parse(raw));
+    // Corrupt / empty persisted state — same treatment as no state at all.
+    if (restored.tabs.length === 0) return buildFreshState();
+    return { ...restored, activeTabId: restored.tabs[0]?.id ?? null };
   } catch {
-    return DEFAULT_STATE;
+    return buildFreshState();
   }
 }
 
@@ -117,6 +143,8 @@ export interface UseToolDockResult {
   closeNodeConfigTabByInputId: (inputId: string) => boolean;
   /** Read the in-memory payload for a node-config tab. */
   getNodeConfigPayload: (id: string) => NodeConfigTabPayload | undefined;
+  /** Reorder a tab from one index to another (drag-and-drop). */
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
 }
 
 export function useToolDock(slug: string | undefined): UseToolDockResult {
@@ -188,52 +216,52 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
     });
   }, []);
 
-  const openNodeConfigTab = useCallback(
-    (payload: NodeConfigTabPayload): string => {
-      // De-duplicate on (containerId, agentInputId) so repeat events don't stack.
-      let reusedId: string | null = null;
-      payloadsRef.current.forEach((p, tabId) => {
-        if (reusedId) return;
-        if (
-          p.containerId === payload.containerId &&
-          (p.agentInputId ?? null) === (payload.agentInputId ?? null)
-        ) {
-          reusedId = tabId;
-        }
-      });
-
-      if (reusedId) {
-        // Refresh payload (schema/initial values may have changed) + focus.
-        payloadsRef.current.set(reusedId, payload);
-        const existingId = reusedId;
-        setState((prev) => {
-          if (!prev.tabs.some((t) => t.id === existingId)) return prev;
-          return { ...prev, activeTabId: existingId };
-        });
-        return reusedId;
-      }
-
-      const tab: TabInstance = { id: makeTabId('node-config'), type: 'node-config' };
-      payloadsRef.current.set(tab.id, payload);
-      setState((prev) => ({
-        tabs: [...prev.tabs, tab],
-        activeTabId: tab.id,
-      }));
-      return tab.id;
-    },
-    []
-  );
-
-  const closeNodeConfigTabByInputId = useCallback((inputId: string): boolean => {
-    let foundId: string | null = null;
+  const openNodeConfigTab = useCallback((payload: NodeConfigTabPayload): string => {
+    // De-duplicate on (containerId, agentInputId) so repeat events don't stack.
+    let reusedId: string | null = null;
     payloadsRef.current.forEach((p, tabId) => {
-      if (foundId) return;
-      if (p.agentInputId === inputId) foundId = tabId;
+      if (reusedId) return;
+      if (
+        p.containerId === payload.containerId &&
+        (p.agentInputId ?? null) === (payload.agentInputId ?? null)
+      ) {
+        reusedId = tabId;
+      }
     });
-    if (!foundId) return false;
-    closeTab(foundId);
-    return true;
-  }, [closeTab]);
+
+    if (reusedId) {
+      // Refresh payload (schema/initial values may have changed) + focus.
+      payloadsRef.current.set(reusedId, payload);
+      const existingId = reusedId;
+      setState((prev) => {
+        if (!prev.tabs.some((t) => t.id === existingId)) return prev;
+        return { ...prev, activeTabId: existingId };
+      });
+      return reusedId;
+    }
+
+    const tab: TabInstance = { id: makeTabId('node-config'), type: 'node-config' };
+    payloadsRef.current.set(tab.id, payload);
+    setState((prev) => ({
+      tabs: [...prev.tabs, tab],
+      activeTabId: tab.id,
+    }));
+    return tab.id;
+  }, []);
+
+  const closeNodeConfigTabByInputId = useCallback(
+    (inputId: string): boolean => {
+      let foundId: string | null = null;
+      payloadsRef.current.forEach((p, tabId) => {
+        if (foundId) return;
+        if (p.agentInputId === inputId) foundId = tabId;
+      });
+      if (!foundId) return false;
+      closeTab(foundId);
+      return true;
+    },
+    [closeTab]
+  );
 
   const closeType = useCallback((type: ToolType) => {
     setState((prev) => {
@@ -257,15 +285,30 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
     setState({ tabs: [], activeTabId: null });
   }, []);
 
+  const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
+    setState((prev) => {
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= prev.tabs.length ||
+        toIndex >= prev.tabs.length
+      ) {
+        return prev;
+      }
+      const tabs = prev.tabs.slice();
+      const [moved] = tabs.splice(fromIndex, 1);
+      tabs.splice(toIndex, 0, moved);
+      return { ...prev, tabs };
+    });
+  }, []);
+
   const countOf = useCallback(
     (type: ToolType) => state.tabs.filter((t) => t.type === type).length,
     [state]
   );
 
-  const hasType = useCallback(
-    (type: ToolType) => state.tabs.some((t) => t.type === type),
-    [state]
-  );
+  const hasType = useCallback((type: ToolType) => state.tabs.some((t) => t.type === type), [state]);
 
   const isActiveType = useCallback(
     (type: ToolType) => {
@@ -293,6 +336,7 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
       openNodeConfigTab,
       closeNodeConfigTabByInputId,
       getNodeConfigPayload,
+      reorderTabs,
     }),
     [
       state,
@@ -309,6 +353,7 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
       openNodeConfigTab,
       closeNodeConfigTabByInputId,
       getNodeConfigPayload,
+      reorderTabs,
     ]
   );
 }

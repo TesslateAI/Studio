@@ -457,6 +457,38 @@ async def test_trajectory_is_json_serializable(patch_fake_agent, parent_context)
 
 
 # ---------------------------------------------------------------------------
+# Bug #203: trajectory must not duplicate the final assistant response
+# ---------------------------------------------------------------------------
+
+
+async def test_trajectory_no_duplicate_final_response(patch_fake_agent, parent_context):
+    """Bug #203 regression: the final assistant message must appear exactly once
+    in the ATIF trajectory.
+
+    The FakeAgent emits an agent_step (which records the assistant turn) and
+    then a complete event. Before the fix, the complete handler also called
+    recorder.record_assistant(final_response), creating a duplicate step.
+    """
+    FakeAgent.final_response = "unique-final-text"
+
+    result = await task_executor(
+        {"role": "trace", "prompt": "verify no dupe", "wait": True}, parent_context
+    )
+    record = SUBAGENT_REGISTRY.get(result["agent_id"])
+    assert record is not None
+
+    traj = record.trajectory
+    agent_steps = [s for s in traj["steps"] if s.get("source") == "agent"]
+
+    # Count how many agent steps contain the final response text.
+    final_steps = [s for s in agent_steps if "unique-final-text" in s.get("message", "")]
+    assert len(final_steps) <= 1, (
+        f"Final response was duplicated in trajectory: found {len(final_steps)} agent steps "
+        f"with the text 'unique-final-text' — expected at most 1."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Bonus: the registration helper installs all 5 tools under DELEGATION_OPS
 # ---------------------------------------------------------------------------
 

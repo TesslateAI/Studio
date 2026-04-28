@@ -123,11 +123,11 @@ export function ChatSessionModal({
       onClick={onClose}
     >
       <div
-        className="bg-[var(--surface)] rounded-3xl w-full max-w-lg shadow-2xl border border-white/10 max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
+        className="bg-[var(--surface)] rounded-3xl w-full max-w-lg shadow-2xl border border-[var(--border)] max-h-[80vh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 pb-4 border-b border-white/10">
+        <div className="flex items-center justify-between p-6 pb-4 border-b border-[var(--border)]">
           <h2 className="font-heading text-xl font-bold text-[var(--text)]">
             Chat Sessions
           </h2>
@@ -148,7 +148,7 @@ export function ChatSessionModal({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search sessions..."
-              className="w-full bg-white/5 border border-white/10 text-[var(--text)] pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent transition-all placeholder:text-[var(--text)]/40"
+              className="w-full bg-white/5 border border-[var(--border)] text-[var(--text)] pl-10 pr-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent transition-all placeholder:text-[var(--text)]/40"
               autoFocus
             />
           </div>
@@ -196,7 +196,7 @@ export function ChatSessionModal({
                       ${
                         isSelected
                           ? 'bg-[var(--primary)]/10 border-[var(--primary)]/30'
-                          : 'bg-white/[0.02] border-white/5 hover:bg-white/5 hover:border-white/10'
+                          : 'bg-white/[0.02] border-[var(--border)] hover:bg-white/5 hover:border-[var(--border-hover)]'
                       }
                     `}
                   >

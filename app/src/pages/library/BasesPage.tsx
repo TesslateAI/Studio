@@ -536,7 +536,7 @@ function BaseCard({
       initial="initial"
       animate="animate"
       onClick={onEdit}
-      className={`group relative flex flex-col bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-all duration-200 hover:-translate-y-0.5 ${onEdit ? 'cursor-pointer' : ''}`}
+      className={`group relative flex flex-col h-full bg-[var(--surface)] rounded-[var(--radius)] border border-[var(--border)] transition-all duration-200 hover:-translate-y-1 hover:bg-[var(--card-hover)] ${onEdit ? 'cursor-pointer' : ''}`}
     >
       <div className="p-4 flex flex-col h-full">
         {/* Top row: icon + title + category */}

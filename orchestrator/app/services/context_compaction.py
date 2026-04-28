@@ -47,6 +47,18 @@ _SUMMARY_RATIO = 0.20
 _SUMMARY_TOKENS_CEILING = 12_000
 _CHARS_PER_TOKEN = 4
 
+# Post-compact file re-injection (Claude-Code-style). After summarising middle
+# turns, the compressor re-reads the N most-recently-touched files so the
+# resumed agent has the current on-disk state, not just the summary's prose.
+_RESTORED_FILES_MAX_COUNT = 5
+_RESTORED_FILES_TOKEN_BUDGET = 50_000
+_RESTORED_FILE_TOKEN_BUDGET = 5_000
+
+# Circuit breaker: if summary generation fails this many times in a row, stop
+# attempting compaction until manually reset. Prevents the
+# "summary fails → context keeps growing → summary fails again" loop.
+_MAX_CONSECUTIVE_FAILURES = 3
+
 
 def approx_token_count(text: str) -> int:
     """Approximate token count from text length (~4 bytes per token)."""
@@ -117,6 +129,8 @@ class ContextCompressor:
         self._previous_summary: str | None = None
         self.compression_count: int = 0
         self.last_prompt_tokens: int = 0
+        self._consecutive_failures: int = 0
+        self._circuit_open: bool = False
 
         logger.info(
             "ContextCompressor initialized: context_window=%d threshold=%d "
@@ -452,15 +466,202 @@ Write only the summary body. Do not include any preamble or prefix."""
             summary = summary.strip()
             if not summary:
                 logger.warning("[Compaction] Empty summary generated")
+                self._record_summary_failure()
                 return None
 
             # Store raw summary (without prefix) for iterative updates
             self._previous_summary = summary
+            self._consecutive_failures = 0
             return f"{SUMMARY_PREFIX}\n{summary}"
 
         except Exception as e:
             logger.warning("[Compaction] Failed to generate summary: %s", e)
+            self._record_summary_failure()
             return None
+
+    def _record_summary_failure(self) -> None:
+        """Increment failure counter and trip the circuit breaker at the limit."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+            self._circuit_open = True
+            logger.error(
+                "Compaction circuit breaker tripped after %d consecutive "
+                "summary failures. Further compaction attempts will be skipped "
+                "until reset_circuit() is called.",
+                self._consecutive_failures,
+            )
+
+    def reset_circuit(self) -> None:
+        """Clear the circuit breaker so compaction can be attempted again."""
+        self._consecutive_failures = 0
+        self._circuit_open = False
+
+    # ------------------------------------------------------------------
+    # Post-compact re-injection (files + active plan)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _truncate_for_token_budget(content: str, token_budget: int) -> tuple[str, bool]:
+        """Truncate file content to fit a token budget. Returns (content, was_truncated)."""
+        char_budget = token_budget * _CHARS_PER_TOKEN
+        if len(content) <= char_budget:
+            return content, False
+        head = content[: int(char_budget * 0.7)]
+        tail = content[-int(char_budget * 0.2) :]
+        return f"{head}\n...[truncated for context budget]...\n{tail}", True
+
+    async def _build_restored_files_block(self, context: dict[str, Any]) -> str | None:
+        """Re-read the most-recently-touched files and format as a block.
+
+        Returns ``None`` if no files could be restored (e.g. empty tracker,
+        orchestrator unavailable). Caller decides whether to append.
+        """
+        try:
+            from .recent_files import get_recent_file_tracker
+
+            paths = await get_recent_file_tracker().recent(context, limit=_RESTORED_FILES_MAX_COUNT)
+        except Exception as exc:
+            logger.debug("[Compaction] Recent file lookup failed: %s", exc)
+            return None
+
+        if not paths:
+            return None
+
+        try:
+            from .orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+        except Exception as exc:
+            logger.debug("[Compaction] Orchestrator unavailable for re-inject: %s", exc)
+            return None
+
+        user_id = context.get("user_id")
+        project_id_raw = context.get("project_id")
+        project_id = str(project_id_raw) if project_id_raw is not None else None
+        project_slug = context.get("project_slug")
+        container_directory = context.get("container_directory")
+        container_name = context.get("container_name")
+
+        sections: list[str] = []
+        total_tokens = 0
+        for path in paths:
+            if total_tokens >= _RESTORED_FILES_TOKEN_BUDGET:
+                break
+            try:
+                content = await orchestrator.read_file(
+                    user_id=user_id,
+                    project_id=project_id,
+                    container_name=container_name,
+                    file_path=path,
+                    project_slug=project_slug,
+                    subdir=container_directory,
+                    volume_id=context.get("volume_id"),
+                    cache_node=context.get("cache_node"),
+                )
+            except Exception as exc:
+                logger.debug("[Compaction] Re-read failed for %s: %s", path, exc)
+                continue
+            if not content:
+                continue
+
+            remaining = _RESTORED_FILES_TOKEN_BUDGET - total_tokens
+            per_file_budget = min(_RESTORED_FILE_TOKEN_BUDGET, remaining)
+            truncated_content, was_truncated = self._truncate_for_token_budget(
+                content, per_file_budget
+            )
+            marker = " (truncated)" if was_truncated else ""
+            sections.append(f"### `{path}`{marker}\n```\n{truncated_content}\n```")
+            total_tokens += approx_token_count(truncated_content)
+
+        if not sections:
+            return None
+
+        header = (
+            "[RESTORED FILES]\n"
+            "These files were recently accessed before the compaction. Their "
+            "current on-disk contents are included below so you can resume "
+            "from the live state, not just the summary.\n\n"
+        )
+        return header + "\n\n".join(sections)
+
+    @staticmethod
+    async def _build_plan_block(context: dict[str, Any]) -> str | None:
+        """Return the active plan formatted for prompt injection, if any.
+
+        Prefers the markdown plan file referenced by ``.tesslate/plans/_active``
+        (populated by the ``update_plan`` tool). Falls back to the legacy
+        ``PlanManager`` Redis-backed plan when no markdown plan exists.
+        """
+        md_block = await ContextCompressor._read_active_markdown_plan(context)
+        if md_block:
+            return md_block
+
+        try:
+            from .plan_manager import PlanManager
+
+            return await PlanManager.get_plan_context(context)
+        except Exception as exc:
+            logger.debug("[Compaction] Legacy plan lookup failed: %s", exc)
+            return None
+
+    @staticmethod
+    async def _read_active_markdown_plan(context: dict[str, Any]) -> str | None:
+        """Read ``.tesslate/plans/_active`` → markdown file, wrap for injection.
+
+        Returns ``None`` if the pointer is missing/empty, the referenced file
+        cannot be read, or the orchestrator is unavailable.
+        """
+        user_id = context.get("user_id")
+        project_id_raw = context.get("project_id")
+        if user_id is None or project_id_raw is None:
+            return None
+        project_id = str(project_id_raw)
+
+        try:
+            from .orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+        except Exception:
+            return None
+
+        read_kwargs = {
+            "user_id": user_id,
+            "project_id": project_id,
+            "container_name": context.get("container_name"),
+            "project_slug": context.get("project_slug"),
+            "subdir": context.get("container_directory"),
+            "volume_id": context.get("volume_id"),
+            "cache_node": context.get("cache_node"),
+        }
+
+        try:
+            pointer = await orchestrator.read_file(
+                file_path=".tesslate/plans/_active", **read_kwargs
+            )
+        except Exception:
+            return None
+        if not pointer:
+            return None
+        active_filename = pointer.strip().splitlines()[0] if pointer.strip() else ""
+        if not active_filename:
+            return None
+
+        try:
+            body = await orchestrator.read_file(
+                file_path=f".tesslate/plans/{active_filename}", **read_kwargs
+            )
+        except Exception:
+            return None
+        if not body:
+            return None
+
+        return (
+            "=== ACTIVE PLAN ===\n"
+            f"{body.strip()}\n"
+            "=== END PLAN ===\n\n"
+            "Continue executing from the current in_progress step. Mark steps "
+            "completed as you finish them via update_plan."
+        )
 
     # ------------------------------------------------------------------
     # Tool pair sanitization
@@ -540,6 +741,7 @@ Write only the summary body. Do not include any preamble or prefix."""
         self,
         messages: list[dict[str, Any]],
         current_tokens: int | None = None,
+        context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Compress conversation messages via 5-phase algorithm.
 
@@ -549,8 +751,22 @@ Write only the summary body. Do not include any preamble or prefix."""
         4. Summarize middle turns
         5. Sanitize tool pairs
 
-        Returns the compressed message list.
+        When ``context`` is provided (with ``user_id`` / ``project_id``), the
+        compressor also re-injects the most-recently-touched files and the
+        active plan into the compressed output — analogous to Claude Code's
+        post-compact attachment flow.
+
+        Returns the compressed message list. If the circuit breaker is open
+        (three consecutive summary failures), returns ``messages`` unchanged.
         """
+        if self._circuit_open:
+            logger.warning(
+                "Compaction circuit breaker is open — skipping compression "
+                "(%d consecutive failures). Reset via reset_circuit().",
+                self._consecutive_failures,
+            )
+            return messages
+
         n_messages = len(messages)
         if n_messages <= self.protect_first_n + self.protect_last_n + 1:
             logger.warning(
@@ -653,6 +869,19 @@ Write only the summary body. Do not include any preamble or prefix."""
 
         # Phase 5: Sanitize tool pairs
         compressed = self._sanitize_tool_pairs(compressed)
+
+        # Phase 6 (optional): Post-compact re-injection of recent files and
+        # the active plan. Only runs when a concrete context dict is provided,
+        # so chat-history compaction in ``/api/chat/*/compact`` remains a
+        # pure summariser and the agent loop gets the richer behaviour.
+        if context and summary:
+            plan_block = await self._build_plan_block(context)
+            if plan_block:
+                compressed.append({"role": "user", "content": plan_block})
+
+            files_block = await self._build_restored_files_block(context)
+            if files_block:
+                compressed.append({"role": "user", "content": files_block})
 
         new_estimate = estimate_messages_tokens(compressed)
         logger.info(

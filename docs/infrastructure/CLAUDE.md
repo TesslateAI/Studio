@@ -87,7 +87,7 @@ minikube start -p tesslate --driver=docker --memory=8192 --cpus=4
 
 # Build and load image (CRITICAL: Delete old image first!)
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 
 # Force pod restart (rollout restart may use cached image)
@@ -127,7 +127,7 @@ aws eks update-kubeconfig --region us-east-1 --name <EKS_CLUSTER_NAME>
 
 # Manual build (ALWAYS use --platform linux/amd64 — EKS nodes are amd64)
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-docker buildx build --platform linux/amd64 --no-cache -t <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:production -f orchestrator/Dockerfile orchestrator/ --push
+docker buildx build --platform linux/amd64 --no-cache -t <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:production -f orchestrator/Dockerfile . --push
 
 # Force pod restart (imagePullPolicy: Always pulls new image)
 kubectl delete pod -n tesslate -l app=tesslate-backend

@@ -344,6 +344,10 @@ def register_schedule_tools(registry):
             },
             executor=manage_schedule_executor,
             category=ToolCategory.WEB,
+            # Action + schedule fields in, success/list dict out — JSON-clean.
+            state_serializable=True,
+            # AgentSchedule DB rows; no in-tool persistent state.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "manage_schedule", "parameters": {"action": "create", "name": "Daily report", "schedule": "daily at 9am", "prompt": "Generate a summary of project activity for {date}"}}',
                 '{"tool_name": "manage_schedule", "parameters": {"action": "list"}}',

@@ -270,7 +270,7 @@ def build_target_response(
         deployment_env=target.deployment_env,
         provider_info=ProviderInfo(
             display_name=provider_info["display_name"] if provider_info else target.provider,
-            icon=provider_info["icon"] if provider_info else "🚀",
+            icon=provider_info["icon"] if provider_info else "◆",
             color=provider_info["color"] if provider_info else "#888888",
             types=provider_info["types"] if provider_info else ["*"],
             frameworks=provider_info["frameworks"] if provider_info else ["*"],

@@ -14,6 +14,9 @@ interface ProjectConnectorProps {
   projectName: string | null;
   onConnect: (projectId: string, projectName: string) => void;
   onDisconnect: () => void;
+  /** Called when the user clicks "+ New Workspace" in the dropdown. The
+      parent owns the create flow (modal, project creation, auto-connect). */
+  onRequestNewWorkspace?: () => void;
 }
 
 export function ProjectConnector({
@@ -21,6 +24,7 @@ export function ProjectConnector({
   projectName,
   onConnect,
   onDisconnect,
+  onRequestNewWorkspace,
 }: ProjectConnectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -88,7 +92,7 @@ export function ProjectConnector({
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-[var(--surface)] border border-[var(--border)] text-[11px] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--border-hover)] transition-colors"
       >
         <Plus size={12} />
-        <span>Connect a project</span>
+        <span>Connect a workspace for file access</span>
       </button>
 
       {isOpen && (
@@ -135,6 +139,26 @@ export function ProjectConnector({
               </button>
             ))}
           </div>
+
+          {/* Divider + "New Workspace" affordance — defers to the parent
+              for the actual create flow (modal + projectsApi.create +
+              auto-connect on success). */}
+          {onRequestNewWorkspace && (
+            <>
+              <div className="border-t border-[var(--border)]" />
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  setSearch('');
+                  onRequestNewWorkspace();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[var(--surface-hover)] transition-colors"
+              >
+                <Plus size={12} className="text-[var(--text-muted)] flex-shrink-0" />
+                <span className="text-[11px] text-[var(--text)]">New Workspace</span>
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -5,14 +5,10 @@
 <h1 align="center">OpenSail</h1>
 
 <p align="center">
-Build agents, software, apps, workflows, automations, and schedules.<br />
-Deploy them to any provider. No vendor lock-in.<br />
-See your entire architecture on one canvas.<br />
-Containers, preview windows, deploy targets, agents, and their wiring, all in one graph.<br />
-Run it on your infrastructure. Share it across your team.<br />
-Become your own sandboxing cloud.<br />
-Governance, audit, and permissions built in.<br />
-Open source. Any model.
+OpenSail is the open platform for building AI apps, agents, workflows, and automations you can own.<br />
+Turn recurring work from Slack, email, spreadsheets, tickets, approvals, and internal tools into runnable software.<br />
+Manage your fleet of agents. Connect real systems. Add approvals, budgets, permissions, logs, schedules, and human review.<br />
+Run it on your infrastructure. Use any model. Open source. Your cloud, your code, your control.
 </p>
 
 <p align="center">
@@ -31,35 +27,82 @@ Open source. Any model.
 
 ---
 
-OpenSail is an open platform for building, running, and sharing AI-powered software. Build an agent that does your job for you. Turn it into an app. Share it with your team. Deploy it to hundreds of users. Connect it to everything.
+OpenSail is an open platform for building, running, and sharing AI workflows, apps, agents, and automations you can inspect and own.
 
-It runs on a snapshot-based filesystem that makes workspaces portable, shareable, and persistent. Connect your local desktop to your own cloud. Run agents in sandboxed environments that cost almost nothing when idle. Ship workflows that keep working while you sleep.
+It is for anyone with a process that keeps coming back: a founder chasing follow-ups, an operator buried in handoffs, a lawyer managing intake and documents, a support team routing issues, a developer building internal tools, or a company giving people a sanctioned place to build useful AI.
 
-OpenSail also exposes a Gateway API and an MCP server (in development), so external agents and humans can interact with your running instance using an API key. They get their own sandboxed containers, can use agents, and publish apps (coming soon) directly from their own coding tools.
+Start with a workflow in plain English: "every morning, check these sources, summarize what changed, update Linear, and send the result to Slack." OpenSail turns that into a real runnable system with a trigger, an agent or app action, selected tools and connectors, delivery targets, approval gates, budget limits, run history, and a sandboxed workspace when the workflow needs files, code, or services.
+
+For builders, OpenSail is a way to turn useful AI experiments into durable software. For leaders, it is a control plane for letting teams move fast while keeping data, infrastructure, cost, permissions, and auditability under control.
+
+Under the hood, OpenSail runs on portable, snapshot-backed workspaces. Agents and apps can sleep when idle, wake when needed, keep state across runs, and move from your local desktop to your own cloud with the same project state intact.
 
 ---
 
-## What you can build
+## What OpenSail Helps You Run
 
-Describe the job. Ship the app.
+OpenSail workflows can be scheduled, triggered, connected, approved, budgeted, tracked, packaged, and reused. The goal is durable AI software your team can trust.
 
-Describe the job you want done or drop in a file. OpenSail helps turn it into a working agent, app, or workflow: defining the steps, connecting the right tools, adding skills, and testing it until it works the way you expect.
+Start small:
 
-An "app" on OpenSail is anything you build and ship: a piece of software, an agent, a scheduled automation, a triggered webhook handler, or an MCP tool that other agents can call. Every app is a versioned, installable bundle produced from a workspace project.
+- Run a task on a schedule, from a button, from a webhook, from Slack or email, or when an app event happens
+- Assign the work to an agent, an installed app action, or a lightweight connector-only automation
+- Use built-in builder agents to create agents, wire connectors, and attach schedules from chat
+- Give the agent only the skills, tools, connectors, and apps it needs for that job
+- Connect business systems like Slack, Linear, GitHub, Salesforce, Gmail, internal APIs, and MCP servers
+- Send the result to Slack, email, a webhook, the OpenSail inbox, or another app
 
-Agents do more than answer a prompt. They can write and run code, use connected apps, remember what they've learned, and continue work across multiple steps. They run in sandboxed cloud environments and keep going even when you close your laptop.
+Add control when the work gets serious:
 
-A few things people are building today:
+- Require approval before risky actions happen, then approve from Slack, email, or the web app
+- Pause and resume runs at approval boundaries while the system keeps processing other work
+- Set per-run and daily budgets so AI and compute spend stays bounded
+- See what ran, what it cost, what systems it touched, what it produced, and who approved it
+- Keep credentials safe behind the Connector Proxy so apps use tools through scoped runtime calls
+- Let lightweight jobs stay cheap, and give heavier jobs a real workspace when they need files, code, terminals, databases, or running services
 
-- **Software Reviewer** - Reviews employee software requests, checks them against approved tools and policies, recommends next steps, and files tickets when needed
-- **Product Feedback Router** - Monitors Slack, support channels, and public forums, then turns feedback into prioritized tickets and weekly product summaries
-- **Weekly Metrics Reporter** - Pulls data every Friday, creates charts, writes the summary, and shares a report with the team
-- **Lead Outreach Agent** - Researches inbound leads, scores them against your qualification rubric, drafts personalized follow-ups, and updates your CRM
-- **Client Onboarding Agent** - Walks through intake forms, pulls in context from past projects, and drafts a kickoff doc
-- **Third-Party Risk Manager** - Researches vendors, assesses sanctions exposure, financial health, and reputational risk, and produces a structured report
-- **Multi-container CRM** - Next.js frontend + Node API + Postgres, with an embedded AI chat drawer, deployed as a single installable app
+Package what works:
 
-You can also start from templates for finance, sales, marketing, operations, and more.
+- Publish a workspace project as an installable app
+- Expose typed actions, views, and data resources that other apps, agents, and dashboards can reuse
+- Install an app and run one of its actions inside an automation
+- Let an agent call an app when the job needs structured, reliable work
+- Fork useful apps, share them with a team, or turn them into reusable building blocks
+
+Examples:
+
+- **Software Request Reviewer** - checks new tool requests against policy, budget, security requirements, and approved vendors, then files the next step
+- **Product Feedback Router** - watches support, Slack, GitHub, and customer calls, groups recurring pain, and turns it into tickets and weekly summaries
+- **Weekly Metrics Reporter** - pulls data every Friday, creates charts, writes the story, and sends it to the right people
+- **Lead Follow-up Agent** - researches inbound leads, scores fit, drafts replies, updates the CRM, and asks before sending anything sensitive
+- **Client Intake Assistant** - collects forms, checks missing documents, drafts kickoff notes, and keeps status visible
+- **Billing Review Workflow** - compares activity, matter context, invoices, and payment status so teams catch leakage before it becomes a write-off
+- **Third-Party Risk Manager** - researches vendors, checks policy and reputational risk, produces a structured report, and keeps the approval trail
+- **Multi-container Internal App** - ships a real frontend, backend, database, agent, and dashboard as one installable app
+
+OpenSail is for developers, operators, founders, legal teams, support teams, and anyone who can describe the work, knows what "good" looks like, and needs a safe way to make AI do it again tomorrow.
+
+---
+
+## Agents
+
+Give recurring work a capable owner, then manage your fleet as it grows.
+
+OpenSail agents are built for the messy jobs that move through files, apps, people, approvals, and business systems. Describe the outcome, attach the tools it needs, set the rules for when it should ask, and let it work from a real sandboxed workspace with source, state, terminals, connectors, schedules, and run history.
+
+An agent can research a lead, prepare a client intake packet, route product feedback, update a CRM, review a vendor request, build an internal tool, fix a bug, generate a report, or call an installed app when the job needs a structured function. It can start from chat, Slack, email, webhook, schedule, app event, or API call, then send results back where people already work.
+
+**Built for finished work.** Agents operate inside real workspaces with files, terminals, containers, previews, Git, artifacts, and deploy targets. They can inspect context, make changes, run commands, call tools, invoke app functions, and leave behind a reviewable trail.
+
+**Made for background workflows.** Schedule agents for daily reports, weekly reviews, customer follow-ups, support triage, billing checks, or monitoring tasks. Each run has a trigger, status, outputs, cost, touched systems, and approval history.
+
+**Context that travels.** Agents carry the right instructions, skills, connectors, MCP servers, model settings, budget, and tool permissions into each run. The work lives with the workspace, so a useful agent can be forked, improved, shared, and reused.
+
+**Manage your fleet of agents.** Put frontend, backend, test, ops, research, and review agents in the same workspace. Assign each one a job, give it the right tools, and let the architecture panel show how the software, agents, containers, secrets, and deploy targets connect.
+
+**Human control at the right moments.** Scope what agents can touch, require approval for sensitive steps, cap spend per run or per day, and inspect the full record after the work completes.
+
+Agents are how OpenSail turns personal process knowledge into durable software. The person closest to the work can describe what should happen, and the platform turns that into something that runs, improves, and scales.
 
 ---
 
@@ -71,19 +114,65 @@ One workspace in. One installable app out.
   <img src="assets/opensail-apps.png" alt="OpenSail Apps" width="80%" />
 </p>
 
-An app on OpenSail is a versioned, immutable, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, its own containers, and its own permissions.
+An app on OpenSail is a versioned, manifest-described bundle. Build it in a workspace, publish it, and anyone can install it with one click. Each install creates a new isolated project with its own volume, containers, runtime contract, permissions, and billing policy.
 
-**The lifecycle:** build in a workspace, publish a version (immutable, content-addressed), go through the approval pipeline, list on the marketplace (or keep private/team-only), install per-user, run, update, fork.
+**The lifecycle:** build in a workspace, publish a content-addressed version, pass the approval pipeline, list on the marketplace or keep it private/team-only, install per-user, run, update, fork.
 
-**Surfaces:** Every app declares what shape it takes. A single app can be a UI (full web app), a chat interface, a scheduled job (cron), a triggered webhook handler, or an MCP tool callable by other agents. These are not different products. They are surface declarations in the same manifest.
+**Functions:** Apps expose typed actions: JSON-schema-validated functions that agents, automations, dashboards, or other apps can call. An action can call an HTTP handler, run a Kubernetes Job, or invoke a hosted agent. Inputs and outputs are validated, artifacts can be persisted, result templates can format the response, and spend is recorded per invocation.
 
-**Billing:** The creator decides who pays. Each billing dimension (AI compute, general compute, platform fee) can be set independently to creator-pays, installer-pays, platform-subsidized, or BYOK (bring your own key, bypass routing entirely). Promotional budgets let creators sponsor the first N users, then flip to installer-pays when the fund runs out. Caps and overage behavior are per-dimension.
+**Views:** Apps expose embeddable views for cards, drawers, and full pages. Dashboards can compose views from other installed apps through signed embed tokens and scoped grants.
 
-**Approval pipeline:** Every published version goes through staged review before it reaches the public marketplace. Automated agent scans check for overbroad OAuth scopes, known-bad code patterns, leaked secrets, and dependency vulnerabilities. A sandbox evaluation runs the app against synthetic inputs with a cheap model to catch crashes, cost blowouts, and prompt injection vulnerabilities. Then a human reviewer signs off. Private and team installs skip the public listing gate, so your first apps ship immediately.
+**Data resources:** Apps expose cached, typed reads backed by actions. A dashboard can ask another app for "current pipeline status" or "last billing review result" and reuse the cached data across runs.
+
+**Dependencies:** Apps can call other apps through positive grants. Parent apps can invoke child app actions, embed child views, and query child data resources while spend rolls up to the parent run.
+
+**Connectors:** Apps declare the external systems they need: Slack, GitHub, Gmail, Linear, Salesforce, internal APIs, MCP servers, OAuth, API keys, and webhooks. Proxy-mode connectors let app code call approved services while OpenSail handles secrets, scopes, rotation, and consent.
+
+**Automation templates:** Apps can ship recommended schedules, manual buttons, and webhook triggers. When a user installs the app, selected templates become user-owned automations they can pause, edit, approve, budget, and monitor.
+
+**Billing:** The creator decides who pays. Each billing dimension (AI compute, general compute, platform fee) can be set independently to creator-pays, installer-pays, platform-subsidized, or BYOK (bring your own key, routed directly to your provider). Promotional budgets let creators sponsor the first N users, then flip to installer-pays when the fund runs out. Caps and overage behavior are per-dimension.
+
+**Approval pipeline:** Every published version goes through staged review before it reaches the public marketplace. Automated scans review OAuth scopes, source patterns, dependency posture, and credential handling. Sandbox evaluations run the app against synthetic inputs to measure reliability, cost behavior, and prompt-injection resilience. Human reviewers handle the final sign-off. Private and team installs use a faster internal path, so your first apps ship quickly.
 
 **Forking:** If the creator allows it, anyone can fork an app. Fork creates a new workspace with full source access and a `forked_from` provenance link. The marketplace shows fork trees. A lawyer takes a starter "intake" app, forks it to "intake-estate-planning," and republishes for their firm.
 
 **Bundles:** Group multiple apps into a starter pack. "Install Lawyer Starter" installs 10 apps with consolidated OAuth consent (one Gmail authorization covers all of them), sane defaults, and a dashboard app at the center that embeds the others via signed iframes.
+
+---
+
+## Automation Runtime
+
+Triggers, agents, apps, delivery, approvals, and spend in one runtime.
+
+OpenSail's Automation Runtime is the durable execution layer for work that keeps happening. It turns a schedule, webhook, manual run, app event, or channel message into an event, creates a run, executes actions, records artifacts and spend, and delivers the result.
+
+The mental model is `Trigger -> Event -> Run -> Action -> Delivery`: `agent.run` sends work to a selected agent, `app.invoke` calls an installed app function, and `gateway.send` delivers the output.
+
+**Triggers:** Start workflows from cron schedules, manual buttons, webhooks, app events, Slack, email, or other connected channels.
+
+**Actions:** Run an agent, invoke an installed app function, or send a result through the gateway. Lightweight runs stay in Tier 0. Work that needs files, shell commands, services, or previews can wake a sandboxed workspace.
+
+**Contracts:** Each automation carries an execution contract: allowed tools, allowed MCP servers, allowed apps, compute tier, approval rules, and spend caps. Risky steps pause at approval boundaries and resume from checkpoints after a human decision.
+
+**Delivery:** Send outputs to Slack, email, webhook endpoints, the OpenSail inbox, or another app. Results can include approval cards, reports, structured JSON, files, screenshots, and delivery receipts.
+
+**Observability:** Every run keeps its trigger, status, checkpoint, artifacts, spend, touched systems, and approval trail visible to the user who owns it.
+
+---
+
+## Build Automations and Agents Autonomously
+
+Describe the system you want, and let OpenSail draft the agent, automation, connectors, schedule, permissions, and review flow.
+
+OpenSail includes built-in agents that help people turn intent into reusable team assets.
+
+**Agent Builder:** Mention `@agent-builder`, describe the agent you want, and it drafts a user-owned agent with a name, instructions, model preference, connected MCP servers, skills, and tool permissions. It uses the user's installed resources, produces a review card, and publishes after approval.
+
+**Automation Builder:** Mention `@automation-builder`, choose one of your existing agents, describe the schedule and output target, and it drafts a user-owned automation. It attaches the cron trigger, prompt template, delivery targets, compute tier, and spend cap, then waits for the publish-and-activate review.
+
+**Service Integrator:** Use the Service Integrator agent to connect services, configure MCPs and channels, and make sure agents have the tools they need before a workflow goes live.
+
+These builders make the marketplace practical for everyday teams: build an agent, attach the right systems, schedule it, review it, and share it from the same chat surface.
 
 ---
 
@@ -99,17 +188,17 @@ Every agent, app, and workflow runs inside a workspace. One workspace = one app.
 
 Workspaces are built on BtrFS, a snapshot-based filesystem that makes everything fast, portable, and persistent.
 
-**Instant snapshots.** Fork a workspace in seconds. Roll back to any point in time. Branch off a working agent to try something new without breaking what's already running. Up to 5 snapshots retained per project for a built-in timeline.
+**Instant snapshots.** Fork a workspace in seconds. Roll back to any point in time. Branch off a working agent to try something new while the current version keeps serving users. Up to 5 snapshots retained per project for a built-in timeline.
 
-**Desktop to cloud.** Connect your local OpenSail instance to your own cloud infrastructure. Build locally, push to the cloud, run at scale. Same workspace, same state, no re-setup.
+**Desktop to cloud.** Connect your local OpenSail instance to your own cloud infrastructure. Build locally, push to the cloud, run at scale. Same workspace, same state, smooth handoff.
 
-**Share anything.** Workspaces are self-contained. Share an agent with your team and they get the full environment: code, state, config, dependencies. Not just a link.
+**Share anything.** Workspaces are self-contained. Share an agent with your team and they get the full environment: code, state, config, dependencies, and runtime settings.
 
 **Stay in control.** You decide what tools and data an agent can use, what actions it can take, and when it needs approval. For sensitive steps, require the agent to ask before moving forward. Analytics show you how agents are being used, how many runs they've completed, and who's using them.
 
 ---
 
-## Agentic coding and Product Operating
+## Agentic coding
 
 Code, ship, and operate from the same workspace.
 
@@ -117,21 +206,21 @@ Code, ship, and operate from the same workspace.
   <img src="assets/opensail-chat.png" alt="OpenSail Agentic Coding" width="85%" />
 </p>
 
-OpenSail is a full coding environment and a product-ops platform living in one window. You get a real editor, a real terminal, and real containers for the code side. You get deployments, schedules, permissions, audit logs, and channel integrations for the operating side. Agents can drive any of it, or stay out of the way.
+OpenSail is a full coding environment and product operating surface in one window. You get a real editor, terminal, containers, live preview, deployments, schedules, permissions, run history, and channel integrations. Agents can drive the work, collaborate with you, or hand control back to the human operator.
 
-**A real IDE, not a chat box.** Monaco editor with multi-language syntax support, autocomplete, find-in-files, and refactor support. A terminal attached to the running container. A file tree that mirrors the container's filesystem exactly. Live preview with hot module reload. Git panel with diff, blame, history, and branch switching. Everything you expect from a dedicated coding tool.
+**Full workspace IDE.** Monaco editor with multi-language syntax support, autocomplete, find-in-files, and refactor support. A terminal attached to the running container. A file tree that mirrors the container's filesystem exactly. Live preview with hot module reload. Git panel with diff, blame, history, and branch switching.
 
-**Code with an agent, or code alone.** The agent sees the same tree, the same files, the same shell output as you do. Every edit the agent makes is a reviewable diff you can accept, reject, or keep editing. Every command the agent runs shows up in your terminal. The agent's work is your work, in the same checkout.
+**Shared context with agents.** The agent sees the same tree, files, shell output, app preview, and architecture graph as you do. Every edit the agent makes is a reviewable diff you can accept, revise, or keep editing. Every command the agent runs shows up in your terminal. The agent's work is your work, in the same checkout.
 
-**Kanban for real work.** Ticket refs like TSK-0001 live on a board inside the project. Drag columns, hand tasks to agents, watch them close as the work lands. The agent can create tickets, update status, and comment as it goes. No separate tracker.
+**Kanban for real work.** Ticket refs like TSK-0001 live on a board inside the project. Drag columns, hand tasks to agents, and watch them close as the work lands. The agent can create tickets, update status, and comment as it goes.
 
 **Ship from the canvas.** Draw an edge from a container to a deploy target. Draw one to a Slack channel. Draw one to a schedule. The same canvas that authors the app authors the ops.
 
 **Governance on by default.** Per-project permissions gate what tools the agent can touch (shell, network, git push, file writes, process spawning). Budget caps throttle AI spend per project and per team. Team roles (admin, editor, viewer) scope who can edit, deploy, or approve. Every significant action writes to an append-only audit log keyed by team and project.
 
-**Context that doesn't run out.** When a session crosses 80% of the model's window, the agent progressively compacts older messages with a cheap model and keeps going. Multi-hour runs don't hit a wall.
+**Long-running context.** When a session crosses 80% of the model's window, the agent progressively compacts older messages with a cheap model and keeps going across multi-hour runs.
 
-**Progressive persistence.** Every agent step streams to the database as it happens. Pods can die, browsers can close, networks can hiccup. Come back later and the trajectory is still there. Resume mid-task.
+**Progressive persistence.** Every agent step streams to the database as it happens. Sessions resume from saved trajectories, checkpoints, and tool results across browser reloads, worker restarts, and network changes.
 
 ---
 
@@ -145,11 +234,11 @@ Click a pixel in your running app, jump to the JSX line that rendered it.
 
 The Design Engineer is a live-editing canvas that runs alongside the code editor. It loads your dev server in an iframe, injects a bridge script into the running app, and turns every rendered element into something you can select, edit, and push back to source.
 
-**Click-to-source.** The bridge walks the React Fiber tree at runtime to resolve any DOM element to its component name, source file, and line number. No source maps required. Click a button in the preview and the editor opens the JSX that produced it.
+**Click-to-source.** The bridge walks the React Fiber tree at runtime to resolve any DOM element to its component name, source file, and line number. Click a button in the preview and the editor opens the JSX that produced it.
 
 **Stable OID mapping.** A server-side pass tags JSX elements with `data-oid` attributes so every edit is keyed to the exact source location that rendered it. Refactor a file, move the component, and the mapping survives.
 
-**Two-way, sub-100ms sync.** Edit class names, text, styles, or attributes in the inspector and the change lands in the preview and the source file in one step. Edit the file directly and HMR flows back through the canvas without losing your selection.
+**Two-way, sub-100ms sync.** Edit class names, text, styles, or attributes in the inspector and the change lands in the preview and the source file in one step. Edit the file directly and HMR flows back through the canvas while preserving your selection.
 
 **Full CSS inspector.** Tailwind autocomplete from a curated palette, an interactive box model for margin / padding / border, grouped style sections for layout, size, typography, background, flex, and grid, color pickers, and HTML attribute editing with add / remove.
 
@@ -157,13 +246,13 @@ The Design Engineer is a live-editing canvas that runs alongside the code editor
 
 **Canvas powers.** Pan and zoom with cursor-anchored math so the point under the cursor stays fixed. Responsive breakpoints from 375px to 1536px. Snap guides. Undo/redo across the whole session with inverse-request replay.
 
-**Structured diffs for the agent.** Canvas edits aren't character patches. They become typed `CodeDiffRequest` objects (style patch, class override, text content, attributes, structural changes). The agent can see what a user did on the canvas and reason about intent, not just bytes.
+**Structured diffs for the agent.** Canvas edits become typed `CodeDiffRequest` objects (style patch, class override, text content, attributes, structural changes). The agent can see what a user did on the canvas and reason about intent from the structured change.
 
 ---
 
 ## Architecture Panel
 
-One canvas. One config file. Two authors. No drift.
+One canvas. One config file. Two authors. Shared state.
 
 <p align="center">
   <img src="assets/opensail-architecture-panel.png" alt="OpenSail Architecture Panel" width="85%" />
@@ -171,7 +260,7 @@ One canvas. One config file. Two authors. No drift.
 
 The Architecture Panel is a visual node-graph canvas built on React Flow where you design, wire, and manage the full topology of your project. Every project has one. It is the single source of truth for what your app is: what containers run, how they connect, where secrets flow, and where the whole thing deploys.
 
-The panel renders `.tesslate/config.json`. Both humans and agents read and write the same file. When the agent adds a Postgres container and wires its `DATABASE_URL` into the backend, the nodes and edges appear on the canvas in real time. When you drag a new service onto the canvas, the agent sees the updated graph on its next iteration. One file, two authors, no drift.
+The panel renders `.tesslate/config.json`. Both humans and agents read and write the same file. When the agent adds a Postgres container and wires its `DATABASE_URL` into the backend, the nodes and edges appear on the canvas in real time. When you drag a new service onto the canvas, the agent sees the updated graph on its next iteration. One file, two authors, shared state.
 
 **Node types on the canvas:**
 
@@ -191,7 +280,7 @@ The panel renders `.tesslate/config.json`. Both humans and agents read and write
 
 **Why this exists:**
 
-The AI agent needs a structured, parseable, roundtrippable target. If "what are the containers and how do they connect" lives as free-form prose in chat, every edit requires re-inferring state. The panel gives both humans and agents a typed graph they can read and write. Credentials and secrets are visible in the graph as env_injection edges, not buried in `.env` files. Multi-container topology is first-class instead of hidden in docker-compose YAML. And for apps, the panel is the authoring surface: publish serializes the graph into the manifest, install restores it into a new project with the same graph.
+The AI agent needs a structured, parseable, roundtrippable target. The panel gives both humans and agents a typed graph they can read and write. Credentials and secrets are visible in the graph as `env_injection` edges. Multi-container topology is first-class and visible alongside Docker/Kubernetes configuration. For apps, the panel is the authoring surface: publish serializes the graph into the manifest, install restores it into a new project with the same graph.
 
 One canvas. One config file. Agents, humans, secrets, deployments, and apps all share one structured representation.
 
@@ -209,11 +298,11 @@ Knowledge is scattered across people and systems. OpenSail gives teams a way to 
 
 Build once, improve through use, then share or duplicate for new workflows. Because agents have memory and can be guided and corrected in conversation, they get better as teams use them.
 
-**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists instead of starting from scratch.
+**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists.
 
 **Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
 
-**Scale without re-architecting.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
+**Scale a working process.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
 
 ---
 
@@ -221,7 +310,7 @@ Build once, improve through use, then share or duplicate for new workflows. Beca
 
 Run your own sandboxing engine.
 
-Running agents means giving them compute. OpenSail provides the infrastructure to do it without burning money.
+Running agents means giving them compute. OpenSail provides the infrastructure for cost-aware execution.
 
 The runtime uses a three-tier compute model built on Kubernetes:
 
@@ -265,7 +354,7 @@ Agents can gather context and take action across dozens of tools. OpenSail suppo
 
 Plug in Slack, Gmail, Google Drive, Linear, Jira, Notion, GitHub, Salesforce, HubSpot, Confluence, databases, internal APIs, or anything with an MCP server or a REST endpoint.
 
-Connectors are first-class. When you build an agent, you pick the tools it needs, set the permissions, and it just works. Add new connectors without changing your agent's code. MCP tool schemas are cached and bridged into the agent's tool registry automatically.
+Connectors are first-class. When you build an agent, you pick the tools it needs, set the permissions, and it just works. Add new connectors while keeping the agent's core instructions stable. MCP tool schemas are cached and bridged into the agent's tool registry automatically.
 
 Build your own connectors for internal systems. Publish them for your team. The protocol is open, so nothing is locked in.
 
@@ -275,7 +364,7 @@ Build your own connectors for internal systems. Publish them for your team. The 
 
 Teach an agent once. Any agent can use it forever.
 
-Skills are reusable capabilities you teach your agents. Instead of re-prompting every time, package what works into a skill and let the agent use it when it needs to.
+Skills are reusable capabilities you teach your agents. Package what works into a skill and let the agent use it when it needs to.
 
 Skills are loaded progressively: a lightweight catalog (name + description) is injected into the agent's context, and the full skill body is pulled on demand only when the agent decides to use it. This keeps the context window lean.
 
@@ -287,14 +376,14 @@ Skills can be anything: a data analysis pipeline, a writing style, a code review
 
 The full cloud platform, running on your laptop.
 
-OpenSail ships as a native desktop app built on Tauri v2. It runs the exact same orchestrator as the cloud version, locally, with zero network dependency by default. No Docker required. No Kubernetes required. Just install and start building.
+OpenSail ships as a native desktop app built on Tauri v2. It runs the exact same orchestrator as the cloud version, locally, with zero network dependency by default. Install and start building with the local runtime.
 
 The desktop app is a Tauri shell wrapping a PyInstaller-frozen FastAPI sidecar. The sidecar binds to localhost on a random port, mints a per-launch bearer token, runs migrations against a local SQLite database, and starts the same server you'd get in the cloud. The frontend is identical. The agent is identical. The tools are identical.
 
 **Three runtimes per project, your choice:**
 
-- **Local** - Subprocesses on your machine. No containers, no setup. The default.
-- **Docker** - Docker Compose if you have it installed. Full container isolation without a cluster.
+- **Local** - Subprocesses on your machine with the default local runtime.
+- **Docker** - Docker Compose if you have it installed. Full container isolation on your machine.
 - **Kubernetes** - Connect to a remote K8s cluster (your own or Tesslate's cloud). Get sandboxed multi-container environments, BtrFS snapshots, tiered compute, the full infrastructure.
 
 You pick the runtime per project. A personal script can run local. A multi-container app can run on Docker. A production workflow can run on your own K8s cluster. Same UI, same agent, same workspace for all three.
@@ -317,11 +406,11 @@ One folder. Wipe it, you get a clean install.
 
 **Offline-first marketplace.** Agents, skills, bases, and themes install locally from the cloud marketplace with SHA-256 verified downloads. Once installed, they work offline. Local items and cloud items merge, local wins by slug. Cache is stale-while-revalidate with background refresh.
 
-**Permissions per project.** Each project has a `.tesslate/permissions.json` that gates what agents can do: shell access, network calls, git push, file writes, process spawning. Three policies per capability: `allow` (silent), `deny` (blocked), `ask` (approval prompt in the tray, TUI, or browser). "Always allow" persists your decision back to the file. Budget caps with monthly limits and alert thresholds are built in.
+**Permissions per project.** Each project has a `.tesslate/permissions.json` that gates what agents can do: shell access, network calls, git push, file writes, process spawning. Three policies per capability: `allow` (silent), `deny`, `ask` (approval prompt in the tray, TUI, or browser). "Always allow" persists your decision back to the file. Budget caps with monthly limits and alert thresholds are built in.
 
 **Approval workflow.** When an agent hits a gated tool, the desktop shows a tray notification with an approval card. Approve, deny, or "always allow" for that tool. Human-readable ticket refs (TSK-0001, TSK-0002) so you can track what the agent asked for and what you approved.
 
-**Adopt existing folders.** Point OpenSail at any directory on your machine and it becomes a project. No copying. On POSIX it symlinks; on Windows it writes a marker file. Git root detection groups sessions by repo automatically. One agent session can span multiple directories.
+**Adopt existing folders.** Point OpenSail at any directory on your machine and it becomes a project. POSIX uses symlinks; Windows writes a marker file. Git root detection groups sessions by repo automatically. One agent session can span multiple directories.
 
 ---
 
@@ -329,7 +418,7 @@ One folder. Wipe it, you get a clean install.
 
 One agent. Every model.
 
-OpenSail is model-agnostic. All model calls route through LiteLLM. Switch providers without rewriting your agents.
+OpenSail is model-agnostic. All model calls route through LiteLLM. Switch providers while keeping your agents intact.
 
 **Supported providers:**
 
@@ -347,7 +436,7 @@ OpenSail is model-agnostic. All model calls route through LiteLLM. Switch provid
 | **Z.AI (ChatGLM)** |
 | **xAI** |
 
-**BYOK (Bring Your Own Key):** Attach your own API key from OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks, or any OpenAI-compatible endpoint. When using BYOK, no platform wallet is charged. Your key, your cost, your provider.
+**BYOK (Bring Your Own Key):** Attach your own API key from OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks, or any OpenAI-compatible endpoint. BYOK routes model usage to your provider account. Your key, your cost, your provider.
 
 **Self-hosted models:** Point LiteLLM at Ollama, vLLM, or any local inference server. Run fully air-gapped with open-weight models on your own hardware.
 
@@ -372,7 +461,7 @@ Deploy from the Architecture Panel. Draw an edge from a container to a deploymen
 | **Container push** | AWS App Runner, GCP Cloud Run, Azure Container Apps, DigitalOcean Container Apps |
 | **Registry / Export** | Docker Hub, GitHub Container Registry (GHCR), Download/Export (zip) |
 
-Each target is a registry entry. Adding a new provider is one config block, not a UI rewrite.
+Each target is a registry entry. Adding a new provider is one config block.
 
 ---
 
@@ -403,27 +492,126 @@ Set agents to run on a schedule, or let them listen for messages and respond as 
 
 Your data. Your models. Your infrastructure.
 
-Workspace agents are powerful. They touch your data, your tools, your processes. You should be able to see exactly what they're doing, run them on your own infrastructure, and not be locked to a single model provider.
+Workspace agents are powerful. They touch your data, your tools, your processes. You should be able to see exactly what they're doing, run them on your own infrastructure, and choose the model provider that fits the work.
 
-OpenSail runs on any model. Switch providers without rewriting your agents. Deploy on-prem, air-gapped, or on any cloud. Data never has to leave your network.
+OpenSail runs on any model. Switch providers while keeping your agents intact. Deploy on-prem, air-gapped, or on any cloud. Keep data inside your network.
 
-No per-seat pricing that scales against you. No credit system that makes you think twice before running an agent. Your infrastructure, your cost structure.
+OpenSail is open-source infrastructure you can operate directly. Your infrastructure, your cost structure.
 
 ---
 
-## Get started
+## Run OpenSail
 
-Clone the repo and run locally:
+Pick the path that matches what you are trying to do. OpenSail can run as a simple local Docker stack, as a desktop app, on local Kubernetes for platform testing, or on a production Kubernetes cluster. Those are different levels of commitment for the same product.
+
+| You want to... | Use this path | Best for |
+|----------------|---------------|----------|
+| Try OpenSail or develop the web app locally | Docker Compose | Most contributors and first-time users |
+| Let a script set up macOS dependencies | macOS installer | People who want a guided local setup |
+| Run the desktop app | Desktop release or desktop dev mode | Local-first workflows and desktop packaging work |
+| Test the real Kubernetes runtime locally | Minikube | Platform/runtime contributors |
+| Run your own production instance | AWS EKS Terraform + Kustomize | Teams operating OpenSail in their own cloud |
+
+### Docker Compose
+
+This is the most realistic first run for most people. It starts the frontend, backend, worker, gateway, Postgres, Redis, Traefik, and the devserver image used by user project containers.
+
+Use Docker Desktop on macOS or Windows, Docker Engine on Linux, or Colima on macOS. On Windows, run the commands from WSL2 so bind mounts and project paths behave like Linux paths.
 
 ```bash
 git clone https://github.com/TesslateAI/opensail.git
 cd opensail
-./install.sh
+cp .env.example .env
 ```
 
-Then open `http://localhost:3000` and start building.
+Edit `.env` before first boot:
 
-Read the full setup guide in the [docs](https://docs.tesslate.com).
+- `SECRET_KEY` should be a real random value.
+- `LITELLM_API_BASE` and `LITELLM_MASTER_KEY` are needed for agent/model calls. A working model proxy gives you the full agent experience.
+
+Then start the stack:
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Open `http://localhost`. API docs are at `http://localhost:8000/docs`.
+
+The fuller Docker walkthrough is in [docs/guides/docker-setup.md](docs/guides/docker-setup.md). After your first setup, the helper script is handy:
+
+```bash
+./scripts/docker.sh start
+./scripts/docker.sh status
+./scripts/docker.sh logs backend
+```
+
+### Guided macOS Setup
+
+If you are on macOS and want the repo to help install local tooling, use the interactive installer. It installs Homebrew dependencies, starts Colima, helps create `.env`, and lets you choose Docker Compose or Minikube.
+
+```bash
+git clone https://github.com/TesslateAI/opensail.git
+cd opensail
+./scripts/install-macos.sh
+```
+
+Use Docker Compose unless you specifically need Kubernetes behavior.
+
+### Desktop App
+
+The desktop app is local-first. The default local runtime uses your machine directly, with Docker and Kubernetes available as optional project runtimes. It is a Tauri shell around the same React frontend and FastAPI orchestrator, with a local SQLite database under `OPENSAIL_HOME`.
+
+If a signed installer is attached to a release, that is the easiest path for non-server users: install it like any other desktop app and start building locally.
+
+If you are working on the desktop app itself or building local installers from source:
+
+```bash
+git clone https://github.com/TesslateAI/opensail.git
+cd opensail
+./desktop/scripts/dev.sh
+```
+
+The desktop toolchain needs Rust, Node 20+, pnpm, `uv`, and Tauri dependencies. See [docs/desktop/development.md](docs/desktop/development.md) for the exact setup and installer build steps.
+
+### Local Kubernetes With Minikube
+
+Use Minikube when you need to test the Kubernetes runtime: namespaces, ingress, Volume Hub, btrfs CSI, snapshots, MinIO-backed object storage, worker behavior, and project containers. Docker Compose gives the fastest first run; Minikube gives the closest local platform test.
+
+```bash
+git clone https://github.com/TesslateAI/opensail.git
+cd opensail
+./scripts/minikube.sh init
+```
+
+Edit the generated secret files under `k8s/overlays/minikube/secrets/`, `k8s/overlays/minikube/minio/`, and `services/btrfs-csi/overlays/minikube/`. Then:
+
+```bash
+./scripts/minikube.sh start
+./scripts/minikube.sh tunnel
+```
+
+Leave the tunnel running and open `http://localhost`. The complete step-by-step guide is [docs/guides/minikube-setup.md](docs/guides/minikube-setup.md).
+
+### Production / Self-Hosted Kubernetes
+
+The repo-supported production path is Terraform for cloud infrastructure and Kustomize for Kubernetes manifests.
+
+The maintained production-class path is AWS EKS:
+
+```bash
+./scripts/terraform/secrets.sh download shared
+./scripts/aws-deploy.sh terraform shared
+
+./scripts/terraform/secrets.sh download beta
+./scripts/aws-deploy.sh terraform beta
+./scripts/aws-deploy.sh build beta
+./scripts/aws-deploy.sh deploy-k8s beta
+```
+
+Use `production` after validating the flow in `beta`.
+
+For non-EKS clusters, treat `k8s/base/` and the overlays as the starting point. Provide the same real pieces yourself: image registry, ingress controller, TLS/DNS, object storage, Postgres/Redis strategy, secrets, storage class, snapshot support, and the Volume Hub/btrfs CSI layer. The EKS guide is the best reference for the required production shape: [docs/guides/aws-deployment.md](docs/guides/aws-deployment.md).
 
 ---
 
@@ -468,7 +656,7 @@ flowchart TB
     class AP,WS,TC,AR,MK,PS cluster;
 ```
 
-`helm install opensail TesslateAI/opensail` gets you the whole stack on your own cluster. Pair desktop apps to it for Codex-style cloud sandboxing, owned end to end by you.
+Kubernetes installs currently use Kustomize overlays. For local cluster testing, use [Minikube](docs/guides/minikube-setup.md). For production on AWS, use the Terraform and deployment helpers in [docs/guides/aws-deployment.md](docs/guides/aws-deployment.md). Pair desktop apps to a cloud instance when you want local-first control with cloud sandboxing behind it.
 
 ## Contributing
 

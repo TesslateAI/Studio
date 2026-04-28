@@ -67,7 +67,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
     if (repoConnected) {
       loadGitStatus();
       loadBranches();
-      const interval = setInterval(loadGitStatus, 30000); // Refresh every 30s
+      const interval = setInterval(loadGitStatus, 30000);
       return () => clearInterval(interval);
     }
   }, [repoConnected, projectId]);
@@ -112,7 +112,6 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
 
   const confirmDisconnectGitHub = async () => {
     setShowDisconnectGithubDialog(false);
-
     try {
       await githubApi.disconnect();
       setGithubConnected(false);
@@ -129,7 +128,6 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
 
   const confirmDisconnectRepo = async () => {
     setShowDisconnectRepoDialog(false);
-
     try {
       await gitApi.disconnect(projectId);
       setRepoConnected(false);
@@ -143,10 +141,8 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
 
   const handlePush = async () => {
     if (!gitStatus) return;
-
     setIsPushing(true);
     const loadingToast = toast.loading('Pushing to remote...');
-
     try {
       await gitApi.push(projectId, gitStatus.branch);
       toast.success('Pushed successfully!', { id: loadingToast });
@@ -163,10 +159,8 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
 
   const handlePull = async () => {
     if (!gitStatus) return;
-
     setIsPulling(true);
     const loadingToast = toast.loading('Pulling from remote...');
-
     try {
       const result = await gitApi.pull(projectId, gitStatus.branch);
       if (result.conflicts && result.conflicts.length > 0) {
@@ -206,10 +200,8 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       setShowBranchMenu(false);
       return;
     }
-
     setIsSwitchingBranch(true);
     const loadingToast = toast.loading(`Switching to ${branchName}...`);
-
     try {
       await gitApi.switchBranch(projectId, branchName);
       toast.success(`Switched to ${branchName}`, { id: loadingToast });
@@ -230,9 +222,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       toast.error('Branch name is required');
       return;
     }
-
     const loadingToast = toast.loading('Creating new branch...');
-
     try {
       await gitApi.createBranch(projectId, newBranchName.trim(), true);
       toast.success(`Created and switched to ${newBranchName}`, { id: loadingToast });
@@ -252,15 +242,15 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   const getSyncStatus = () => {
     if (!gitStatus) return null;
     if (gitStatus.ahead > 0 && gitStatus.behind > 0) {
-      return { text: 'Diverged', color: 'text-yellow-400', icon: Warning };
+      return { text: 'Diverged', color: 'var(--status-warning)', icon: Warning };
     }
     if (gitStatus.ahead > 0) {
-      return { text: `${gitStatus.ahead} ahead`, color: 'text-blue-400', icon: CloudArrowUp };
+      return { text: `${gitStatus.ahead} ahead`, color: 'var(--text-muted)', icon: CloudArrowUp };
     }
     if (gitStatus.behind > 0) {
-      return { text: `${gitStatus.behind} behind`, color: 'text-orange-400', icon: CloudArrowDown };
+      return { text: `${gitStatus.behind} behind`, color: 'var(--status-warning)', icon: CloudArrowDown };
     }
-    return { text: 'Up to date', color: 'text-green-400', icon: CheckCircle };
+    return { text: 'Up to date', color: 'var(--status-success)', icon: CheckCircle };
   };
 
   // Not connected to GitHub
@@ -270,20 +260,17 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
         <div className="h-full flex items-center justify-center p-8">
           <div className="text-center max-w-md">
             <div className="mb-6 flex justify-center">
-              <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center backdrop-blur-sm border border-[var(--text)]/15">
-                <GitBranch className="w-12 h-12 text-purple-400" weight="fill" />
+              <div className="w-16 h-16 rounded-[var(--radius)] bg-[var(--surface-hover)] border border-[var(--border)] flex items-center justify-center">
+                <GitBranch size={28} className="text-[var(--text-muted)]" weight="bold" />
               </div>
             </div>
-            <h3 className="text-2xl font-bold text-[var(--text)] mb-3">Connect to GitHub</h3>
-            <p className="text-gray-400 leading-relaxed">
+            <h3 className="text-base font-semibold text-[var(--text)] mb-2">Connect to GitHub</h3>
+            <p className="text-xs text-[var(--text-muted)] leading-relaxed">
               Link your GitHub account to enable version control, collaborate with others, and
               deploy your projects.
             </p>
-            <div className="mt-8 pt-8 border-t border-[var(--text)]/15">
-              <button
-                onClick={() => setShowConnectModal(true)}
-                className="w-full py-3 bg-purple-500 hover:bg-purple-600 text-white rounded-xl font-semibold transition-all"
-              >
+            <div className="mt-6 pt-6 border-t border-[var(--border)]">
+              <button onClick={() => setShowConnectModal(true)} className="btn btn-filled w-full">
                 Connect GitHub Account
               </button>
             </div>
@@ -308,47 +295,46 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       <>
         <div className="h-full overflow-y-auto">
           {/* GitHub Account Info */}
-          <div className="p-6 border-b border-white/5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
-                  <GitBranch className="w-5 h-5 text-purple-400" weight="fill" />
+          <div className="p-4 border-b border-[var(--border)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius-medium)] flex items-center justify-center">
+                  <GitBranch size={14} className="text-[var(--text-muted)]" weight="bold" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-[var(--text)]">
+                  <div className="text-xs font-semibold text-[var(--text)]">
                     @{githubStatus?.github_username}
                   </div>
-                  <div className="text-xs text-gray-500">GitHub Connected</div>
+                  <div className="text-[10px] text-[var(--text-subtle)]">GitHub Connected</div>
                 </div>
               </div>
-              <button
-                onClick={handleDisconnectGitHub}
-                className="text-xs text-red-400 hover:text-red-300 transition-colors"
-              >
+              <button onClick={handleDisconnectGitHub} className="btn btn-sm btn-danger">
                 Disconnect
               </button>
             </div>
           </div>
 
           {/* Repository Setup */}
-          <div className="p-6">
-            <h3 className="text-sm font-semibold text-gray-400 mb-4">SETUP REPOSITORY</h3>
-            <div className="space-y-3">
-              <button
-                onClick={() => setShowImportModal(true)}
-                className="w-full p-4 bg-white/5 hover:bg-white/8 border border-[var(--text)]/15 rounded-xl text-left transition-all group"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center group-hover:bg-blue-500/30 transition-colors">
-                    <Download className="w-5 h-5 text-blue-400" weight="fill" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-white">Import from GitHub</div>
-                    <div className="text-xs text-gray-500">Clone an existing repository</div>
+          <div className="p-4">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-subtle)] mb-2">
+              Setup Repository
+            </div>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="w-full p-3 bg-[var(--surface-hover)] hover:bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-hover)] rounded-[var(--radius)] text-left transition-colors group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-medium)] flex items-center justify-center">
+                  <Download size={14} className="text-[var(--text-muted)]" weight="bold" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-[var(--text)]">Import from GitHub</div>
+                  <div className="text-[10px] text-[var(--text-subtle)]">
+                    Clone an existing repository
                   </div>
                 </div>
-              </button>
-            </div>
+              </div>
+            </button>
           </div>
         </div>
 
@@ -371,35 +357,37 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
   return (
     <div className="h-full overflow-y-auto">
       {/* GitHub Account Info */}
-      <div className="p-4 border-b border-white/5 flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-purple-500/20 rounded-lg flex items-center justify-center">
-            <GitBranch className="w-4 h-4 text-purple-400" weight="fill" />
+          <div className="w-7 h-7 bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius-small)] flex items-center justify-center">
+            <GitBranch size={12} className="text-[var(--text-muted)]" weight="bold" />
           </div>
           <div>
             <div className="text-xs font-semibold text-[var(--text)]">
               @{githubStatus?.github_username}
             </div>
-            <div className="text-xs text-gray-500">GitHub Connected</div>
+            <div className="text-[10px] text-[var(--text-subtle)]">GitHub Connected</div>
           </div>
         </div>
       </div>
 
       {/* Repository Info */}
-      <div className="p-4 border-b border-white/5">
+      <div className="px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-start justify-between mb-3">
           <div className="min-w-0 flex-1 mr-2">
-            <div className="text-sm font-semibold text-[var(--text)] mb-1">
+            <div className="text-xs font-semibold text-[var(--text)] mb-0.5 truncate">
               {repoInfo?.repo_name}
             </div>
-            <div className="text-xs text-gray-500 font-mono truncate">{repoInfo?.repo_url}</div>
+            <div className="text-[10px] text-[var(--text-subtle)] font-mono truncate">
+              {repoInfo?.repo_url}
+            </div>
           </div>
           <button
             onClick={handleDisconnectRepo}
-            className="text-gray-400 hover:text-red-400 transition-colors p-1 shrink-0"
+            className="text-[var(--text-subtle)] hover:text-[var(--status-error)] transition-colors p-1 shrink-0"
             title="Disconnect repository"
           >
-            <LinkBreak className="w-4 h-4" />
+            <LinkBreak size={14} weight="bold" />
           </button>
         </div>
 
@@ -410,20 +398,22 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
             <div className="relative">
               <button
                 onClick={() => setShowBranchMenu(!showBranchMenu)}
-                className="flex items-center gap-1 text-xs bg-white/5 hover:bg-white/10 px-2 py-1 rounded transition-colors"
+                className="flex items-center gap-1.5 text-[11px] bg-[var(--surface-hover)] hover:bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-hover)] px-2 py-1 rounded-[var(--radius-small)] transition-colors text-[var(--text)]"
               >
-                <GitBranch className="w-3 h-3" />
+                <GitBranch size={11} weight="bold" />
                 <span>{gitStatus.branch}</span>
-                <span className="text-gray-500">▾</span>
+                <span className="text-[var(--text-subtle)]">▾</span>
               </button>
 
               {/* Branch Dropdown Menu */}
               {showBranchMenu && (
-                <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--surface)] border border-[var(--text)]/15 rounded-lg shadow-xl z-50 max-h-64 overflow-hidden flex flex-col">
+                <div className="absolute top-full left-0 mt-1 w-64 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] z-50 max-h-64 overflow-hidden flex flex-col p-1.5">
                   {/* Current Branch */}
-                  <div className="p-2 border-b border-white/5">
-                    <div className="text-xs text-gray-400 mb-1">Current Branch</div>
-                    <div className="text-sm font-semibold text-[var(--text)]">
+                  <div className="p-2 border-b border-[var(--border)] mb-1">
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--text-subtle)] mb-0.5">
+                      Current Branch
+                    </div>
+                    <div className="text-xs font-semibold text-[var(--text)]">
                       {gitStatus.branch}
                     </div>
                   </div>
@@ -435,17 +425,17 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
                         key={branch.name}
                         onClick={() => handleSwitchBranch(branch.name)}
                         disabled={isSwitchingBranch || branch.name === gitStatus.branch}
-                        className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                        className={`w-full text-left px-2.5 py-1.5 text-xs rounded-[var(--radius-small)] transition-colors ${
                           branch.name === gitStatus.branch
-                            ? 'bg-blue-500/20 text-blue-400 cursor-default'
-                            : 'hover:bg-white/5 text-[var(--text)]'
+                            ? 'bg-[var(--surface-hover)] text-[var(--text)] cursor-default'
+                            : 'hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text)]'
                         } ${isSwitchingBranch ? 'opacity-50' : ''}`}
                       >
                         <div className="flex items-center gap-2">
-                          <GitBranch className="w-3 h-3" />
+                          <GitBranch size={11} weight="bold" />
                           <span>{branch.name}</span>
                           {branch.name === gitStatus.branch && (
-                            <span className="ml-auto text-xs">✓</span>
+                            <span className="ml-auto text-[10px]">✓</span>
                           )}
                         </div>
                       </button>
@@ -453,11 +443,11 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
                   </div>
 
                   {/* Create New Branch */}
-                  <div className="p-2 border-t border-white/5">
+                  <div className="p-1.5 border-t border-[var(--border)] mt-1">
                     {!showNewBranchInput ? (
                       <button
                         onClick={() => setShowNewBranchInput(true)}
-                        className="w-full text-left px-2 py-1.5 text-sm text-green-400 hover:bg-white/5 rounded transition-colors"
+                        className="w-full text-left px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-[var(--radius-small)] transition-colors"
                       >
                         + Create new branch
                       </button>
@@ -475,14 +465,11 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
                             }
                           }}
                           placeholder="new-branch-name"
-                          className="w-full bg-white/5 border border-[var(--text)]/15 text-[var(--text)] px-2 py-1 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
                           autoFocus
                         />
                         <div className="flex gap-1">
-                          <button
-                            onClick={handleCreateBranch}
-                            className="flex-1 px-2 py-1 bg-green-500 hover:bg-green-600 text-white text-xs rounded transition-colors"
-                          >
+                          <button onClick={handleCreateBranch} className="btn btn-sm btn-primary flex-1">
                             Create
                           </button>
                           <button
@@ -490,7 +477,7 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
                               setShowNewBranchInput(false);
                               setNewBranchName('');
                             }}
-                            className="flex-1 px-2 py-1 bg-white/5 hover:bg-white/10 text-white text-xs rounded transition-colors"
+                            className="btn btn-sm flex-1"
                           >
                             Cancel
                           </button>
@@ -503,8 +490,11 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
             </div>
 
             {syncStatus && (
-              <div className={`flex items-center gap-1 text-xs ${syncStatus.color}`}>
-                <syncStatus.icon className="w-3 h-3" />
+              <div
+                className="flex items-center gap-1 text-[11px]"
+                style={{ color: syncStatus.color }}
+              >
+                <syncStatus.icon size={11} weight="bold" />
                 <span>{syncStatus.text}</span>
               </div>
             )}
@@ -513,23 +503,23 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
       </div>
 
       {/* View Tabs */}
-      <div className="flex border-b border-white/5">
+      <div className="flex border-b border-[var(--border)]">
         <button
           onClick={() => setActiveView('status')}
-          className={`flex-1 py-2 text-sm font-medium transition-colors ${
+          className={`flex-1 py-2 text-[11px] font-medium transition-colors ${
             activeView === 'status'
-              ? 'text-[var(--text)] border-b-2 border-blue-500'
-              : 'text-gray-400 hover:text-[var(--text)]'
+              ? 'text-[var(--text)] border-b-2 border-[var(--primary)]'
+              : 'text-[var(--text-muted)] hover:text-[var(--text)]'
           }`}
         >
           Status
         </button>
         <button
           onClick={() => setActiveView('history')}
-          className={`flex-1 py-2 text-sm font-medium transition-colors ${
+          className={`flex-1 py-2 text-[11px] font-medium transition-colors ${
             activeView === 'history'
-              ? 'text-[var(--text)] border-b-2 border-blue-500'
-              : 'text-gray-400 hover:text-[var(--text)]'
+              ? 'text-[var(--text)] border-b-2 border-[var(--primary)]'
+              : 'text-[var(--text-muted)] hover:text-[var(--text)]'
           }`}
         >
           History
@@ -538,24 +528,26 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
 
       {/* Content */}
       {activeView === 'status' ? (
-        <div className="p-4 space-y-4">
+        <div className="p-4 space-y-3">
           {/* Actions */}
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={handlePull}
               disabled={isPulling || isLoadingStatus}
-              className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+              className="btn flex items-center justify-center gap-1.5"
+              style={isPulling || isLoadingStatus ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
             >
-              <CloudArrowDown className="w-4 h-4" />
-              {isPulling ? 'Pulling...' : 'Pull'}
+              <CloudArrowDown size={13} weight="bold" />
+              {isPulling ? 'Pulling…' : 'Pull'}
             </button>
             <button
               onClick={handlePush}
               disabled={isPushing || isLoadingStatus}
-              className="flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 border border-[var(--text)]/15 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+              className="btn flex items-center justify-center gap-1.5"
+              style={isPushing || isLoadingStatus ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
             >
-              <CloudArrowUp className="w-4 h-4" />
-              {isPushing ? 'Pushing...' : 'Push'}
+              <CloudArrowUp size={13} weight="bold" />
+              {isPushing ? 'Pushing…' : 'Push'}
             </button>
           </div>
 
@@ -563,43 +555,57 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
           <button
             onClick={() => setShowCommitDialog(true)}
             disabled={isLoadingStatus || totalChanges === 0}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl font-semibold transition-all"
+            className="btn btn-filled w-full flex items-center justify-center gap-1.5"
+            style={
+              isLoadingStatus || totalChanges === 0
+                ? { opacity: 0.4, cursor: 'not-allowed' }
+                : undefined
+            }
           >
-            <GitCommit className="w-5 h-5" weight="fill" />
+            <GitCommit size={13} weight="bold" />
             Commit Changes ({totalChanges})
           </button>
 
           {/* Changes */}
           {gitStatus && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-400 mb-2">CHANGES</h4>
+              <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-subtle)] mb-2">
+                Changes
+              </div>
               {totalChanges === 0 ? (
-                <div className="text-sm text-gray-500 text-center py-4">No changes to commit</div>
+                <div className="text-xs text-[var(--text-subtle)] text-center py-4">
+                  No changes to commit
+                </div>
               ) : (
                 <div className="space-y-1">
-                  {gitStatus.changes.slice(0, 10).map((change, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center gap-2 text-sm p-2 bg-white/5 rounded-lg"
-                    >
-                      <span
-                        className={`font-mono font-semibold shrink-0 ${
-                          change.status === 'M'
-                            ? 'text-yellow-400'
-                            : change.status === 'A'
-                              ? 'text-green-400'
-                              : change.status === 'D'
-                                ? 'text-red-400'
-                                : 'text-gray-400'
-                        }`}
+                  {gitStatus.changes.slice(0, 10).map((change, index) => {
+                    const statusColor =
+                      change.status === 'M'
+                        ? 'var(--status-warning)'
+                        : change.status === 'A'
+                          ? 'var(--status-success)'
+                          : change.status === 'D'
+                            ? 'var(--status-error)'
+                            : 'var(--text-subtle)';
+                    return (
+                      <div
+                        key={index}
+                        className="flex items-center gap-2 text-xs px-2 py-1.5 bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius-small)]"
                       >
-                        {change.status}
-                      </span>
-                      <span className="text-gray-300 truncate">{change.file_path}</span>
-                    </div>
-                  ))}
+                        <span
+                          className="font-mono font-semibold shrink-0 text-[10px] w-3 text-center"
+                          style={{ color: statusColor }}
+                        >
+                          {change.status}
+                        </span>
+                        <span className="text-[var(--text-muted)] truncate">
+                          {change.file_path}
+                        </span>
+                      </div>
+                    );
+                  })}
                   {gitStatus.changes.length > 10 && (
-                    <div className="text-xs text-gray-500 text-center py-2">
+                    <div className="text-[10px] text-[var(--text-subtle)] text-center py-2">
                       +{gitStatus.changes.length - 10} more files
                     </div>
                   )}
@@ -611,12 +617,14 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
           {/* Last Commit */}
           {gitStatus?.last_commit && (
             <div>
-              <h4 className="text-xs font-semibold text-gray-400 mb-2">LAST COMMIT</h4>
-              <div className="p-3 bg-white/5 rounded-lg">
-                <div className="text-sm text-[var(--text)] mb-1">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-subtle)] mb-2">
+                Last Commit
+              </div>
+              <div className="px-3 py-2 bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius-small)]">
+                <div className="text-xs text-[var(--text)] mb-1">
                   {gitStatus.last_commit.message}
                 </div>
-                <div className="text-xs text-gray-500">
+                <div className="text-[10px] text-[var(--text-subtle)]">
                   {gitStatus.last_commit.author} • {gitStatus.last_commit.sha.substring(0, 7)}
                 </div>
               </div>
@@ -639,7 +647,6 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
         }}
       />
 
-      {/* Disconnect GitHub Confirmation */}
       <ConfirmDialog
         isOpen={showDisconnectGithubDialog}
         onClose={() => setShowDisconnectGithubDialog(false)}
@@ -651,7 +658,6 @@ export function GitHubPanel({ projectId }: GitHubPanelProps) {
         variant="warning"
       />
 
-      {/* Disconnect Repository Confirmation */}
       <ConfirmDialog
         isOpen={showDisconnectRepoDialog}
         onClose={() => setShowDisconnectRepoDialog(false)}

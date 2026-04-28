@@ -5,9 +5,9 @@ Responsibilities:
        stable local names (``TesslateAgentAdapter.inner`` preserves the raw
        submodule instance for callers that need direct access).
     2. ``run_turn()`` drives a single request/response cycle against the
-       submodule runner and writes each trajectory event as an
-       ``AgentStep`` row (message-scoped, append-only) so real-time status
-       streams still work.
+       submodule runner, yielding every event. Callers pass an optional
+       ``event_sink`` to handle per-event side-effects (e.g. ``AgentStep``
+       persistence) without coupling the submodule to orchestrator internals.
     3. ``AgentAdapterContext`` is the neutral invocation envelope shared by
        routers and the worker.
 """
@@ -15,18 +15,12 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
-import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
 from tesslate_agent.agent.base import AbstractAgent
 from tesslate_agent.agent.tesslate_agent import TesslateAgent
-
-try:
-    from tesslate_agent.agent.tools.registry import ToolRegistry
-except ImportError:
-    ToolRegistry = Any  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +51,9 @@ class TesslateAgentAdapter:
     def inner(self) -> AbstractAgent:
         return self._inner
 
-    async def run(self, user_request: str, context: dict[str, Any]) -> Any:
-        return await self._inner.run(user_request, context)
+    @property
+    def tools(self) -> Any:
+        return self._inner.tools
 
     async def run_turn(
         self,
@@ -66,26 +61,33 @@ class TesslateAgentAdapter:
         adapter_context: AgentAdapterContext,
         *,
         event_sink: EventSink | None = None,
-    ) -> dict[str, Any]:
-        """Drive a single agent turn, forwarding each yielded event.
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Drive a single agent turn, yielding every event.
 
-        Returns the last event emitted (typically ``{"type": "complete", ...}``
-        or ``{"type": "max_iterations", ...}``). If ``event_sink`` is
-        provided, every event is awaited on it first — this is how the
-        orchestrator persists trajectory events as ``AgentStep`` rows and
-        fans them out on the PubSub stream without coupling the submodule
-        to that plumbing.
+        Yields each event emitted by the submodule runner so callers can
+        interleave cancellation checks, pubsub publishing, or other
+        per-event work. If ``event_sink`` is provided it is awaited on
+        each event before yielding — this is how the orchestrator persists
+        trajectory events as ``AgentStep`` rows without coupling the
+        submodule to that plumbing.
         """
-        last: dict[str, Any] = {}
-        ctx = adapter_context.to_submodule_context()
+        # Build the context dict the submodule agent expects from the frozen
+        # AgentAdapterContext dataclass (which has no to_submodule_context()).
+        ctx: dict[str, Any] = {
+            "project_id": adapter_context.project_id,
+            "user_id": adapter_context.user_id,
+        }
+        if adapter_context.goal_ancestry:
+            ctx["goal_ancestry"] = adapter_context.goal_ancestry
+        if adapter_context.extra:
+            ctx.update(adapter_context.extra)
         async for event in _iter_events(self._inner, user_request, ctx):
-            last = event
             if event_sink is not None:
                 try:
                     await event_sink(event)
                 except Exception as exc:
                     logger.debug("event_sink raised; swallowing: %s", exc)
-        return last
+            yield event
 
 
 async def _iter_events(
@@ -107,76 +109,13 @@ async def _iter_events(
 
 
 # ---------------------------------------------------------------------------
-# Event sink: persist trajectory events as AgentStep rows
+# Event sink type
 # ---------------------------------------------------------------------------
 
 EventSink = Any  # async callable taking a single event dict
 
 
-def make_agent_step_sink(
-    session_factory: Any,
-    *,
-    message_id: uuid.UUID,
-    chat_id: uuid.UUID,
-) -> Any:
-    """Build an event-sink coroutine that writes each event as an AgentStep.
-
-    ``session_factory`` is an async callable that yields a fresh
-    ``AsyncSession`` (usually ``AsyncSessionLocal``). Each emitted event
-    becomes one append-only row with a monotonically increasing
-    ``step_index``.
-    """
-    from ..models import AgentStep
-
-    counter = {"i": 0}
-
-    async def _sink(event: dict[str, Any]) -> None:
-        idx = counter["i"]
-        counter["i"] = idx + 1
-        async with session_factory() as session:
-            row = AgentStep(
-                id=uuid.uuid4(),
-                message_id=message_id,
-                chat_id=chat_id,
-                step_index=idx,
-                step_data=event,
-            )
-            session.add(row)
-            await session.commit()
-
-    return _sink
-
-
-def build_adapter_from_system_prompt(
-    system_prompt: str,
-    *,
-    tools: ToolRegistry | None = None,
-    model: Any | None = None,
-    max_iterations: int = 25,
-) -> TesslateAgentAdapter:
-    """Construct an adapter pre-loaded with the submodule's default tool set.
-
-    ``tools`` defaults to a fresh ``ToolRegistry`` populated with every
-    built-in submodule tool (file / shell / nav / git / memory / planning /
-    web / delegation). Orchestrator-specific tools (kanban, project_control,
-    etc.) must be registered by the caller.
-    """
-    if tools is None:
-        tools = ToolRegistry()
-        from tesslate_agent.agent.tools.registry import register_all_tools
-
-        register_all_tools(tools)
-    return TesslateAgentAdapter(
-        system_prompt=system_prompt,
-        tools=tools,
-        model=model,
-        max_iterations=max_iterations,
-    )
-
-
 __all__ = [
     "AgentAdapterContext",
     "TesslateAgentAdapter",
-    "build_adapter_from_system_prompt",
-    "make_agent_step_sink",
 ]

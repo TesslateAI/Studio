@@ -52,10 +52,23 @@ import {
 
 export type PanelType = 'github' | 'architecture' | 'notes' | 'settings' | 'marketplace' | null;
 
-export type ViewType = 'architecture' | 'preview' | 'code' | 'design' | 'kanban' | 'assets' | 'terminal';
+export type ViewType =
+  | 'architecture'
+  | 'preview'
+  | 'code'
+  | 'design'
+  | 'kanban'
+  | 'assets'
+  | 'terminal'
+  | 'repository';
 
 /**
- * All available command handlers that components can register
+ * All available command handlers that components can register.
+ *
+ * Convention: handlers are owned by the component that holds the state
+ * the action mutates. Pure navigation and palette-only entries that just
+ * call `navigate()` don't need a handler — they go straight from the
+ * palette `action`.
  */
 export interface CommandHandlers {
   // Project view commands
@@ -63,16 +76,65 @@ export interface CommandHandlers {
   togglePanel: (panel: Exclude<PanelType, null>) => void;
   refreshPreview: () => void;
 
-  // Dashboard commands
+  // Project lifecycle
+  runProject: () => void;
+  stopProject: () => void;
+  restartProject: () => void;
+
+  // Layout
+  toggleLeftSidebar: () => void;
+  toggleRightSidebar: () => void;
+  toggleZenMode: () => void;
+
+  // Dashboard
   openCreateProject: () => void;
 
-  // Chat commands
+  // Chat
   focusChatInput: () => void;
   clearChat: () => void;
+  newChatSession: () => void;
+  nextChatSession: () => void;
+  prevChatSession: () => void;
+  stopAgent: () => void;
+  switchModel: () => void;
+  toggleEditMode: () => void;
+  renameChatSession: () => void;
+  deleteChatSession: () => void;
+  attachChatFile: () => void;
 
-  // Editor commands
-  saveFile: () => void;
-  formatFile: () => void;
+  // Code
+  openQuickFile: () => void;
+  toggleFileTree: () => void;
+
+  // Architecture
+  archAutoLayout: () => void;
+  archFitView: () => void;
+  archSaveConfig: () => void;
+  archLoadConfig: () => void;
+
+  // Snapshots
+  createSnapshot: () => void;
+  restoreSnapshot: () => void;
+  openTimeline: () => void;
+
+  // Git
+  gitCommit: () => void;
+  gitPush: () => void;
+  gitPull: () => void;
+  gitCreateBranch: () => void;
+  gitSwitchBranch: () => void;
+  gitDiscardChanges: () => void;
+
+  // Diagnostics
+  copyDebugInfo: () => void;
+  viewContainerLogs: () => void;
+  restartContainer: () => void;
+
+  // Project actions
+  publishProject: () => void;
+  forkProject: () => void;
+  renameProject: () => void;
+  openProjectOverview: () => void;
 }
 
 /**

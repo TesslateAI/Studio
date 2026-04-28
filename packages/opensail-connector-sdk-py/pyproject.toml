@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "opensail-connector-sdk"
+version = "0.1.0"
+description = "Typed Python SDK for calling third-party providers (Slack, GitHub, Linear, Gmail) through the OpenSail Connector Proxy from inside an installed app pod."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Tesslate" }]
+dependencies = [
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "respx>=0.21",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opensail_connector_sdk"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -50,6 +50,13 @@ interface MarketplaceSidebarProps {
   onSelectItem?: (item: MarketplaceItem) => void;
   onAutoLayout?: () => void;
   autoLayoutDisabled?: boolean;
+  /**
+   * Deep-link signal: when the parent bumps `nonce` the sidebar opens
+   * and expands the matching category, then briefly pulses its header.
+   * Used by the unified Deploy hub to land users in the "Deploy Targets"
+   * section without leaking ProjectPage state into the canvas.
+   */
+  focusSignal?: { category: string; nonce: number } | null;
 }
 
 // Helper to render item type badge
@@ -115,7 +122,7 @@ const CATEGORIES = [
   { id: 'workflow', label: 'Workflows', icon: <FlowArrow size={16} weight="fill" /> },
 ];
 
-export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisabled }: MarketplaceSidebarProps) => {
+export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisabled, focusSignal }: MarketplaceSidebarProps) => {
   const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -123,7 +130,23 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set(['base', 'service', 'deployment', 'workflow'])
   );
+  const [pulsedCategory, setPulsedCategory] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Focus signal — bumped nonce opens the sidebar and pulses the target category.
+  useEffect(() => {
+    if (!focusSignal) return;
+    setIsOpen(true);
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      next.add(focusSignal.category);
+      return next;
+    });
+    setPulsedCategory(focusSignal.category);
+    const timer = setTimeout(() => setPulsedCategory(null), 1400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSignal?.nonce]);
 
   useEffect(() => {
     fetchMarketplaceItems();
@@ -264,9 +287,9 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                     <div
                       draggable
                       onDragStart={onBrowserDragStart}
-                      className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-move bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 hover:border-purple-400 transition-colors"
+                      className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-move bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)] transition-colors"
                     >
-                      <Browser size={18} weight="fill" className="text-purple-400" />
+                      <Browser size={18} weight="fill" className="text-[var(--text-muted)]" />
                       <div className="flex-1 min-w-0">
                         <span className="text-sm font-medium text-[var(--text)]">
                           Browser Preview
@@ -275,7 +298,7 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                           Preview running containers
                         </p>
                       </div>
-                      <Plus size={14} className="text-purple-400" weight="bold" />
+                      <Plus size={14} className="text-[var(--text-muted)]" weight="bold" />
                     </div>
                   </div>
 
@@ -285,12 +308,17 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                       const categoryItems = itemsByType[category.id] || [];
                       const isExpanded = expandedCategories.has(category.id);
 
+                      const isPulsing = pulsedCategory === category.id;
+
                       return (
                         <div key={category.id}>
                           {/* Category Header */}
                           <button
                             onClick={() => toggleCategory(category.id)}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--sidebar-hover)] transition-colors"
+                            data-pulse={isPulsing ? 'true' : undefined}
+                            className={`marketplace-category-header w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--sidebar-hover)] transition-colors ${
+                              isPulsing ? 'is-pulsing' : ''
+                            }`}
                           >
                             <span className="text-[var(--text)]/60">
                               {isExpanded ? <CaretDown size={14} /> : <CaretRight size={14} />}
@@ -334,7 +362,7 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                                     className={`group bg-[var(--bg)] border border-[var(--border-color)] rounded-lg p-2 transition-all ${
                                       isComingSoon
                                         ? 'opacity-50 cursor-not-allowed'
-                                        : 'cursor-move hover:border-[var(--primary)] hover:shadow-md'
+                                        : 'cursor-move hover:bg-[var(--card-hover)]'
                                     }`}
                                   >
                                     <div className="flex items-start gap-2">
@@ -352,7 +380,7 @@ export const MarketplaceSidebar = ({ onSelectItem, onAutoLayout, autoLayoutDisab
                                             className={`font-medium text-sm truncate transition-colors ${
                                               isComingSoon
                                                 ? 'text-[var(--text)]/50'
-                                                : 'text-[var(--text)] group-hover:text-[var(--primary)]'
+                                                : 'text-[var(--text)]'
                                             }`}
                                           >
                                             {item.name}

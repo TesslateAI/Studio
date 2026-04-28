@@ -2,32 +2,28 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
 import {
-  ArrowLeft,
   Monitor,
   Code,
-  GitBranch,
-  BookOpen,
   Image,
   Storefront,
-  Gear,
   Rocket,
   Kanban,
   Terminal,
   TreeStructure,
   LockSimple,
   PencilRuler,
-  Clock,
   SidebarSimple,
   Chat,
   Plus,
+  GithubLogo,
+  Clock,
+  BookOpen,
+  Gear,
+  SlidersHorizontal,
 } from '@phosphor-icons/react';
-import { FloatingPanel } from '../components/ui/FloatingPanel';
-import { MobileMenu } from '../components/ui/MobileMenu';
 import { Tooltip } from '../components/ui/Tooltip';
-import { NavigationSidebar } from '../components/ui/NavigationSidebar';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { ChatContainer } from '../components/chat/ChatContainer';
-import { MobileWarning } from '../components/MobileWarning';
 import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
 import { TimelinePanel } from '../components/panels/TimelinePanel';
 import { NoComputePlaceholder } from '../components/NoComputePlaceholder';
@@ -37,22 +33,29 @@ import { useToolDock, type ToolType, type TabInstance } from '../hooks/useToolDo
 import { ToolTabsPanel, type TabRenderer } from '../components/project/ToolTabsPanel';
 import { PreviewPane } from '../components/project/PreviewPane';
 import {
-  GitHubPanel,
   NotesPanel,
   SettingsPanel,
   AssetsPanel,
   KanbanPanel,
   TerminalPanel,
+  RepositoryPanel,
   NodeConfigPanel,
+  ConfigPanel,
 } from '../components/panels';
 import {
   NodeConfigPendingProvider,
   useNodeConfigPending,
 } from '../contexts/NodeConfigPendingContext';
+import { AgentRunsProvider } from '../contexts/AgentRunsProvider';
+import {
+  useBuilderShell,
+  useRegisterBuilderSection,
+} from '../contexts/BuilderShellContext';
 import { nodeConfigEvents } from '../utils/nodeConfigEvents';
 import { nodeConfigApi } from '../lib/api';
-import { DeploymentsDropdown } from '../components/DeploymentsDropdown';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
+import { ProviderConnectModal } from '../components/modals/ProviderConnectModal';
+import { DeployHubDrawer } from '../components/deploy/DeployHubDrawer';
 import CodeEditor from '../components/CodeEditor';
 import { ContainerSelector, PROJECT_ROOT_ID } from '../components/ContainerSelector';
 import { type PreviewableContainer } from '../components/PreviewPortPicker';
@@ -62,6 +65,8 @@ import {
 } from '../components/views/ArchitectureView';
 import DesignView from '../components/views/DesignView';
 import { projectsApi, marketplaceApi } from '../lib/api';
+import PublishAsAppDrawer from '../components/apps/PublishAsAppDrawer';
+import { inspectorFocusEvents } from '../utils/inspectorFocusEvents';
 import { useCommandHandlers, type ViewType } from '../contexts/CommandContext';
 import { useChatPosition } from '../contexts/ChatPositionContext';
 import { useTeam } from '../contexts/TeamContext';
@@ -71,15 +76,12 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'reac
 import { type ChatAgent } from '../types/chat';
 import { getFeatures, type ComputeTier } from '../types/project';
 import { getEnvironmentStatus } from '../components/ui/environmentStatus';
-import { EnvironmentStatusBadge } from '../components/ui/EnvironmentStatusBadge';
 import IdleWarningBanner from '../components/IdleWarningBanner';
 import { VolumeHealthBanner } from '../components/VolumeHealthBanner';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-type PanelType = 'github' | 'notes' | 'settings' | 'timeline' | null;
 
 const TOOL_LABELS: Record<ToolType, string> = {
   architecture: 'Architecture',
@@ -89,7 +91,12 @@ const TOOL_LABELS: Record<ToolType, string> = {
   kanban: 'Kanban',
   assets: 'Assets',
   terminal: 'Terminal',
+  repository: 'Repository',
   'node-config': 'Configure',
+  config: 'Config',
+  volume: 'Snapshots',
+  notes: 'Notes',
+  settings: 'Settings',
 };
 
 // ---------------------------------------------------------------------------
@@ -112,7 +119,6 @@ function ProjectPageInner() {
   const canChat = can('chat.send');
   const canEditKanban = can('kanban.edit');
   const canAccessTerminal = can('terminal.access');
-  const canGitWrite = can('git.write');
   const canEditSettings = can('project.settings');
   const canDeploy = can('deployment.create');
   const canEditAssets = can('file.write');
@@ -168,22 +174,17 @@ function ProjectPageInner() {
     unsubs.push(
       nodeConfigEvents.on('user-input-required', (payload) => {
         if (!project?.id) return;
-        dock.openNodeConfigTab({
-          projectId: project.id as string,
-          containerId: payload.container_id,
-          containerName: payload.container_name,
-          schema: payload.schema,
-          initialValues: payload.initial_values,
-          mode: payload.mode,
-          preset: payload.preset,
-          agentInputId: payload.input_id,
-        });
+        // The persistent Config tab listens for this event on its own and
+        // surfaces the pending card. We don't open or focus the tab — the
+        // user navigates there via the tool button when they're ready (the
+        // chat pause banner gives them the entry point).
         markPending(payload.container_id);
       })
     );
 
     unsubs.push(
       nodeConfigEvents.on('node-config-resumed', (payload) => {
+        // Legacy ephemeral tab close-out kept as a safety net during rollout.
         dock.closeNodeConfigTabByInputId(payload.input_id);
         clearPending(payload.container_id);
         if (slug) {
@@ -194,13 +195,9 @@ function ProjectPageInner() {
         }
         const parts: string[] = [];
         if (payload.updated_keys.length) parts.push(`${payload.updated_keys.length} updated`);
-        if (payload.rotated_secrets.length)
-          parts.push(`${payload.rotated_secrets.length} rotated`);
-        if (payload.cleared_secrets.length)
-          parts.push(`${payload.cleared_secrets.length} cleared`);
-        toast.success(
-          parts.length > 0 ? `Config saved · ${parts.join(', ')}` : 'Config saved'
-        );
+        if (payload.rotated_secrets.length) parts.push(`${payload.rotated_secrets.length} rotated`);
+        if (payload.cleared_secrets.length) parts.push(`${payload.cleared_secrets.length} cleared`);
+        toast.success(parts.length > 0 ? `Config saved · ${parts.join(', ')}` : 'Config saved');
       })
     );
 
@@ -229,8 +226,7 @@ function ProjectPageInner() {
             preset: cfg.preset,
           });
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : 'Failed to load container config';
+          const message = err instanceof Error ? err.message : 'Failed to load container config';
           toast.error(message);
         }
       })
@@ -280,16 +276,46 @@ function ProjectPageInner() {
   const archRef = useRef<ArchitectureViewHandle>(null);
   const [archState, setArchState] = useState({ configDirty: false, isRunning: false });
 
-  const [activePanel, setActivePanel] = useState<PanelType>(null);
+  // Publish-as-App drawer state. Lives at the project level so the
+  // toolbar button (above the dock), the architecture canvas button, and
+  // the command palette all open the same drawer instance. The drawer
+  // owns its own draft fetch (one source of truth) — a parent pre-fetch
+  // would race with the drawer's own effect when the response landed
+  // after mount.
+  const [isPublishOpen, setIsPublishOpen] = useState(false);
+
+  // Zen mode is declared near the BuilderShell destructure below.
+
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
-  const [isLeftSidebarExpanded, setIsLeftSidebarExpanded] = useState(() => {
-    const saved = localStorage.getItem('navigationSidebarExpanded');
-    return saved !== null ? JSON.parse(saved) : true;
-  });
-  const [showDeploymentsDropdown, setShowDeploymentsDropdown] = useState(false);
+  const [previewReloadKey, setPreviewReloadKey] = useState(0);
+  const { isLeftSidebarExpanded, setIsLeftSidebarExpanded } = useBuilderShell();
+
+  // Zen mode hides the chat panel and collapses the navigation rail; ⌘⇧\.
+  // Derived: if both are already hidden we restore them; otherwise hide both.
+  const toggleZenMode = useCallback(() => {
+    const inZen = !isChatVisible && !isLeftSidebarExpanded;
+    setIsChatVisible(inZen);
+    setIsLeftSidebarExpanded(inZen);
+  }, [isChatVisible, isLeftSidebarExpanded, setIsLeftSidebarExpanded]);
+
+  const toggleNavRail = useCallback(() => {
+    setIsLeftSidebarExpanded(!isLeftSidebarExpanded);
+  }, [isLeftSidebarExpanded, setIsLeftSidebarExpanded]);
+  // Unified Deploy hub — replaces the legacy DeploymentsDropdown + standalone
+  // "Publish as App" entry. The hub fans out to PublishAsAppDrawer (hero),
+  // the architecture canvas (graph deeplink), and DeploymentModal /
+  // ProviderConnectModal (per-provider quick deploy).
+  const [isDeployHubOpen, setIsDeployHubOpen] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
+  const [deployModalProvider, setDeployModalProvider] = useState<string | undefined>(undefined);
+  const [providerConnectTarget, setProviderConnectTarget] = useState<string | null>(null);
+  const [marketplaceFocus, setMarketplaceFocus] = useState<{
+    category: string;
+    nonce: number;
+  } | null>(null);
+  const [deployHubRefreshNonce, setDeployHubRefreshNonce] = useState(0);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
 
   // Preview port picker
@@ -450,10 +476,6 @@ function ProjectPageInner() {
     },
     [slug]
   );
-
-  const togglePanel = (panel: PanelType) => {
-    setActivePanel(activePanel === panel ? null : panel);
-  };
 
   const handleAgentSelect = useCallback(
     (agent: ChatAgent) => {
@@ -637,7 +659,7 @@ function ProjectPageInner() {
       const libraryData = await marketplaceApi.getMyAgents();
       const enabledAgents = libraryData.agents.filter(
         (agent: Record<string, unknown>) =>
-          agent.is_enabled && !agent.is_admin_disabled && agent.slug !== 'librarian'
+          agent.is_enabled && !agent.is_admin_disabled && !agent.is_system
       );
       const uiAgents = enabledAgents.map((agent: Record<string, unknown>) => ({
         id: agent.slug as string,
@@ -861,16 +883,15 @@ function ProjectPageInner() {
   // Preview helpers
   // ---------------------------------------------------------------------------
 
+  // State-driven reload: bumping this key forces React to remount the
+  // preview iframe element, which guarantees a fresh navigation. The
+  // previous imperative `iframe.src = …` mutation was unreliable — any
+  // subsequent React render would not re-set `src` (the JSX value hadn't
+  // changed) but a re-mount caused by a parent prop swap would silently
+  // drop the cache-busted URL, leaving the user staring at a stale frame.
   const refreshPreview = useCallback(() => {
-    if (devServerUrlWithAuth) {
-      const iframe = iframeRef.current;
-      if (iframe) {
-        const url = new URL(devServerUrlWithAuth);
-        url.searchParams.set('t', Date.now().toString());
-        iframe.src = url.toString();
-      }
-    }
-  }, [devServerUrlWithAuth]);
+    setPreviewReloadKey((k) => k + 1);
+  }, []);
 
   const navigateBack = useCallback(() => {
     const iframe = iframeRef.current;
@@ -962,6 +983,65 @@ function ProjectPageInner() {
     }
   }, [slug, isEnvironmentRunning]);
 
+  // Explicit lifecycle commands — separate from the toggle button so command-
+  // palette / keyboard invocations have predictable semantics (Run only starts;
+  // Stop only stops; Restart cycles).
+  const handleRunProject = useCallback(async () => {
+    if (!slug) return;
+    if (isEnvironmentRunning) {
+      toast('Environment already running', { icon: 'ℹ️' });
+      return;
+    }
+    try {
+      toast.loading('Starting environment...', { id: 'env-toggle' });
+      await projectsApi.startAllContainers(slug);
+      toast.success('Environment started!', { id: 'env-toggle', duration: 2000 });
+      const p = await projectsApi.get(slug);
+      setProject(p);
+      loadContainer();
+    } catch (error) {
+      console.error('runProject failed:', error);
+      toast.error('Failed to start environment', { id: 'env-toggle' });
+    }
+  }, [slug, isEnvironmentRunning]);
+
+  const handleStopProject = useCallback(async () => {
+    if (!slug) return;
+    if (!isEnvironmentRunning) {
+      toast('Environment is not running', { icon: 'ℹ️' });
+      return;
+    }
+    try {
+      toast.loading('Stopping environment...', { id: 'env-toggle' });
+      await projectsApi.stopAllContainers(slug);
+      toast.success('Environment stopped', { id: 'env-toggle', duration: 2000 });
+      const p = await projectsApi.get(slug);
+      setProject(p);
+      loadContainer();
+    } catch (error) {
+      console.error('stopProject failed:', error);
+      toast.error('Failed to stop environment', { id: 'env-toggle' });
+    }
+  }, [slug, isEnvironmentRunning]);
+
+  const handleRestartProject = useCallback(async () => {
+    if (!slug) return;
+    try {
+      toast.loading('Restarting environment...', { id: 'env-toggle' });
+      if (isEnvironmentRunning) {
+        await projectsApi.stopAllContainers(slug);
+      }
+      await projectsApi.startAllContainers(slug);
+      toast.success('Environment restarted!', { id: 'env-toggle', duration: 2000 });
+      const p = await projectsApi.get(slug);
+      setProject(p);
+      loadContainer();
+    } catch (error) {
+      console.error('restartProject failed:', error);
+      toast.error('Failed to restart environment', { id: 'env-toggle' });
+    }
+  }, [slug, isEnvironmentRunning]);
+
   // ---------------------------------------------------------------------------
   // Dock / tool helpers
   // ---------------------------------------------------------------------------
@@ -1048,6 +1128,14 @@ function ProjectPageInner() {
     { enableOnFormTags: false }
   );
   useHotkeys(
+    'mod+8',
+    (e) => {
+      e.preventDefault();
+      openToolAndShowDock('repository');
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
     'mod+r',
     (e) => {
       e.preventDefault();
@@ -1064,26 +1152,10 @@ function ProjectPageInner() {
     { enableOnFormTags: false }
   );
   useHotkeys(
-    'mod+[',
-    (e) => {
-      e.preventDefault();
-      setIsLeftSidebarExpanded(false);
-    },
-    { enableOnFormTags: false }
-  );
-  useHotkeys(
-    'mod+]',
-    (e) => {
-      e.preventDefault();
-      setIsLeftSidebarExpanded(true);
-    },
-    { enableOnFormTags: false }
-  );
-  useHotkeys(
     'mod+shift+g',
     (e) => {
       e.preventDefault();
-      togglePanel('github');
+      dock.openTool('repository');
     },
     { enableOnFormTags: false }
   );
@@ -1091,7 +1163,7 @@ function ProjectPageInner() {
     'mod+shift+n',
     (e) => {
       e.preventDefault();
-      togglePanel('notes');
+      dock.openTool('notes');
     },
     { enableOnFormTags: false }
   );
@@ -1099,14 +1171,65 @@ function ProjectPageInner() {
     'mod+shift+s',
     (e) => {
       e.preventDefault();
-      togglePanel('settings');
+      dock.openTool('settings');
     },
     { enableOnFormTags: false }
   );
   useHotkeys(
-    'escape',
-    () => {
-      if (activePanel) setActivePanel(null);
+    'mod+shift+a',
+    (e) => {
+      e.preventDefault();
+      dock.openTool('architecture');
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+k',
+    (e) => {
+      e.preventDefault();
+      dock.openTool('config');
+    },
+    { enableOnFormTags: false }
+  );
+  // Project lifecycle
+  useHotkeys(
+    'mod+e',
+    (e) => {
+      e.preventDefault();
+      handleRunProject();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+e',
+    (e) => {
+      e.preventDefault();
+      handleStopProject();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+r',
+    (e) => {
+      e.preventDefault();
+      handleRestartProject();
+    },
+    { enableOnFormTags: false }
+  );
+  // Layout
+  useHotkeys(
+    'mod+\\',
+    (e) => {
+      e.preventDefault();
+      toggleNavRail();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+\\',
+    (e) => {
+      e.preventDefault();
+      toggleZenMode();
     },
     { enableOnFormTags: false }
   );
@@ -1242,15 +1365,136 @@ function ProjectPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabType, slug]);
 
+  // Publish action — declared up here (above useCommandHandlers) so the
+  // palette command can reference the same callback. Hook order stays stable
+  // because this runs on every render before any early returns.
+  //
+  // Single entry point shared by the project toolbar button, the
+  // architecture canvas button, and the command palette `publishProject`
+  // action. The legacy `/creator/publish/:appId` page is gone (v9 spec
+  // puts the publish flow on the architecture canvas + drawer).
+  const canPublish = project?.project_kind !== 'app_runtime' && canEditSettings;
+  const handlePublishAsApp = useCallback(() => {
+    if (!slug || !canPublish) return;
+    setIsPublishOpen(true);
+  }, [slug, canPublish]);
+
   // Register command handlers for CommandPalette
   useCommandHandlers({
     switchView: (view: ViewType) => {
       // Preview is a pinned pane, others are tabs — dock.openTool handles both
       dock.openTool(view);
     },
-    togglePanel: (panel) => togglePanel(panel as PanelType),
+    togglePanel: (panel) => {
+      // Panels were folded into the top tab dock. Map command-palette panel
+      // names to their corresponding dock tab.
+      switch (panel) {
+        case 'github':
+          dock.openTool('repository');
+          return;
+        case 'architecture':
+          dock.openTool('architecture');
+          return;
+        case 'notes':
+          dock.openTool('notes');
+          return;
+        case 'settings':
+          dock.openTool('settings');
+          return;
+        default:
+          // 'marketplace' has no project-page equivalent — ignore.
+          return;
+      }
+    },
     refreshPreview,
+    runProject: handleRunProject,
+    stopProject: handleStopProject,
+    restartProject: handleRestartProject,
+    toggleLeftSidebar: toggleChatVisible,
+    toggleRightSidebar: toggleNavRail,
+    toggleZenMode,
+    archAutoLayout: () => {
+      const ref = archRef.current;
+      if (!ref) {
+        toast('Open the Architecture view first', { icon: 'ℹ️' });
+        dock.openTool('architecture');
+        return;
+      }
+      ref.autoLayout().catch((err) => {
+        console.error('archAutoLayout failed', err);
+        toast.error('Auto-layout failed');
+      });
+    },
+    archSaveConfig: () => {
+      const ref = archRef.current;
+      if (!ref) {
+        dock.openTool('architecture');
+        toast('Open the Architecture view first', { icon: 'ℹ️' });
+        return;
+      }
+      ref.saveConfig().catch((err) => {
+        console.error('archSaveConfig failed', err);
+        toast.error('Save failed');
+      });
+    },
+    archLoadConfig: () => {
+      const ref = archRef.current;
+      if (!ref) {
+        dock.openTool('architecture');
+        toast('Open the Architecture view first', { icon: 'ℹ️' });
+        return;
+      }
+      ref.loadConfig().catch((err) => {
+        console.error('archLoadConfig failed', err);
+        toast.error('Load failed');
+      });
+    },
+    openTimeline: () => dock.openTool('volume'),
+    publishProject: () => {
+      // handlePublishAsApp is defined further down — we reference the same
+      // callback by name so the palette command and the toolbar button stay
+      // in sync.
+      handlePublishAsApp();
+    },
+    forkProject: () => {
+      if (project?.id) navigate(`/apps/${project.id}/fork`);
+    },
+    openProjectOverview: () => {
+      if (slug) navigate(`/project/${slug}`);
+    },
+    viewContainerLogs: () => dock.openTool('terminal'),
+    restartContainer: handleRestartProject,
+    copyDebugInfo: async () => {
+      const debug = {
+        slug,
+        projectId: project?.id,
+        runtime: project?.runtime,
+        environmentStatus,
+        userAgent: navigator.userAgent,
+        timestamp: new Date().toISOString(),
+      };
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(debug, null, 2));
+        toast.success('Debug info copied');
+      } catch {
+        toast.error('Could not copy to clipboard');
+      }
+    },
   });
+
+  // ---------------------------------------------------------------------------
+  // Sidebar registration — must run on every render (not gated by the loading
+  // early-return below) so the hook order stays stable when `project` flips
+  // from null to populated. (handlePublishAsApp is declared above next to
+  // useCommandHandlers so the palette command and the toolbar button share
+  // the same callback identity.)
+  // ---------------------------------------------------------------------------
+
+  // The builder sidebar is intentionally identical to the dashboard sidebar.
+  // No project-specific affordances are injected — going Dashboard ↔ Project
+  // should feel like only the main panel changes. Users navigate back via
+  // the breadcrumb in the top bar (Projects → ...).
+  useRegisterBuilderSection(undefined);
 
   // ---------------------------------------------------------------------------
   // Loading state
@@ -1297,6 +1541,17 @@ function ProjectPageInner() {
       hotkey: '⌘7',
       disabled: !canAccessTerminal,
       restricted: !canAccessTerminal,
+    },
+    { id: 'repository', icon: <GithubLogo size={14} weight="bold" />, hotkey: '⌘8' },
+    { id: 'config', icon: <SlidersHorizontal size={14} weight="bold" />, hotkey: '⌘⇧K' },
+    { id: 'volume', icon: <Clock size={14} weight="bold" />, hotkey: '' },
+    { id: 'notes', icon: <BookOpen size={14} weight="bold" />, hotkey: '⌘⇧N' },
+    {
+      id: 'settings',
+      icon: <Gear size={14} weight="bold" />,
+      hotkey: '⌘⇧S',
+      disabled: !canEditSettings,
+      restricted: !canEditSettings,
     },
   ];
 
@@ -1355,166 +1610,18 @@ function ProjectPageInner() {
   // Sidebar items (panels only — view toggles moved to top bar)
   // ---------------------------------------------------------------------------
 
-  const panelItems = [
-    {
-      icon: <Clock size={16} />,
-      title: 'Volume & Snapshots',
-      onClick: () => togglePanel('timeline'),
-      active: activePanel === 'timeline',
-    },
-    {
-      icon: <BookOpen size={16} />,
-      title: 'Notes',
-      onClick: () => togglePanel('notes'),
-      active: activePanel === 'notes',
-      disabled: false,
-      restricted: false,
-    },
-    {
-      icon: <GitBranch size={16} />,
-      title: 'GitHub Sync',
-      onClick: canGitWrite ? () => togglePanel('github') : undefined,
-      active: activePanel === 'github',
-      disabled: !canGitWrite,
-      restricted: !canGitWrite,
-    },
-    {
-      icon: <Gear size={16} />,
-      title: 'Project Settings',
-      onClick: canEditSettings ? () => togglePanel('settings') : undefined,
-      active: activePanel === 'settings',
-      disabled: !canEditSettings,
-      restricted: !canEditSettings,
-    },
-    // "Publish as App" flips app_role from null → app_source and jumps
-    // into the creator publish flow. Hidden for installed app_instances
-    // (which can't be re-roled) and gated by project.edit.
-    ...(project?.app_role !== 'app_instance'
-      ? [
-          {
-            icon: <Rocket size={16} />,
-            title: 'Publish as App',
-            onClick: canEditSettings
-              ? async () => {
-                  if (!slug) return;
-                  try {
-                    if (project?.app_role !== 'app_source') {
-                      await projectsApi.setAppRole(slug, 'app_source');
-                    }
-                    navigate(`/creator/publish/${project?.id}`);
-                  } catch (err) {
-                    // Surface failure via toast-free fallback; the route
-                    // itself will re-validate role and show its own error.
-                    console.error('setAppRole failed', err);
-                  }
-                }
-              : undefined,
-            active: false,
-            disabled: !canEditSettings,
-            restricted: !canEditSettings,
-          },
-        ]
-      : []),
-  ];
-
-  // Mobile drawer builder section — renders tool buttons + panel toggles inside
-  // the shared NavigationSidebar drawer. Clicking anything opens/toggles its
-  // target and dismisses the drawer so the user lands on the content immediately.
-  const closeMobileDrawer = () => window.dispatchEvent(new Event('closeMobileMenu'));
-
-  const mobileBuilderSection: NonNullable<
-    React.ComponentProps<typeof NavigationSidebar>['builderSection']
-  > = ({ navButtonClass, iconClass, labelClass, inactiveIconClass, inactiveLabelClass }) => (
-    <>
-      {/* Back to projects */}
-      <button
-        onClick={() => {
-          closeMobileDrawer();
-          navigate('/dashboard');
-        }}
-        className={navButtonClass(false)}
-      >
-        <ArrowLeft size={16} className={inactiveIconClass} />
-        <span className={`${inactiveLabelClass} truncate`}>
-          {(project?.name as string) || 'Project'}
-        </span>
-      </button>
-
-      <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
-
-      <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-subtle)]">
-        Views
-      </div>
-
-      {toolButtonDefs.map((def) => {
-        const active = dock.isActiveType(def.id);
-        return (
-          <button
-            key={def.id}
-            onClick={
-              def.disabled
-                ? undefined
-                : () => {
-                    closeMobileDrawer();
-                    openToolAndShowDock(def.id);
-                  }
-            }
-            className={navButtonClass(active)}
-            style={def.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-          >
-            {React.cloneElement(
-              def.icon as React.ReactElement<{ className?: string; size?: number }>,
-              { className: iconClass(active), size: 16 }
-            )}
-            <span className={labelClass(active)}>{TOOL_LABELS[def.id]}</span>
-            {def.restricted && (
-              <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
-                locked
-              </span>
-            )}
-          </button>
-        );
-      })}
-
-      <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
-
-      <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-subtle)]">
-        Panels
-      </div>
-
-      {panelItems.map((item, index) => (
-        <button
-          key={index}
-          onClick={
-            item.disabled || !item.onClick
-              ? undefined
-              : () => {
-                  closeMobileDrawer();
-                  item.onClick!();
-                }
-          }
-          className={navButtonClass(item.active)}
-          style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-        >
-          {React.cloneElement(item.icon as React.ReactElement<{ className?: string }>, {
-            className: iconClass(item.active),
-          })}
-          <span className={labelClass(item.active)}>{item.title}</span>
-          {item.restricted && (
-            <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
-              locked
-            </span>
-          )}
-        </button>
-      ))}
-    </>
-  );
-
   // ---------------------------------------------------------------------------
   // Chat props
   // ---------------------------------------------------------------------------
 
   const chatViewContext = activeTabType === 'architecture' ? 'graph' : 'builder';
+
+  // Deep-link from the sidebar: when the user clicks a project-nested chat
+  // row we navigate here with `state: { sessionId }`. ChatContainer seeds
+  // its currentChatId from this and re-syncs whenever it changes (so
+  // clicking another chat in the same project swaps sessions in place).
+  const initialChatIdFromRoute =
+    (location.state as Record<string, unknown> | null)?.sessionId as string | undefined;
 
   const chatProps = {
     projectId: project?.id as number,
@@ -1542,6 +1649,8 @@ function ProjectPageInner() {
       }
     },
     disabled: !canChat,
+    initialChatId: initialChatIdFromRoute ?? null,
+    onOpenConfigTab: () => dock.openTool('config'),
   } as const;
 
   // ---------------------------------------------------------------------------
@@ -1576,6 +1685,7 @@ function ProjectPageInner() {
         }}
         onStateChange={handleArchStateChange}
         readOnly={isViewer}
+        marketplaceFocus={marketplaceFocus}
       />
     ),
     preview: (_tab: TabInstance, idx: number) => (
@@ -1601,6 +1711,7 @@ function ProjectPageInner() {
         placeholder={noPreview ? previewPlaceholder : undefined}
         overlay={loadingOverlay ?? undefined}
         showClose={false}
+        reloadKey={previewReloadKey}
       />
     ),
     code: (_tab: TabInstance, _idx: number) => (
@@ -1656,6 +1767,17 @@ function ProjectPageInner() {
     assets: (_tab: TabInstance, _idx: number) => (
       <AssetsPanel projectSlug={slug!} readOnly={!canEditAssets} />
     ),
+    repository: (_tab: TabInstance, _idx: number) => (
+      <RepositoryPanel projectSlug={slug!} projectId={project?.id as number | undefined} />
+    ),
+    config: (_tab: TabInstance, _idx: number) =>
+      project?.id ? (
+        <ConfigPanel projectId={project.id as string} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <p className="text-xs text-[var(--text-muted)]">Loading project…</p>
+        </div>
+      ),
     'node-config': (tab: TabInstance, _idx: number) => {
       const payload = dock.getNodeConfigPayload(tab.id);
       if (!payload) {
@@ -1698,6 +1820,38 @@ function ProjectPageInner() {
             </p>
             <p className="text-[var(--text-subtle)] text-xs mt-1 opacity-60">
               Viewers cannot access the terminal
+            </p>
+          </div>
+        </div>
+      ),
+    volume: (_tab: TabInstance, _idx: number) => (
+      <TimelinePanel
+        projectId={project?.id as string}
+        projectSlug={slug!}
+        projectStatus={(project?.environment_status as string) || 'stopped'}
+        onRestored={() => {
+          loadFilesWithRetry();
+          fileEvents.emit('files-changed');
+          setDevServerUrl(null);
+          containerStartup.reset();
+          setNeedsContainerStart(false);
+          loadContainer();
+        }}
+      />
+    ),
+    notes: (_tab: TabInstance, _idx: number) => <NotesPanel projectSlug={slug!} />,
+    settings: (_tab: TabInstance, _idx: number) =>
+      canEditSettings ? (
+        <SettingsPanel projectSlug={slug!} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <div className="text-center p-6">
+            <LockSimple size={48} className="text-[var(--text-subtle)] mx-auto mb-3" />
+            <p className="text-[var(--text-subtle)] text-sm font-medium">
+              Project settings are restricted
+            </p>
+            <p className="text-[var(--text-subtle)] text-xs mt-1 opacity-60">
+              Viewers cannot edit settings
             </p>
           </div>
         </div>
@@ -1758,38 +1912,18 @@ function ProjectPageInner() {
         {isEnvironmentRunning ? 'Stop All' : 'Start All'}
       </button>
 
-      {environmentStatus && (
-        <div className="hidden md:flex">
-          <EnvironmentStatusBadge status={environmentStatus} showTooltip />
-        </div>
-      )}
-
       <div className="w-px h-[22px] bg-[var(--border)] mx-0.5 hidden md:block" />
 
-      <div className="relative">
-        <button
-          onClick={
-            canDeploy ? () => setShowDeploymentsDropdown(!showDeploymentsDropdown) : undefined
-          }
-          className="btn btn-filled"
-          style={!canDeploy ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-          title={!canDeploy ? 'Deployment restricted for viewers' : undefined}
-        >
-          {!canDeploy && <LockSimple size={13} weight="bold" />}
-          <Rocket size={15} weight="bold" />
-          <span className="hidden md:inline">Deploy</span>
-        </button>
-        <DeploymentsDropdown
-          projectSlug={slug!}
-          isOpen={showDeploymentsDropdown}
-          onClose={() => setShowDeploymentsDropdown(false)}
-          onOpenDeployModal={() => setShowDeployModal(true)}
-          assignedDeploymentTarget={
-            container?.deployment_provider as 'vercel' | 'netlify' | 'cloudflare' | null | undefined
-          }
-          containerName={container?.name as string | undefined}
-        />
-      </div>
+      <button
+        onClick={canDeploy ? () => setIsDeployHubOpen(true) : undefined}
+        className="btn btn-filled"
+        style={!canDeploy ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+        title={!canDeploy ? 'Deployment restricted for viewers' : undefined}
+      >
+        {!canDeploy && <LockSimple size={13} weight="bold" />}
+        <Rocket size={15} weight="bold" />
+        <span className="hidden md:inline">Deploy</span>
+      </button>
     </div>
   );
 
@@ -1805,18 +1939,21 @@ function ProjectPageInner() {
   const renderDockedChatPane = () => <ChatContainer {...chatProps} isDocked={true} />;
 
   const activeDockTabType = dock.state.tabs.find((t) => t.id === dock.state.activeTabId)?.type;
-  const dockExtraHeader =
-    activeDockTabType === 'terminal' ? (
-      <Tooltip content="New terminal" side="bottom" delay={200}>
-        <button
-          onClick={() => dock.openToolNew('terminal')}
-          className="flex items-center justify-center h-6 w-6 rounded-[var(--radius-small)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
-          aria-label="New terminal"
-        >
-          <Plus size={12} weight="bold" />
-        </button>
-      </Tooltip>
-    ) : undefined;
+  const dockExtraHeader = (
+    <div className="flex items-center gap-1">
+      {activeDockTabType === 'terminal' && (
+        <Tooltip content="New terminal" side="bottom" delay={200}>
+          <button
+            onClick={() => dock.openToolNew('terminal')}
+            className="flex items-center justify-center h-6 w-6 rounded-[var(--radius-small)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
+            aria-label="New terminal"
+          >
+            <Plus size={12} weight="bold" />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  );
 
   const renderDockContainer = () => (
     <ToolTabsPanel
@@ -1826,6 +1963,7 @@ function ProjectPageInner() {
       onClose={dock.closeTab}
       renderers={tabRenderers}
       extraHeader={dockExtraHeader}
+      onReorder={dock.reorderTabs}
     />
   );
 
@@ -1914,7 +2052,7 @@ function ProjectPageInner() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="h-full flex overflow-hidden bg-[var(--sidebar-bg)]">
+    <>
       {idleWarningMinutes !== null && slug && (
         <IdleWarningBanner
           minutesLeft={idleWarningMinutes}
@@ -1935,206 +2073,46 @@ function ProjectPageInner() {
         />
       )}
 
-      {/* Mobile Warning */}
-      <MobileWarning />
-
-      <MobileMenu activePage="builder" builderSection={mobileBuilderSection} />
-
-      {/* Navigation Sidebar — no view toggles, just project title + panel toggles */}
-      <NavigationSidebar
-        activePage="builder"
-        onExpandedChange={setIsLeftSidebarExpanded}
-        builderSection={({
-          isExpanded,
-          navButtonClass,
-          navButtonClassCollapsed,
-          iconClass,
-          labelClass,
-          inactiveIconClass,
-          inactiveLabelClass,
-        }) => (
-          <>
-            {/* Project name / back to projects */}
-            {isExpanded ? (
-              <button onClick={() => navigate('/dashboard')} className={navButtonClass(false)}>
-                <ArrowLeft size={16} className={inactiveIconClass} />
-                <span className={`${inactiveLabelClass} truncate`}>
-                  {(project?.name as string) || 'Project'}
-                </span>
-              </button>
-            ) : (
-              <Tooltip
-                content={(project?.name as string) || 'Back to Projects'}
-                side="right"
-                delay={200}
-              >
-                <button
-                  onClick={() => navigate('/dashboard')}
-                  className={navButtonClassCollapsed(false)}
-                >
-                  <ArrowLeft size={16} className={inactiveIconClass} />
-                </button>
-              </Tooltip>
-            )}
-
-            <div className="h-px bg-[var(--sidebar-border)] my-1.5 mx-3 flex-shrink-0" />
-
-            {/* Panel Toggles — Notes/GitHub/Settings */}
-            {panelItems.map((item, index) =>
-              isExpanded ? (
-                <button
-                  key={index}
-                  onClick={item.disabled ? undefined : item.onClick}
-                  className={navButtonClass(item.active)}
-                  style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-                >
-                  {React.cloneElement(item.icon as React.ReactElement<{ className?: string }>, {
-                    className: iconClass(item.active),
-                  })}
-                  <span className={labelClass(item.active)}>{item.title}</span>
-                  {item.restricted && (
-                    <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-[var(--text-subtle)] opacity-50">
-                      locked
-                    </span>
-                  )}
-                </button>
-              ) : (
-                <Tooltip
-                  key={index}
-                  content={item.restricted ? `${item.title} (Locked)` : item.title}
-                  side="right"
-                  delay={200}
-                >
-                  <button
-                    onClick={item.disabled ? undefined : item.onClick}
-                    className={navButtonClassCollapsed(item.active)}
-                    style={item.disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-                  >
-                    {React.cloneElement(item.icon as React.ReactElement<{ className?: string }>, {
-                      className: iconClass(item.active),
-                    })}
-                  </button>
-                </Tooltip>
-              )
-            )}
-          </>
-        )}
-      />
-
-      {/* Main Content Area — flush to the NavigationSidebar on desktop,
-          symmetric margin on mobile (where the sidebar is hidden). */}
+      {/* Top Bar */}
       <div
-        className="flex-1 flex flex-col overflow-hidden m-[var(--app-margin)] md:ml-0"
-        style={{
-          borderRadius: 'var(--radius)',
-          border: 'var(--border-width) solid var(--border)',
-          backgroundColor: 'var(--bg)',
-        }}
+        className="h-10 border-b border-[var(--border)] flex items-center justify-between flex-shrink-0"
+        style={{ paddingLeft: '18px', paddingRight: '10px' }}
       >
-        {/* Top Bar */}
-        <div
-          className="h-10 border-b border-[var(--border)] flex items-center justify-between flex-shrink-0"
-          style={{ paddingLeft: '7px', paddingRight: '10px' }}
-        >
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            {/* Mobile-only hamburger — opens the mobile drawer with tools + panels */}
-            <button
-              onClick={() => window.dispatchEvent(new Event('toggleMobileMenu'))}
-              className="md:hidden flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
-              aria-label="Open menu"
-            >
-              <SidebarSimple size={14} weight="bold" />
-            </button>
-            <Breadcrumbs
-              items={[
-                { label: 'Projects', href: '/dashboard' },
-                { label: project.name as string, href: `/project/${slug}` },
-                { label: activeTabType ? TOOL_LABELS[activeTabType] : 'Agents' },
-              ]}
-            />
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <Breadcrumbs
+            items={[
+              { label: 'Projects', href: '/dashboard' },
+              { label: project.name as string, href: `/project/${slug}` },
+              { label: activeTabType ? TOOL_LABELS[activeTabType] : 'Agents' },
+            ]}
+          />
 
-            {activeTabType && activeTabType !== 'architecture' && containers.length > 0 && (
-              <div className="hidden md:flex items-center border-l border-[var(--border)] pl-2">
-                <ContainerSelector
-                  containers={containers.map((c) => ({
-                    id: c.id as string,
-                    name: c.name as string,
-                    status: c.status as string,
-                    base: c.base as { slug: string; name: string } | undefined,
-                  }))}
-                  currentContainerId={containerId || (container?.id as string)}
-                  onChange={(id) => navigate(`/project/${slug}?container=${id}`)}
-                  onOpenArchitecture={() => dock.openTool('architecture')}
-                />
-              </div>
-            )}
-          </div>
-
-          {renderTopBarActions()}
+          {activeTabType && activeTabType !== 'architecture' && containers.length > 0 && (
+            <div className="hidden md:flex items-center border-l border-[var(--border)] pl-2">
+              <ContainerSelector
+                containers={containers.map((c) => ({
+                  id: c.id as string,
+                  name: c.name as string,
+                  status: c.status as string,
+                  base: c.base as { slug: string; name: string } | undefined,
+                }))}
+                currentContainerId={containerId || (container?.id as string)}
+                onChange={(id) => navigate(`/project/${slug}?container=${id}`)}
+                onOpenArchitecture={() => dock.openTool('architecture')}
+                environmentStatus={environmentStatus}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Main View Container */}
-        <div className="flex-1 flex overflow-hidden bg-[var(--bg)]">
-          <div className="hidden md:flex w-full h-full">{renderDesktopContent()}</div>
-          <div className="md:hidden w-full h-full">{renderMobileContent()}</div>
-        </div>
+        {renderTopBarActions()}
       </div>
 
-      {/* Floating Panels */}
-      <FloatingPanel
-        title="Volume & Snapshots"
-        icon={<Clock size={20} />}
-        isOpen={activePanel === 'timeline'}
-        onClose={() => setActivePanel(null)}
-        defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
-        defaultSize={{ width: 380, height: 600 }}
-      >
-        <TimelinePanel
-          projectId={project?.id as string}
-          projectSlug={slug!}
-          projectStatus={(project?.environment_status as string) || 'stopped'}
-          onRestored={() => {
-            loadFilesWithRetry();
-            fileEvents.emit('files-changed');
-            // Re-enter startup flow — pod was bounced, need to wait for new pod
-            setDevServerUrl(null);
-            containerStartup.reset();
-            setNeedsContainerStart(false);
-            loadContainer();
-          }}
-        />
-      </FloatingPanel>
-
-      <FloatingPanel
-        title="GitHub Sync"
-        icon={<GitBranch size={20} />}
-        isOpen={activePanel === 'github'}
-        onClose={() => setActivePanel(null)}
-        defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
-        defaultSize={{ width: 420, height: 620 }}
-      >
-        <GitHubPanel projectId={project?.id as number} />
-      </FloatingPanel>
-
-      <FloatingPanel
-        title="Notes & Tasks"
-        icon={<BookOpen size={20} />}
-        isOpen={activePanel === 'notes'}
-        onClose={() => setActivePanel(null)}
-        defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
-      >
-        <NotesPanel projectSlug={slug!} />
-      </FloatingPanel>
-
-      <FloatingPanel
-        title="Settings"
-        icon={<Gear size={20} />}
-        isOpen={activePanel === 'settings'}
-        onClose={() => setActivePanel(null)}
-        defaultPosition={{ x: (isLeftSidebarExpanded ? 244 : 48) + 8, y: 60 }}
-      >
-        <SettingsPanel projectSlug={slug!} />
-      </FloatingPanel>
+      {/* Main View Container */}
+      <div className="flex-1 flex overflow-hidden bg-[var(--bg)]">
+        <div className="hidden md:flex w-full h-full">{renderDesktopContent()}</div>
+        <div className="md:hidden w-full h-full">{renderMobileContent()}</div>
+      </div>
 
       {/* Floating chat — always on mobile; desktop only when chatPosition === 'center'.
           JS-gated (not CSS) so exactly one ChatContainer mounts at a time and
@@ -2182,22 +2160,116 @@ function ProjectPageInner() {
         <DeploymentModal
           projectSlug={slug!}
           isOpen={showDeployModal}
-          onClose={() => setShowDeployModal(false)}
+          onClose={() => {
+            setShowDeployModal(false);
+            setDeployModalProvider(undefined);
+          }}
           onSuccess={() => {
             setShowDeployModal(false);
+            setDeployModalProvider(undefined);
+            // Hub may show this deployment in the recent list — bump nonce
+            // so the next open re-fetches.
+            setDeployHubRefreshNonce((n) => n + 1);
             toast.success('Deployment started successfully!');
           }}
-          defaultProvider={container?.deployment_provider as string | undefined}
+          defaultProvider={
+            deployModalProvider ??
+            (container?.deployment_provider as string | undefined)
+          }
         />
       )}
-    </div>
+
+      {/* Unified Deploy hub — toolbar Deploy button opens this. Hands off to
+          PublishAsAppDrawer (hero), the architecture canvas (Card B), and
+          DeploymentModal / ProviderConnectModal (per-provider quick deploy). */}
+      <DeployHubDrawer
+        isOpen={isDeployHubOpen}
+        onClose={() => setIsDeployHubOpen(false)}
+        projectSlug={slug!}
+        canPublish={canPublish}
+        refreshNonce={deployHubRefreshNonce}
+        onOpenPublishDrawer={handlePublishAsApp}
+        onOpenArchitectureWithDeploymentCategory={() => {
+          dock.openTool('architecture');
+          setMarketplaceFocus({ category: 'deployment', nonce: Date.now() });
+        }}
+        onOpenDeployModal={(provider) => {
+          setIsDeployHubOpen(false);
+          setDeployModalProvider(provider);
+          setShowDeployModal(true);
+        }}
+        onOpenProviderConnectModal={(provider) => {
+          setProviderConnectTarget(provider);
+        }}
+      />
+
+      {/* ProviderConnectModal triggered from the Deploy hub when a chip
+          without credentials is clicked. After connecting, we open the
+          DeploymentModal preselected to that provider so the user can
+          ship right away without a second trip through the hub. */}
+      {providerConnectTarget && (
+        <ProviderConnectModal
+          isOpen={true}
+          defaultProvider={providerConnectTarget}
+          onClose={() => setProviderConnectTarget(null)}
+          onConnected={(provider) => {
+            setProviderConnectTarget(null);
+            setDeployHubRefreshNonce((n) => n + 1);
+            setIsDeployHubOpen(false);
+            setDeployModalProvider(provider);
+            setShowDeployModal(true);
+          }}
+        />
+      )}
+
+      {/* Publish-as-App drawer — single instance shared by the project
+          toolbar button, the architecture canvas button, and the command
+          palette `publishProject` action. The drawer owns its own draft
+          fetch on mount. The "Fix in inspector" button is canvas-aware:
+          we open the architecture tab and emit a
+          publish-inspector-jump-request event; ArchitectureView listens
+          and selects the matching React Flow node. */}
+      {isPublishOpen && (
+        <PublishAsAppDrawer
+          projectSlug={slug!}
+          projectName={(project?.name as string | undefined) ?? slug!}
+          onClose={() => setIsPublishOpen(false)}
+          onPublished={() => {
+            // Project's app_role / project_kind flips on first publish; the
+            // toolbar button label depends on it, so refresh project data.
+            loadProject();
+          }}
+          onJumpToInspector={(target) => {
+            setIsPublishOpen(false);
+            // Make sure the canvas tab is mounted so it can hear the event.
+            dock.openTool('architecture');
+            // Defer one rAF tick to let ArchitectureView's effect attach
+            // its listener after mounting. inspectorFocusEvents drops the
+            // event silently if no one is listening, so without the
+            // deferral a fresh-mount canvas would miss the request.
+            requestAnimationFrame(() => {
+              inspectorFocusEvents.emit('publish-inspector-jump-request', target);
+            });
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function ProjectPageWithRuns() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return (
+    <AgentRunsProvider projectId={projectId ?? null}>
+      <ProjectPageInner />
+    </AgentRunsProvider>
   );
 }
 
 export default function ProjectPage() {
   return (
     <NodeConfigPendingProvider>
-      <ProjectPageInner />
+      <ProjectPageWithRuns />
     </NodeConfigPendingProvider>
   );
 }

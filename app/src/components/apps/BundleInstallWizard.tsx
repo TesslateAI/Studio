@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, CheckCircle, XCircle } from '@phosphor-icons/react';
+import { X, CheckCircle, XCircle, Warning } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
 import {
   appBundlesApi,
@@ -13,8 +13,10 @@ import { useTeam } from '../../contexts/TeamContext';
 /**
  * BundleInstallWizard — modal for installing a MarketplaceApp bundle.
  *
- * Aggregates wallet + MCP consent across selected items. Honors `required`
- * items (can't be disabled) and `default_enabled` defaults.
+ * Aggregates wallet + connector consent across selected items (manifest
+ * 2026-05: connectors[] with exposure=proxy|env). Honors `required` items
+ * (can't be disabled) and `default_enabled` defaults. exposure=env warns
+ * the user that raw credentials will be injected into the app container.
  *
  * Backend returns 207 Multi-Status (`succeeded[]` + `failed[]`); we render
  * a per-item summary after the install attempt.
@@ -34,9 +36,19 @@ interface BillingDim {
   dimension: string;
   payer: string;
 }
-interface McpDecl {
-  name: string;
+
+type ConnectorKind = 'mcp' | 'api_key' | 'oauth' | 'webhook';
+type ConnectorExposure = 'proxy' | 'env';
+
+interface ConnectorDecl {
+  id: string;
+  kind: ConnectorKind;
   scopes: string[];
+  /** Per manifest 2026-05: 'proxy' routes calls through the platform Connector
+   *  Proxy (token never leaves the platform); 'env' injects the raw credential
+   *  as a container env var so the app can use it directly. */
+  exposure: ConnectorExposure;
+  required: boolean;
 }
 
 function parseBilling(manifest: Record<string, unknown> | null): BillingDim[] {
@@ -56,17 +68,30 @@ function parseBilling(manifest: Record<string, unknown> | null): BillingDim[] {
   return out;
 }
 
-function parseMcp(manifest: Record<string, unknown> | null): McpDecl[] {
+function parseConnectors(manifest: Record<string, unknown> | null): ConnectorDecl[] {
+  // Manifest 2026-05: connectors live in `manifest.connectors[]`. The legacy
+  // `manifest.mcp` field has been removed entirely — Phase 1's hard reset
+  // forces all installs to re-run through this wizard against the new schema.
   if (!manifest) return [];
-  const mcp = manifest.mcp;
-  if (!Array.isArray(mcp)) return [];
-  const out: McpDecl[] = [];
-  for (const raw of mcp) {
+  const connectors = manifest.connectors;
+  if (!Array.isArray(connectors)) return [];
+  const out: ConnectorDecl[] = [];
+  const validKinds: ConnectorKind[] = ['mcp', 'api_key', 'oauth', 'webhook'];
+  for (const raw of connectors) {
     if (raw && typeof raw === 'object') {
-      const m = raw as Record<string, unknown>;
+      const c = raw as Record<string, unknown>;
+      const kindRaw = typeof c.kind === 'string' ? c.kind : 'api_key';
+      const kind: ConnectorKind = (validKinds as string[]).includes(kindRaw)
+        ? (kindRaw as ConnectorKind)
+        : 'api_key';
+      const exposureRaw = typeof c.exposure === 'string' ? c.exposure : 'proxy';
+      const exposure: ConnectorExposure = exposureRaw === 'env' ? 'env' : 'proxy';
       out.push({
-        name: typeof m.name === 'string' ? m.name : 'unnamed',
-        scopes: Array.isArray(m.scopes) ? (m.scopes as string[]) : [],
+        id: typeof c.id === 'string' ? c.id : 'unnamed',
+        kind,
+        scopes: Array.isArray(c.scopes) ? (c.scopes as string[]) : [],
+        exposure,
+        required: typeof c.required === 'boolean' ? c.required : true,
       });
     }
   }
@@ -88,7 +113,7 @@ export function BundleInstallWizard({
   >({});
   const [enabled, setEnabled] = useState<Record<string, boolean>>({});
   const [walletAccepted, setWalletAccepted] = useState(false);
-  const [mcpAccepted, setMcpAccepted] = useState<Record<string, boolean>>({});
+  const [connectorAccepted, setConnectorAccepted] = useState<Record<string, boolean>>({});
   const [teamId, setTeamId] = useState(activeTeam?.id ?? '');
 
   const [loading, setLoading] = useState(true);
@@ -152,18 +177,24 @@ export function BundleInstallWizard({
     return [...map.values()];
   }, [selectedItems, versionDetails]);
 
-  const aggregatedMcp = useMemo(() => {
-    const map = new Map<string, McpDecl>();
+  const aggregatedConnectors = useMemo(() => {
+    const map = new Map<string, ConnectorDecl>();
     for (const it of selectedItems) {
       const v = versionDetails[it.app_version_id];
-      for (const m of parseMcp(v?.manifest_json ?? null)) {
-        if (!map.has(m.name)) {
-          map.set(m.name, m);
+      for (const c of parseConnectors(v?.manifest_json ?? null)) {
+        const existing = map.get(c.id);
+        if (!existing) {
+          map.set(c.id, c);
         } else {
-          const existing = map.get(m.name)!;
-          map.set(m.name, {
-            name: m.name,
-            scopes: Array.from(new Set([...existing.scopes, ...m.scopes])),
+          // Merge scopes; if any declaration uses env exposure, the aggregate
+          // is env (more invasive — installer must consent to the worst case).
+          map.set(c.id, {
+            id: c.id,
+            kind: existing.kind,
+            scopes: Array.from(new Set([...existing.scopes, ...c.scopes])),
+            exposure:
+              existing.exposure === 'env' || c.exposure === 'env' ? 'env' : 'proxy',
+            required: existing.required || c.required,
           });
         }
       }
@@ -171,8 +202,9 @@ export function BundleInstallWizard({
     return [...map.values()];
   }, [selectedItems, versionDetails]);
 
-  const allMcpAccepted =
-    aggregatedMcp.length === 0 || aggregatedMcp.every((d) => mcpAccepted[d.name]);
+  const allConnectorsAccepted =
+    aggregatedConnectors.length === 0 ||
+    aggregatedConnectors.every((d) => connectorAccepted[d.id]);
 
   const canAdvance = (): boolean => {
     if (loading) return false;
@@ -182,7 +214,7 @@ export function BundleInstallWizard({
       case 2:
         return walletAccepted;
       case 3:
-        return allMcpAccepted;
+        return allConnectorsAccepted;
       case 4:
         return !!teamId;
       default:
@@ -204,10 +236,17 @@ export function BundleInstallWizard({
         installs: selectedItems.map((it) => ({
           app_version_id: it.app_version_id,
           wallet_mix_consent: { accepted: true },
-          mcp_consents: aggregatedMcp.map((m) => ({
-            name: m.name,
-            scopes: m.scopes,
-            accepted: mcpAccepted[m.name] === true,
+          // Backend wire contract still keys this field as `mcp_consents` for
+          // back-compat. Each entry now carries the full connector descriptor
+          // (id, kind, exposure, scopes) so the orchestrator can record exactly
+          // which exposure mode the installer agreed to. Matches AppInstallWizard.
+          mcp_consents: aggregatedConnectors.map((d) => ({
+            id: d.id,
+            name: d.id,
+            kind: d.kind,
+            exposure: d.exposure,
+            scopes: d.scopes,
+            accepted: connectorAccepted[d.id] === true,
           })),
         })),
       });
@@ -227,7 +266,7 @@ export function BundleInstallWizard({
   const titles: Record<WizardStep, string> = {
     1: 'Select items',
     2: 'Wallet & billing',
-    3: 'MCP access',
+    3: 'Connectors & access',
     4: 'Team',
     5: result ? 'Install results' : 'Review',
   };
@@ -343,30 +382,77 @@ export function BundleInstallWizard({
 
     if (step === 3) {
       return (
-        <div className="flex flex-col gap-2" data-testid="mcp-step">
-          {aggregatedMcp.length === 0 ? (
-            <p className="text-xs">No MCP servers requested.</p>
+        <div className="flex flex-col gap-3" data-testid="mcp-step">
+          {aggregatedConnectors.length === 0 ? (
+            <p className="text-xs">No connectors requested across selected items.</p>
           ) : (
-            aggregatedMcp.map((d) => (
-              <label
-                key={d.name}
-                className="flex items-start gap-2 p-2 border border-[var(--border)] rounded-[var(--radius-small)]"
-              >
-                <input
-                  type="checkbox"
-                  checked={!!mcpAccepted[d.name]}
-                  onChange={(e) =>
-                    setMcpAccepted((m) => ({ ...m, [d.name]: e.target.checked }))
-                  }
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-[var(--text)]">{d.name}</div>
-                  <div className="text-[10px] text-[var(--text-subtle)]">
-                    scopes: {d.scopes.join(', ') || '(none)'}
+            <>
+              <p className="text-xs">
+                Review each connector's access mode and scopes (aggregated
+                across selected items):
+              </p>
+              {aggregatedConnectors.map((d) => (
+                <div
+                  key={d.id}
+                  className="p-3 border border-[var(--border)] rounded-[var(--radius-small)] flex flex-col gap-2"
+                  data-testid={`connector-${d.id}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={!!connectorAccepted[d.id]}
+                      onChange={(e) =>
+                        setConnectorAccepted((m) => ({ ...m, [d.id]: e.target.checked }))
+                      }
+                    />
+                    <span className="font-semibold text-[var(--text)]">{d.id}</span>
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-subtle)]">
+                      {d.kind}
+                    </span>
+                    {d.exposure === 'proxy' ? (
+                      <span
+                        className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+                        title="Calls route through the platform Connector Proxy. Your token never reaches this app."
+                      >
+                        Proxied
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400"
+                        title="The raw credential will be injected into this app's container as an environment variable."
+                      >
+                        Env
+                      </span>
+                    )}
                   </div>
+                  <p className="text-[11px] text-[var(--text-subtle)]">
+                    scopes: {d.scopes.join(', ') || '(none)'}
+                  </p>
+                  {d.exposure === 'proxy' ? (
+                    <p className="text-[11px] text-[var(--text-subtle)]">
+                      Proxied — your token stays on the platform; this app calls
+                      it through the Connector Proxy.
+                    </p>
+                  ) : (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-[var(--radius-small)] bg-amber-500/10 border border-amber-500/30 p-2"
+                    >
+                      <Warning
+                        size={14}
+                        weight="fill"
+                        className="text-amber-400 mt-0.5 flex-shrink-0"
+                      />
+                      <p className="text-[11px] text-amber-300 leading-snug">
+                        This app will receive your raw <span className="font-mono">{d.id}</span>{' '}
+                        {d.kind} credential as an environment variable. Only
+                        install if you trust the creator.
+                      </p>
+                    </div>
+                  )}
                 </div>
-              </label>
-            ))
+              ))}
+            </>
           )}
         </div>
       );
@@ -403,8 +489,15 @@ export function BundleInstallWizard({
           {aggregatedBilling.length}
         </div>
         <div>
-          <span className="text-[var(--text-subtle)]">MCP servers accepted:</span>{' '}
-          {aggregatedMcp.length}
+          <span className="text-[var(--text-subtle)]">Connectors accepted:</span>{' '}
+          {aggregatedConnectors.length}
+          {aggregatedConnectors.some((d) => d.exposure === 'env') && (
+            <span className="ml-2 inline-flex items-center gap-1 text-amber-400">
+              <Warning size={12} weight="fill" />
+              {aggregatedConnectors.filter((d) => d.exposure === 'env').length} use env-injected
+              credentials
+            </span>
+          )}
         </div>
         <div>
           <span className="text-[var(--text-subtle)]">Team:</span>{' '}

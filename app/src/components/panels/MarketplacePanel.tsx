@@ -132,7 +132,7 @@ export function MarketplacePanel({ projectId: _projectId, onLockToggle }: Market
         {marketplaceItems[activeTab].map((item) => (
           <div
             key={item.id}
-            className="marketplace-item bg-white/3 border border-white/8 rounded-2xl p-4 transition-all hover:bg-white/5 hover:border-[var(--primary)] hover:-translate-y-0.5 cursor-pointer"
+            className="marketplace-item bg-white/3 border border-white/8 rounded-2xl p-4 transition-all hover:bg-[var(--card-hover)] hover:-translate-y-0.5 cursor-pointer"
           >
             <div style={{ background: item.gradient }} className="h-[120px] rounded-xl mb-3" />
             <div className="font-semibold text-sm text-white mb-1">{item.title}</div>

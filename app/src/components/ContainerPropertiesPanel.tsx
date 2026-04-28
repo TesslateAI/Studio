@@ -17,6 +17,7 @@ import {
 import api, { createLogStreamWebSocket } from '../lib/api';
 import { toast } from 'react-hot-toast';
 import { connectionEvents } from '../utils/connectionEvents';
+import { inspectorFocusEvents } from '../utils/inspectorFocusEvents';
 import { AnsiLine } from '../lib/ansi';
 import {
   ExternalServiceCredentialModal,
@@ -41,6 +42,77 @@ interface ContainerPropertiesPanelProps {
   containerType?: 'base' | 'service';
   /** When provided, renders a "Configure" button that opens the node-config tab. */
   onConfigure?: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// App Contract annotations
+// ---------------------------------------------------------------------------
+//
+// Phase 5: the Canvas inspector lets a creator annotate a container with the
+// pieces the Publish Drawer eventually emits into ``opensail.app.yaml``. We
+// keep these annotations as local React state today; persistence lives on a
+// future ``POST /api/projects/{slug}/canvas-annotations`` endpoint that the
+// Publish Drawer will consume when emitting the manifest.
+//
+// Why local state instead of round-tripping yaml here?
+// * Round-tripping yaml from the canvas would require us to load + parse the
+//   full ``opensail.app.yaml`` (which the publisher already does server-side).
+// * The Publish Drawer is the single writer of the manifest; the canvas is
+//   the source of intent. Persisting these as a small JSON blob keyed by
+//   container id keeps the canvas non-blocking on a yaml refactor.
+// * The publisher (`publish_inferrer.py`) already infers exposed actions
+//   from project structure — these annotations are the explicit overrides /
+//   additions the creator makes from the canvas.
+// ---------------------------------------------------------------------------
+
+type AppSurfaceKind = 'ui' | 'chat' | 'full_page' | 'card' | 'drawer' | 'mcp_tool';
+type ConnectorKind = 'oauth' | 'api_key' | 'basic_auth' | 'webhook';
+type ConnectorExposure = 'proxy' | 'env';
+type ActionPayer = 'installer' | 'creator';
+
+interface AppSurfaceAnnotation {
+  enabled: boolean;
+  kind: AppSurfaceKind;
+  entrypoint: string;
+}
+
+interface AppActionAnnotation {
+  name: string;
+  handler_path: string;
+  input_schema: string;
+  output_schema: string;
+  payer_default: ActionPayer;
+}
+
+interface DataResourceAnnotation {
+  name: string;
+  backed_by_action: string;
+}
+
+interface ConnectorAnnotation {
+  id: string;
+  kind: ConnectorKind;
+  scopes: string[];
+  exposure: ConnectorExposure;
+}
+
+interface ContainerCanvasAnnotations {
+  surface: AppSurfaceAnnotation;
+  actions: AppActionAnnotation[];
+  data_resources: DataResourceAnnotation[];
+  connectors: ConnectorAnnotation[];
+}
+
+const EMPTY_ANNOTATIONS: ContainerCanvasAnnotations = {
+  surface: { enabled: false, kind: 'ui', entrypoint: '' },
+  actions: [],
+  data_resources: [],
+  connectors: [],
+};
+
+/** Storage key prefix — annotations are scoped per project + container. */
+function annotationsStorageKey(projectSlug: string, containerId: string): string {
+  return `canvas-annotations:${projectSlug}:${containerId}`;
 }
 
 const PANEL_MIN_WIDTH = 280;
@@ -144,6 +216,111 @@ export const ContainerPropertiesPanel = ({
   // --- Collapsible sections ---
   const [isEnvExpanded, setIsEnvExpanded] = useState(false);
   const [isAddingInline, setIsAddingInline] = useState(false);
+
+  // --- App Contract annotations (Phase 5 canvas annotations) ---
+  const [isAppContractExpanded, setIsAppContractExpanded] = useState(false);
+  const [annotations, setAnnotations] = useState<ContainerCanvasAnnotations>(() => {
+    try {
+      const raw = localStorage.getItem(annotationsStorageKey(projectSlug, containerId));
+      if (raw) return { ...EMPTY_ANNOTATIONS, ...(JSON.parse(raw) as Partial<ContainerCanvasAnnotations>) };
+    } catch {
+      /* ignore */
+    }
+    return EMPTY_ANNOTATIONS;
+  });
+  const [annotationsDirty, setAnnotationsDirty] = useState(false);
+
+  // Hydrate when the panel switches to a different container.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(annotationsStorageKey(projectSlug, containerId));
+      if (raw) {
+        setAnnotations({
+          ...EMPTY_ANNOTATIONS,
+          ...(JSON.parse(raw) as Partial<ContainerCanvasAnnotations>),
+        });
+      } else {
+        setAnnotations(EMPTY_ANNOTATIONS);
+      }
+      setAnnotationsDirty(false);
+    } catch {
+      setAnnotations(EMPTY_ANNOTATIONS);
+      setAnnotationsDirty(false);
+    }
+  }, [projectSlug, containerId]);
+
+  const updateAnnotations = useCallback(
+    (patch: Partial<ContainerCanvasAnnotations>) => {
+      setAnnotations((prev) => ({ ...prev, ...patch }));
+      setAnnotationsDirty(true);
+    },
+    []
+  );
+
+  // Phase 5 inspector-jump listener.
+  //
+  // PublishAsAppDrawer's "Fix in inspector" handler emits an
+  // ``inspector-focus-request`` after the canvas selects this container.
+  // We expand the App Contract section, then scroll the matching action
+  // or connector row into view via ``scrollIntoView({ block: 'center' })``.
+  // Up to 4 rAF retries give the section's render pass time to mount the
+  // child rows before we look them up.
+  const panelRootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const off = inspectorFocusEvents.on('inspector-focus-request', (req) => {
+      if (req.containerId !== containerId) return;
+      setIsAppContractExpanded(true);
+      const tryFocus = (attempt: number) => {
+        const root = panelRootRef.current;
+        if (!root) {
+          if (attempt < 4) requestAnimationFrame(() => tryFocus(attempt + 1));
+          return;
+        }
+        const selector =
+          req.kind === 'action'
+            ? req.name
+              ? `[data-action-name="${CSS.escape(req.name)}"]`
+              : '[data-action-name]'
+            : req.name
+              ? `[data-connector-id="${CSS.escape(req.name)}"]`
+              : '[data-connector-id]';
+        const el = root.querySelector<HTMLElement>(selector);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Highlight pulse — additive Tailwind ring; auto-removed after 1.5s.
+          el.classList.add('ring-2', 'ring-[var(--primary)]', 'ring-offset-2');
+          window.setTimeout(() => {
+            el.classList.remove(
+              'ring-2',
+              'ring-[var(--primary)]',
+              'ring-offset-2'
+            );
+          }, 1500);
+        } else if (attempt < 4) {
+          requestAnimationFrame(() => tryFocus(attempt + 1));
+        }
+      };
+      requestAnimationFrame(() => tryFocus(0));
+    });
+    return off;
+  }, [containerId]);
+
+  const saveAnnotations = useCallback(() => {
+    try {
+      localStorage.setItem(
+        annotationsStorageKey(projectSlug, containerId),
+        JSON.stringify(annotations)
+      );
+      // TODO: POST /api/projects/{slug}/canvas-annotations once the
+      // backend stub lands (Phase 5 follow-up). The Publish Drawer will
+      // read these when emitting opensail.app.yaml.
+      setAnnotationsDirty(false);
+      toast.success('Annotations saved locally');
+    } catch (err) {
+      console.error('Failed to persist annotations:', err);
+      toast.error('Failed to save annotations');
+    }
+  }, [projectSlug, containerId, annotations]);
 
   // --- Container Logs ---
   const [isLogsOpen, setIsLogsOpen] = useState(true);
@@ -532,6 +709,7 @@ export const ContainerPropertiesPanel = ({
 
       {/* Panel — no outer container, cards float directly */}
       <div
+        ref={panelRootRef}
         className="fixed md:absolute inset-y-4 md:inset-y-auto md:top-4 md:bottom-4 right-4 w-[calc(100%-2rem)] max-w-sm md:w-[var(--panel-w)] md:max-w-none flex flex-col overflow-hidden z-50"
         style={{ '--panel-w': `${panelWidth}px` } as React.CSSProperties}
       >
@@ -876,6 +1054,437 @@ export const ContainerPropertiesPanel = ({
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* App Contract annotations card (Phase 5 canvas annotations).
+              Persists to localStorage today; the Publish Drawer reads these
+              when emitting opensail.app.yaml. See annotation-system docstring
+              at the top of this file. */}
+          <div className="bg-[var(--surface-hover)] rounded-[var(--radius)] border border-[var(--border)] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setIsAppContractExpanded((v) => !v)}
+              className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface-hover)] transition-colors group"
+              data-testid="app-contract-toggle"
+            >
+              <span className="text-[11px] font-medium text-[var(--text-muted)] group-hover:text-[var(--text)]">
+                App Contract
+              </span>
+              {annotationsDirty && (
+                <span className="text-[10px] text-[var(--status-warning)]">
+                  unsaved
+                </span>
+              )}
+              <span
+                className={`ml-auto transition-transform duration-200 text-[var(--text-subtle)] ${isAppContractExpanded ? 'rotate-0' : '-rotate-90'}`}
+              >
+                <CaretDown size={10} />
+              </span>
+            </button>
+            {isAppContractExpanded && (
+              <div className="px-4 pb-4 space-y-4">
+                {/* Surface */}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={annotations.surface.enabled}
+                      onChange={(e) =>
+                        updateAnnotations({
+                          surface: { ...annotations.surface, enabled: e.target.checked },
+                        })
+                      }
+                      data-testid="surface-enabled"
+                    />
+                    <span className="text-xs font-medium text-[var(--text)]">
+                      Expose as app surface
+                    </span>
+                  </label>
+                  {annotations.surface.enabled && (
+                    <div className="space-y-1.5 pl-5">
+                      <div>
+                        <label className="block text-[10px] uppercase tracking-wider text-[var(--text-subtle)] mb-1">
+                          Kind
+                        </label>
+                        <select
+                          value={annotations.surface.kind}
+                          onChange={(e) =>
+                            updateAnnotations({
+                              surface: {
+                                ...annotations.surface,
+                                kind: e.target.value as AppSurfaceKind,
+                              },
+                            })
+                          }
+                          data-testid="surface-kind"
+                          className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+                        >
+                          <option value="ui">ui</option>
+                          <option value="chat">chat</option>
+                          <option value="full_page">full_page</option>
+                          <option value="card">card</option>
+                          <option value="drawer">drawer</option>
+                          <option value="mcp_tool">mcp_tool</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] uppercase tracking-wider text-[var(--text-subtle)] mb-1">
+                          Entrypoint
+                        </label>
+                        <input
+                          type="text"
+                          value={annotations.surface.entrypoint}
+                          onChange={(e) =>
+                            updateAnnotations({
+                              surface: {
+                                ...annotations.surface,
+                                entrypoint: e.target.value,
+                              },
+                            })
+                          }
+                          placeholder="/index.html"
+                          className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-[var(--text)]">
+                      Expose as app actions
+                    </span>
+                    <button
+                      onClick={() =>
+                        updateAnnotations({
+                          actions: [
+                            ...annotations.actions,
+                            {
+                              name: '',
+                              handler_path: '',
+                              input_schema: '{}',
+                              output_schema: '{}',
+                              payer_default: 'installer',
+                            },
+                          ],
+                        })
+                      }
+                      className="btn btn-icon btn-sm"
+                      title="Add action"
+                      data-testid="add-action"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  </div>
+                  {annotations.actions.map((action, idx) => (
+                    <div
+                      key={idx}
+                      // Phase 5 inspector-jump scroll target. The panel
+                      // listens for ``inspector-focus-request`` events and
+                      // resolves the matching row by ``data-action-name``.
+                      data-action-name={action.name || `__unnamed_${idx}`}
+                      className="space-y-1.5 pl-3 border-l-2 border-[var(--border)]"
+                    >
+                      <input
+                        type="text"
+                        value={action.name}
+                        onChange={(e) => {
+                          const next = [...annotations.actions];
+                          next[idx] = { ...action, name: e.target.value };
+                          updateAnnotations({ actions: next });
+                        }}
+                        placeholder="action_name"
+                        className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                      />
+                      <input
+                        type="text"
+                        value={action.handler_path}
+                        onChange={(e) => {
+                          const next = [...annotations.actions];
+                          next[idx] = { ...action, handler_path: e.target.value };
+                          updateAnnotations({ actions: next });
+                        }}
+                        placeholder="handler.path (e.g. POST /api/foo)"
+                        className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                      />
+                      <textarea
+                        value={action.input_schema}
+                        onChange={(e) => {
+                          const next = [...annotations.actions];
+                          next[idx] = { ...action, input_schema: e.target.value };
+                          updateAnnotations({ actions: next });
+                        }}
+                        placeholder='{"type":"object"}'
+                        rows={3}
+                        className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-[10px] font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                      />
+                      <textarea
+                        value={action.output_schema}
+                        onChange={(e) => {
+                          const next = [...annotations.actions];
+                          next[idx] = { ...action, output_schema: e.target.value };
+                          updateAnnotations({ actions: next });
+                        }}
+                        placeholder='{"type":"object"}'
+                        rows={3}
+                        className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-[10px] font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                      />
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={action.payer_default}
+                          onChange={(e) => {
+                            const next = [...annotations.actions];
+                            next[idx] = {
+                              ...action,
+                              payer_default: e.target.value as ActionPayer,
+                            };
+                            updateAnnotations({ actions: next });
+                          }}
+                          className="flex-1 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+                        >
+                          <option value="installer">payer: installer</option>
+                          <option value="creator">payer: creator</option>
+                        </select>
+                        <button
+                          onClick={() => {
+                            const next = annotations.actions.filter(
+                              (_, i) => i !== idx
+                            );
+                            updateAnnotations({ actions: next });
+                          }}
+                          className="btn btn-icon btn-sm"
+                          title="Remove"
+                        >
+                          <Trash size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Data resources */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-[var(--text)]">
+                      Expose as data resources
+                    </span>
+                    <button
+                      onClick={() =>
+                        updateAnnotations({
+                          data_resources: [
+                            ...annotations.data_resources,
+                            { name: '', backed_by_action: '' },
+                          ],
+                        })
+                      }
+                      className="btn btn-icon btn-sm"
+                      title="Add data resource"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  </div>
+                  {annotations.data_resources.map((dr, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-1.5 pl-3 border-l-2 border-[var(--border)]"
+                    >
+                      <input
+                        type="text"
+                        value={dr.name}
+                        onChange={(e) => {
+                          const next = [...annotations.data_resources];
+                          next[idx] = { ...dr, name: e.target.value };
+                          updateAnnotations({ data_resources: next });
+                        }}
+                        placeholder="resource_name"
+                        className="flex-1 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                      />
+                      <select
+                        value={dr.backed_by_action}
+                        onChange={(e) => {
+                          const next = [...annotations.data_resources];
+                          next[idx] = { ...dr, backed_by_action: e.target.value };
+                          updateAnnotations({ data_resources: next });
+                        }}
+                        className="flex-1 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+                      >
+                        <option value="">— action —</option>
+                        {annotations.actions
+                          .filter((a) => a.name)
+                          .map((a) => (
+                            <option key={a.name} value={a.name}>
+                              {a.name}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={() => {
+                          const next = annotations.data_resources.filter(
+                            (_, i) => i !== idx
+                          );
+                          updateAnnotations({ data_resources: next });
+                        }}
+                        className="btn btn-icon btn-sm"
+                        title="Remove"
+                      >
+                        <Trash size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Connectors */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-[var(--text)]">
+                      Require connectors
+                    </span>
+                    <button
+                      onClick={() =>
+                        updateAnnotations({
+                          connectors: [
+                            ...annotations.connectors,
+                            {
+                              id: '',
+                              kind: 'oauth',
+                              scopes: [],
+                              exposure: 'proxy',
+                            },
+                          ],
+                        })
+                      }
+                      className="btn btn-icon btn-sm"
+                      title="Add connector"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  </div>
+                  {annotations.connectors.map((conn, idx) => {
+                    const oauthEnvBlocked =
+                      conn.kind === 'oauth' && conn.exposure === 'env';
+                    const envWarn = conn.exposure === 'env' && conn.kind !== 'oauth';
+                    return (
+                      <div
+                        key={idx}
+                        // Phase 5 inspector-jump scroll target. Same data
+                        // attribute pattern as the action row above.
+                        data-connector-id={conn.id || `__unnamed_${idx}`}
+                        className="space-y-1.5 pl-3 border-l-2 border-[var(--border)]"
+                      >
+                        <input
+                          type="text"
+                          value={conn.id}
+                          onChange={(e) => {
+                            const next = [...annotations.connectors];
+                            next[idx] = { ...conn, id: e.target.value };
+                            updateAnnotations({ connectors: next });
+                          }}
+                          placeholder="connector_id"
+                          className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                        />
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={conn.kind}
+                            onChange={(e) => {
+                              const next = [...annotations.connectors];
+                              next[idx] = {
+                                ...conn,
+                                kind: e.target.value as ConnectorKind,
+                              };
+                              updateAnnotations({ connectors: next });
+                            }}
+                            className="flex-1 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+                          >
+                            <option value="oauth">oauth</option>
+                            <option value="api_key">api_key</option>
+                            <option value="basic_auth">basic_auth</option>
+                            <option value="webhook">webhook</option>
+                          </select>
+                          <select
+                            value={conn.exposure}
+                            onChange={(e) => {
+                              const next = [...annotations.connectors];
+                              next[idx] = {
+                                ...conn,
+                                exposure: e.target.value as ConnectorExposure,
+                              };
+                              updateAnnotations({ connectors: next });
+                            }}
+                            data-testid={`connector-exposure-${idx}`}
+                            className="flex-1 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
+                          >
+                            <option value="proxy">proxy</option>
+                            <option value="env">env</option>
+                          </select>
+                          <button
+                            onClick={() => {
+                              const next = annotations.connectors.filter(
+                                (_, i) => i !== idx
+                              );
+                              updateAnnotations({ connectors: next });
+                            }}
+                            className="btn btn-icon btn-sm"
+                            title="Remove"
+                          >
+                            <Trash size={12} />
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          value={conn.scopes.join(', ')}
+                          onChange={(e) => {
+                            const next = [...annotations.connectors];
+                            next[idx] = {
+                              ...conn,
+                              scopes: e.target.value
+                                .split(',')
+                                .map((s) => s.trim())
+                                .filter(Boolean),
+                            };
+                            updateAnnotations({ connectors: next });
+                          }}
+                          placeholder="scope1, scope2"
+                          className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-[10px] font-mono focus:outline-none focus:border-[var(--border-hover)]"
+                        />
+                        {oauthEnvBlocked && (
+                          <p
+                            data-testid={`connector-error-${idx}`}
+                            className="text-[10px] text-red-400"
+                          >
+                            OAuth + env is rejected at install. Use proxy
+                            exposure for OAuth connectors.
+                          </p>
+                        )}
+                        {envWarn && (
+                          <p
+                            data-testid={`connector-warn-${idx}`}
+                            className="text-[10px] text-amber-400"
+                          >
+                            the app process will see this secret directly.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Save */}
+                {annotationsDirty && (
+                  <div className="pt-2 border-t border-[var(--border)]">
+                    <button
+                      onClick={saveAnnotations}
+                      className="btn btn-sm w-full"
+                      data-testid="save-annotations"
+                    >
+                      <Check size={12} />
+                      Save annotations
+                    </button>
                   </div>
                 )}
               </div>

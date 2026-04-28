@@ -15,7 +15,13 @@ import logging
 from pathlib import PurePosixPath
 from typing import Any
 
-from ..output_formatter import error_output, format_file_size, pluralize, success_output
+from ....services.orchestration import get_orchestrator
+from ..output_formatter import (
+    error_output,
+    format_file_size,
+    pluralize,
+    success_output,
+)
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
@@ -211,9 +217,6 @@ async def read_many_files_tool(params: dict[str, Any], context: dict[str, Any]) 
     filtering = params.get("file_filtering_options") or {}
     respect_gitignore = bool(filtering.get("respect_gitignore", True))
     respect_tesslate_ignore = bool(filtering.get("respect_tesslate_ignore", True))
-    # Both flags are advisory: ``list_tree`` already honors .gitignore when the
-    # backend implements it, and tesslate_ignore is applied by orchestrator
-    # backends that support it.
     _ = respect_gitignore
     _ = respect_tesslate_ignore
 
@@ -236,8 +239,9 @@ async def read_many_files_tool(params: dict[str, Any], context: dict[str, Any]) 
         effective_excludes.extend(DEFAULT_EXCLUDE_PATTERNS)
     effective_excludes.extend(exclude)
 
-    user_id = context["user_id"]
-    project_id = str(context["project_id"])
+    user_id = context.get("user_id")
+    project_id_raw = context.get("project_id")
+    project_id = str(project_id_raw) if project_id_raw is not None else ""
     container_name = context.get("container_name")
     container_directory = context.get("container_directory")
 
@@ -249,8 +253,6 @@ async def read_many_files_tool(params: dict[str, Any], context: dict[str, Any]) 
         max_bytes_per_file,
         max_total_bytes,
     )
-
-    from ....services.orchestration import get_orchestrator
 
     orchestrator = get_orchestrator()
 
@@ -328,7 +330,6 @@ async def read_many_files_tool(params: dict[str, Any], context: dict[str, Any]) 
         for err_path in errors:
             skipped.append({"path": err_path, "reason": "read failed"})
 
-        # Preserve sorted order by keying on path.
         by_path = {rec.get("path"): rec for rec in successes}
         for path in batch:
             rec = by_path.get(path)
@@ -399,6 +400,14 @@ async def read_many_files_tool(params: dict[str, Any], context: dict[str, Any]) 
     if skipped:
         summary += f", skipped {pluralize(len(skipped), 'file')}"
 
+    try:
+        from ....services.recent_files import get_recent_file_tracker
+
+        tracker = get_recent_file_tracker()
+        await tracker.record_many(context, [f.get("path") for f in files_out if f.get("path")])
+    except Exception:
+        pass
+
     return success_output(
         message=summary,
         files=files_out,
@@ -416,7 +425,7 @@ async def read_many_files_tool(params: dict[str, Any], context: dict[str, Any]) 
 
 
 def register_read_many_files_tool(registry) -> None:
-    """Register the read_many_files tool."""
+    """Register the ``read_many_files`` tool."""
 
     registry.register(
         Tool(
@@ -434,7 +443,7 @@ def register_read_many_files_tool(registry) -> None:
                     "include": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Glob patterns of files to include (required, non-empty)",
+                        "description": ("Glob patterns of files to include (required, non-empty)"),
                     },
                     "exclude": {
                         "type": "array",
@@ -443,7 +452,9 @@ def register_read_many_files_tool(registry) -> None:
                     },
                     "recursive": {
                         "type": "boolean",
-                        "description": "Kept for API parity; recursion is controlled via '**' in patterns",
+                        "description": (
+                            "Kept for API parity; recursion is controlled via '**' in patterns"
+                        ),
                     },
                     "use_default_excludes": {
                         "type": "boolean",
@@ -455,17 +466,26 @@ def register_read_many_files_tool(registry) -> None:
                     },
                     "max_bytes_per_file": {
                         "type": "integer",
-                        "description": f"Per-file byte budget (default: {DEFAULT_MAX_BYTES_PER_FILE})",
+                        "description": (
+                            f"Per-file byte budget (default: {DEFAULT_MAX_BYTES_PER_FILE})"
+                        ),
                     },
                     "max_total_bytes": {
                         "type": "integer",
-                        "description": f"Total byte budget across all files (default: {DEFAULT_MAX_TOTAL_BYTES})",
+                        "description": (
+                            f"Total byte budget across all files "
+                            f"(default: {DEFAULT_MAX_TOTAL_BYTES})"
+                        ),
                     },
                 },
                 "required": ["include"],
             },
             executor=read_many_files_tool,
             category=ToolCategory.FILE_OPS,
+            # Glob patterns in, list of file content strings out — JSON-serializable.
+            state_serializable=True,
+            # Each call is a fresh batch read; no persistent file handles.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "read_many_files", "parameters": {"include": ["**/*.py"]}}',
                 '{"tool_name": "read_many_files", "parameters": {"include": ["src/**/*.ts", "src/**/*.tsx"], "exclude": ["**/*.test.ts"]}}',

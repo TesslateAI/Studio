@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -81,12 +81,16 @@ async def create_directory(
     return _serialize_directory(directory)
 
 
-@router.delete("/directories/{directory_id}", status_code=204)
+@router.delete(
+    "/directories/{directory_id}",
+    status_code=204,
+    response_class=Response,
+)
 async def delete_directory(
     directory_id: uuid.UUID,
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
-) -> None:
+) -> Response:
     existing = await db.execute(
         select(Directory).where(Directory.id == directory_id, Directory.user_id == user.id)
     )
@@ -95,3 +99,4 @@ async def delete_directory(
         raise HTTPException(status_code=404, detail="directory not found")
     await db.delete(row)
     await db.commit()
+    return Response(status_code=204)

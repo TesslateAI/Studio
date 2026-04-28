@@ -26,9 +26,12 @@ import os
 from functools import lru_cache
 from typing import Literal
 
-SchemaVersion = Literal["2025-01", "2025-02"]
+SchemaVersion = Literal["2025-01", "2025-02", "2026-05"]
 
-MANIFEST_SCHEMA_SUPPORTED: list[SchemaVersion] = ["2025-01", "2025-02"]
+# 2026-05 is the canonical post-Phase-1 manifest. Older versions stay
+# accepted so old AppVersion rows don't suddenly fail compatibility
+# (we don't republish historical bundles).
+MANIFEST_SCHEMA_SUPPORTED: list[SchemaVersion] = ["2025-01", "2025-02", "2026-05"]
 RUNTIME_API_SUPPORTED: list[str] = ["1.0"]
 
 

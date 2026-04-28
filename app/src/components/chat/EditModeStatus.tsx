@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Check, AlertTriangle, Eye } from 'lucide-react';
 
 export type EditMode = 'allow' | 'ask' | 'plan';
@@ -6,35 +7,35 @@ interface EditModeStatusProps {
   mode: EditMode;
   onModeChange: (mode: EditMode) => void;
   className?: string;
-  compact?: boolean; // When true, only show icon without text label
+  /** When true, only show icon (no text label) on the trigger button. */
+  compact?: boolean;
 }
 
-const modeConfig = {
+interface ModeConfig {
+  label: string;
+  icon: typeof AlertTriangle;
+  description: string;
+}
+
+const MODE_CONFIG: Record<EditMode, ModeConfig> = {
   ask: {
-    label: 'Ask Before Edit',
+    label: 'Ask before edit',
     icon: AlertTriangle,
-    color: 'text-gray-400',
-    bgColor: 'bg-gray-400/10',
-    borderColor: 'border-gray-400/30',
-    hoverBg: 'hover:bg-gray-400/20',
+    description: 'Agent pauses for approval before editing files.',
   },
   allow: {
-    label: 'Allow All Edits',
+    label: 'Allow all edits',
     icon: Check,
-    color: 'text-orange-400',
-    bgColor: 'bg-orange-400/10',
-    borderColor: 'border-orange-400/30',
-    hoverBg: 'hover:bg-orange-400/20',
+    description: 'Agent edits files freely without confirmation.',
   },
   plan: {
-    label: 'Plan Mode',
+    label: 'Plan mode',
     icon: Eye,
-    color: 'text-green-400',
-    bgColor: 'bg-green-400/10',
-    borderColor: 'border-green-400/30',
-    hoverBg: 'hover:bg-green-400/20',
+    description: 'Agent proposes a plan without making any edits.',
   },
-} as const;
+};
+
+const MODE_ORDER: EditMode[] = ['ask', 'allow', 'plan'];
 
 export function EditModeStatus({
   mode,
@@ -42,32 +43,87 @@ export function EditModeStatus({
   className = '',
   compact = false,
 }: EditModeStatusProps) {
-  const config = modeConfig[mode];
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const config = MODE_CONFIG[mode];
   const Icon = config.icon;
 
-  const cycleMode = () => {
-    const modes: EditMode[] = ['ask', 'allow', 'plan'];
-    const currentIndex = modes.indexOf(mode);
-    const nextIndex = (currentIndex + 1) % modes.length;
-    onModeChange(modes[nextIndex]);
-  };
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', handle);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
 
   return (
-    <div className={`flex items-center justify-center ${className}`}>
+    <div ref={containerRef} className={`relative ${className}`}>
       <button
-        onClick={cycleMode}
-        className={`
-          flex items-center gap-1.5 rounded-full
-          border transition-all duration-200
-          ${config.bgColor} ${config.borderColor} ${config.hoverBg}
-          text-xs font-medium h-7
-          ${compact ? 'px-1.5' : 'px-3'}
-        `}
-        title={compact ? config.label : 'Click to cycle edit mode'}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`btn btn-sm flex items-center gap-1.5 ${open ? 'btn-active' : ''}`}
+        title={compact ? config.label : 'Change edit mode'}
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        <Icon className={`w-3.5 h-3.5 ${config.color}`} />
-        {!compact && <span className={config.color}>{config.label}</span>}
+        <Icon size={13} className="text-[var(--text-muted)]" />
+        {!compact && (
+          <span className="text-[var(--text)] text-xs font-medium">{config.label}</span>
+        )}
       </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-full left-0 mb-1.5 w-56 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] p-1 z-50 shadow-lg"
+        >
+          {MODE_ORDER.map((m) => {
+            const cfg = MODE_CONFIG[m];
+            const ModeIcon = cfg.icon;
+            const isSelected = m === mode;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => {
+                  onModeChange(m);
+                  setOpen(false);
+                }}
+                title={cfg.description}
+                className={`w-full grid grid-cols-[16px_1fr_16px] items-center gap-2 px-2.5 py-2 rounded-[var(--radius-small)] transition-colors text-left ${
+                  isSelected
+                    ? 'bg-[var(--surface-hover)]'
+                    : 'hover:bg-[var(--surface-hover)]'
+                }`}
+                role="menuitemradio"
+                aria-checked={isSelected}
+              >
+                <ModeIcon size={13} className="text-[var(--text-muted)] justify-self-center" />
+                <span className="text-xs font-medium text-[var(--text)] truncate">
+                  {cfg.label}
+                </span>
+                <Check
+                  size={13}
+                  className={`justify-self-center ${
+                    isSelected ? 'text-[var(--primary)]' : 'text-transparent'
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

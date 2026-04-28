@@ -165,7 +165,7 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
     <>
       <div className="h-full flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="p-6 border-b border-white/10">
+        <div className="p-6 border-b border-[var(--border)]">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-purple-500/20 rounded-lg">
@@ -227,7 +227,7 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
               {deployments.map((deployment) => (
                 <div
                   key={deployment.id}
-                  className="bg-white/5 border border-white/10 rounded-lg p-4 hover:border-white/20 transition-all cursor-pointer"
+                  className="bg-white/5 border border-[var(--border)] rounded-lg p-4 hover:border-[var(--border-hover)] transition-all cursor-pointer"
                   onClick={() => setSelectedDeployment(deployment)}
                 >
                   <div className="flex items-start justify-between mb-3">
@@ -270,7 +270,7 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/10">
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-[var(--border)]">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -311,11 +311,11 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
             onClick={() => setSelectedDeployment(null)}
           >
             <div
-              className="bg-[var(--surface)] rounded-3xl w-full max-w-2xl shadow-2xl border border-white/10 max-h-[80vh] overflow-hidden flex flex-col"
+              className="bg-[var(--surface)] rounded-3xl w-full max-w-2xl shadow-2xl border border-[var(--border)] max-h-[80vh] overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="p-6 border-b border-white/10">
+              <div className="p-6 border-b border-[var(--border)]">
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-3 mb-2">
@@ -395,10 +395,10 @@ export function DeploymentsPanel({ projectSlug }: DeploymentsPanelProps) {
               </div>
 
               {/* Modal Footer */}
-              <div className="p-6 border-t border-white/10 flex justify-end gap-3">
+              <div className="p-6 border-t border-[var(--border)] flex justify-end gap-3">
                 <button
                   onClick={() => setSelectedDeployment(null)}
-                  className="px-4 py-2 bg-white/5 border border-white/10 text-[var(--text)] rounded-lg font-semibold hover:bg-white/10 transition-all"
+                  className="px-4 py-2 bg-white/5 border border-[var(--border)] text-[var(--text)] rounded-lg font-semibold hover:bg-white/10 transition-all"
                 >
                   Close
                 </button>

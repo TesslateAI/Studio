@@ -14,9 +14,9 @@ to desktop.
 |---|---|---|
 | Rust (stable) | Tauri host + cargo build | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` then `source $HOME/.cargo/env` |
 | `cargo-tauri` CLI | `cargo tauri dev` / `cargo tauri build` entry points | `cargo install tauri-cli --version '^2.0' --locked` |
-| Python 3.11+ | Orchestrator + sidecar entrypoint | system Python or pyenv |
-| PyInstaller | Freeze the sidecar into a single binary | `pip install pyinstaller` (plus the orchestrator deps — see below) |
-| pnpm | React frontend | `corepack enable && corepack prepare pnpm@latest --activate` |
+| `uv` | Manages the sidecar `.venv` and installs PyInstaller + orchestrator deps | `brew install uv` (macOS) or `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Python 3.12 | Sidecar runtime — pinned because every native dep PyInstaller bundles (asyncpg, grpcio, hiredis, PyNaCl) ships wheels for it | `uv` will fetch this on first `uv venv` |
+| pnpm | React frontend | `corepack enable && corepack prepare pnpm@latest --activate` (or `npm i -g pnpm` if corepack is off) |
 | Node 20+ | pnpm runtime | `nvm install 20` or system package |
 
 Linux-only system deps (Tauri WebKitGTK + tray-icon sysdeps):
@@ -34,28 +34,31 @@ warnings on startup are harmless).
 
 ## One-time orchestrator install
 
-The sidecar freezes the orchestrator into a PyInstaller bundle, so every
-orchestrator dep must be importable from the Python that runs
-`build_sidecar.py`. Editable installs are the simplest path:
+`desktop/scripts/dev.sh` and `desktop/scripts/build-all.sh` bootstrap a
+`.venv/` at the repo root via `uv` on first run and install PyInstaller +
+the editable orchestrator deps automatically — there's nothing manual to
+do for a fresh checkout. If you want to prep the venv ahead of time
+(or run scripts directly against the frozen Python):
 
 ```bash
-# sibling tesslate-agent submodule first
-pip install -e packages/tesslate-agent --break-system-packages
-# then the orchestrator
-pip install -e orchestrator --break-system-packages
+uv venv --python 3.12 .venv
+uv pip install pyinstaller \
+  -e packages/tesslate-agent \
+  -e orchestrator
 ```
 
-`--break-system-packages` is only required on distros where pip refuses
-to touch the system Python; skip it in a venv.
+The `.venv/` directory is gitignored. Override the Python pin with
+`OPENSAIL_PY_VERSION=3.x` if you have a specific reason — wheels for the
+native deps must exist for that version.
 
 ## Build the sidecar
 
 The sidecar is a single `--onefile` PyInstaller executable that Tauri
-spawns as `externalBin`. Build it once, then `cargo tauri dev` will
-launch it:
+spawns as `externalBin`. `dev.sh` rebuilds it on demand; if you want to
+freeze it manually use the venv Python:
 
 ```bash
-python3 desktop/sidecar/build_sidecar.py
+.venv/bin/python desktop/sidecar/build_sidecar.py
 ```
 
 Output lands at
@@ -176,7 +179,7 @@ actually starts.
 
 **"cannot open shared object file: libpython3.12.so"** — the sidecar
 binary was built with `--onedir` (sibling `_internal/` dir). Force a
-`--onefile` rebuild: `rm -rf desktop/sidecar/dist desktop/src-tauri/binaries && python3 desktop/sidecar/build_sidecar.py`.
+`--onefile` rebuild: `rm -rf desktop/sidecar/dist desktop/src-tauri/binaries && .venv/bin/python desktop/sidecar/build_sidecar.py`.
 
 **`/tray-state` returns 401** — the tray poll is sending the wrong
 bearer, or `TESSLATE_DESKTOP_BEARER` isn't set in the sidecar's

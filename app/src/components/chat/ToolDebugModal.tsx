@@ -184,7 +184,7 @@ export function ToolDebugModal({ isOpen, onClose, projectId }: ToolDebugModalPro
             <select
               value={selectedTool?.name ?? ''}
               onChange={(e) => handleToolSelect(e.target.value)}
-              className="w-full px-3 py-2 rounded-[var(--radius)] bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] text-sm mb-4 focus:outline-none focus:border-[var(--primary)]"
+              className="w-full px-3 py-2 rounded-[var(--radius)] bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] text-sm mb-4 focus:outline-none focus:border-[var(--border-hover)]"
             >
               <option value="">Select a tool...</option>
               {categories.map((cat) => (
@@ -220,7 +220,7 @@ export function ToolDebugModal({ isOpen, onClose, projectId }: ToolDebugModalPro
               value={params}
               onChange={(e) => setParams(e.target.value)}
               spellCheck={false}
-              className="flex-1 min-h-[200px] w-full px-3 py-2 rounded-[var(--radius)] bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] text-sm font-mono resize-none focus:outline-none focus:border-[var(--primary)]"
+              className="flex-1 min-h-[200px] w-full px-3 py-2 rounded-[var(--radius)] bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] text-sm font-mono resize-none focus:outline-none focus:border-[var(--border-hover)]"
             />
 
             {/* Execute Button */}

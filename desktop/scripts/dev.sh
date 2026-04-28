@@ -14,6 +14,35 @@ DESKTOP_DIR="$(cd "$HERE/.." && pwd)"
 REPO_ROOT="$(cd "$DESKTOP_DIR/.." && pwd)"
 SIDECAR_DIR="$DESKTOP_DIR/sidecar"
 BIN_DIR="$DESKTOP_DIR/src-tauri/binaries"
+VENV_DIR="$REPO_ROOT/.venv"
+
+# Python is pinned to a CPython that has wheels for every native dep PyInstaller
+# bundles (asyncpg, grpcio, hiredis, PyNaCl). Bumping requires verifying wheels.
+PY_VERSION="${OPENSAIL_PY_VERSION:-3.12}"
+
+ensure_uv() {
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not on PATH — install with: brew install uv  (or curl -LsSf https://astral.sh/uv/install.sh | sh)" >&2
+    exit 1
+  fi
+}
+
+ensure_venv() {
+  ensure_uv
+  if [ ! -x "$VENV_DIR/bin/python" ]; then
+    echo "[dev.sh] creating .venv via uv (python $PY_VERSION)" >&2
+    uv venv --python "$PY_VERSION" "$VENV_DIR"
+  fi
+  # Install / refresh sidecar deps if anything is missing. Keeps cold start
+  # cheap on subsequent runs because uv resolves from its cache.
+  if ! VIRTUAL_ENV="$VENV_DIR" "$VENV_DIR/bin/python" -c \
+      "import PyInstaller, app, tesslate_agent" >/dev/null 2>&1; then
+    echo "[dev.sh] installing sidecar deps via uv pip" >&2
+    VIRTUAL_ENV="$VENV_DIR" uv pip install pyinstaller \
+      -e "$REPO_ROOT/packages/tesslate-agent" \
+      -e "$REPO_ROOT/orchestrator"
+  fi
+}
 
 case "$(uname -s)" in
   Linux*)   HOST_TRIPLE="x86_64-unknown-linux-gnu"  ;;
@@ -43,7 +72,8 @@ fi
 
 if [ "$need_rebuild" = "1" ]; then
   echo "[dev.sh] building sidecar for $HOST_TRIPLE" >&2
-  python3 "$SIDECAR_DIR/build_sidecar.py"
+  ensure_venv
+  "$VENV_DIR/bin/python" "$SIDECAR_DIR/build_sidecar.py"
 else
   echo "[dev.sh] sidecar at $BIN is up to date" >&2
 fi

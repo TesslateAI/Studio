@@ -741,6 +741,10 @@ def register_project_control_tools(registry):
             category=ToolCategory.PROJECT,
             parameters=parameters,
             executor=project_control_executor,
+            # Action + container_name in, status/logs/probe dict out — JSON-clean.
+            state_serializable=True,
+            # Pure observation; no in-tool persistent state.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "project_control", "parameters": {"action": "status"}}',
                 '{"tool_name": "project_control", "parameters": {"action": "container_logs", "container_name": "frontend"}}',

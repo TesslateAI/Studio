@@ -209,6 +209,10 @@ class ThemeJsonSchema(BaseModel):
     typography: ThemeTypography
     spacing: ThemeSpacing
     animation: ThemeAnimation
+    # Top-level toggle: when true, the frontend forces every border CSS
+    # variable to transparent. Optional so themes that predate this field
+    # validate cleanly.
+    borderless: bool = False
 
     model_config = {"extra": "forbid"}  # Reject unknown fields
 

@@ -458,6 +458,7 @@ async def get_marketplace_agents(
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.is_system.isnot(True),
             MarketplaceAgent.item_type.notin_(
                 ["skill", "subagent", "mcp_server", "deployment_target"]
             ),
@@ -1312,6 +1313,33 @@ async def fork_agent(
     }
 
 
+def _is_tool_driven_request(request: Request | None) -> bool:
+    """Phase 5 — distinguish tool-driven creates from interactive UI creates.
+
+    Tool-driven calls come from the agent-builder skill via the Python
+    tools (``marketplace_ops/create_agent``) but may also re-enter this
+    router from a programmatic path. Either header tag flags the
+    request:
+
+    - ``X-Tool-Created: true`` — explicit tag the agent loop sets when
+      it forwards a tool result through the public API.
+    - JWT scope ``marketplace.author`` — the API-key scope present on
+      automation runs that drove the create.
+
+    When True we ENFORCE ``is_published=False`` on insert and run an
+    extra ownership check on update so a leaked tool token cannot
+    publish or mutate someone else's row.
+    """
+    if request is None:
+        return False
+    if (request.headers.get("X-Tool-Created") or "").lower() == "true":
+        return True
+    scope_header = request.headers.get("X-API-Scope") or ""
+    if "marketplace.author" in scope_header.split():
+        return True
+    return False
+
+
 @router.post("/agents/create")
 async def create_custom_agent(
     name: str = Body(...),
@@ -1321,12 +1349,28 @@ async def create_custom_agent(
     agent_type: str = Body(default="StreamAgent"),
     model: str = Body(default=None),
     category: str = Body(default="custom"),
+    request: Request = None,  # FastAPI injects automatically; default for static analysers
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
     """
     Create a custom agent from scratch.
+
+    Phase 5: when ``_is_tool_driven_request`` returns True we hard-pin
+    ``is_published=False`` on insert. The interactive UI path also
+    inserts ``is_published=False`` (see below) — the tool-driven gate
+    is defense in depth in case a future refactor exposes a path that
+    defaults the flag differently.
     """
+    _tool_driven = _is_tool_driven_request(request)
+    # ``_tool_driven`` informs logging + future hardening; the insert
+    # below already pins is_published=False unconditionally.
+    if _tool_driven:
+        logger.info(
+            "marketplace.create_agent tool_driven=true user=%s name=%s",
+            current_user.id,
+            name,
+        )
     if not model:
         from ..config import get_settings
 
@@ -1395,18 +1439,51 @@ async def create_custom_agent(
 async def update_custom_agent(
     agent_id: str,
     update_data: dict,
+    request: Request = None,  # FastAPI injects automatically; default for static analysers
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
     """
     Update a custom or forked agent.
     For open source agents not owned by user, creates a fork with the changes.
+
+    Phase 5: tool-driven requests get an extra ownership pre-check and
+    are forbidden from setting ``is_published`` (the UI is the only
+    path that can flip publish state).
     """
     # Security: strip out fields that must only be set by trusted server code.
     # ``is_builtin`` is a seed-only flag; even if a future refactor splats
     # ``update_data`` into ``setattr()`` we guarantee user payloads cannot
     # flip it.
     update_data.pop("is_builtin", None)
+
+    _tool_driven = _is_tool_driven_request(request)
+    if _tool_driven:
+        # Tool-driven calls cannot publish, never. The agent-builder
+        # tools also drop this field, but defense in depth here.
+        update_data.pop("is_published", None)
+        # Tool-driven calls require explicit ownership: no fork-on-edit
+        # for open-source agents (that's an interactive flow).
+        agent_lookup = (
+            await db.execute(
+                select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
+            )
+        ).scalar_one_or_none()
+        if agent_lookup is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if (
+            agent_lookup.created_by_user_id != current_user.id
+            and agent_lookup.forked_by_user_id != current_user.id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Tool-driven update requires direct ownership",
+            )
+        if agent_lookup.is_published:
+            raise HTTPException(
+                status_code=409,
+                detail="Tool-driven update cannot edit a published agent — fork via UI first",
+            )
 
     # Get the agent
     result = await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
@@ -1489,15 +1566,16 @@ async def update_custom_agent(
             )
             db.add(purchase)
 
-            # Remove original from active library
+            # Remove original from every team-scoped library this user has —
+            # forking should hide the upstream agent everywhere, not just in
+            # whichever row sqlalchemy happens to return first.
             original_purchase_result = await db.execute(
                 select(UserPurchasedAgent).where(
                     UserPurchasedAgent.user_id == current_user.id,
                     UserPurchasedAgent.agent_id == agent_id,
                 )
             )
-            original_purchase = original_purchase_result.scalar_one_or_none()
-            if original_purchase:
+            for original_purchase in original_purchase_result.scalars().all():
                 original_purchase.is_active = False
 
             await db.commit()
@@ -1541,12 +1619,14 @@ async def update_custom_agent(
             else UserPurchasedAgent.user_id == current_user.id
         )
         purchase_result = await db.execute(
-            select(UserPurchasedAgent).where(
+            select(UserPurchasedAgent)
+            .where(
                 purchase_filter,
                 UserPurchasedAgent.agent_id == agent_id,
             )
+            .limit(1)
         )
-        purchase = purchase_result.scalar_one_or_none()
+        purchase = purchase_result.scalars().first()
         if purchase:
             purchase.selected_model = update_data["model"]
     # Merge config (features, etc.) - deep merge so partial updates work
@@ -1588,6 +1668,7 @@ async def get_user_agents(
             MarketplaceAgent.item_type.notin_(
                 ["skill", "subagent", "mcp_server", "deployment_target"]
             ),
+            MarketplaceAgent.is_system.isnot(True),
         )
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .order_by(UserPurchasedAgent.purchase_date.desc())
@@ -1648,6 +1729,7 @@ async def get_user_agents(
                 if agent.forked_by_user_id
                 else None,
                 "is_admin_disabled": not agent.is_active,
+                "is_system": agent.is_system,
             }
         )
 
@@ -1664,19 +1746,22 @@ async def toggle_agent(
     """
     Toggle an agent enabled/disabled in user's library.
     """
-    # Find the purchase record
+    # Find ALL purchase rows for this (user, agent) pair — a user can have
+    # one row per team they belong to, and the toggle should affect every
+    # team-scoped copy uniformly. Returning the first and ignoring siblings
+    # would silently leave a stale ``is_active=True`` row in another team.
     result = await db.execute(
         select(UserPurchasedAgent).where(
             UserPurchasedAgent.user_id == current_user.id, UserPurchasedAgent.agent_id == agent_id
         )
     )
-    purchase = result.scalar_one_or_none()
+    purchases = result.scalars().all()
 
-    if not purchase:
+    if not purchases:
         raise HTTPException(status_code=404, detail="Agent not in your library")
 
-    # Update enabled status
-    purchase.is_active = enabled
+    for purchase in purchases:
+        purchase.is_active = enabled
     await db.commit()
 
     return {

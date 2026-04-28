@@ -106,7 +106,16 @@ async def _get_arq_pool():
 async def get_chats(
     current_user: User = Depends(get_authenticated_user), db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Chat).where(Chat.user_id == current_user.id))
+    # Delegated runs (Chat.is_delegated_run=True) are hidden from the user's
+    # chat list — they are reachable only via the drill-in UI from the
+    # parent's call_agent step. The chat-detail endpoint does NOT filter,
+    # so navigating by id still works.
+    result = await db.execute(
+        select(Chat).where(
+            Chat.user_id == current_user.id,
+            Chat.is_delegated_run.is_(False),
+        )
+    )
     chats = result.scalars().all()
     return chats
 
@@ -216,6 +225,7 @@ async def get_user_sessions(
         Chat.user_id == current_user.id,
         Chat.origin == "standalone",
         Chat.status != "deleted",
+        Chat.is_delegated_run.is_(False),
     ]
     # Team-scope: show chats belonging to the active team OR legacy chats with no team
     if current_user.default_team_id:
@@ -361,7 +371,11 @@ async def list_chat_sessions(
             sa_func.count(Message.id).label("message_count"),
         )
         .outerjoin(Message, Message.chat_id == Chat.id)
-        .where(Chat.user_id == current_user.id, Chat.project_id == project_id)
+        .where(
+            Chat.user_id == current_user.id,
+            Chat.project_id == project_id,
+            Chat.is_delegated_run.is_(False),
+        )
         .group_by(Chat.id)
         .order_by(Chat.updated_at.desc().nullslast(), Chat.created_at.desc())
     )
@@ -585,15 +599,33 @@ async def get_project_messages(
 @router.delete("/{project_id}/messages")
 async def delete_project_messages(
     project_id: str,
+    chat_id: str | None = None,
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete all messages for a specific project's chat (clear chat history)."""
+    """Delete messages for a project's chat session.
+
+    A project can have multiple chat sessions — when ``chat_id`` is supplied
+    the delete is scoped to that session only (the `/clear` slash command
+    passes the active session). Without it, falls back to the most-recent
+    session, matching the GET endpoint's legacy selection.
+    """
     try:
-        # Get the chat for this user and project
-        result = await db.execute(
-            select(Chat).where(Chat.user_id == current_user.id, Chat.project_id == project_id)
-        )
+        if chat_id:
+            result = await db.execute(
+                select(Chat).where(
+                    Chat.id == chat_id,
+                    Chat.user_id == current_user.id,
+                    Chat.project_id == project_id,
+                )
+            )
+        else:
+            result = await db.execute(
+                select(Chat)
+                .where(Chat.user_id == current_user.id, Chat.project_id == project_id)
+                .order_by(Chat.created_at.desc())
+                .limit(1)
+            )
         chat = result.scalar_one_or_none()
 
         if not chat:
@@ -802,8 +834,12 @@ async def compact_chat(
         threshold=0.0,  # force compression regardless of size
     )
 
+    compact_context = {
+        "user_id": current_user.id,
+        "project_id": chat.project_id,
+    }
     try:
-        compressed = await compressor.compress(llm_messages)
+        compressed = await compressor.compress(llm_messages, context=compact_context)
     except Exception as e:
         logger.error("[CHAT] Compact failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Compaction failed: {e}") from e
@@ -954,15 +990,19 @@ async def agent_chat(
                 detail="User does not have a LiteLLM API key. Please contact support.",
             )
 
-        # 2.5. Get user's selected model override (if any)
+        # 2.5. Get user's selected model override (if any). Use ``.first()``
+        # so users with multiple team-scoped rows for the same agent don't
+        # crash the run.
         try:
             user_purchase_result = await db.execute(
-                select(UserPurchasedAgent).where(
+                select(UserPurchasedAgent)
+                .where(
                     UserPurchasedAgent.user_id == current_user.id,
                     UserPurchasedAgent.agent_id == agent_model.id,
                 )
+                .limit(1)
             )
-            user_purchase = user_purchase_result.scalar_one_or_none()
+            user_purchase = user_purchase_result.scalars().first()
         except Exception as e:
             logger.error(f"[HTTP-AGENT] Error fetching user purchase: {e}", exc_info=True)
             await db.rollback()
@@ -1700,6 +1740,21 @@ async def agent_chat_stream(
             from ..services.agent_context import build_tier_snapshot
 
             _tier_snapshot = await build_tier_snapshot(project, db)
+            # Pre-split @-mentions for both the queue (payload) and in-process
+            # (context) paths. The worker rebuilds context from the payload,
+            # so the queue path picks these up via payload.mention_*. The
+            # in-process path consumes the context dict directly below.
+            _ctx_mentions = list(request.mentions or [])
+            _ctx_mention_agent_ids = [
+                m.ref_id for m in _ctx_mentions if m.kind == "agent" and m.ref_id
+            ]
+            _ctx_mention_mcp_config_ids = [
+                m.ref_id for m in _ctx_mentions if m.kind == "mcp" and m.ref_id
+            ]
+            _ctx_mention_app_instance_ids = [
+                m.ref_id for m in _ctx_mentions if m.kind == "app" and m.ref_id
+            ]
+
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
@@ -1724,6 +1779,9 @@ async def agent_chat_stream(
                 "attachments": [a.model_dump() for a in request.attachments]
                 if request.attachments
                 else [],
+                "mention_agent_ids": _ctx_mention_agent_ids,
+                "mention_mcp_config_ids": _ctx_mention_mcp_config_ids,
+                "mention_app_instance_ids": _ctx_mention_app_instance_ids,
             }
 
             # ================================================================
@@ -1739,10 +1797,59 @@ async def agent_chat_stream(
                 import uuid as _uuid
 
                 from ..services.agent_task import AgentTaskPayload
+                from ..services.concurrency_limits import (
+                    CapacityExceeded,
+                    check_and_reserve_slot,
+                )
                 from ..services.pubsub import get_pubsub
                 from ..services.task_queue import get_task_queue
 
                 agent_task_id = str(_uuid.uuid4())
+
+                # Enforce per-user / per-project concurrency + enqueue rate
+                # limits before we burn queue capacity on a request that
+                # would never run anyway.
+                try:
+                    await check_and_reserve_slot(
+                        user_id=str(current_user.id),
+                        project_id=str(request.project_id) if request.project_id else None,
+                        task_id=agent_task_id,
+                    )
+                except CapacityExceeded as cap_err:
+                    error_event = {
+                        "type": "error",
+                        "data": {
+                            "message": str(cap_err.reason),
+                            "limit": cap_err.limit,
+                            "current": cap_err.current,
+                            "retry_after_seconds": 10,
+                        },
+                    }
+                    yield f"data: {json.dumps(error_event)}\n\n"
+                    return
+
+                # Split @-mentions by kind. Validation happens later in the
+                # worker — here we just slice the structured array. Empty/None
+                # request.mentions means legacy behavior (no @-effects).
+                _mentions = list(request.mentions or [])
+                _mention_agent_ids = [
+                    m.ref_id for m in _mentions if m.kind == "agent" and m.ref_id
+                ]
+                _mention_mcp_config_ids = [
+                    m.ref_id for m in _mentions if m.kind == "mcp" and m.ref_id
+                ]
+                _mention_app_instance_ids = [
+                    m.ref_id for m in _mentions if m.kind == "app" and m.ref_id
+                ]
+
+                if _mentions:
+                    logger.info(
+                        "[SSE-AGENT] @-mentions: agents=%d mcps=%d apps=%d",
+                        len(_mention_agent_ids),
+                        len(_mention_mcp_config_ids),
+                        len(_mention_app_instance_ids),
+                    )
+
                 payload = AgentTaskPayload(
                     task_id=agent_task_id,
                     user_id=str(current_user.id),
@@ -1760,6 +1867,9 @@ async def agent_chat_stream(
                     attachments=[a.model_dump() for a in request.attachments]
                     if request.attachments
                     else [],
+                    mention_agent_ids=_mention_agent_ids,
+                    mention_mcp_config_ids=_mention_mcp_config_ids,
+                    mention_app_instance_ids=_mention_app_instance_ids,
                 )
 
                 # Enqueue the job
@@ -2013,6 +2123,54 @@ async def force_cancel_agent(
     }
 
 
+@router.get("/agent/active-in-project")
+async def get_active_tasks_in_project(
+    project_id: str,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all active agent tasks across every chat session in a project.
+
+    Powers the sidebar's live run-state dots and background SSE reconnection
+    on page refresh. Returns one entry per chat session that currently holds
+    a lock. Cancelled zombie locks are self-healed (released) and omitted.
+    """
+    from ..services.pubsub import get_pubsub
+
+    pubsub = get_pubsub()
+    if not pubsub:
+        return {"tasks": []}
+
+    # Pull all chat sessions the user owns on this project to bound the scan.
+    # (We don't have a SCAN-by-project index; we enumerate the user's chats.)
+    result = await db.execute(
+        select(Chat).where(
+            Chat.project_id == UUID(project_id),
+            Chat.user_id == current_user.id,
+        )
+    )
+    chats = result.scalars().all()
+
+    active = []
+    for chat in chats:
+        chat_id_str = str(chat.id)
+        holder = await pubsub.get_chat_lock(chat_id_str)
+        if not holder:
+            continue
+        # Self-heal zombie locks: if the holder is cancelled, force-release.
+        if await pubsub.is_cancelled(holder):
+            await pubsub.force_release_chat_lock(chat_id_str)
+            continue
+        active.append(
+            {
+                "task_id": holder,
+                "chat_id": chat_id_str,
+                "title": chat.title,
+            }
+        )
+    return {"tasks": active}
+
+
 @router.get("/agent/active")
 async def get_active_agent_task(
     project_id: str,
@@ -2084,9 +2242,19 @@ async def get_active_agent_task(
                 # Legacy fallback: project-level lock check
                 holding_task_id = await pubsub.get_project_lock(project_id)
             if holding_task_id:
-                # Lock is held — but skip if the user already cancelled it
+                # Self-heal zombie locks: if holder is cancelled, release it
+                # so the next send isn't blocked by stale lock state. The new
+                # worker also does takeover atomically, but releasing here
+                # keeps /agent/active's reporting consistent with reality.
                 is_cancelled = await pubsub.is_cancelled(holding_task_id)
-                if not is_cancelled:
+                if is_cancelled:
+                    if chat_id:
+                        await pubsub.force_release_chat_lock(chat_id)
+                    logger.info(
+                        f"[AGENT-ACTIVE] Released zombie lock held by "
+                        f"cancelled task {holding_task_id}"
+                    )
+                else:
                     logger.info(
                         f"[AGENT-ACTIVE] Lock held by {holding_task_id}, "
                         f"worker still running (TaskManager cache was stale)"
@@ -2132,6 +2300,126 @@ async def subscribe_agent_events(
                     yield f"data: {json.dumps(event)}\n\n"
         except (asyncio.CancelledError, GeneratorExit):
             return
+
+    return StarletteStreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.get("/agent/stream-project")
+async def subscribe_project_agent_events(
+    project_id: str,
+    current_user: User = Depends(get_authenticated_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Multiplexed SSE for every active chat in a project — one HTTP connection.
+
+    Browsers cap SSE at ~6 per origin. When a user has many parallel agents
+    running in one project, we fan the per-task Redis streams server-side
+    into a single HTTP/SSE connection. Each event is tagged with its
+    ``chat_id`` / ``task_id`` so the client can route to the correct run.
+
+    Periodically refreshes the subscription set (every 5s) so new agents
+    spawned after the client connected are picked up without a reconnect.
+    """
+    from starlette.responses import StreamingResponse as StarletteStreamingResponse
+
+    from ..services.pubsub import get_pubsub
+
+    pubsub = get_pubsub()
+    if not pubsub:
+        raise HTTPException(status_code=503, detail="Pubsub not available")
+
+    # Bound the fan-out by only looking at chats this user owns on this project.
+    result = await db.execute(
+        select(Chat).where(
+            Chat.project_id == UUID(project_id),
+            Chat.user_id == current_user.id,
+        )
+    )
+    user_chats: dict[str, str] = {str(c.id): c.title or "" for c in result.scalars().all()}
+    if not user_chats:
+        raise HTTPException(status_code=404, detail="No chats in this project")
+
+    queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=1024)
+    active_pumps: dict[str, asyncio.Task] = {}
+    stop_event = asyncio.Event()
+
+    async def pump(chat_id: str, task_id: str):
+        """Relay one task's events into the shared queue."""
+        try:
+            async for event in pubsub.subscribe_agent_events(task_id):
+                if stop_event.is_set():
+                    return
+                # Tag so the client can route.
+                tagged = {"chat_id": chat_id, "task_id": task_id, "event": event}
+                try:
+                    queue.put_nowait(tagged)
+                except asyncio.QueueFull:
+                    # Drop oldest to keep real-time; slow client.
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+                    with contextlib.suppress(asyncio.QueueFull):
+                        queue.put_nowait(tagged)
+                etype = event.get("type")
+                if etype in ("done", "complete", "error"):
+                    return
+        except (asyncio.CancelledError, GeneratorExit):
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[MUX] pump {task_id} errored: {e}")
+
+    async def discover_loop():
+        """Every 5s, attach pumps for newly-running chats; drop finished ones."""
+        try:
+            while not stop_event.is_set():
+                for chat_id in list(user_chats.keys()):
+                    holder = await pubsub.get_chat_lock(chat_id)
+                    if holder:
+                        if await pubsub.is_cancelled(holder):
+                            # zombie lock — skip; /agent/active will self-heal
+                            continue
+                        if chat_id not in active_pumps or active_pumps[chat_id].done():
+                            active_pumps[chat_id] = asyncio.create_task(pump(chat_id, holder))
+                # GC finished pumps
+                for chat_id, task in list(active_pumps.items()):
+                    if task.done():
+                        active_pumps.pop(chat_id, None)
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stop_event.wait(), timeout=5.0)
+        except asyncio.CancelledError:
+            pass
+
+    async def event_stream():
+        import contextlib as _ctx
+
+        discover_task = asyncio.create_task(discover_loop())
+        try:
+            # Initial hello so the client sees an immediate open-ACK.
+            yield f"data: {json.dumps({'type': 'ready'})}\n\n"
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except TimeoutError:
+                    # SSE keep-alive comment — prevents intermediary timeouts.
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(item)}\n\n"
+        except (asyncio.CancelledError, GeneratorExit):
+            return
+        finally:
+            stop_event.set()
+            discover_task.cancel()
+            with _ctx.suppress(asyncio.CancelledError):
+                await discover_task
+            for t in active_pumps.values():
+                t.cancel()
 
     return StarletteStreamingResponse(
         event_stream(),
@@ -2666,13 +2954,18 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     try:
         logger.info("[UNIFIED-CHAT] Creating agent instance via factory")
 
-        # Get user's selected model override (if any)
+        # Get user's selected model override (if any). Use ``.first()`` so a
+        # user with multiple team-scoped purchase rows for the same agent
+        # doesn't crash the chat run — any row carries the same
+        # ``selected_model``.
         user_purchase_result = await db.execute(
-            select(UserPurchasedAgent).where(
+            select(UserPurchasedAgent)
+            .where(
                 UserPurchasedAgent.user_id == user.id, UserPurchasedAgent.agent_id == agent_model.id
             )
+            .limit(1)
         )
-        user_purchase = user_purchase_result.scalar_one_or_none()
+        user_purchase = user_purchase_result.scalars().first()
 
         # Use user's selected model if available, otherwise use agent's default model
         model_name = (
@@ -2918,21 +3211,19 @@ async def save_file(
     print(f"💾 Saving file: {file_path}")
 
     try:
-        # 1. Save to database (for backup/version history)
+        # 1. Save to database (for backup/version history).
+        #
+        # Agent runs are inherently concurrent — the old check-then-insert
+        # pattern raced under load and produced duplicate rows that later
+        # broke `scalar_one_or_none()`. Always go through
+        # upsert_project_file(), which is race-safe via
+        # uq_project_files_project_path + ON CONFLICT DO UPDATE.
         try:
-            result = await db.execute(
-                select(ProjectFile).where(
-                    ProjectFile.project_id == project_id, ProjectFile.file_path == file_path
-                )
+            from ..services.project_files import upsert_project_file
+
+            await upsert_project_file(
+                db, project_id=project_id, file_path=file_path, content=code
             )
-            db_file = result.scalar_one_or_none()
-
-            if db_file:
-                db_file.content = code
-            else:
-                db_file = ProjectFile(project_id=project_id, file_path=file_path, content=code)
-                db.add(db_file)
-
             await db.commit()
             print(f"[DB] Saved {file_path} to database")
         except Exception as e:

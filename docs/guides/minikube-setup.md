@@ -202,7 +202,7 @@ kubectl --context=tesslate -n tesslate create secret generic llama-api-credentia
 ### Build and load the application images
 
 ```bash
-docker build -t tesslate-backend:latest    -f orchestrator/Dockerfile          orchestrator/
+docker build -t tesslate-backend:latest    -f orchestrator/Dockerfile          .
 docker build -t tesslate-frontend:latest   -f app/Dockerfile.prod              app/
 docker build -t tesslate-devserver:latest  -f orchestrator/Dockerfile.devserver .
 
@@ -343,7 +343,7 @@ kubectl --context=tesslate exec -it deployment/tesslate-backend -n tesslate -- /
 
 # Restart a deployment after rebuilding an image
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
-docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 kubectl --context=tesslate rollout restart deployment/tesslate-backend -n tesslate
 

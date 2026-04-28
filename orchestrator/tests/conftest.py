@@ -140,6 +140,9 @@ def mock_tool_registry():
             },
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            # Test fixture; trivially serializable mock with no external state.
+            state_serializable=True,
+            holds_external_state=False,
         )
     )
 

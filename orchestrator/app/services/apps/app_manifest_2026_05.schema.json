@@ -1,0 +1,319 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tesslate.com/schemas/app-manifest/2026-05.schema.json",
+  "title": "Tesslate App Manifest",
+  "description": "v3 manifest schema for Tesslate Apps. Version tag: 2026-05. Introduces App Runtime Contract: typed runtime/billing blocks plus actions/views/data_resources/dependencies/connectors[].exposure/automation_templates. Required top-level keys: manifest_schema_version, app, runtime, billing. All other top-level blocks default to empty arrays when omitted.",
+  "type": "object",
+  "required": ["manifest_schema_version", "app", "runtime", "billing"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_schema_version": {
+      "type": "string",
+      "enum": ["2026-05"]
+    },
+    "app": {
+      "type": "object",
+      "required": ["id", "name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)+$", "description": "Reverse-DNS unique id, e.g. com.example.sales-dashboard"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "minLength": 1, "maxLength": 80},
+        "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$", "description": "Semver"},
+        "description": {"type": "string", "maxLength": 4000},
+        "category": {"type": "string", "maxLength": 64},
+        "icon_ref": {"type": ["string", "null"], "description": "CAS hash or URL"},
+        "changelog": {"type": "string", "maxLength": 8000},
+        "forkable": {"type": "boolean", "default": false, "description": "Whether the app source can be forked from the marketplace"},
+        "forked_from": {"type": ["string", "null"], "description": "app_id@semver of parent"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "description": "How the app runs and scales. tenancy_model + state_model jointly determine replica safety; see runtime constraint matrix.",
+      "required": ["tenancy_model", "state_model"],
+      "additionalProperties": false,
+      "properties": {
+        "tenancy_model": {"enum": ["per_install", "shared_singleton", "per_invocation"]},
+        "state_model": {"enum": ["stateless", "per_install_volume", "service_pvc", "shared_volume", "external"]},
+        "scaling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min_replicas": {"type": "integer", "minimum": 0, "default": 0},
+            "max_replicas": {"type": "integer", "minimum": 0, "default": 1},
+            "target_concurrency": {"type": "integer", "minimum": 1, "default": 10},
+            "idle_timeout_seconds": {"type": "integer", "minimum": 0, "default": 600}
+          }
+        },
+        "storage": {
+          "type": "object",
+          "description": "Required when state_model uses a volume (per_install_volume | service_pvc | shared_volume).",
+          "additionalProperties": false,
+          "required": ["write_scope"],
+          "properties": {
+            "write_scope": {
+              "type": "array",
+              "items": {"type": "string"},
+              "minItems": 1,
+              "description": "Allowed write paths inside the container; outside this is tmpfs."
+            }
+          }
+        }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "required": ["ai_compute", "general_compute", "platform_fee"],
+      "additionalProperties": false,
+      "properties": {
+        "ai_compute": {"$ref": "#/$defs/payerPolicy"},
+        "general_compute": {"$ref": "#/$defs/payerPolicy"},
+        "platform_fee": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rate_percent": {"type": "number", "minimum": 0, "maximum": 100, "default": 0},
+            "model": {"enum": ["free", "one_time", "subscription", "per_invocation"], "default": "free"},
+            "price_usd": {"type": "number", "minimum": 0, "default": 0},
+            "billing_period": {"type": ["string", "null"], "enum": ["monthly", "yearly", null]},
+            "trial_days": {"type": "integer", "minimum": 0, "default": 0}
+          }
+        }
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"enum": ["ui", "chat", "full_page", "card", "drawer", "mcp_tool"]},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "entrypoint": {"type": "string"},
+          "container": {"type": "string"},
+          "tool_schema": {"type": "object", "description": "Required when kind=mcp_tool; JSON Schema for MCP tool input."}
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["name", "handler"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 120},
+          "description": {"type": "string"},
+          "handler": {
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {"enum": ["http_post", "k8s_job", "hosted_agent"]},
+              "container": {"type": "string"},
+              "path": {"type": "string"}
+            }
+          },
+          "input_schema": {"type": "object"},
+          "output_schema": {"type": "object"},
+          "timeout_seconds": {"type": "integer", "minimum": 1, "default": 60},
+          "idempotency": {
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {"enum": ["none", "input_hash", "explicit_key"]},
+              "ttl_seconds": {"type": "integer", "minimum": 0}
+            }
+          },
+          "billing": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "ai_compute": {"$ref": "#/$defs/actionBillingDimension"},
+              "general_compute": {"$ref": "#/$defs/actionBillingDimension"}
+            }
+          },
+          "required_connectors": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": []
+          },
+          "required_grants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["capability", "resource"],
+              "additionalProperties": false,
+              "properties": {
+                "capability": {"type": "string"},
+                "resource": {
+                  "type": "object",
+                  "required": ["kind", "id"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {"type": "string"},
+                    "id": {"type": "string"}
+                  }
+                }
+              }
+            },
+            "default": []
+          },
+          "result_template": {"type": "string", "description": "Sandboxed Jinja template rendering the action output for delivery."},
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "kind"],
+              "additionalProperties": false,
+              "properties": {
+                "name": {"type": "string"},
+                "kind": {"enum": ["text", "json", "file", "log", "report", "image", "screenshot", "csv", "markdown", "delivery_receipt"]},
+                "from": {"type": "string"},
+                "mime_type": {"type": "string"}
+              }
+            },
+            "default": []
+          }
+        }
+      }
+    },
+    "views": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "entrypoint"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "kind": {"enum": ["card", "full_page", "drawer"]},
+          "entrypoint": {"type": "string"},
+          "input_schema": {"type": "object"},
+          "output_schema": {"type": "object"},
+          "cache_ttl_seconds": {"type": "integer", "minimum": 0, "default": 0}
+        }
+      }
+    },
+    "data_resources": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["name", "backed_by_action", "schema"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "backed_by_action": {"type": "string", "description": "Must reference a name in actions[]."},
+          "schema": {"type": "object"},
+          "cache_ttl_seconds": {"type": "integer", "minimum": 0, "default": 0}
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["alias", "app_id"],
+        "additionalProperties": false,
+        "properties": {
+          "alias": {"type": "string"},
+          "app_id": {"type": "string"},
+          "required": {"type": "boolean", "default": true},
+          "needs": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "actions": {"type": "array", "items": {"type": "string"}, "default": []},
+              "views": {"type": "array", "items": {"type": "string"}, "default": []},
+              "data_resources": {"type": "array", "items": {"type": "string"}, "default": []}
+            }
+          }
+        }
+      }
+    },
+    "connectors": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "exposure"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"enum": ["mcp", "api_key", "oauth", "webhook"]},
+          "exposure": {"enum": ["proxy", "env"], "description": "REQUIRED — proxy routes calls server-side; env injects raw secrets into the app process. oauth+env is rejected."},
+          "scopes": {"type": "array", "items": {"type": "string"}, "default": []},
+          "required": {"type": "boolean", "default": true},
+          "secret_key": {"type": "string"}
+        }
+      }
+    },
+    "automation_templates": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["name", "trigger", "action"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "trigger": {
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": true,
+            "properties": {
+              "kind": {"enum": ["cron", "webhook", "app_event", "manual"]},
+              "expression": {"type": "string"}
+            }
+          },
+          "action": {
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": true,
+            "properties": {
+              "kind": {"enum": ["app.invoke", "agent.run", "gateway.send", "workflow.run"]},
+              "action": {"type": "string"},
+              "input": {"type": "object"}
+            }
+          },
+          "delivery": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "kind": {"type": "string"}
+            }
+          },
+          "contract_template": {"type": "object"},
+          "is_default_enabled": {"type": "boolean", "default": false}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "payerPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "payer_default": {"enum": ["creator", "platform", "installer", "byok", "team"]},
+        "rate_percent": {"type": "number", "minimum": 0, "maximum": 100}
+      }
+    },
+    "actionBillingDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dimension": {"enum": ["ai_compute", "general_compute"]},
+        "payer_default": {"enum": ["creator", "platform", "installer", "byok", "team"]}
+      }
+    }
+  }
+}

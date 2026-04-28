@@ -21,11 +21,15 @@ from .oauth import get_available_oauth_clients
 from .routers import (
     admin,
     admin_marketplace,
+    admin_spend,
     agent,
     agents,
+    app_actions,
     app_billing,
     app_bundles,
+    app_composition,
     app_installs,
+    app_publish,
     app_runtime,
     app_runtime_status,
     app_schedules,
@@ -34,9 +38,12 @@ from .routers import (
     app_versions,
     app_yanks,
     auth,
+    automations,
     billing,
     channels,
+    communication_destinations,
     chat,
+    contract_templates,
     creators,
     deployment_credentials,
     deployment_oauth,
@@ -53,6 +60,7 @@ from .routers import (
     git_providers,
     github,
     internal,
+    internal_secrets,
     kanban,
     magic_link,
     marketplace,
@@ -67,6 +75,7 @@ from .routers import (
     schedules,
     secrets,
     shell,
+    sidebar,
     snapshots,
     tasks,
     teams,
@@ -1161,11 +1170,14 @@ async def get_csrf_token():
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(node_config.router, prefix="/api", tags=["node-config"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(sidebar.router)  # prefix set on the router itself (/api/sidebar)
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
 app.include_router(creators.router)  # /api/creators - already prefixed in router
 app.include_router(admin.router, prefix="/api", tags=["admin"])
+app.include_router(admin_spend.router, tags=["admin-spend"])  # /api/admin/spend
+app.include_router(contract_templates.router, tags=["contract-templates"])  # /api/contract-templates
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
 app.include_router(git_providers.router, prefix="/api", tags=["git-providers"])
@@ -1216,6 +1228,10 @@ app.include_router(mcp_server.router, tags=["mcp-server"])  # MCP server endpoin
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 app.include_router(internal.router, prefix="/api")  # /api/internal - Cluster-internal endpoints
+# Shared-singleton apps' per-user secret fetcher. Mounted at /internal/* (no
+# /api prefix) so K8s NetworkPolicy can isolate the surface from external
+# traffic — see internal_secrets module docstring for the threat model.
+app.include_router(internal_secrets.router)  # /internal/secrets/{token}
 app.include_router(feature_flags.router, tags=["feature-flags"])  # /api/feature-flags
 app.include_router(
     version.router, prefix="/api", tags=["version"]
@@ -1246,6 +1262,46 @@ app.include_router(
 )  # /api/app-instances/{id}/trigger/{name} — HMAC auth
 app.include_router(admin_marketplace.router, prefix="/api/admin-marketplace", tags=["apps:admin"])
 app.include_router(app_bundles.router, prefix="/api/app-bundles", tags=["apps:bundles"])
+app.include_router(
+    app_publish.router, prefix="/api", tags=["apps:publish"]
+)  # /api/projects/{slug}/publish-app — Architecture canvas drawer flow
+
+# --- Automation Runtime + typed App Actions (Phase 1) ----------------------
+app.include_router(automations.router)  # /api/automations - definitions, runs, artifacts
+app.include_router(app_actions.router)  # /api/apps/{instance}/actions/{name}
+app.include_router(
+    communication_destinations.router
+)  # /api/destinations - named gateway delivery targets (Phase 4)
+
+# --- App Composition (Phase 3) ---------------------------------------------
+# Parent → child action / view / data-resource calls, gated by
+# app_instance_links positive-list grants. See services/apps/composition.py.
+app.include_router(app_composition.router)  # /api/v1/composition/installs/...
+
+# --- Connector Proxy (Phase 3 → Phase 4) -----------------------------------
+# Two topologies live behind the same router code:
+#   * embedded  — mounted on the orchestrator at
+#                 ``/api/v1/connector-proxy``.  Used by desktop +
+#                 docker-compose where everything is one process.
+#   * dedicated — served by the standalone ``opensail-runtime`` Deployment
+#                 (``python -m app.services.apps.connector_proxy``).  In
+#                 this mode the orchestrator does NOT expose the proxy —
+#                 app pods reach it directly at the in-cluster Service so
+#                 NetworkPolicy can isolate it from arbitrary cluster
+#                 traffic. The ``OPENSAIL_RUNTIME_URL`` env injected into
+#                 app pods (see services/apps/installer.py) routes to the
+#                 right surface either way.
+from .services.apps.connector_proxy import router as connector_proxy_router  # noqa: E402
+
+if not settings.is_connector_proxy_dedicated:
+    app.include_router(
+        connector_proxy_router
+    )  # /api/v1/connector-proxy/connectors/{id}/{path}
+else:
+    logger.info(
+        "Connector Proxy: CONNECTOR_PROXY_MODE=dedicated — router not "
+        "mounted; pods talk to opensail-runtime:8400 directly"
+    )
 
 # Mount MCP Streamable HTTP ASGI app (for external MCP clients like Claude Desktop)
 try:

@@ -177,6 +177,11 @@ def register_run_with_secrets_tool(registry) -> None:
                 "required": ["command", "container_id", "secret_keys"],
             },
             executor=run_with_secrets_executor,
+            # Command + key names in, exit_code+scrubbed_output dict out — JSON-clean.
+            state_serializable=True,
+            # Spawns a subprocess but waits to completion before returning;
+            # no in-tool persistent handle (unlike bash_exec is_background).
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "run_with_secrets", "parameters": {"command": "npx supabase migration up", "container_id": "…", "secret_keys": ["SUPABASE_SERVICE_KEY"]}}',
             ],

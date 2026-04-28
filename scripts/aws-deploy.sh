@@ -70,13 +70,18 @@ ensure_kubectl_context() {
         CLUSTER_NAME="tesslate-${ENVIRONMENT}-eks"
     fi
     ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
-    ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER_NAME}-eks-deployer"
 
-    info "Configuring kubectl for $CLUSTER_NAME (via role: ${CLUSTER_NAME}-eks-deployer)..."
+    # Default to team-deployer (group-based RBAC, usable by anyone in tesslate-{env}-deployers
+    # or higher). Override with AWS_EKS_ROLE_ARN for legacy eks-deployer, observer, or debugger.
+    # See docs/guides/eks-cluster-access.md for the full role matrix.
+    ROLE_ARN="${AWS_EKS_ROLE_ARN:-arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER_NAME}-team-deployer}"
+    ROLE_NAME="${ROLE_ARN##*/}"
+
+    info "Configuring kubectl for $CLUSTER_NAME (via role: ${ROLE_NAME})..."
     aws eks update-kubeconfig --region us-east-1 --name "$CLUSTER_NAME" --alias "$CLUSTER_NAME" \
         --role-arn "$ROLE_ARN" >/dev/null 2>&1 \
-        || error "Failed to configure kubectl. Does cluster '$CLUSTER_NAME' exist? Can you assume role '$ROLE_ARN'?"
-    success "✓ kubectl context set to $CLUSTER_NAME"
+        || error "Failed to configure kubectl. Does cluster '$CLUSTER_NAME' exist? Can you assume role '$ROLE_ARN'? (Override with AWS_EKS_ROLE_ARN=...)"
+    success "✓ kubectl context set to $CLUSTER_NAME (role: ${ROLE_NAME})"
 
     if ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
         error "Cannot reach cluster $CLUSTER_NAME. Check AWS credentials and role permissions."

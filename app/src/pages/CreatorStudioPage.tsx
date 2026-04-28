@@ -79,12 +79,15 @@ function AppCard({
 }
 
 /**
- * Dropdown that lets the creator start a publish flow from:
- *   - "New App" → navigates to /creator/publish/new (existing creator path).
- *   - A project they already own whose app_role is null or 'app_source'.
- *     Selecting a null-role project flips it to 'app_source' before navigating
- *     to /creator/publish/<projectId>.
+ * Project picker that opens the source project's workspace. The publish
+ * flow lives entirely on the architecture canvas (Publish-as-App drawer),
+ * so this dropdown's only job is to navigate the creator to the right
+ * project — the canvas's "Publish as App" button handles the rest. The
+ * backend promotes `workspace → app_source` automatically on first
+ * publish, so no client-side kind flip is needed here.
  */
+type ProjectKind = 'workspace' | 'app_source' | 'app_runtime';
+
 function PublishNewButton() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -93,7 +96,7 @@ function PublishNewButton() {
     id: string;
     slug: string;
     name: string;
-    app_role: string | null;
+    project_kind: ProjectKind;
   }>>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,26 +106,26 @@ function PublishNewButton() {
     setError(null);
     projectsApi
       .getAll()
-      .then((all: Array<{ id: string; slug: string; name: string; app_role?: string | null }>) => {
-        const eligible = all
-          .filter((p) => !p.app_role || p.app_role === 'app_source')
-          .map((p) => ({ id: p.id, slug: p.slug, name: p.name, app_role: p.app_role ?? null }));
-        setProjects(eligible);
-      })
+      .then(
+        (
+          all: Array<{ id: string; slug: string; name: string; project_kind: ProjectKind }>
+        ) => {
+          const eligible = all
+            .filter(
+              (p) => p.project_kind === 'workspace' || p.project_kind === 'app_source'
+            )
+            .map((p) => ({
+              id: p.id,
+              slug: p.slug,
+              name: p.name,
+              project_kind: p.project_kind,
+            }));
+          setProjects(eligible);
+        }
+      )
       .catch((err) => setError(extractError(err, 'Failed to load projects')))
       .finally(() => setLoading(false));
   }, [open, projects.length]);
-
-  const pick = async (p: { id: string; slug: string; app_role: string | null }) => {
-    try {
-      if (p.app_role !== 'app_source') {
-        await projectsApi.setAppRole(p.slug, 'app_source');
-      }
-      navigate(`/creator/publish/${p.id}`);
-    } catch (err) {
-      setError(extractError(err, 'Failed to publish project'));
-    }
-  };
 
   return (
     <div className="relative">
@@ -131,26 +134,15 @@ function PublishNewButton() {
         className="px-3 py-2 rounded bg-[var(--accent)] text-white text-sm"
         type="button"
       >
-        Publish New Version ▾
+        Publish from project ▾
       </button>
       {open && (
         <div
           className="absolute right-0 mt-1 min-w-[260px] rounded border bg-[var(--bg)] shadow-lg z-50"
           style={{ borderColor: 'var(--border)' }}
         >
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              navigate('/creator/publish/new');
-            }}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--surface)]"
-          >
-            New App (blank publish flow)
-          </button>
-          <div className="border-t" style={{ borderColor: 'var(--border)' }} />
-          <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-            From existing project
+          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
+            Open project to publish
           </div>
           {loading && (
             <div className="px-3 py-2 text-xs text-[var(--text-muted)]">Loading…</div>
@@ -170,12 +162,12 @@ function PublishNewButton() {
                 type="button"
                 onClick={() => {
                   setOpen(false);
-                  pick(p);
+                  navigate(`/project/${p.slug}`);
                 }}
                 className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--surface)] flex items-center justify-between gap-2"
               >
                 <span className="truncate">{p.name}</span>
-                {p.app_role === 'app_source' && (
+                {p.project_kind === 'app_source' && (
                   <span className="text-[10px] text-[var(--text-subtle)]">source</span>
                 )}
               </button>
@@ -359,6 +351,15 @@ export default function CreatorStudioPage() {
             {draftApps.length === 0 && !loading && (
               <div className="text-sm text-[var(--text-muted)]">No drafts.</div>
             )}
+            {/*
+              Drafts are MarketplaceApps that never reached `approved` state.
+              Publishing a new version requires the source project workspace
+              (where the Publish-as-App drawer lives), but MarketplaceApp
+              doesn't carry a back-pointer to its source project today, so
+              we surface the draft + send the creator to "Manage versions"
+              for visibility. Re-publishing is initiated from the project's
+              architecture canvas.
+            */}
             {draftApps.map((app) => (
               <div
                 key={app.id}
@@ -368,11 +369,11 @@ export default function CreatorStudioPage() {
                 <h3 className="font-semibold text-[var(--text)]">{app.name}</h3>
                 <div className="text-xs text-[var(--text-muted)] mb-2">{app.slug}</div>
                 <button
-                  onClick={() => navigate(`/creator/publish/${app.id}`)}
+                  onClick={() => navigate(`/creator/apps/${app.id}/versions`)}
                   className="text-sm text-[var(--accent)] hover:underline"
                   type="button"
                 >
-                  Continue editing
+                  Manage versions
                 </button>
               </div>
             ))}

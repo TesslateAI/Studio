@@ -194,6 +194,11 @@ def register_write_stdin_tool(registry) -> None:
                 "required": ["session_id", "chars"],
             },
             executor=write_stdin_tool,
+            # session_id + chars in, drained-output dict out — JSON-clean.
+            state_serializable=True,
+            # Writes into a live PTY whose file descriptor + child process
+            # state lives outside the agent run.
+            holds_external_state=True,
             examples=[
                 '{"tool_name": "write_stdin", "parameters": {"session_id": "abc123", "chars": "hello\\n"}}',
                 '{"tool_name": "write_stdin", "parameters": {"session_id": "abc123", "chars": "y\\n", "yield_time_ms": 500}}',

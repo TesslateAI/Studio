@@ -9,10 +9,10 @@ user's home directory (``scope="global"``).
 
 Storage layout
 --------------
-- ``project`` scope → ``<PROJECT_ROOT>/.tesslate/memory.md``
+- ``project`` scope -> ``<PROJECT_ROOT>/.tesslate/memory.md``
   where ``PROJECT_ROOT`` is read from the environment, falling back to
   ``context['project_root']`` when that is unset.
-- ``global`` scope → ``<HOME>/.tesslate/memory.md``
+- ``global`` scope -> ``<HOME>/.tesslate/memory.md``
 
 File format
 -----------
@@ -730,6 +730,10 @@ def register_memory_ops_tools(registry) -> None:
             parameters=MEMORY_READ_PARAMS,
             executor=memory_read_tool,
             category=ToolCategory.MEMORY_OPS,
+            # Optional section/scope in, memory text dict out — JSON-clean.
+            state_serializable=True,
+            # Reads from a markdown file on disk; no in-memory cache.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "memory_read", "parameters": {}}',
                 '{"tool_name": "memory_read", "parameters": {"section": "Conventions"}}',
@@ -751,6 +755,10 @@ def register_memory_ops_tools(registry) -> None:
             parameters=MEMORY_WRITE_PARAMS,
             executor=memory_write_tool,
             category=ToolCategory.MEMORY_OPS,
+            # Section + body in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Atomic markdown file write; no persistent state.
+            holds_external_state=False,
             examples=[
                 (
                     '{"tool_name": "memory_write", "parameters": '

@@ -84,6 +84,9 @@ interface DesignStoreState {
   selectionInfo: Map<string, DesignSelectionEntry>;
   /** Clipboard — set by copy, consumed by paste. */
   clipboard: DesignSelectionEntry[];
+  /** When non-null, the next canvas click should drop this snippet at the
+   *  clicked element's source location instead of selecting it. */
+  pendingInsert: { snippet: string } | null;
 }
 
 const COALESCE_WINDOW_MS = 500;
@@ -104,6 +107,7 @@ let state: DesignStoreState = {
   selectedOids: new Set(),
   selectionInfo: new Map(),
   clipboard: [],
+  pendingInsert: null,
 };
 
 const listeners = new Set<() => void>();
@@ -465,6 +469,17 @@ export function selectElement(
 
 export function clearSelection(): void {
   setState({ selectedOids: new Set(), selectionInfo: new Map() });
+}
+
+// ── Placement-mode insert ────────────────────────────────────────────
+
+export function armPendingInsert(snippet: string): void {
+  setState({ pendingInsert: { snippet } });
+}
+
+export function clearPendingInsert(): void {
+  if (!state.pendingInsert) return;
+  setState({ pendingInsert: null });
 }
 
 /**
