@@ -950,28 +950,26 @@ export default function AppWorkspacePage() {
   const refreshAutomations = useCallback(async () => {
     if (!instance) return;
     try {
-      const rows = await automationsApi.list({ limit: 100 });
+      const rows = await automationsApi.list({
+        app_instance_id: instance.id,
+        limit: 100,
+      });
       setAutomations(rows);
     } catch {
       setAutomations([]);
     }
   }, [instance]);
   const refreshRuns = useCallback(async () => {
-    if (!automations || automations.length === 0) {
-      setRecentRuns([]);
-      return;
-    }
+    if (!instance) return;
     try {
-      // Phase 5 first cut: surface the most recent runs from the first
-      // automation tied to this install. Phase 6 will widen this to a
-      // multi-automation join when the dedicated endpoint lands.
-      const first = automations[0];
-      const rows = await automationsApi.listRuns(first.id, { limit: 25 });
+      const rows = await automationsApi.listRunsByInstall(instance.id, {
+        limit: 25,
+      });
       setRecentRuns(rows);
     } catch {
       setRecentRuns([]);
     }
-  }, [automations]);
+  }, [instance]);
   const refreshModuleLinks = useCallback(async () => {
     if (!instance) return;
     const rows = await appCompositionApi.listLinks(instance.id);
@@ -981,10 +979,7 @@ export default function AppWorkspacePage() {
     if (drawerTab === 'actions' && actions === null) void refreshActions();
     if (drawerTab === 'automations' && automations === null) void refreshAutomations();
     if (drawerTab === 'modules' && moduleLinks === null) void refreshModuleLinks();
-    if (drawerTab === 'runs') {
-      if (automations === null) void refreshAutomations();
-      else if (recentRuns === null) void refreshRuns();
-    }
+    if (drawerTab === 'runs' && recentRuns === null) void refreshRuns();
   }, [
     drawerTab,
     actions,
@@ -1054,6 +1049,23 @@ export default function AppWorkspacePage() {
     const path = rawEntry.startsWith('/') ? rawEntry : `/${rawEntry}`;
     return `${base}${path}`;
   }, [primary?.entrypoint, runtime?.primary_url]);
+
+  // Primary container id, resolved by matching `runtime.primary_url` against
+  // the per-container URLs the orchestrator exposes. Used to drive the
+  // health-check polling that gates iframe mount in WorkspaceSurface.
+  // Falls back to the first container so single-container apps still work
+  // when primary_url has trailing-slash / casing drift versus container.url.
+  const primaryContainerId = useMemo<string | null>(() => {
+    if (!runtime || runtime.containers.length === 0) return null;
+    const norm = (u: string | null | undefined) =>
+      (u ?? '').replace(/\/+$/, '').toLowerCase();
+    const target = norm(runtime.primary_url);
+    if (target) {
+      const match = runtime.containers.find((c) => norm(c.url) === target);
+      if (match) return match.id;
+    }
+    return runtime.containers[0]?.id ?? null;
+  }, [runtime]);
 
   const beginSessionSilent = useCallback(async (): Promise<SessionHandle | null> => {
     if (!instance) return null;
@@ -1176,6 +1188,9 @@ export default function AppWorkspacePage() {
         appInstanceId={instance.id}
         sessionId={session?.session_id ?? null}
         apiKey={session?.api_key ?? null}
+        appName={app.name}
+        projectSlug={runtime?.project_slug ?? null}
+        primaryContainerId={primaryContainerId}
       />
     );
   };

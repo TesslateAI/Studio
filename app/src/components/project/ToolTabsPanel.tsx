@@ -75,6 +75,11 @@ export const TOOL_TAB_META: Record<ToolType, ToolTabMeta> = {
     label: 'Configure',
     icon: <SlidersHorizontal size={13} weight="bold" />,
   },
+  config: {
+    id: 'config',
+    label: 'Config',
+    icon: <SlidersHorizontal size={13} weight="bold" />,
+  },
   volume: {
     id: 'volume',
     label: 'Snapshots',

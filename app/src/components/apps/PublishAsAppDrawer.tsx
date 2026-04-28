@@ -352,7 +352,6 @@ export default function PublishAsAppDrawer({
               className="px-3 py-1.5 text-sm rounded bg-[var(--primary)] text-white hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5"
               data-testid="publish-to-marketplace-btn"
             >
-              <Rocket size={14} weight="fill" />
               {publishing ? 'Publishing…' : 'Publish to Marketplace'}
             </button>
           </div>

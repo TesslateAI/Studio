@@ -27,7 +27,6 @@ import { GraphCanvas } from '../GraphCanvas';
 import { MarketplaceSidebar } from '../MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../ContainerPropertiesPanel';
 import type { InspectorJumpTarget } from '../apps/PublishAsAppDrawer';
-import { Rocket } from '@phosphor-icons/react';
 import {
   ExternalServiceCredentialModal,
   type ExternalServiceItem,
@@ -131,14 +130,6 @@ export interface ArchitectureViewProps {
   onStateChange?: (state: { configDirty: boolean; isRunning: boolean }) => void;
   readOnly?: boolean;
   /**
-   * Called when the canvas's "Publish as App" button is clicked. The
-   * drawer state lives on the parent (ProjectPage) so the same drawer
-   * is reachable from the project toolbar and the canvas. When omitted
-   * the canvas button hides — the parent decides whether publishing is
-   * available for this project.
-   */
-  onPublishAsApp?: () => void;
-  /**
    * Deep-link signal forwarded to the floating MarketplaceSidebar. The
    * unified Deploy hub bumps `nonce` to ask the sidebar to open and
    * expand a specific category (e.g., "deployment") so the user lands
@@ -171,7 +162,6 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       onNavigateToContainer,
       onStateChange,
       readOnly = false,
-      onPublishAsApp,
       marketplaceFocus,
     },
     ref
@@ -1988,33 +1978,6 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
               focusSignal={marketplaceFocus ?? null}
             />
           )}
-
-          {/* Publish as App — visible for workspace + app_source projects.
-              app_runtime instances (installed apps) explicitly hide this
-              button since they're consumers, not publishers. The drawer
-              itself lives on ProjectPage so the same instance is reachable
-              from the project toolbar; this button just asks the parent
-              to open it. */}
-          {!readOnly && onPublishAsApp && project &&
-            ((project as { project_kind?: string }).project_kind === 'workspace' ||
-              (project as { project_kind?: string }).project_kind === 'app_source') && (
-              <button
-                type="button"
-                onClick={onPublishAsApp}
-                className="absolute top-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--primary)] text-white text-xs font-medium shadow-md hover:opacity-90"
-                data-testid="publish-as-app-btn"
-                title={
-                  (project as { project_kind?: string }).project_kind === 'app_source'
-                    ? 'Publish a new version'
-                    : 'Publish as App'
-                }
-              >
-                <Rocket size={14} weight="fill" />
-                {(project as { project_kind?: string }).project_kind === 'app_source'
-                  ? 'Publish new version'
-                  : 'Publish as App'}
-              </button>
-            )}
 
           <GraphCanvas
             nodes={nodes}

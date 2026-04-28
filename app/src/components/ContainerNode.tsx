@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Handle, Position, type Node } from '@xyflow/react';
-import { Cube, X } from '@phosphor-icons/react';
+import { Cube, Plug, X } from '@phosphor-icons/react';
 
 interface ContainerNodeData extends Record<string, unknown> {
   name: string;
@@ -57,6 +57,7 @@ const arePropsEqual = (
 
 const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
   const typeColor = getTypeColor(data.containerType, data.serviceType);
+  const isExternal = data.serviceType === 'external';
 
   return (
     <div
@@ -75,7 +76,8 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
         className="!bg-[#333] !w-2.5 !h-2.5 !border !border-[#444]"
       />
 
-      {/* Node content */}
+      {/* Node content. External services get a dashed border + a plug icon
+          so they're visually distinct from runnable containers at a glance. */}
       <div
         onClick={() => data.onClick?.(id)}
         onDoubleClick={() => {
@@ -83,13 +85,21 @@ const ContainerNodeComponent = ({ data, id }: ContainerNodeProps) => {
             data.onDoubleClick(id);
           }
         }}
-        className="bg-[var(--xy-node-background-color,#1a1a1a)] rounded-xl min-w-[180px] cursor-pointer shadow-md border border-[var(--xy-node-border-color,transparent)]"
+        className={`bg-[var(--xy-node-background-color,#1a1a1a)] rounded-xl min-w-[180px] cursor-pointer shadow-md border ${
+          isExternal
+            ? 'border-dashed border-purple-500/60'
+            : 'border-[var(--xy-node-border-color,transparent)]'
+        }`}
       >
         {/* Header - Color-coded icon + Title/Status */}
         <div className="flex items-center gap-3 p-3">
           {/* Color-coded icon square */}
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${typeColor}`}>
-            <Cube size={20} weight="fill" className="text-white" />
+            {isExternal ? (
+              <Plug size={20} weight="fill" className="text-white" />
+            ) : (
+              <Cube size={20} weight="fill" className="text-white" />
+            )}
           </div>
 
           {/* Title and status */}

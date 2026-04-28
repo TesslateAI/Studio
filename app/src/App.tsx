@@ -48,7 +48,6 @@ import TeamSettingsPage from './pages/settings/TeamSettingsPage';
 import TeamMembersPage from './pages/settings/TeamMembersPage';
 import AuditLogPage from './pages/settings/AuditLogPage';
 import ConnectionsSettings from './pages/settings/ConnectionsSettings';
-import ChannelsSettings from './pages/settings/ChannelsSettings';
 import SchedulesSettings from './pages/settings/SchedulesSettings';
 import InviteAcceptPage from './pages/InviteAcceptPage';
 import { useReferralTracking } from './hooks/useReferralTracking';
@@ -441,7 +440,11 @@ function AppContent() {
           <Route path="api-keys" element={<ApiKeysSettings />} />
           <Route path="billing" element={<Navigate to="/settings/team/billing" replace />} />
           <Route path="messaging" element={<ConnectionsSettings />} />
-          <Route path="messaging/channels" element={<ChannelsSettings />} />
+          {/* Channels moved to Library → Channels. Old route stays as a redirect for bookmarks. */}
+          <Route
+            path="messaging/channels"
+            element={<Navigate to="/library?tab=channels" replace />}
+          />
           <Route path="messaging/schedules" element={<SchedulesSettings />} />
           <Route path="team" element={<TeamSettingsPage />} />
           <Route path="team/members" element={<TeamMembersPage />} />

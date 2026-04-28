@@ -70,30 +70,6 @@ SEED_APPS: list[SeedApp] = [
         ),
     ),
     SeedApp(
-        slug="markitdown",
-        assets_dir=SEEDS_ROOT / "markitdown",
-        description=(
-            "Microsoft MarkItDown wrapped in a minimal FastAPI upload UI — "
-            "converts PDF/Office/media files to Markdown for LLM pipelines."
-        ),
-    ),
-    SeedApp(
-        slug="deer-flow",
-        assets_dir=SEEDS_ROOT / "deer-flow",
-        description=(
-            "ByteDance DeerFlow 2.0 — open-source deep-research super-agent "
-            "harness. Runs from a pre-built image; configure an LLM key."
-        ),
-    ),
-    SeedApp(
-        slug="mirofish",
-        assets_dir=SEEDS_ROOT / "mirofish",
-        description=(
-            "MiroFish swarm-intelligence prediction engine. Multi-agent "
-            "simulation with a web UI; requires an LLM API key."
-        ),
-    ),
-    SeedApp(
         slug="damian-app",
         assets_dir=SEEDS_ROOT / "damian-app",
         description=(

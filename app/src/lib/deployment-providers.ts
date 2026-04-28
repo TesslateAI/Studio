@@ -53,7 +53,7 @@ export const DEPLOYMENT_PROVIDERS: Record<string, ProviderConfig> = {
 /** Get provider config with fallback defaults. */
 export function getProviderConfig(provider: string): ProviderConfig {
   return DEPLOYMENT_PROVIDERS[provider] ?? {
-    icon: '🚀',
+    icon: '◆',
     displayName: provider.charAt(0).toUpperCase() + provider.slice(1),
     color: '#6B7280',
     textColor: 'text-white',

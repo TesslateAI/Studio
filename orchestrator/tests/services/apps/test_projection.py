@@ -409,3 +409,236 @@ async def test_missing_app_version_raises(db: AsyncSession) -> None:
     bogus_id = uuid.uuid4()
     with pytest.raises(projection.AppVersionNotFound):
         await projection.regenerate_projection(db, app_version_id=bogus_id)
+
+
+# ---------------------------------------------------------------------------
+# Rebind on regeneration.
+#
+# ``automation_actions.app_action_id`` is FK ``ON DELETE SET NULL``, so a
+# naive delete-and-reinsert silently nulls every existing automation that
+# pointed at this version's actions — and the dispatcher then raises
+# ``ContractInvalid`` on every cron tick. Projection takes a snapshot of
+# the FK dependents pre-delete and rebinds them by slug post-insert.
+# These tests pin that contract.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_automation_pointing_at(
+    db: AsyncSession,
+    *,
+    app_action_id: uuid.UUID,
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Seed User + AutomationDefinition + AutomationAction(app.invoke) whose
+    ``app_action_id`` points at the supplied row. Returns ``(defn_id, aa_id)``."""
+    user_id = uuid.uuid4()
+    db.add(
+        models.User(
+            id=user_id,
+            email=f"u-{user_id}@example.com",
+            hashed_password="x",
+            is_active=True,
+            is_superuser=False,
+            is_verified=False,
+            name="t",
+            username=f"u-{user_id.hex[:8]}",
+            slug=f"u-{user_id.hex[:8]}",
+        )
+    )
+    await db.flush()
+    defn_id = uuid.uuid4()
+    db.add(
+        models_automations.AutomationDefinition(
+            id=defn_id,
+            name="t",
+            owner_user_id=user_id,
+            workspace_scope="none",
+            contract={"max_compute_tier": 0},
+            max_compute_tier=0,
+            is_active=True,
+            depth=0,
+        )
+    )
+    await db.flush()
+    aa_id = uuid.uuid4()
+    db.add(
+        models_automations.AutomationAction(
+            id=aa_id,
+            automation_id=defn_id,
+            ordinal=0,
+            action_type="app.invoke",
+            config={"input": {}},
+            app_action_id=app_action_id,
+        )
+    )
+    await db.flush()
+    return defn_id, aa_id
+
+
+@pytest.mark.asyncio
+async def test_rebinds_dependents_to_new_app_action_ids(db: AsyncSession) -> None:
+    """The same-named action in the new manifest gets the new auto-generated
+    UUID, but every dependent ``automation_action`` is repointed at it —
+    not left dangling at NULL."""
+    parent = await _seed_marketplace_app(db, slug="parent-app")
+    av = await _seed_app_version(
+        db, app=parent, manifest=_full_manifest_2026_05()
+    )
+
+    # First projection — establishes the initial AppAction rows.
+    await projection.regenerate_projection(db, app_version_id=av.id)
+    old_summarize_id = (
+        await db.execute(
+            select(models_automations.AppAction.id).where(
+                models_automations.AppAction.app_version_id == av.id,
+                models_automations.AppAction.name == "summarize",
+            )
+        )
+    ).scalar_one()
+
+    # Seed an automation that depends on the old AppAction.id.
+    defn_id, aa_id = await _seed_automation_pointing_at(
+        db, app_action_id=old_summarize_id
+    )
+
+    # Regenerate (mimics another user installing the same version).
+    await projection.regenerate_projection(db, app_version_id=av.id)
+
+    new_summarize_id = (
+        await db.execute(
+            select(models_automations.AppAction.id).where(
+                models_automations.AppAction.app_version_id == av.id,
+                models_automations.AppAction.name == "summarize",
+            )
+        )
+    ).scalar_one()
+    # Sanity — the row really did get a fresh id (delete + reinsert).
+    assert new_summarize_id != old_summarize_id
+
+    # Dependent re-pointed at the new id; not left at NULL.
+    rebound_fk = (
+        await db.execute(
+            select(models_automations.AutomationAction.app_action_id).where(
+                models_automations.AutomationAction.id == aa_id
+            )
+        )
+    ).scalar_one()
+    assert rebound_fk == new_summarize_id
+
+    # Owning definition still active — slug survived the upgrade.
+    defn = (
+        await db.execute(
+            select(models_automations.AutomationDefinition).where(
+                models_automations.AutomationDefinition.id == defn_id
+            )
+        )
+    ).scalar_one()
+    assert defn.is_active is True
+    assert defn.paused_reason is None
+
+
+@pytest.mark.asyncio
+async def test_pauses_definition_when_action_slug_removed_in_upgrade(
+    db: AsyncSession,
+) -> None:
+    """If an upgrade drops an action the manifest used to declare, dependents
+    can't be rebound — pause the owning definition with a structured reason
+    so the cron stops firing into a dispatcher that would only reject."""
+    parent = await _seed_marketplace_app(db, slug="parent-app")
+    av = await _seed_app_version(
+        db, app=parent, manifest=_full_manifest_2026_05()
+    )
+    await projection.regenerate_projection(db, app_version_id=av.id)
+    old_summarize_id = (
+        await db.execute(
+            select(models_automations.AppAction.id).where(
+                models_automations.AppAction.app_version_id == av.id,
+                models_automations.AppAction.name == "summarize",
+            )
+        )
+    ).scalar_one()
+    defn_id, aa_id = await _seed_automation_pointing_at(
+        db, app_action_id=old_summarize_id
+    )
+
+    # Replace manifest with one that drops "summarize" entirely. Also drop
+    # the data_resource and automation_template that referenced it so the
+    # parser doesn't reject the manifest before projection runs.
+    upgraded = _full_manifest_2026_05()
+    upgraded["actions"] = [
+        a for a in upgraded["actions"] if a["name"] != "summarize"
+    ]
+    upgraded["data_resources"] = []
+    upgraded["automation_templates"] = []
+    av.manifest_json = upgraded
+    await db.flush()
+
+    await projection.regenerate_projection(db, app_version_id=av.id)
+
+    # Slug gone — FK left NULL (cascade); definition paused.
+    rebound_fk = (
+        await db.execute(
+            select(models_automations.AutomationAction.app_action_id).where(
+                models_automations.AutomationAction.id == aa_id
+            )
+        )
+    ).scalar_one()
+    assert rebound_fk is None
+    defn = (
+        await db.execute(
+            select(models_automations.AutomationDefinition).where(
+                models_automations.AutomationDefinition.id == defn_id
+            )
+        )
+    ).scalar_one()
+    assert defn.is_active is False
+    assert defn.paused_reason == "action_removed_in_upgrade"
+
+
+@pytest.mark.asyncio
+async def test_rebinds_invocation_subjects_too(db: AsyncSession) -> None:
+    """Billing attribution rows (``InvocationSubject.app_action_id``) follow
+    the same FK lifecycle and get the same rebind treatment so historical
+    spend doesn't lose its attribution column on every re-projection."""
+    parent = await _seed_marketplace_app(db, slug="parent-app")
+    av = await _seed_app_version(
+        db, app=parent, manifest=_full_manifest_2026_05()
+    )
+    await projection.regenerate_projection(db, app_version_id=av.id)
+    old_summarize_id = (
+        await db.execute(
+            select(models_automations.AppAction.id).where(
+                models_automations.AppAction.app_version_id == av.id,
+                models_automations.AppAction.name == "summarize",
+            )
+        )
+    ).scalar_one()
+
+    subject_id = uuid.uuid4()
+    db.add(
+        models_automations.InvocationSubject(
+            id=subject_id,
+            app_action_id=old_summarize_id,
+            payer_policy="installer",
+            credit_source="opensail_credits",
+        )
+    )
+    await db.flush()
+
+    await projection.regenerate_projection(db, app_version_id=av.id)
+
+    new_summarize_id = (
+        await db.execute(
+            select(models_automations.AppAction.id).where(
+                models_automations.AppAction.app_version_id == av.id,
+                models_automations.AppAction.name == "summarize",
+            )
+        )
+    ).scalar_one()
+    rebound_fk = (
+        await db.execute(
+            select(models_automations.InvocationSubject.app_action_id).where(
+                models_automations.InvocationSubject.id == subject_id
+            )
+        )
+    ).scalar_one()
+    assert rebound_fk == new_summarize_id

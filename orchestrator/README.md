@@ -2,7 +2,7 @@
 
 Backend orchestration service for the OpenSail platform. Handles user authentication, project management, and container lifecycle orchestration with support for both Docker and Kubernetes deployments.
 
-## 🚀 Features
+## Features
 
 - 🔐 **JWT Authentication** - Secure user authentication with access and refresh tokens
 - 👥 **Multi-user Support** - Isolated project environments per user

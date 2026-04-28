@@ -2,7 +2,7 @@
 
 This directory contains scripts for deploying OpenSail to Kubernetes using DigitalOcean Container Registry.
 
-## 🚀 Quick Start
+## Quick Start
 
 For complete deployment:
 

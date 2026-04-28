@@ -18,6 +18,7 @@ import {
   Plug,
   Rocket,
   Workflow,
+  MessageSquare,
 } from 'lucide-react';
 import { MoodyFace } from './MoodyFace';
 import {
@@ -91,6 +92,7 @@ const LIBRARY_ITEMS: Array<{
   { key: 'bases', label: 'Bases', icon: Rocket },
   { key: 'skills', label: 'Skills', icon: Zap },
   { key: 'mcp_servers', label: 'Connectors', icon: Plug },
+  { key: 'channels', label: 'Channels', icon: MessageSquare },
   { key: 'models', label: 'Models', icon: Cpu },
   { key: 'themes', label: 'Themes', icon: Palette },
 ];

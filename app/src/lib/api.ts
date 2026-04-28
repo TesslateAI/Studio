@@ -25,6 +25,7 @@ import type {
 import type {
   ContainerConfigResponse,
   NodeConfigMode,
+  ProjectConfigResponse,
   RevealSecretResponse,
   SubmittedValues,
 } from '../types/nodeConfig';
@@ -1454,13 +1455,24 @@ export const nodeConfigApi = {
     return response.data;
   },
 
+  /** Aggregated project config — every service / container / deployment provider
+   * with its schema and masked initial values. Used by the persistent Config tab. */
+  getProjectConfig: async (projectId: string): Promise<ProjectConfigResponse> => {
+    const response = await api.get(`/api/projects/${projectId}/config`);
+    return response.data;
+  },
+
   /** Apply a direct (non-agent) edit to a container's config. */
   patchContainerConfig: async (
     projectId: string,
     containerId: string,
     body: {
       values: SubmittedValues;
-      overrides?: Record<string, unknown>;
+      /** User-added field metadata appended to the preset schema. Each entry
+       * matches FieldSchema (key, label, type, required?, is_secret?, ...).
+       * The backend merges these into the resolved schema so the value lands
+       * in the right bucket (text → environment_vars, secret → encrypted). */
+      overrides?: Array<Record<string, unknown>>;
       preset?: string;
       mode?: NodeConfigMode;
     }
@@ -4846,6 +4858,7 @@ export interface ListAutomationsParams {
   is_active?: boolean;
   workspace_scope?: string;
   team_id?: string;
+  app_instance_id?: string;
   limit?: number;
   offset?: number;
 }
@@ -4862,10 +4875,26 @@ export const automationsApi = {
     if (params?.is_active !== undefined) qs.append('is_active', String(params.is_active));
     if (params?.workspace_scope) qs.append('workspace_scope', params.workspace_scope);
     if (params?.team_id) qs.append('team_id', params.team_id);
+    if (params?.app_instance_id) qs.append('app_instance_id', params.app_instance_id);
     if (params?.limit !== undefined) qs.append('limit', String(params.limit));
     if (params?.offset !== undefined) qs.append('offset', String(params.offset));
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     const response = await api.get(`/api/automations${suffix}`);
+    return response.data;
+  },
+
+  async listRunsByInstall(
+    appInstanceId: string,
+    params?: ListRunsParams
+  ): Promise<AutomationRunSummary[]> {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.append('status', params.status);
+    if (params?.limit !== undefined) qs.append('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.append('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const response = await api.get(
+      `/api/automations/runs/by-install/${appInstanceId}${suffix}`
+    );
     return response.data;
   },
 

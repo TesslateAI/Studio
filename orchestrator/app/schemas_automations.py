@@ -112,6 +112,7 @@ class AutomationDefinitionIn(BaseModel):
     workspace_project_id: UUID | None = None
     target_project_id: UUID | None = None
     team_id: UUID | None = None
+    app_instance_id: UUID | None = None
 
     contract: dict[str, Any] = Field(
         ...,
@@ -202,6 +203,7 @@ class AutomationDefinitionOut(BaseModel):
     workspace_scope: str
     workspace_project_id: UUID | None
     target_project_id: UUID | None
+    app_instance_id: UUID | None = None
     contract: dict[str, Any]
     max_compute_tier: int
     max_spend_per_run_usd: Decimal | None
@@ -231,6 +233,7 @@ class AutomationDefinitionSummary(BaseModel):
     team_id: UUID | None
     workspace_scope: str
     target_project_id: UUID | None
+    app_instance_id: UUID | None = None
     is_active: bool
     paused_reason: str | None
     max_compute_tier: int

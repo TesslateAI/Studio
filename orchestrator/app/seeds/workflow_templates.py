@@ -157,7 +157,7 @@ A scalable backend template with caching and database layers.
 - High-performance APIs
 - Apps requiring caching
         """,
-        "icon": "🚀",
+        "icon": "⚡",
         "category": "backend",
         "tags": ["fastapi", "postgresql", "redis", "api", "caching"],
         "template_definition": {

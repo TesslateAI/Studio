@@ -40,6 +40,7 @@ from app.models import (
     User,
 )
 from app.models_automations import (
+    AppAction,
     AppAutomationTemplate,
     AutomationAction,
     AutomationDefinition,
@@ -151,6 +152,16 @@ async def install_context(db: AsyncSession):
 async def test_materializes_default_enabled_template(
     db: AsyncSession, install_context
 ) -> None:
+    # The installer resolves the template's manifest-side ``action`` slug
+    # against this version's ``app_actions`` projection — seed the row the
+    # template will reference.
+    app_action = AppAction(
+        id=uuid.uuid4(),
+        app_version_id=install_context["app_version_id"],
+        name="build_digest",
+        handler={"kind": "http_post", "container": "web", "path": "/digest"},
+    )
+    db.add(app_action)
     db.add(
         AppAutomationTemplate(
             id=uuid.uuid4(),
@@ -158,7 +169,11 @@ async def test_materializes_default_enabled_template(
             name="Weekly digest",
             description="Send a weekly summary",
             trigger_config={"kind": "cron", "cron": "0 9 * * 1"},
-            action_config={"action_type": "app.invoke", "alias": "build_digest"},
+            action_config={
+                "action_type": "app.invoke",
+                "action": "build_digest",
+                "input": {"team": "{{ installer.team_id }}"},
+            },
             delivery_config={},
             contract_template={"max_compute_tier": 1, "allowed_tools": ["http"]},
             is_default_enabled=True,
@@ -228,8 +243,11 @@ async def test_materializes_default_enabled_template(
     assert len(actions) == 1
     act = actions[0]
     assert act.action_type == "app.invoke"
-    assert act.config == {"alias": "build_digest"}
+    # ``action`` slug is consumed during slug→FK resolution — the FK is the
+    # truth; the slug should not linger in the persisted config to shadow it.
+    assert act.config == {"input": {"team": "{{ installer.team_id }}"}}
     assert act.ordinal == 0
+    assert act.app_action_id == app_action.id
 
 
 # ---------------------------------------------------------------------------
@@ -381,3 +399,170 @@ async def test_returns_zero_when_no_templates_for_version(
         target_project_id=install_context["project"].id,
     )
     assert created == 0
+
+
+# ---------------------------------------------------------------------------
+# app.invoke slug → app_action_id resolution.
+# ---------------------------------------------------------------------------
+
+
+async def test_skips_app_invoke_template_when_slug_missing(
+    db: AsyncSession,
+    install_context,
+    caplog,
+) -> None:
+    """``app.invoke`` requires either ``app_action_id`` or an ``action`` slug.
+    Without one, the dispatcher would fail every cron tick — refuse the
+    template at install time rather than silently create a broken row."""
+    db.add(
+        AppAutomationTemplate(
+            id=uuid.uuid4(),
+            app_version_id=install_context["app_version_id"],
+            name="Template missing slug",
+            trigger_config={"kind": "cron", "cron": "0 0 * * *"},
+            action_config={"action_type": "app.invoke"},  # no slug, no FK
+            contract_template={"max_compute_tier": 0},
+            is_default_enabled=True,
+        )
+    )
+    await db.flush()
+
+    with caplog.at_level(logging.WARNING, logger="app.services.apps.installer"):
+        created = await _materialize_install_automations(
+            db,
+            app_version_id=install_context["app_version_id"],
+            installer_user_id=install_context["user_id"],
+            team_id=install_context["team_id"],
+            target_project_id=install_context["project"].id,
+        )
+    assert created == 0
+    assert any(
+        "requires either app_action_id or an 'action' slug" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+async def test_skips_app_invoke_template_when_slug_unknown(
+    db: AsyncSession,
+    install_context,
+    caplog,
+) -> None:
+    """Slug must resolve to an ``AppAction`` on this version. A template
+    referencing an action the manifest never declared is skipped — would-be
+    automations whose FK can't be set are worse than not created at all."""
+    db.add(
+        AppAction(
+            id=uuid.uuid4(),
+            app_version_id=install_context["app_version_id"],
+            name="echo",
+            handler={"kind": "http_post", "container": "web", "path": "/echo"},
+        )
+    )
+    db.add(
+        AppAutomationTemplate(
+            id=uuid.uuid4(),
+            app_version_id=install_context["app_version_id"],
+            name="Template unknown slug",
+            trigger_config={"kind": "cron", "cron": "0 0 * * *"},
+            action_config={"action_type": "app.invoke", "action": "ghost"},
+            contract_template={"max_compute_tier": 0},
+            is_default_enabled=True,
+        )
+    )
+    await db.flush()
+
+    with caplog.at_level(logging.WARNING, logger="app.services.apps.installer"):
+        created = await _materialize_install_automations(
+            db,
+            app_version_id=install_context["app_version_id"],
+            installer_user_id=install_context["user_id"],
+            team_id=install_context["team_id"],
+            target_project_id=install_context["project"].id,
+        )
+    assert created == 0
+    assert any(
+        "action slug 'ghost' not declared on app_version" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+async def test_app_invoke_template_with_explicit_app_action_id_skips_slug_lookup(
+    db: AsyncSession,
+    install_context,
+) -> None:
+    """If the template carries an explicit ``app_action_id`` already
+    (e.g., a future tool that pre-resolves), respect it and don't redo
+    the slug lookup — supports the path the schema technically allows."""
+    app_action = AppAction(
+        id=uuid.uuid4(),
+        app_version_id=install_context["app_version_id"],
+        name="explicit",
+        handler={"kind": "http_post", "container": "web", "path": "/x"},
+    )
+    db.add(app_action)
+    db.add(
+        AppAutomationTemplate(
+            id=uuid.uuid4(),
+            app_version_id=install_context["app_version_id"],
+            name="Pre-resolved template",
+            trigger_config={"kind": "cron", "cron": "0 0 * * *"},
+            action_config={
+                "action_type": "app.invoke",
+                "app_action_id": str(app_action.id),
+            },
+            contract_template={"max_compute_tier": 0},
+            is_default_enabled=True,
+        )
+    )
+    await db.flush()
+
+    created = await _materialize_install_automations(
+        db,
+        app_version_id=install_context["app_version_id"],
+        installer_user_id=install_context["user_id"],
+        team_id=install_context["team_id"],
+        target_project_id=install_context["project"].id,
+    )
+    assert created == 1
+    act = (
+        await db.execute(select(AutomationAction))
+    ).scalar_one()
+    assert str(act.app_action_id) == str(app_action.id)
+
+
+async def test_agent_run_template_does_not_require_app_action_id(
+    db: AsyncSession,
+    install_context,
+) -> None:
+    """``agent.run`` and ``gateway.send`` action types are slug-free — the
+    new resolution gate only applies to ``app.invoke``."""
+    db.add(
+        AppAutomationTemplate(
+            id=uuid.uuid4(),
+            app_version_id=install_context["app_version_id"],
+            name="Agent runner",
+            trigger_config={"kind": "cron", "cron": "0 0 * * *"},
+            action_config={
+                "action_type": "agent.run",
+                "agent_id": str(uuid.uuid4()),
+                "prompt": "hi",
+            },
+            contract_template={"max_compute_tier": 1},
+            is_default_enabled=True,
+        )
+    )
+    await db.flush()
+
+    created = await _materialize_install_automations(
+        db,
+        app_version_id=install_context["app_version_id"],
+        installer_user_id=install_context["user_id"],
+        team_id=install_context["team_id"],
+        target_project_id=install_context["project"].id,
+    )
+    assert created == 1
+    act = (
+        await db.execute(select(AutomationAction))
+    ).scalar_one()
+    assert act.action_type == "agent.run"
+    assert act.app_action_id is None

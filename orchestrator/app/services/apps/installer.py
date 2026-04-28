@@ -38,6 +38,7 @@ from ...models import (
     Project,
 )
 from ...models_automations import (
+    AppAction,
     AppAutomationTemplate,
     AppRuntimeDeployment,
     AutomationAction,
@@ -359,6 +360,7 @@ async def _materialize_install_automations(
     installer_user_id: UUID,
     team_id: UUID,
     target_project_id: UUID,
+    app_instance_id: UUID | None = None,
 ) -> int:
     """Project ``app_automation_templates`` (default-enabled) into
     ``automation_definitions`` rows owned by the installer.
@@ -438,6 +440,44 @@ async def _materialize_install_automations(
             )
             continue
 
+        # For ``app.invoke`` templates the 2026-05 manifest references the
+        # target action by SLUG (``action: foo``) — that's the creator-
+        # facing identifier the manifest knows. The dispatcher reads the
+        # column FK ``automation_actions.app_action_id`` and fails the run
+        # if it is NULL (dispatcher.py:551). Resolve the slug to a row id
+        # against this version's just-projected ``AppAction`` set. Refuse
+        # the template on miss — better to skip with a structured warning
+        # than auto-create an automation that the dispatcher will fail
+        # every cron tick.
+        action_app_action_id = action_cfg.pop("app_action_id", None)
+        action_slug = action_cfg.pop("action", None)
+        if action_type == "app.invoke" and action_app_action_id is None:
+            if not action_slug:
+                logger.warning(
+                    "install_app: skipping automation template %r — "
+                    "action_type='app.invoke' requires either app_action_id "
+                    "or an 'action' slug in action_config; got %r",
+                    tpl.name,
+                    tpl.action_config,
+                )
+                continue
+            action_app_action_id = (
+                await db.execute(
+                    select(AppAction.id)
+                    .where(AppAction.app_version_id == app_version_id)
+                    .where(AppAction.name == action_slug)
+                )
+            ).scalar_one_or_none()
+            if action_app_action_id is None:
+                logger.warning(
+                    "install_app: skipping automation template %r — "
+                    "action slug %r not declared on app_version %s",
+                    tpl.name,
+                    action_slug,
+                    app_version_id,
+                )
+                continue
+
         definition = AutomationDefinition(
             id=uuid.uuid4(),
             name=tpl.name,
@@ -445,6 +485,7 @@ async def _materialize_install_automations(
             team_id=team_id,
             workspace_scope="target_project",
             target_project_id=target_project_id,
+            app_instance_id=app_instance_id,
             contract=contract,
             max_compute_tier=int(contract.get("max_compute_tier", 0) or 0),
             is_active=True,
@@ -468,7 +509,6 @@ async def _materialize_install_automations(
         )
 
         # Phase 1 dispatcher accepts exactly one action per definition.
-        action_app_action_id = action_cfg.pop("app_action_id", None)
         db.add(
             AutomationAction(
                 id=uuid.uuid4(),
@@ -1005,6 +1045,7 @@ async def install_app(
             installer_user_id=installer_user_id,
             team_id=team_id,
             target_project_id=project.id,
+            app_instance_id=instance.id,
         )
 
     # 9.5) Wire app_instance_links rows for manifest.dependencies[] (Phase 3).

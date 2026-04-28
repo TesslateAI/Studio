@@ -11,6 +11,7 @@ export type ToolType =
   | 'terminal'
   | 'repository'
   | 'node-config'
+  | 'config'
   | 'volume'
   | 'notes'
   | 'settings';
@@ -25,6 +26,7 @@ export const TOOL_TYPES: ToolType[] = [
   'terminal',
   'repository',
   'node-config',
+  'config',
   'volume',
   'notes',
   'settings',

@@ -929,6 +929,24 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             _tier_containers = _tier_snapshot.get("containers", [])
 
             # 8. Build execution context (same structure as chat.py)
+            #
+            # ``allowed_scopes`` is set explicitly only for agents that
+            # need authoring tools (agent-builder). For every other
+            # interactive agent the key is omitted, which preserves the
+            # existing pass-through behavior in marketplace_ops gates
+            # (they accept ``None`` as "no enforcement"). Automation-driven
+            # runs derive their scopes from the contract elsewhere.
+            from .services.automations.scopes import (
+                AUTOMATIONS_WRITE,
+                MARKETPLACE_AUTHOR,
+            )
+
+            _BUILTIN_AGENT_SCOPES: dict[str, set[str]] = {
+                "agent-builder": {MARKETPLACE_AUTHOR, AUTOMATIONS_WRITE},
+            }
+            _agent_slug = getattr(agent_model, "slug", None)
+            _admin_scopes = _BUILTIN_AGENT_SCOPES.get(_agent_slug)
+
             context = {
                 "user_id": UUID(payload.user_id),
                 "project_id": UUID(project_id) if project_id else None,
@@ -936,6 +954,11 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "container_directory": container_directory,
                 "chat_id": UUID(payload.chat_id),
                 "task_id": task_id,
+                # The pubsub handle lets in-tool HITL paths
+                # (e.g., request_review) emit SSE events directly so the
+                # chat surface can render an interactive card while the
+                # tool blocks waiting for a user click.
+                "pubsub": pubsub,
                 "db": db,
                 "chat_history": chat_history,
                 "project_context": project_context,
@@ -953,6 +976,11 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 "available_skills": available_skills,
                 "attachments": payload.attachments,
                 "api_key_scopes": payload.api_key_scopes,
+                # Per-built-in scope grant. Falls back to None so the
+                # marketplace_ops defensive gate (``if allowed_scopes and
+                # MARKETPLACE_AUTHOR not in allowed_scopes``) keeps its
+                # current pass-through semantics for every other agent.
+                "allowed_scopes": _admin_scopes,
                 # Volume routing — Hub is the live source of truth for node
                 # placement; cache_node is NOT passed (dead DB field).
                 "volume_id": project.volume_id if project else None,

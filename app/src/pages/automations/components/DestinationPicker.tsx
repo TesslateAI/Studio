@@ -6,8 +6,8 @@
  * ``ChannelConfig`` (e.g., "Slack — Acme Workspace > #standup, DM
  * Manav, …"). The top option opens an inline modal that creates a new
  * destination on top of an existing channel-config; if the user has no
- * channel configs at all, the modal links them out to /settings/channels
- * to set one up.
+ * channel configs at all, the modal links them out to Library → Channels
+ * (/library?tab=channels) to set one up.
  *
  * The component owns no automation state — it just emits the selected
  * destination_id (UUID string) via ``onChange``. Empty string means "no
@@ -320,7 +320,7 @@ function CreateDestinationModal({ channels, onClose, onCreated }: ModalProps) {
               inside it.
             </p>
             <a
-              href="/settings/channels"
+              href="/library?tab=channels"
               className="btn btn-sm btn-filled inline-flex items-center gap-1.5"
             >
               <Plus className="w-3 h-3" />

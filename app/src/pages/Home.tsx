@@ -14,6 +14,7 @@ import {
 } from '@phosphor-icons/react';
 import { MoodyFace } from '../components/ui/MoodyFace';
 import { CreateProjectModal, RepoImportModal } from '../components/modals';
+import { ChannelsCard } from '../components/channels/ChannelsCard';
 import { projectsApi, tasksApi } from '../lib/api';
 import { useTeam } from '../contexts/TeamContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -595,11 +596,14 @@ export default function Home() {
               tooltip="Chat with agents to automate workflows in your projects."
               onClick={() => navigate('/chat')}
               secondaryIcon={<Plus size={18} weight="bold" />}
-              secondaryTooltip="Build a new custom agent."
+              secondaryTooltip="Build a new custom agent with @agent-builder."
               secondaryAriaLabel="Create new agent"
-              onSecondaryClick={() => navigate('/library?tab=agents&create=true')}
+              onSecondaryClick={() =>
+                navigate('/chat', { state: { landingPrompt: '@agent-builder ' } })
+              }
             />
             <ConnectorsCard onClick={() => navigate('/marketplace/browse/mcp_server')} />
+            <ChannelsCard onClick={() => navigate('/library?tab=channels')} />
           </div>
 
           {/* Recent Projects — finder-style list */}

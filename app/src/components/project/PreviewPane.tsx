@@ -29,6 +29,12 @@ export interface PreviewPaneProps {
   placeholder?: React.ReactNode;
   overlay?: React.ReactNode;
   showClose?: boolean;
+  /**
+   * Bumped by the parent to force a full iframe remount (used as the React
+   * `key`). State-driven reloads survive concurrent renders that would
+   * otherwise undo an imperative `iframe.src = …` mutation.
+   */
+  reloadKey?: number;
 }
 
 export const PreviewPane = forwardRef<HTMLIFrameElement, PreviewPaneProps>(
@@ -49,6 +55,7 @@ export const PreviewPane = forwardRef<HTMLIFrameElement, PreviewPaneProps>(
       placeholder,
       overlay,
       showClose = true,
+      reloadKey = 0,
     },
     iframeRef
   ) {
@@ -171,6 +178,7 @@ export const PreviewPane = forwardRef<HTMLIFrameElement, PreviewPaneProps>(
           >
             <iframe
               ref={iframeRef}
+              key={`preview-iframe-${reloadKey}`}
               id="preview-iframe"
               src={devServerUrlWithAuth || devServerUrl}
               className="w-full h-full"

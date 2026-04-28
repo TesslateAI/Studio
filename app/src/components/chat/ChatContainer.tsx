@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { Loader2, FileCode, X, List, Plus, Plug } from 'lucide-react';
+import { Loader2, FileCode, X, List, Plus, Plug, Pause } from 'lucide-react';
 import { PencilSimple, Storefront } from '@phosphor-icons/react';
+import { nodeConfigEvents } from '../../utils/nodeConfigEvents';
 import { useCommandHandlers } from '../../contexts/CommandContext';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
@@ -98,6 +99,11 @@ interface ChatContainerProps {
    * while the builder is already open), we swap to that session in place.
    */
   initialChatId?: string | null;
+  /**
+   * Open the persistent Config tab. Wired from ProjectPage so the chat-side
+   * pause banner can take the user to the relevant card with one click.
+   */
+  onOpenConfigTab?: () => void;
 }
 
 export function ChatContainer({
@@ -123,12 +129,50 @@ export function ChatContainer({
   onVolumeReady,
   disabled: disabledProp,
   initialChatId = null,
+  onOpenConfigTab,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const { hasRole } = useAuth();
   const isAdmin = hasRole('admin');
   const [showDebugModal, setShowDebugModal] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  // Pinned-banner pauses: agent has called request_node_config(wait_for_input=True)
+  // and is parked on a pending input. Cleared on resume / cancel.
+  const [pendingPauses, setPendingPauses] = useState<
+    Array<{ inputId: string; containerId: string; containerName: string }>
+  >([]);
+  useEffect(() => {
+    const unsubs: Array<() => void> = [];
+    unsubs.push(
+      nodeConfigEvents.on('user-input-required', (payload) => {
+        setPendingPauses((prev) =>
+          prev.some((p) => p.inputId === payload.input_id)
+            ? prev
+            : [
+                ...prev,
+                {
+                  inputId: payload.input_id,
+                  containerId: payload.container_id,
+                  containerName: payload.container_name,
+                },
+              ]
+        );
+      })
+    );
+    unsubs.push(
+      nodeConfigEvents.on('node-config-resumed', (payload) => {
+        setPendingPauses((prev) => prev.filter((p) => p.inputId !== payload.input_id));
+      })
+    );
+    unsubs.push(
+      nodeConfigEvents.on('node-config-cancelled', (payload) => {
+        setPendingPauses((prev) => prev.filter((p) => p.inputId !== payload.input_id));
+      })
+    );
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, []);
   useEffect(() => {
     onExpandedChange?.(isExpanded);
   }, [isExpanded, onExpandedChange]);
@@ -2566,6 +2610,36 @@ export function ChatContainer({
 
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Pause banner — pinned just above the input so the user can't miss
+            that the agent stopped and which card needs filling. */}
+        {pendingPauses.length > 0 && (
+          <div className="pointer-events-auto px-3 pb-2 space-y-2">
+            {pendingPauses.map((p) => (
+              <button
+                key={p.inputId}
+                type="button"
+                onClick={onOpenConfigTab}
+                disabled={!onOpenConfigTab}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--primary)]/10 border border-[var(--primary)]/40 rounded-[var(--radius-small)] text-left hover:bg-[var(--primary)]/15 transition-colors disabled:cursor-default"
+              >
+                <Pause
+                  size={14}
+                  className="text-[var(--primary)] flex-shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-medium text-[var(--text)] truncate">
+                    Agent paused — waiting on{' '}
+                    <span className="font-semibold">{p.containerName}</span> config
+                  </p>
+                  <p className="text-[10px] text-[var(--text-muted)] truncate">
+                    {onOpenConfigTab ? 'Click to open the Config tab and fill the card.' : 'Open the Config tab to fill the card.'}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Chat input */}
         <div onFocus={handleInputFocus} className="pointer-events-auto">

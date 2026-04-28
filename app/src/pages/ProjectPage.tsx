@@ -19,6 +19,7 @@ import {
   Clock,
   BookOpen,
   Gear,
+  SlidersHorizontal,
 } from '@phosphor-icons/react';
 import { Tooltip } from '../components/ui/Tooltip';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
@@ -39,6 +40,7 @@ import {
   TerminalPanel,
   RepositoryPanel,
   NodeConfigPanel,
+  ConfigPanel,
 } from '../components/panels';
 import {
   NodeConfigPendingProvider,
@@ -91,6 +93,7 @@ const TOOL_LABELS: Record<ToolType, string> = {
   terminal: 'Terminal',
   repository: 'Repository',
   'node-config': 'Configure',
+  config: 'Config',
   volume: 'Snapshots',
   notes: 'Notes',
   settings: 'Settings',
@@ -171,22 +174,17 @@ function ProjectPageInner() {
     unsubs.push(
       nodeConfigEvents.on('user-input-required', (payload) => {
         if (!project?.id) return;
-        dock.openNodeConfigTab({
-          projectId: project.id as string,
-          containerId: payload.container_id,
-          containerName: payload.container_name,
-          schema: payload.schema,
-          initialValues: payload.initial_values,
-          mode: payload.mode,
-          preset: payload.preset,
-          agentInputId: payload.input_id,
-        });
+        // The persistent Config tab listens for this event on its own and
+        // surfaces the pending card. We don't open or focus the tab — the
+        // user navigates there via the tool button when they're ready (the
+        // chat pause banner gives them the entry point).
         markPending(payload.container_id);
       })
     );
 
     unsubs.push(
       nodeConfigEvents.on('node-config-resumed', (payload) => {
+        // Legacy ephemeral tab close-out kept as a safety net during rollout.
         dock.closeNodeConfigTabByInputId(payload.input_id);
         clearPending(payload.container_id);
         if (slug) {
@@ -291,6 +289,7 @@ function ProjectPageInner() {
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null);
   const [devServerUrlWithAuth, setDevServerUrlWithAuth] = useState<string | null>(null);
   const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string>('');
+  const [previewReloadKey, setPreviewReloadKey] = useState(0);
   const { isLeftSidebarExpanded, setIsLeftSidebarExpanded } = useBuilderShell();
 
   // Zen mode hides the chat panel and collapses the navigation rail; ⌘⇧\.
@@ -884,16 +883,15 @@ function ProjectPageInner() {
   // Preview helpers
   // ---------------------------------------------------------------------------
 
+  // State-driven reload: bumping this key forces React to remount the
+  // preview iframe element, which guarantees a fresh navigation. The
+  // previous imperative `iframe.src = …` mutation was unreliable — any
+  // subsequent React render would not re-set `src` (the JSX value hadn't
+  // changed) but a re-mount caused by a parent prop swap would silently
+  // drop the cache-busted URL, leaving the user staring at a stale frame.
   const refreshPreview = useCallback(() => {
-    if (devServerUrlWithAuth) {
-      const iframe = iframeRef.current;
-      if (iframe) {
-        const url = new URL(devServerUrlWithAuth);
-        url.searchParams.set('t', Date.now().toString());
-        iframe.src = url.toString();
-      }
-    }
-  }, [devServerUrlWithAuth]);
+    setPreviewReloadKey((k) => k + 1);
+  }, []);
 
   const navigateBack = useCallback(() => {
     const iframe = iframeRef.current;
@@ -1182,6 +1180,14 @@ function ProjectPageInner() {
     (e) => {
       e.preventDefault();
       dock.openTool('architecture');
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+shift+k',
+    (e) => {
+      e.preventDefault();
+      dock.openTool('config');
     },
     { enableOnFormTags: false }
   );
@@ -1537,6 +1543,7 @@ function ProjectPageInner() {
       restricted: !canAccessTerminal,
     },
     { id: 'repository', icon: <GithubLogo size={14} weight="bold" />, hotkey: '⌘8' },
+    { id: 'config', icon: <SlidersHorizontal size={14} weight="bold" />, hotkey: '⌘⇧K' },
     { id: 'volume', icon: <Clock size={14} weight="bold" />, hotkey: '' },
     { id: 'notes', icon: <BookOpen size={14} weight="bold" />, hotkey: '⌘⇧N' },
     {
@@ -1643,6 +1650,7 @@ function ProjectPageInner() {
     },
     disabled: !canChat,
     initialChatId: initialChatIdFromRoute ?? null,
+    onOpenConfigTab: () => dock.openTool('config'),
   } as const;
 
   // ---------------------------------------------------------------------------
@@ -1677,7 +1685,6 @@ function ProjectPageInner() {
         }}
         onStateChange={handleArchStateChange}
         readOnly={isViewer}
-        onPublishAsApp={canPublish ? handlePublishAsApp : undefined}
         marketplaceFocus={marketplaceFocus}
       />
     ),
@@ -1704,6 +1711,7 @@ function ProjectPageInner() {
         placeholder={noPreview ? previewPlaceholder : undefined}
         overlay={loadingOverlay ?? undefined}
         showClose={false}
+        reloadKey={previewReloadKey}
       />
     ),
     code: (_tab: TabInstance, _idx: number) => (
@@ -1762,6 +1770,14 @@ function ProjectPageInner() {
     repository: (_tab: TabInstance, _idx: number) => (
       <RepositoryPanel projectSlug={slug!} projectId={project?.id as number | undefined} />
     ),
+    config: (_tab: TabInstance, _idx: number) =>
+      project?.id ? (
+        <ConfigPanel projectId={project.id as string} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <p className="text-xs text-[var(--text-muted)]">Loading project…</p>
+        </div>
+      ),
     'node-config': (tab: TabInstance, _idx: number) => {
       const payload = dock.getNodeConfigPayload(tab.id);
       if (!payload) {
@@ -1933,17 +1949,6 @@ function ProjectPageInner() {
             aria-label="New terminal"
           >
             <Plus size={12} weight="bold" />
-          </button>
-        </Tooltip>
-      )}
-      {canPublish && (
-        <Tooltip content="Publish as App" side="bottom" delay={200}>
-          <button
-            onClick={handlePublishAsApp}
-            className="flex items-center justify-center h-6 w-6 rounded-[var(--radius-small)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
-            aria-label="Publish as App"
-          >
-            <Rocket size={12} weight="bold" />
           </button>
         </Tooltip>
       )}

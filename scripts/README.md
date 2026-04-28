@@ -13,7 +13,7 @@ scripts/
 └── utilities/        # Testing and maintenance utilities
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Local Development
 ```bash

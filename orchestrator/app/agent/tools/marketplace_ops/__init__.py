@@ -29,18 +29,22 @@ from .assign_mcp import register_assign_mcp_tool
 from .assign_skill import register_assign_skill_tool
 from .attach_schedule import register_attach_schedule_tool
 from .create_agent import register_create_agent_tool
+from .list_user_resources import register_list_user_resources_tool
 from .request_grant import register_request_grant_tool
+from .request_review import register_request_review_tool
 from .update_agent import register_update_agent_tool
 
 
 def register_all_marketplace_ops_tools(registry):
-    """Register all six marketplace authoring tools."""
+    """Register all marketplace authoring tools (the agent-builder surface)."""
     register_create_agent_tool(registry)
     register_update_agent_tool(registry)
     register_assign_skill_tool(registry)
     register_assign_mcp_tool(registry)
     register_attach_schedule_tool(registry)
     register_request_grant_tool(registry)
+    register_list_user_resources_tool(registry)
+    register_request_review_tool(registry)
 
 
 __all__ = [
@@ -49,6 +53,8 @@ __all__ = [
     "register_assign_skill_tool",
     "register_attach_schedule_tool",
     "register_create_agent_tool",
+    "register_list_user_resources_tool",
     "register_request_grant_tool",
+    "register_request_review_tool",
     "register_update_agent_tool",
 ]

@@ -9,6 +9,7 @@
 
 import type {
   ArchitectureNodeAddedEvent,
+  ContainersRestartingEvent,
   NodeConfigCancelledEvent,
   NodeConfigResumedEvent,
   SecretRotatedEvent,
@@ -28,6 +29,7 @@ export type NodeConfigEventMap = {
   'node-config-resumed': NodeConfigResumedEvent;
   'node-config-cancelled': NodeConfigCancelledEvent;
   'secret-rotated': SecretRotatedEvent;
+  'containers-restarting': ContainersRestartingEvent;
   'open-config-tab-request': OpenConfigTabRequest;
 };
 

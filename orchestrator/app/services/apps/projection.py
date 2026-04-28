@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models import AppVersion, MarketplaceApp
@@ -34,6 +34,9 @@ from ...models_automations import (
     AppDataResource,
     AppDependency,
     AppView,
+    AutomationAction,
+    AutomationDefinition,
+    InvocationSubject,
 )
 from .app_manifest import AppManifest2026_05
 from .manifest_parser import ManifestValidationError, parse as parse_manifest
@@ -191,6 +194,31 @@ async def regenerate_projection(
 
     # 5. Open the savepoint. All six writes live or die together.
     async with db.begin_nested():
+        # 5a-pre. Snapshot dependents BEFORE the DELETE so we can rebind
+        # them by slug after re-inserting AppAction rows. Without this:
+        # ``automation_actions.app_action_id`` is FK ``ON DELETE SET NULL``,
+        # so the cascade silently nulls every existing automation that
+        # pointed at this app_version's actions and the dispatcher then
+        # raises ``ContractInvalid`` on every subsequent run. The rebind
+        # at 5b-post repoints survivors at the new same-named row, or
+        # pauses the owning definition if the slug disappeared in the
+        # new manifest. Same idea for ``invocation_subjects`` (billing
+        # attribution; rebound when possible, NULL-tolerated otherwise).
+        old_action_dependents = (
+            await db.execute(
+                select(AutomationAction.id, AppAction.name)
+                .join(AppAction, AppAction.id == AutomationAction.app_action_id)
+                .where(AppAction.app_version_id == app_version_id)
+            )
+        ).all()
+        old_subject_dependents = (
+            await db.execute(
+                select(InvocationSubject.id, AppAction.name)
+                .join(AppAction, AppAction.id == InvocationSubject.app_action_id)
+                .where(AppAction.app_version_id == app_version_id)
+            )
+        ).all()
+
         # 5a. DELETE in reverse-FK order. ``app_data_resources`` is wiped
         # FIRST because it FKs ``app_actions``; even though the migration
         # declares ON DELETE CASCADE on that FK (so deleting actions would
@@ -237,6 +265,73 @@ async def regenerate_projection(
             # only intra-projection FK references we have.
             await db.flush()
             action_id_by_name[action_spec.name] = row.id
+
+        # 5b-post. Rebind dependents snapshotted at 5a-pre. Walks the
+        # ``(dependent_id, slug)`` snapshots and points each survivor at
+        # the new same-named ``AppAction``. Slugs that vanished from the
+        # new manifest leave the dependent's FK NULL and pause the owning
+        # ``AutomationDefinition`` so the cron stops firing into a state
+        # the dispatcher would only reject.
+        orphaned_definition_ids: set[UUID] = set()
+        for aa_id, slug in old_action_dependents:
+            new_id = action_id_by_name.get(slug)
+            if new_id is not None:
+                await db.execute(
+                    update(AutomationAction)
+                    .where(AutomationAction.id == aa_id)
+                    .values(app_action_id=new_id)
+                )
+            else:
+                owning_def_id = (
+                    await db.execute(
+                        select(AutomationAction.automation_id).where(
+                            AutomationAction.id == aa_id
+                        )
+                    )
+                ).scalar_one_or_none()
+                if owning_def_id is not None:
+                    orphaned_definition_ids.add(owning_def_id)
+
+        for def_id in orphaned_definition_ids:
+            await db.execute(
+                update(AutomationDefinition)
+                .where(AutomationDefinition.id == def_id)
+                .values(
+                    is_active=False,
+                    paused_reason="action_removed_in_upgrade",
+                )
+            )
+
+        for is_id, slug in old_subject_dependents:
+            new_id = action_id_by_name.get(slug)
+            if new_id is not None:
+                await db.execute(
+                    update(InvocationSubject)
+                    .where(InvocationSubject.id == is_id)
+                    .values(app_action_id=new_id)
+                )
+            # Else: leave NULL — billing attribution is best-effort, and
+            # losing the FK on a historical row only loses metadata, not
+            # money. The unified billing path doesn't hard-require it.
+
+        if old_action_dependents or old_subject_dependents:
+            rebound_actions = sum(
+                1 for _, slug in old_action_dependents if slug in action_id_by_name
+            )
+            rebound_subjects = sum(
+                1 for _, slug in old_subject_dependents if slug in action_id_by_name
+            )
+            logger.info(
+                "regenerate_projection: app_version=%s rebound %d/%d "
+                "automation_action(s); paused %d definition(s) for missing "
+                "slugs; rebound %d/%d invocation_subject(s)",
+                app_version_id,
+                rebound_actions,
+                len(old_action_dependents),
+                len(orphaned_definition_ids),
+                rebound_subjects,
+                len(old_subject_dependents),
+            )
 
         for view_spec in manifest.views:
             db.add(

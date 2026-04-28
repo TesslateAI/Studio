@@ -170,3 +170,96 @@ def test_end_to_end_pause_and_resume_via_router(authenticated_client, monkeypatc
     assert "node_config_resumed" in types
     assert types.index("architecture_node_added") < types.index("user_input_required")
     assert types.index("user_input_required") < types.index("node_config_resumed")
+
+
+@pytest.mark.integration
+def test_wait_for_input_false_returns_immediately_without_pausing(
+    authenticated_client, monkeypatch
+):
+    """``wait_for_input=False`` should:
+      * NOT emit ``user_input_required``
+      * NOT pause the agent (no submit needed)
+      * Still emit ``architecture_node_added``
+      * Return key names from the preset schema with ``deferred=True``
+      * Persist a Container row with empty env_vars / secrets
+    """
+    from app.agent.tools import approval_manager as am
+    from app.agent.tools.node_config import request_node_config as rnc
+
+    am._manager = None
+
+    recorder = _EventRecorder()
+    monkeypatch.setattr(rnc, "get_pubsub", lambda: recorder)
+
+    _, user_data = authenticated_client
+    user_id = UUID(user_data["id"])
+    loop = asyncio.new_event_loop()
+
+    try:
+        project_id = loop.run_until_complete(_create_project(user_id))
+
+        async def _run_flow() -> dict:
+            from sqlalchemy.ext.asyncio import (
+                AsyncSession,
+                async_sessionmaker,
+                create_async_engine,
+            )
+
+            engine = create_async_engine(
+                "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
+                pool_pre_ping=True,
+            )
+            Session = async_sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )
+
+            async with Session() as db:
+                context = {
+                    "db": db,
+                    "project_id": project_id,
+                    "user_id": user_id,
+                    "task_id": "ff-task-1",
+                    "chat_id": "ff-chat-1",
+                }
+                # No submitter background task — the call should return on its own.
+                result = await asyncio.wait_for(
+                    rnc.request_node_config_executor(
+                        {
+                            "node_name": "stripe",
+                            "preset": "stripe",
+                            "wait_for_input": False,
+                        },
+                        context,
+                    ),
+                    timeout=5.0,  # if we hang here the executor is still pausing
+                )
+
+            await engine.dispose()
+            return result
+
+        result = loop.run_until_complete(_run_flow())
+    finally:
+        loop.close()
+
+    # --- Assertions ---
+    assert result["success"] is True
+    assert result["created"] is True
+    assert result["deferred"] is True
+    # Key names from the stripe preset; no values, no secrets
+    assert set(result["configured_keys"]) == {
+        "STRIPE_PUBLISHABLE_KEY",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+    }
+    assert set(result["secret_keys"]) == {
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+    }
+    assert result["non_secret_values"] == {}
+    assert result["updated_keys"] == []
+    assert result["rotated_secrets"] == []
+
+    types = [e.get("type") for e in recorder.events]
+    assert "architecture_node_added" in types
+    assert "user_input_required" not in types
+    assert "node_config_resumed" not in types

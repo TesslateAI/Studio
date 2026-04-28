@@ -507,3 +507,163 @@ def test_artifact_404_when_missing(app_client) -> None:
         f"/api/automations/{aid}/runs/{run['run_id']}/artifacts/{uuid.uuid4()}"
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Tests — app-instance scoping (drawer filter + runs-by-install)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_app_install(db, owner_id: uuid.UUID) -> uuid.UUID:
+    """Insert a minimal MarketplaceApp + AppVersion + AppInstance owned by
+    ``owner_id`` and return the install id.
+
+    Bypasses the full install saga — we only need a valid FK target for
+    ``automation_definitions.app_instance_id`` and a row whose
+    ``installer_user_id`` matches the test user.
+    """
+    from app.models import AppVersion, MarketplaceApp
+    from app.models_automations import AppInstance
+
+    app_id = uuid.uuid4()
+    db.add(
+        MarketplaceApp(
+            id=app_id,
+            slug=f"app-{app_id.hex[:8]}",
+            name="Test App",
+            category="utility",
+            creator_user_id=owner_id,
+            state="approved",
+        )
+    )
+    version_id = uuid.uuid4()
+    db.add(
+        AppVersion(
+            id=version_id,
+            app_id=app_id,
+            version="1.0.0",
+            manifest_schema_version="2026-05",
+            manifest_json={"manifest_schema_version": "2026-05"},
+            manifest_hash="x" * 64,
+            feature_set_hash="y" * 64,
+            approval_state="stage1_approved",
+        )
+    )
+    install_id = uuid.uuid4()
+    db.add(
+        AppInstance(
+            id=install_id,
+            app_id=app_id,
+            app_version_id=version_id,
+            installer_user_id=owner_id,
+            state="installed",
+        )
+    )
+    await db.flush()
+    return install_id
+
+
+@pytest.mark.unit
+def test_list_filters_by_app_instance_id(app_client) -> None:
+    client, owner_id, session_maker = app_client
+
+    async def _seed():
+        async with session_maker() as db:
+            iid = await _seed_app_install(db, owner_id)
+            await db.commit()
+            return iid
+
+    install_id = asyncio.run(_seed())
+
+    # One scoped to the install, one unscoped.
+    scoped = client.post(
+        "/api/automations",
+        json={
+            **_good_create_payload(),
+            "name": "scoped",
+            "app_instance_id": str(install_id),
+        },
+    )
+    assert scoped.status_code == 201, scoped.text
+    unscoped = client.post(
+        "/api/automations",
+        json={**_good_create_payload(), "name": "unscoped"},
+    )
+    assert unscoped.status_code == 201, unscoped.text
+
+    # Filtered list returns only the scoped row.
+    resp = client.get(
+        f"/api/automations?app_instance_id={install_id}"
+    )
+    assert resp.status_code == 200, resp.text
+    names = [i["name"] for i in resp.json()]
+    assert names == ["scoped"]
+
+    # Unfiltered list still returns both — preserves the global page's view.
+    all_resp = client.get("/api/automations")
+    all_names = sorted(i["name"] for i in all_resp.json())
+    assert all_names == ["scoped", "unscoped"]
+
+
+@pytest.mark.unit
+def test_create_rejects_unknown_app_instance_id(app_client) -> None:
+    client, _, _ = app_client
+    resp = client.post(
+        "/api/automations",
+        json={
+            **_good_create_payload(),
+            "app_instance_id": str(uuid.uuid4()),
+        },
+    )
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.unit
+def test_runs_by_install_returns_runs_across_automations(app_client) -> None:
+    client, owner_id, session_maker = app_client
+
+    async def _seed():
+        async with session_maker() as db:
+            iid = await _seed_app_install(db, owner_id)
+            await db.commit()
+            return iid
+
+    install_id = asyncio.run(_seed())
+
+    # Two scoped automations; one unscoped (must NOT appear in the per-install runs).
+    a1 = client.post(
+        "/api/automations",
+        json={
+            **_good_create_payload(),
+            "name": "a1",
+            "app_instance_id": str(install_id),
+        },
+    ).json()
+    a2 = client.post(
+        "/api/automations",
+        json={
+            **_good_create_payload(),
+            "name": "a2",
+            "app_instance_id": str(install_id),
+        },
+    ).json()
+    other = client.post(
+        "/api/automations", json={**_good_create_payload(), "name": "other"}
+    ).json()
+
+    r1 = client.post(f"/api/automations/{a1['id']}/run", json={}).json()
+    r2 = client.post(f"/api/automations/{a2['id']}/run", json={}).json()
+    r_other = client.post(f"/api/automations/{other['id']}/run", json={}).json()
+
+    resp = client.get(f"/api/automations/runs/by-install/{install_id}")
+    assert resp.status_code == 200, resp.text
+    ids = {r["id"] for r in resp.json()}
+    assert ids == {r1["run_id"], r2["run_id"]}
+    assert r_other["run_id"] not in ids
+
+
+@pytest.mark.unit
+def test_runs_by_install_404_for_unknown_install(app_client) -> None:
+    client, _, _ = app_client
+    resp = client.get(f"/api/automations/runs/by-install/{uuid.uuid4()}")
+    assert resp.status_code == 404

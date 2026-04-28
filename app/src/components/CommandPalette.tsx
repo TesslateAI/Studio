@@ -427,7 +427,9 @@ function resolveAction(id: string, deps: ActionDeps): (() => void) | null {
     case 'settings-billing':
       return () => navigate('/settings/team/billing');
     case 'settings-channels':
-      return () => navigate('/settings/messaging/channels');
+      // Channels moved to Library → Channels. Command ID stays stable so any
+      // user-bound keyboard shortcut keeps working.
+      return () => navigate('/library?tab=channels');
     case 'settings-schedules':
       return () => navigate('/settings/messaging/schedules');
     case 'settings-connections':

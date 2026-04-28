@@ -16,6 +16,7 @@ import AgentsPage from './library/AgentsPage';
 import SkillsPage from './library/SkillsPage';
 import BasesPage from './library/BasesPage';
 import ConnectorsPage from './library/ConnectorsPage';
+import ChannelsPage from './library/ChannelsPage';
 import ModelsPage from './library/ModelsPage';
 import ThemesPage from './library/ThemesPage';
 import type { LibraryTheme } from './library/ThemesPage';
@@ -51,7 +52,14 @@ interface Provider {
   api_type?: string;
 }
 
-type TabType = 'agents' | 'bases' | 'skills' | 'mcp_servers' | 'themes' | 'models';
+type TabType =
+  | 'agents'
+  | 'bases'
+  | 'skills'
+  | 'mcp_servers'
+  | 'channels'
+  | 'themes'
+  | 'models';
 
 interface ModelInfo {
   id: string;
@@ -233,6 +241,10 @@ export default function Library() {
         // works on first open without a manual round-trip through the
         // Agents tab.
         await Promise.all([loadMcpServers(), loadLibraryAgents()]);
+        setLoading(false);
+      } else if (activeTab === 'channels') {
+        // ChannelsPage owns its own data lifecycle (calls channelsApi.list
+        // in a useEffect). Library.tsx just needs to mount it.
         setLoading(false);
       } else if (activeTab === 'themes') {
         await loadLibraryThemes();
@@ -517,6 +529,8 @@ export default function Library() {
             onBrowse={() => navigate('/marketplace/browse/mcp_server')}
           />
         )}
+
+        {activeTab === 'channels' && <ChannelsPage />}
 
         {activeTab === 'themes' && (
           <ThemesPage

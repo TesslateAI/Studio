@@ -351,7 +351,17 @@ export default function Chat() {
 
   // Handle approval with mode switching
   const handleApprovalResponse = useCallback(
-    async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop', toolName: string) => {
+    async (
+      approvalId: string,
+      response:
+        | 'allow_once'
+        | 'allow_all'
+        | 'stop'
+        | 'publish_and_activate'
+        | 'save_draft'
+        | 'cancel',
+      toolName: string
+    ) => {
       await handleApproval(approvalId, response);
       const WRITE_TOOLS = new Set(['write_file', 'patch_file', 'multi_edit']);
       if (response === 'allow_all' && WRITE_TOOLS.has(toolName)) {

@@ -78,6 +78,18 @@ class AutomationDefinition(Base):
         GUID(), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
 
+    # Optional link to the AppInstance this automation was authored for.
+    # Surfaces in the per-app drawer (``AppWorkspacePage``) so its
+    # Automations / Runs tabs only show items relevant to the install the
+    # user is viewing. SET NULL on uninstall — see migration 0087 for the
+    # rationale (preserve audit chain, soft-degrade to global list).
+    app_instance_id = Column(
+        GUID(),
+        ForeignKey("app_instances.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     contract = Column(JSON, nullable=False)
 
     # Compute / spend ceilings — enforced by ContractGate at runtime.

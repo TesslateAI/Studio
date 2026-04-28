@@ -6,6 +6,7 @@ import {
   sendDesignMessage,
 } from './DesignBridge';
 import { CanvasViewport } from './CanvasViewport';
+import { useDesignStore, clearPendingInsert } from './designStore';
 
 // ── Bridge status types ──────────────────────────────────────────
 type BridgeStatus = 'not-installed' | 'connecting' | 'ready' | 'unavailable';
@@ -292,9 +293,14 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     return null;
   };
 
+  const pendingInsert = useDesignStore((s) => s.pendingInsert);
+
   return (
     <div className="relative w-full h-full bg-black overflow-hidden">
-      <CanvasViewport>
+      <CanvasViewport
+        contentWidth={viewportWidth === 'fit' ? FIT_CANVAS_WIDTH : viewportWidth}
+        contentHeight={FIT_CANVAS_HEIGHT}
+      >
         <div style={containerStyle} className="relative">
           <iframe
             id="design-preview-iframe"
@@ -314,6 +320,27 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           */}
         </div>
       </CanvasViewport>
+
+      {/* Placement-mode pill — shown while waiting for a click target. */}
+      {pendingInsert && (
+        <div
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1 rounded-full text-[11px] backdrop-blur-sm border shadow-md"
+          style={{
+            background: 'color-mix(in srgb, var(--primary, #3b82f6) 18%, var(--surface, #1e1e1e))',
+            borderColor: 'var(--primary)',
+            color: 'var(--text)',
+          }}
+        >
+          <span>Click an element to drop your snippet · Esc to cancel</span>
+          <button
+            type="button"
+            onClick={() => clearPendingInsert()}
+            className="text-[10px] underline opacity-80 hover:opacity-100"
+          >
+            cancel
+          </button>
+        </div>
+      )}
 
       {/* Install bridge prompt — centered over preview (not canvas-transformed). */}
       {bridgeStatus === 'not-installed' && (

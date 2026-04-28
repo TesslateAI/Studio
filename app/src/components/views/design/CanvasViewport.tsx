@@ -19,8 +19,8 @@ import {
   beginPan,
   clearSnapLines,
   endPan,
-  resetCanvas,
   setPosition,
+  setScale,
   useCanvasStore,
   zoomAt,
   zoomCentered,
@@ -29,18 +29,43 @@ import { SnapOverlay } from './SnapOverlay';
 
 interface CanvasViewportProps {
   children: React.ReactNode;
+  /** Intrinsic content width in canvas coords. Used to auto-center the
+   *  frame so the iframe sits in the middle of the viewport instead of
+   *  the top-left corner (its raw 0,0 origin). */
+  contentWidth: number;
+  contentHeight: number;
 }
+
+/** Window event that triggers a manual recenter (Toolbar dispatches it). */
+export const RECENTER_CANVAS_EVENT = 'design:recenter-canvas';
 
 /** Element id used by adaptRectToCanvas and anything that wants to
  *  read the current canvas transform matrix off the DOM. */
 export const CANVAS_FRAME_ID = 'design-canvas-frame';
 
-export const CanvasViewport: React.FC<CanvasViewportProps> = ({ children }) => {
+export const CanvasViewport: React.FC<CanvasViewportProps> = ({ children, contentWidth, contentHeight }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const scale = useCanvasStore((s) => s.scale);
   const position = useCanvasStore((s) => s.position);
   const isPanning = useCanvasStore((s) => s.isPanning);
+  const slug = useCanvasStore((s) => s.slug);
+
+  // Track whether the user has actively panned/zoomed. Until they have,
+  // the viewport keeps re-centering on content/container size changes.
+  const hasUserMovedRef = useRef(false);
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
+  const contentWRef = useRef(contentWidth);
+  contentWRef.current = contentWidth;
+  const contentHRef = useRef(contentHeight);
+  contentHRef.current = contentHeight;
+
+  // Reset auto-center tracking whenever the project (or breakpoint) changes
+  // so the new content lands centered.
+  useEffect(() => {
+    hasUserMovedRef.current = false;
+  }, [slug, contentWidth, contentHeight]);
 
   // Local refs so event handlers don't re-bind on every state change.
   const spaceDownRef = useRef(false);
@@ -62,22 +87,81 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ children }) => {
   const positionRef = useRef(position);
   positionRef.current = position;
 
-  // ── Wheel zoom ────────────────────────────────────────────────────
+  // ── Wheel: ctrl/cmd = zoom, otherwise pan (Figma-style trackpad) ──
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const handleWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        zoomAt(e.clientX, e.clientY, e.deltaY, { left: rect.left, top: rect.top });
+        hasUserMovedRef.current = true;
+        return;
+      }
+      // Trackpad two-finger scroll OR shift+wheel → pan. Mouse wheel
+      // without modifier is also treated as vertical pan so users always
+      // have a way to move the canvas without learning hotkeys.
       e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      zoomAt(e.clientX, e.clientY, e.deltaY, { left: rect.left, top: rect.top });
+      const dx = e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX;
+      const dy = e.shiftKey && e.deltaX === 0 ? 0 : e.deltaY;
+      setPosition({ x: positionRef.current.x - dx, y: positionRef.current.y - dy });
+      hasUserMovedRef.current = true;
     };
 
     // Must be non-passive to call preventDefault.
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
   }, []);
+
+  // ── Auto-center until the user moves the canvas ────────────────────
+  const recenter = useCallback((opts?: { resetZoom?: boolean }) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const targetScale = opts?.resetZoom ? 1 : scaleRef.current;
+    if (opts?.resetZoom && targetScale !== scaleRef.current) {
+      setScale(1);
+    }
+    const w = contentWRef.current;
+    const h = contentHRef.current;
+    if (!w || !h || rect.width === 0 || rect.height === 0) return;
+    setPosition({
+      x: (rect.width - w * targetScale) / 2,
+      y: (rect.height - h * targetScale) / 2,
+    });
+    if (opts?.resetZoom) hasUserMovedRef.current = false;
+  }, []);
+
+  // Initial + responsive auto-center while the user hasn't moved yet.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const tryCenter = () => {
+      if (hasUserMovedRef.current) return;
+      recenter();
+    };
+    tryCenter();
+    const ro = new ResizeObserver(() => tryCenter());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [recenter]);
+
+  // Re-center whenever content dimensions change (e.g. breakpoint switch),
+  // even after the user has moved — switching viewport is an intentional
+  // signal to re-frame.
+  useEffect(() => {
+    hasUserMovedRef.current = false;
+    recenter();
+  }, [contentWidth, contentHeight, recenter]);
+
+  // External recenter request (Toolbar button → window event).
+  useEffect(() => {
+    const handler = () => recenter({ resetZoom: true });
+    window.addEventListener(RECENTER_CANVAS_EVENT, handler);
+    return () => window.removeEventListener(RECENTER_CANVAS_EVENT, handler);
+  }, [recenter]);
 
   // ── Space key tracking (global so it works when the iframe has focus too) ──
   useEffect(() => {
@@ -134,6 +218,7 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ children }) => {
       originY: positionRef.current.y,
       pointerId: e.pointerId,
     };
+    hasUserMovedRef.current = true;
     beginPan();
     clearSnapLines();
     el.style.cursor = 'grabbing';
@@ -183,16 +268,22 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ children }) => {
     return { width: rect.width, height: rect.height };
   }, []);
 
-  useHotkeys('0', () => resetCanvas(), { preventDefault: true }, []);
+  useHotkeys('0', () => recenter({ resetZoom: true }), { preventDefault: true }, [recenter]);
   useHotkeys(
     ['=', '+', 'shift+='],
-    () => zoomCentered(1.2, getViewportSize()),
+    () => {
+      hasUserMovedRef.current = true;
+      zoomCentered(1.2, getViewportSize());
+    },
     { preventDefault: true },
     [getViewportSize],
   );
   useHotkeys(
     ['-', '_'],
-    () => zoomCentered(1 / 1.2, getViewportSize()),
+    () => {
+      hasUserMovedRef.current = true;
+      zoomCentered(1 / 1.2, getViewportSize());
+    },
     { preventDefault: true },
     [getViewportSize],
   );
@@ -241,14 +332,14 @@ export const CanvasViewport: React.FC<CanvasViewportProps> = ({ children }) => {
 
       <button
         type="button"
-        onClick={() => resetCanvas()}
+        onClick={() => recenter({ resetZoom: true })}
         className="absolute bottom-2 right-2 z-20 flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium backdrop-blur-sm border hover:opacity-90 transition-opacity"
         style={{
           background: 'color-mix(in srgb, var(--surface, #1e1e1e) 85%, transparent)',
           borderColor: 'var(--border)',
           color: 'var(--text-muted)',
         }}
-        title="Reset zoom (0)"
+        title="Recenter (0)"
       >
         <Maximize2 className="w-3 h-3" />
         <span>{zoomPct}%</span>

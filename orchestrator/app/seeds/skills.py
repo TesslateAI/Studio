@@ -236,7 +236,7 @@ TESSLATE_SKILLS = [
         ),
         "category": "deployment",
         "item_type": "skill",
-        "icon": "🚀",
+        "icon": "▲",
         "pricing_type": "free",
         "price": 0,
         "source_type": "open",

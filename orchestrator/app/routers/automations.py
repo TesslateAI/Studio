@@ -185,6 +185,7 @@ async def _project_definition(
         workspace_scope=definition.workspace_scope,
         workspace_project_id=definition.workspace_project_id,
         target_project_id=definition.target_project_id,
+        app_instance_id=definition.app_instance_id,
         contract=definition.contract or {},
         max_compute_tier=definition.max_compute_tier,
         max_spend_per_run_usd=definition.max_spend_per_run_usd,
@@ -294,6 +295,64 @@ async def _load_definition_or_404(
 
 
 # ---------------------------------------------------------------------------
+# Cross-automation run listing (must be registered before the
+# ``/{automation_id}`` dynamic routes so FastAPI matches the static segment
+# first).
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/runs/by-install/{app_instance_id}",
+    response_model=list[AutomationRunSummary],
+)
+async def list_runs_by_install(
+    app_instance_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    status_filter: str | None = Query(default=None, alias="status"),
+) -> list[AutomationRunSummary]:
+    """Recent runs across every automation linked to one ``AppInstance``.
+
+    Surfaces in the per-app drawer's "Runs" tab. Without this the UI would
+    have to fan out one ``listRuns(automation_id)`` call per automation
+    (N+1) and merge — this single query keeps the drawer cheap regardless
+    of how many automations the user has wired into the install.
+
+    Auth model: the caller must own the install (``installer_user_id``).
+    Team-shared installs are out of scope here — the per-app drawer is
+    always rendered for the install's owner. We 404 (not 403) on miss to
+    match the existing leak-resistant pattern in this router.
+    """
+    from ..models_automations import AppInstance
+
+    ai = (
+        await db.execute(select(AppInstance).where(AppInstance.id == app_instance_id))
+    ).scalar_one_or_none()
+    if ai is None or (
+        ai.installer_user_id != user.id and not getattr(user, "is_superuser", False)
+    ):
+        raise HTTPException(status_code=404, detail="App install not found")
+
+    query = (
+        select(AutomationRun)
+        .join(
+            AutomationDefinition,
+            AutomationDefinition.id == AutomationRun.automation_id,
+        )
+        .where(AutomationDefinition.app_instance_id == app_instance_id)
+        .order_by(AutomationRun.created_at.desc())
+    )
+    if status_filter is not None:
+        query = query.where(AutomationRun.status == status_filter)
+    query = query.limit(limit).offset(offset)
+
+    rows = (await db.execute(query)).scalars().all()
+    return [AutomationRunSummary.model_validate(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # CRUD: AutomationDefinition
 # ---------------------------------------------------------------------------
 
@@ -305,6 +364,13 @@ async def list_automations(
     is_active: bool | None = Query(default=None),
     workspace_scope: str | None = Query(default=None),
     team_id: UUID | None = Query(default=None),
+    app_instance_id: UUID | None = Query(
+        default=None,
+        description=(
+            "Scope the list to automations linked to a specific AppInstance. "
+            "Used by the per-app drawer in the workspace UI."
+        ),
+    ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> list[AutomationDefinitionSummary]:
@@ -346,6 +412,8 @@ async def list_automations(
         query = query.where(AutomationDefinition.workspace_scope == workspace_scope)
     if team_id is not None:
         query = query.where(AutomationDefinition.team_id == team_id)
+    if app_instance_id is not None:
+        query = query.where(AutomationDefinition.app_instance_id == app_instance_id)
 
     query = (
         query.order_by(AutomationDefinition.created_at.desc())
@@ -388,6 +456,23 @@ async def create_automation(
                 detail="Cannot create a team-scoped automation without editor+ role",
             )
 
+    # Validate the app_instance_id (when provided) is one the caller can
+    # see. Reusing the same 404 pattern as ``_authorize_definition`` so we
+    # don't leak existence of someone else's install.
+    if payload.app_instance_id is not None:
+        from ..models_automations import AppInstance
+
+        ai = (
+            await db.execute(
+                select(AppInstance).where(AppInstance.id == payload.app_instance_id)
+            )
+        ).scalar_one_or_none()
+        if ai is None or ai.installer_user_id != user.id:
+            raise HTTPException(
+                status_code=404,
+                detail="App install not found",
+            )
+
     automation = AutomationDefinition(
         id=uuid4(),
         name=payload.name,
@@ -396,6 +481,7 @@ async def create_automation(
         workspace_scope=payload.workspace_scope,
         workspace_project_id=payload.workspace_project_id,
         target_project_id=payload.target_project_id,
+        app_instance_id=payload.app_instance_id,
         contract=payload.contract,
         max_compute_tier=payload.max_compute_tier,
         max_spend_per_run_usd=payload.max_spend_per_run_usd,

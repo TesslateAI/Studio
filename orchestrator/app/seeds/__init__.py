@@ -9,6 +9,7 @@ import logging
 from .community_bases import seed_community_bases
 from .deployment_targets import seed_deployment_targets
 from .marketplace_agents import (
+    auto_add_agent_builder_to_users,
     auto_add_librarian_agent_to_users,
     auto_add_tesslate_agent_to_users,
     get_or_create_tesslate_account,
@@ -36,6 +37,7 @@ __all__ = [
     "seed_deployment_targets",
     "auto_add_tesslate_agent_to_users",
     "auto_add_librarian_agent_to_users",
+    "auto_add_agent_builder_to_users",
     "get_or_create_tesslate_account",
     "WORKFLOW_TEMPLATES",
 ]
@@ -96,6 +98,14 @@ async def run_all_seeds():
             logger.info("Auto-add Librarian agent: %d users updated", count)
         except Exception:
             logger.exception("Failed to auto-add Librarian agent to users")
+            await db.rollback()
+
+        # 4c. Auto-add Agent Builder to all users
+        try:
+            count = await auto_add_agent_builder_to_users(db)
+            logger.info("Auto-add Agent Builder: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Agent Builder to users")
             await db.rollback()
 
         # 5. Skills (item_type='skill')
