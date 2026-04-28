@@ -92,6 +92,30 @@ OpenSail is for developers, operators, founders, legal teams, support teams, and
 
 ---
 
+## Turn best practices into shared agents
+
+Turn institutional knowledge into agents the whole team can run.
+
+<p align="center">
+  <img src="assets/at-mention.png" alt="@-mention any tool, MCP, app, or agent on your platform from chat" width="85%" />
+</p>
+
+Knowledge is scattered across people and systems. OpenSail gives teams a way to turn that knowledge into a reusable agent or workflow that follows the right process, uses the right tools, and can be shared across the organization.
+
+Build once, improve through use, then share or duplicate for new workflows. Because agents have memory and can be guided and corrected in conversation, they get better as teams use them.
+
+**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists.
+
+<p align="center">
+  <img src="assets/marketplace-agents.png" alt="Browse the agents marketplace — install, fork, and customize what your team has built" width="85%" />
+</p>
+
+**Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
+
+**Scale a working process.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
+
+---
+
 ## Agents
 
 Give recurring work a capable owner, then manage your fleet as it grows.
@@ -119,30 +143,6 @@ Agents are how OpenSail turns personal process knowledge into durable software. 
 <p align="center">
   <img src="assets/agents-code-diffs.png" alt="An agent building an app, with reviewable code diffs" width="85%" />
 </p>
-
----
-
-## Turn best practices into shared agents
-
-Turn institutional knowledge into agents the whole team can run.
-
-<p align="center">
-  <img src="assets/at-mention.png" alt="@-mention any tool, MCP, app, or agent on your platform from chat" width="85%" />
-</p>
-
-Knowledge is scattered across people and systems. OpenSail gives teams a way to turn that knowledge into a reusable agent or workflow that follows the right process, uses the right tools, and can be shared across the organization.
-
-Build once, improve through use, then share or duplicate for new workflows. Because agents have memory and can be guided and corrected in conversation, they get better as teams use them.
-
-**Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists.
-
-<p align="center">
-  <img src="assets/marketplace-agents.png" alt="Browse the agents marketplace — install, fork, and customize what your team has built" width="85%" />
-</p>
-
-**Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
-
-**Scale a working process.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
 
 ---
 
