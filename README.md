@@ -9,7 +9,7 @@ OpenSail is the open-source alternative to Codex App, Claude Desktop, Cursor, an
 <p align="center">
   <a href="https://docs.tesslate.com"><strong>Docs</strong></a> ·
   <a href="https://docs.tesslate.com/quickstart"><strong>Quickstart</strong></a> ·
-  <a href="https://discord.gg/DkzMzwBTaw"><strong>Discord</strong></a> ·
+  <a href="https://discord.gg/DkzMzwBTaw"><strong>Join Discord</strong></a> ·
   <a href="https://github.com/TesslateAI/opensail/releases"><strong>Releases</strong></a>
 </p>
 
@@ -26,7 +26,7 @@ Run it on your infrastructure. Use any model. Open source. Your cloud, your code
   <a href="#"><img src="https://img.shields.io/badge/License-Apache_2.0-green?style=flat-square" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Platform-Linux_%7C_macOS_%7C_Windows-blue?style=flat-square" alt="Platform" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Runtime-Kubernetes_Native-purple?style=flat-square" alt="Runtime" /></a>
-  <a href="https://discord.gg/DkzMzwBTaw"><img src="https://img.shields.io/discord/000000000?label=Discord&style=flat-square" alt="Discord" /></a>
+  <a href="https://discord.gg/DkzMzwBTaw"><img src="https://img.shields.io/badge/Join_Discord-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Join Discord" /></a>
 </p>
 
 ---
@@ -336,6 +336,10 @@ Build once, improve through use, then share or duplicate for new workflows. Beca
 
 **Discover what your team has built.** Browse shared agents, apps, and workflows. Fork what works. Build on top of what already exists.
 
+<p align="center">
+  <img src="assets/marketplace-agents.png" alt="Browse the agents marketplace — install, fork, and customize what your team has built" width="85%" />
+</p>
+
 **Collaborate across tools.** Set agents to run on a schedule, or deploy them in Slack so they pick up requests as they come in. Agents join the conversations where work already happens.
 
 **Scale a working process.** Something that works for one person should work for a hundred. OpenSail handles the infrastructure so you can focus on the workflow.
@@ -489,6 +493,10 @@ OpenSail is model-agnostic. All model calls route through LiteLLM. Switch provid
 ## Deployment targets
 
 Ship to 22 places by drawing an edge.
+
+<p align="center">
+  <img src="assets/deployment-targets.png" alt="Pick from 22 deployment providers — serverless, container, static, and registry targets" width="85%" />
+</p>
 
 Deploy from the Architecture Panel. Draw an edge from a container to a deployment target. A/B deployments work naturally: connect the same container to two targets (Vercel for production, Cloudflare for preview) and each gets independent deployment history and rollback.
 
