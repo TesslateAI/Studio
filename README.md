@@ -5,9 +5,9 @@
 <h1 align="center">OpenSail</h1>
 
 <p align="center">
-Build AI software for the messy work your team still does by hand.<br />
-Turn Slack threads, inboxes, spreadsheets, tickets, approvals, and one-off scripts into apps, agents, and automations.<br />
-Connect the tools where work already happens. Put approvals, budgets, permissions, and logs around every run.<br />
+OpenSail is the open platform for building AI apps, agents, workflows, and automations you can own.<br />
+Turn recurring work from Slack, email, spreadsheets, tickets, approvals, and internal tools into runnable software.<br />
+Manage your fleet of agents. Connect real systems. Add approvals, budgets, permissions, logs, schedules, and human review.<br />
 Run it on your infrastructure. Use any model. Open source. Your cloud, your code, your control.
 </p>
 
@@ -55,7 +55,7 @@ Start small:
 Add control when the work gets serious:
 
 - Require approval before risky actions happen, then approve from Slack, email, or the web app
-- Pause and resume runs at approval boundaries instead of tying up the system
+- Pause and resume runs at approval boundaries while the system keeps processing other work
 - Set per-run and daily budgets so AI and compute spend stays bounded
 - See what ran, what it cost, what systems it touched, what it produced, and who approved it
 - Keep credentials safe behind the Connector Proxy so apps use tools through scoped runtime calls
@@ -81,6 +81,28 @@ Examples:
 - **Multi-container Internal App** - ships a real frontend, backend, database, agent, and dashboard as one installable app
 
 OpenSail is for developers, operators, founders, legal teams, support teams, and anyone who can describe the work, knows what "good" looks like, and needs a safe way to make AI do it again tomorrow.
+
+---
+
+## Agents
+
+Give recurring work a capable owner, then manage your fleet as it grows.
+
+OpenSail agents are built for the messy jobs that move through files, apps, people, approvals, and business systems. Describe the outcome, attach the tools it needs, set the rules for when it should ask, and let it work from a real sandboxed workspace with source, state, terminals, connectors, schedules, and run history.
+
+An agent can research a lead, prepare a client intake packet, route product feedback, update a CRM, review a vendor request, build an internal tool, fix a bug, generate a report, or call an installed app when the job needs a structured function. It can start from chat, Slack, email, webhook, schedule, app event, or API call, then send results back where people already work.
+
+**Built for finished work.** Agents operate inside real workspaces with files, terminals, containers, previews, Git, artifacts, and deploy targets. They can inspect context, make changes, run commands, call tools, invoke app functions, and leave behind a reviewable trail.
+
+**Made for background workflows.** Schedule agents for daily reports, weekly reviews, customer follow-ups, support triage, billing checks, or monitoring tasks. Each run has a trigger, status, outputs, cost, touched systems, and approval history.
+
+**Context that travels.** Agents carry the right instructions, skills, connectors, MCP servers, model settings, budget, and tool permissions into each run. The work lives with the workspace, so a useful agent can be forked, improved, shared, and reused.
+
+**Manage your fleet of agents.** Put frontend, backend, test, ops, research, and review agents in the same workspace. Assign each one a job, give it the right tools, and let the architecture panel show how the software, agents, containers, secrets, and deploy targets connect.
+
+**Human control at the right moments.** Scope what agents can touch, require approval for sensitive steps, cap spend per run or per day, and inspect the full record after the work completes.
+
+Agents are how OpenSail turns personal process knowledge into durable software. The person closest to the work can describe what should happen, and the platform turns that into something that runs, improves, and scales.
 
 ---
 
@@ -124,6 +146,8 @@ Triggers, agents, apps, delivery, approvals, and spend in one runtime.
 
 OpenSail's Automation Runtime is the durable execution layer for work that keeps happening. It turns a schedule, webhook, manual run, app event, or channel message into an event, creates a run, executes actions, records artifacts and spend, and delivers the result.
 
+The mental model is `Trigger -> Event -> Run -> Action -> Delivery`: `agent.run` sends work to a selected agent, `app.invoke` calls an installed app function, and `gateway.send` delivers the output.
+
 **Triggers:** Start workflows from cron schedules, manual buttons, webhooks, app events, Slack, email, or other connected channels.
 
 **Actions:** Run an agent, invoke an installed app function, or send a result through the gateway. Lightweight runs stay in Tier 0. Work that needs files, shell commands, services, or previews can wake a sandboxed workspace.
@@ -136,9 +160,9 @@ OpenSail's Automation Runtime is the durable execution layer for work that keeps
 
 ---
 
-## Builder Agents
+## Build Automations and Agents Autonomously
 
-Create agents and schedules from chat.
+Describe the system you want, and let OpenSail draft the agent, automation, connectors, schedule, permissions, and review flow.
 
 OpenSail includes built-in agents that help people turn intent into reusable team assets.
 
@@ -382,7 +406,7 @@ One folder. Wipe it, you get a clean install.
 
 **Offline-first marketplace.** Agents, skills, bases, and themes install locally from the cloud marketplace with SHA-256 verified downloads. Once installed, they work offline. Local items and cloud items merge, local wins by slug. Cache is stale-while-revalidate with background refresh.
 
-**Permissions per project.** Each project has a `.tesslate/permissions.json` that gates what agents can do: shell access, network calls, git push, file writes, process spawning. Three policies per capability: `allow` (silent), `deny` (blocked), `ask` (approval prompt in the tray, TUI, or browser). "Always allow" persists your decision back to the file. Budget caps with monthly limits and alert thresholds are built in.
+**Permissions per project.** Each project has a `.tesslate/permissions.json` that gates what agents can do: shell access, network calls, git push, file writes, process spawning. Three policies per capability: `allow` (silent), `deny`, `ask` (approval prompt in the tray, TUI, or browser). "Always allow" persists your decision back to the file. Budget caps with monthly limits and alert thresholds are built in.
 
 **Approval workflow.** When an agent hits a gated tool, the desktop shows a tray notification with an approval card. Approve, deny, or "always allow" for that tool. Human-readable ticket refs (TSK-0001, TSK-0002) so you can track what the agent asked for and what you approved.
 
@@ -394,7 +418,7 @@ One folder. Wipe it, you get a clean install.
 
 One agent. Every model.
 
-OpenSail is model-agnostic. All model calls route through LiteLLM. Switch providers without rewriting your agents.
+OpenSail is model-agnostic. All model calls route through LiteLLM. Switch providers while keeping your agents intact.
 
 **Supported providers:**
 
@@ -412,7 +436,7 @@ OpenSail is model-agnostic. All model calls route through LiteLLM. Switch provid
 | **Z.AI (ChatGLM)** |
 | **xAI** |
 
-**BYOK (Bring Your Own Key):** Attach your own API key from OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks, or any OpenAI-compatible endpoint. When using BYOK, no platform wallet is charged. Your key, your cost, your provider.
+**BYOK (Bring Your Own Key):** Attach your own API key from OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks, or any OpenAI-compatible endpoint. BYOK routes model usage to your provider account. Your key, your cost, your provider.
 
 **Self-hosted models:** Point LiteLLM at Ollama, vLLM, or any local inference server. Run fully air-gapped with open-weight models on your own hardware.
 
@@ -437,7 +461,7 @@ Deploy from the Architecture Panel. Draw an edge from a container to a deploymen
 | **Container push** | AWS App Runner, GCP Cloud Run, Azure Container Apps, DigitalOcean Container Apps |
 | **Registry / Export** | Docker Hub, GitHub Container Registry (GHCR), Download/Export (zip) |
 
-Each target is a registry entry. Adding a new provider is one config block, not a UI rewrite.
+Each target is a registry entry. Adding a new provider is one config block.
 
 ---
 
@@ -468,17 +492,17 @@ Set agents to run on a schedule, or let them listen for messages and respond as 
 
 Your data. Your models. Your infrastructure.
 
-Workspace agents are powerful. They touch your data, your tools, your processes. You should be able to see exactly what they're doing, run them on your own infrastructure, and not be locked to a single model provider.
+Workspace agents are powerful. They touch your data, your tools, your processes. You should be able to see exactly what they're doing, run them on your own infrastructure, and choose the model provider that fits the work.
 
-OpenSail runs on any model. Switch providers without rewriting your agents. Deploy on-prem, air-gapped, or on any cloud. Data never has to leave your network.
+OpenSail runs on any model. Switch providers while keeping your agents intact. Deploy on-prem, air-gapped, or on any cloud. Keep data inside your network.
 
-No per-seat pricing that scales against you. No credit system that makes you think twice before running an agent. Your infrastructure, your cost structure.
+OpenSail is open-source infrastructure you can operate directly. Your infrastructure, your cost structure.
 
 ---
 
 ## Run OpenSail
 
-Pick the path that matches what you are trying to do. OpenSail can run as a simple local Docker stack, as a desktop app, on local Kubernetes for platform testing, or on a production Kubernetes cluster. Those are different levels of commitment, not different products.
+Pick the path that matches what you are trying to do. OpenSail can run as a simple local Docker stack, as a desktop app, on local Kubernetes for platform testing, or on a production Kubernetes cluster. Those are different levels of commitment for the same product.
 
 | You want to... | Use this path | Best for |
 |----------------|---------------|----------|
@@ -503,7 +527,7 @@ cp .env.example .env
 Edit `.env` before first boot:
 
 - `SECRET_KEY` should be a real random value.
-- `LITELLM_API_BASE` and `LITELLM_MASTER_KEY` are needed for agent/model calls. The app can boot without a working model proxy, but the agent experience will not be useful.
+- `LITELLM_API_BASE` and `LITELLM_MASTER_KEY` are needed for agent/model calls. A working model proxy gives you the full agent experience.
 
 Then start the stack:
 
@@ -536,7 +560,7 @@ Use Docker Compose unless you specifically need Kubernetes behavior.
 
 ### Desktop App
 
-The desktop app is local-first: no Docker and no Kubernetes required for the default local runtime. It is a Tauri shell around the same React frontend and FastAPI orchestrator, with a local SQLite database under `OPENSAIL_HOME`.
+The desktop app is local-first. The default local runtime uses your machine directly, with Docker and Kubernetes available as optional project runtimes. It is a Tauri shell around the same React frontend and FastAPI orchestrator, with a local SQLite database under `OPENSAIL_HOME`.
 
 If a signed installer is attached to a release, that is the easiest path for non-server users: install it like any other desktop app and start building locally.
 
@@ -552,7 +576,7 @@ The desktop toolchain needs Rust, Node 20+, pnpm, `uv`, and Tauri dependencies. 
 
 ### Local Kubernetes With Minikube
 
-Use Minikube when you need to test the Kubernetes runtime: namespaces, ingress, Volume Hub, btrfs CSI, snapshots, MinIO-backed object storage, worker behavior, and project containers. This is heavier than Docker Compose and is not the fastest way to try the product.
+Use Minikube when you need to test the Kubernetes runtime: namespaces, ingress, Volume Hub, btrfs CSI, snapshots, MinIO-backed object storage, worker behavior, and project containers. Docker Compose gives the fastest first run; Minikube gives the closest local platform test.
 
 ```bash
 git clone https://github.com/TesslateAI/opensail.git
@@ -571,7 +595,7 @@ Leave the tunnel running and open `http://localhost`. The complete step-by-step 
 
 ### Production / Self-Hosted Kubernetes
 
-There is no maintained Helm chart in this repo today. The production path is Terraform for cloud infrastructure and Kustomize for Kubernetes manifests.
+The repo-supported production path is Terraform for cloud infrastructure and Kustomize for Kubernetes manifests.
 
 The maintained production-class path is AWS EKS:
 
@@ -585,9 +609,9 @@ The maintained production-class path is AWS EKS:
 ./scripts/aws-deploy.sh deploy-k8s beta
 ```
 
-Use `production` instead of `beta` when you are ready to operate the production environment.
+Use `production` after validating the flow in `beta`.
 
-For non-EKS clusters, treat `k8s/base/` and the overlays as the starting point, not a one-command installer. You need to provide the same real pieces yourself: image registry, ingress controller, TLS/DNS, object storage, Postgres/Redis strategy, secrets, storage class, snapshot support, and the Volume Hub/btrfs CSI layer. The EKS guide is the best reference for what has to exist before OpenSail is healthy: [docs/guides/aws-deployment.md](docs/guides/aws-deployment.md).
+For non-EKS clusters, treat `k8s/base/` and the overlays as the starting point. Provide the same real pieces yourself: image registry, ingress controller, TLS/DNS, object storage, Postgres/Redis strategy, secrets, storage class, snapshot support, and the Volume Hub/btrfs CSI layer. The EKS guide is the best reference for the required production shape: [docs/guides/aws-deployment.md](docs/guides/aws-deployment.md).
 
 ---
 
@@ -632,7 +656,7 @@ flowchart TB
     class AP,WS,TC,AR,MK,PS cluster;
 ```
 
-Kubernetes installs currently use Kustomize overlays, not Helm. For local cluster testing, use [Minikube](docs/guides/minikube-setup.md). For production on AWS, use the Terraform and deployment helpers in [docs/guides/aws-deployment.md](docs/guides/aws-deployment.md). Pair desktop apps to a cloud instance when you want local-first control with cloud sandboxing behind it.
+Kubernetes installs currently use Kustomize overlays. For local cluster testing, use [Minikube](docs/guides/minikube-setup.md). For production on AWS, use the Terraform and deployment helpers in [docs/guides/aws-deployment.md](docs/guides/aws-deployment.md). Pair desktop apps to a cloud instance when you want local-first control with cloud sandboxing behind it.
 
 ## Contributing
 
