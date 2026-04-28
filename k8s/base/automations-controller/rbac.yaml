@@ -1,0 +1,80 @@
+# automations-controller — least-privilege RBAC
+#
+# The controller's reconciler needs four primitives:
+#
+#   1. coordination.k8s.io/v1.Lease — leader election when
+#      CONTROLLER_LEASE_BACKEND=k8s. CRUD because acquire/renew/release
+#      mutate the Lease object.
+#
+#   2. apps/v1.deployments/scale — scale_to_zero / scale_up intents.
+#      Patch only; the controller never creates Deployments (the apps
+#      installer does that with the backend SA's wider grant).
+#
+#   3. core/v1.pods — delete_pod intents (force-delete after grace
+#      window expires). List is needed to find pods by label selector.
+#
+#   4. core/v1.secrets — read for cron schedule timezones / cert
+#      rotation intents (future). No write — secret rotation goes
+#      through the apps installer.
+#
+# Cluster-scoped because the controller acts on per-project namespaces
+# (proj-*, app-*, …) — narrowing to a single namespace would break
+# multi-project reaping.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tesslate-automations-controller
+  labels:
+    app: tesslate-automations-controller
+    component: rbac
+rules:
+  # Lease — leader election when CONTROLLER_LEASE_BACKEND=k8s.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+
+  # Deployment scale — scale_to_zero / scale_up reconciler.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch", "update"]
+
+  # Pods — delete_pod reconciler.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+
+  # Secrets — read-only (cron timezone configs, etc.).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+
+  # Events — for troubleshooting reconciler errors.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+
+  # Endpoints — wake-from-zero needs to wait for service to be ready.
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tesslate-automations-controller
+  labels:
+    app: tesslate-automations-controller
+    component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: tesslate-automations-controller-sa
+    namespace: tesslate
+roleRef:
+  kind: ClusterRole
+  name: tesslate-automations-controller
+  apiGroup: rbac.authorization.k8s.io

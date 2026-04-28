@@ -75,7 +75,7 @@ const LABEL_BY_KIND: Record<CommitKind, { label: string; emoji: string }> = {
   build: { label: 'Build setup', emoji: '🏗️' },
   merge: { label: 'Merge', emoji: '🔀' },
   revert: { label: 'Revert', emoji: '⏪' },
-  release: { label: 'Release', emoji: '🚀' },
+  release: { label: 'Release', emoji: '🏁' },
   remove: { label: 'Removed code', emoji: '🗑️' },
   rename: { label: 'Rename', emoji: '🏷️' },
   update: { label: 'Update', emoji: '📦' },

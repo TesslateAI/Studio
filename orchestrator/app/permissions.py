@@ -125,6 +125,13 @@ class Permission(StrEnum):
     MODELS_PROXY = "models.proxy"
     USAGE_READ = "usage.read"
 
+    # Apps — typed action invocation against installed Tesslate Apps.
+    # Required by the agent's ``invoke_app_action`` tool and by any future
+    # external/automation surface that dispatches an app action. Phase 1 of
+    # the OpenSail Automation Runtime introduces this scope; Phase 2 layers
+    # per-contract ``allow_apps`` enforcement on top.
+    APP_INVOKE = "app.invoke"
+
     # Desktop / External (public-api extensions)
     DESKTOP_PAIR = "desktop.pair"
     AGENTS_READ = "agents.read"
@@ -284,6 +291,11 @@ SCOPE_LABELS: dict[str, dict[str, str]] = {
     Permission.MARKETPLACE_INSTALL: {
         "label": "Marketplace — Install items",
         "category": "Marketplace",
+    },
+    # Apps
+    Permission.APP_INVOKE: {
+        "label": "Apps — Invoke installed app actions",
+        "category": "Apps",
     },
 }
 

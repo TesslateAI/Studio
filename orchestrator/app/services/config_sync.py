@@ -7,6 +7,12 @@ Two directions:
   - Config → DB:  sync_project_config()    writes .tesslate/config.json AND replaces the
                   project's container/connection/deployment/preview graph in one transaction.
                   Used by the setup-config HTTP route and the apply_setup_config agent tool.
+
+Auto-sync helper:
+  - ensure_config_synced()  reads .tesslate/config.json from disk (or PVC) and
+                            applies it via sync_project_config. Non-blocking on
+                            failure — start/restart paths call this so config.json
+                            is the source of truth without a separate setup-config call.
 """
 
 from __future__ import annotations
@@ -462,3 +468,76 @@ async def sync_project_config(
         container_ids=container_ids,
         primary_container_id=primary_container_id,
     )
+
+
+async def ensure_config_synced(
+    db: AsyncSession,
+    project: Project,
+    user_id: UUID,
+) -> bool:
+    """Read ``.tesslate/config.json`` from disk/PVC and sync it to the DB.
+
+    Called from start/restart endpoints so edits to ``config.json`` propagate
+    to the Container model without a separate ``POST /setup-config`` call.
+
+    Non-blocking: any failure (missing file, parse error, sync error) is
+    logged and swallowed. The caller continues with whatever is already in
+    the DB. Returns True iff a sync actually ran.
+    """
+    import json
+
+    from ..schemas import TesslateConfigCreate
+    from .base_config_parser import (
+        parse_tesslate_config,
+        read_tesslate_config,
+        serialize_config_to_json,
+    )
+    from .project_fs import get_project_fs_path
+
+    try:
+        config_obj = None
+        fs_path = get_project_fs_path(project)
+        if fs_path is not None:
+            config_obj = read_tesslate_config(str(fs_path))
+        else:
+            from .orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+            config_json = await orchestrator.read_file(
+                user_id=user_id,
+                project_id=project.id,
+                container_name=None,
+                file_path=".tesslate/config.json",
+                project_slug=project.slug,
+                volume_id=getattr(project, "volume_id", None),
+                cache_node=getattr(project, "cache_node", None),
+            )
+            if config_json:
+                config_obj = parse_tesslate_config(config_json)
+
+        if config_obj is None or not config_obj.apps:
+            return False
+
+        # Round-trip through serialize_config_to_json so the payload exactly
+        # matches the JSON shape TesslateConfigCreate expects (including the
+        # `from`/`to` aliases on connections). Avoids field-name skew between
+        # the parser dataclasses and the API schema.
+        payload = json.loads(serialize_config_to_json(config_obj))
+        if not payload.get("primaryApp") and config_obj.apps:
+            payload["primaryApp"] = next(iter(config_obj.apps))
+
+        cfg_create = TesslateConfigCreate(**payload)
+
+        await sync_project_config(db, project, cfg_create, user_id)
+        logger.info(
+            "[CONFIG-SYNC] Auto-synced .tesslate/config.json for project %s",
+            project.slug,
+        )
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[CONFIG-SYNC] Auto-sync of .tesslate/config.json failed for project %s: %s — continuing with existing DB state",
+            getattr(project, "slug", "?"),
+            exc,
+        )
+        return False

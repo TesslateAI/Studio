@@ -88,7 +88,7 @@ docker-compose up -d --build orchestrator
 docker-compose up -d --build app
 
 # Devserver (for user containers)
-docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver .
 ```
 
 ### Production (AWS ECR)
@@ -98,7 +98,7 @@ docker build -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver o
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
 
 # Backend
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 
@@ -108,7 +108,7 @@ docker tag tesslate-frontend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-frontend:latest
 
 # Devserver
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver .
 docker tag tesslate-devserver:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:latest
 ```
@@ -120,7 +120,7 @@ docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-devserver:
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
 
 # Build
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 
 # Load into Minikube
 minikube -p tesslate image load tesslate-backend:latest

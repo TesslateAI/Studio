@@ -1,0 +1,94 @@
+# Tier 1 ephemeral compute pod template (Phase 4).
+#
+# This file is NOT applied directly via kustomize — it is the canonical
+# source of truth for the structure rendered by
+# ``services/automations/ephemeral_pod.py`` per AutomationRun. Keeping the
+# template as YAML (rather than purely Python) lets ops review/diff the
+# pod surface and lets operators do a ``kubectl apply --dry-run=client``
+# validation against a known-good baseline.
+#
+# Rendering substitutions performed by ephemeral_pod.py:
+#   {run_id}       — AutomationRun.id (used for pod name + env var)
+#   {automation_id}— AutomationDefinition.id (env var)
+#   {namespace}    — settings.compute_pool_namespace
+#   {volume_id}    — btrfs subvolume id (when Grant declares fs access)
+#   {image}        — agent runtime image (defaults to k8s_devserver_image)
+#   {pvc_name}     — PVC name from compute_manager._ensure_compute_pv_pvc
+#
+# Tier 1 properties (matches the Phase 4 plan):
+#   * One-shot pod (restartPolicy=Never, activeDeadlineSeconds=1800).
+#   * /tmp tmpfs (emptyDir Memory 256Mi) — bounded RAM scratch.
+#   * readOnlyRootFilesystem=true; writes outside /tmp surface as
+#     write-tracker sidecar JSON log lines.
+#   * Workspace mount under /automations/{run_id}/ when grant.fs is on.
+#   * resources.limits cpu=500m mem=512Mi (small + fast cold-start).
+#
+# The write-tracker sidecar is appended programmatically to keep the YAML
+# minimal (the sidecar mounts root RO for inotify visibility, no other
+# mounts).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "ephemeral-{run_id}"
+  namespace: "{namespace}"
+  labels:
+    app.kubernetes.io/name: tesslate-studio
+    app.kubernetes.io/component: ephemeral-compute
+    app.kubernetes.io/part-of: tesslate
+    tesslate.io/tier: "1"
+    tesslate.io/state-model: stateless
+    tesslate.io/run-id: "{run_id}"
+    tesslate.io/automation-id: "{automation_id}"
+spec:
+  restartPolicy: Never
+  activeDeadlineSeconds: 1800
+  terminationGracePeriodSeconds: 5
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: agent
+    image: "{image}"
+    imagePullPolicy: IfNotPresent
+    workingDir: /workspace
+    env:
+    - name: OPENSAIL_RUN_ID
+      value: "{run_id}"
+    - name: OPENSAIL_AUTOMATION_ID
+      value: "{automation_id}"
+    - name: OPENSAIL_TIER
+      value: "1"
+    - name: OPENSAIL_NAMESPACE
+      value: "{namespace}"
+    - name: OPENSAIL_VOLUME_ID
+      value: "{volume_id}"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+  volumes:
+  - name: tmp
+    emptyDir:
+      medium: Memory
+      sizeLimit: 256Mi

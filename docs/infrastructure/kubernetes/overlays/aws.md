@@ -49,7 +49,7 @@ images:
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
 
 # Build, tag, push
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 
@@ -286,7 +286,7 @@ kubectl logs -n tesslate deployment/tesslate-backend
 **Code changes**:
 ```bash
 # Always use --no-cache to ensure changes are included
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 docker tag tesslate-backend:latest <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/tesslate-backend:latest
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package,
   Power,
@@ -120,6 +120,8 @@ export default function AgentsPage({
   onTogglePublish: (agent: LibraryAgent) => void;
 }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoCreateTriggered = useRef(false);
 
   // Local state
   const [editingAgent, setEditingAgent] = useState<LibraryAgent | null>(null);
@@ -143,6 +145,19 @@ export default function AgentsPage({
   useEffect(() => {
     if (showSearch) searchInputRef.current?.focus();
   }, [showSearch]);
+
+  // Auto-open the new-agent editor when navigated here with ?create=true
+  // (e.g. from the Home page's split Agents card "+" button). Strip the param
+  // so a refresh doesn't re-trigger the modal.
+  useEffect(() => {
+    if (autoCreateTriggered.current) return;
+    if (searchParams.get('create') !== 'true') return;
+    autoCreateTriggered.current = true;
+    const next = new URLSearchParams(searchParams);
+    next.delete('create');
+    setSearchParams(next, { replace: true });
+    setEditingAgent(makeNewAgent());
+  }, [searchParams, setSearchParams]);
 
   // Close sort menu on outside click
   useEffect(() => {
@@ -582,7 +597,7 @@ export default function AgentsPage({
         {/* Detail panel */}
         {editingAgent && (
           <div
-            className="w-full sm:w-[360px] lg:w-[440px] xl:w-[480px] max-sm:absolute max-sm:inset-0 max-sm:z-30 max-sm:bg-[var(--bg)] flex-shrink-0 overflow-y-auto animate-slide-in-right max-sm:!pl-[var(--app-margin)]"
+            className="w-full sm:w-[360px] lg:w-[640px] xl:w-[840px] max-sm:absolute max-sm:inset-0 max-sm:z-30 max-sm:bg-[var(--bg)] flex-shrink-0 overflow-y-auto animate-slide-in-right max-sm:!pl-[var(--app-margin)]"
             style={{ padding: 'var(--app-margin)', paddingLeft: 0 }}
           >
             <EditAgentModal
@@ -713,15 +728,12 @@ function AgentCard({
       animate="animate"
       onClick={onEdit}
       className={`
-        group relative flex flex-col cursor-pointer
-        bg-[var(--surface-hover)] rounded-[var(--radius)] border
+        group relative flex flex-col h-full cursor-pointer
+        bg-[var(--surface)] rounded-[var(--radius)] border border-[var(--border)]
         transition-all duration-200
-        hover:-translate-y-0.5
-        ${
-          isSelected
-            ? 'border-[var(--primary)] ring-1 ring-[var(--primary)]/20'
-            : 'border-[var(--border)] hover:border-[var(--border-hover)]'
-        }
+        hover:-translate-y-1
+        hover:bg-[var(--card-hover)]
+        ${isSelected ? 'border-[var(--primary)] ring-1 ring-[var(--primary)]/20' : ''}
         ${!agent.is_enabled ? 'opacity-45' : ''}
       `}
     >
@@ -1149,9 +1161,9 @@ function EditAgentModal({
   );
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+    <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-2 content-start">
       {/* Identity card — save + close + avatar + name */}
-      <div className={card}>
+      <div className={`${card} lg:col-span-2`}>
         <div className="flex items-center justify-between h-10 px-4 border-b border-[var(--border)]">
           <span className="text-xs font-semibold text-[var(--text)] truncate">
             {name || 'New Agent'}
@@ -1220,6 +1232,14 @@ function EditAgentModal({
                   dropUp={false}
                 />
               </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-[var(--text-subtle)] w-14 flex-shrink-0">
+                Type
+              </span>
+              <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                {agent.agent_type}
+              </span>
             </div>
             {agent.agent_type === 'TesslateAgent' &&
               FEATURE_FLAGS.map((flag) => (
@@ -1349,7 +1369,7 @@ function EditAgentModal({
                           <textarea
                             value={editingSubagentPrompt}
                             onChange={(e) => setEditingSubagentPrompt(e.target.value)}
-                            className="w-full px-2.5 py-2 bg-[var(--bg)] border border-[var(--border)] rounded-md text-[var(--text)] text-xs font-mono focus:outline-none focus:border-[var(--primary)] resize-y"
+                            className="w-full px-2.5 py-2 bg-[var(--bg)] border border-[var(--border)] rounded-md text-[var(--text)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)] resize-y"
                             rows={6}
                           />
                           <div className="flex gap-1.5 justify-end">
@@ -1418,7 +1438,7 @@ function EditAgentModal({
                         value={newSubagent.name}
                         onChange={(e) => setNewSubagent((p) => ({ ...p, name: e.target.value }))}
                         placeholder="Name"
-                        className="w-full px-2.5 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-md text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
+                        className="w-full px-2.5 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-md text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
                       />
                       <input
                         type="text"
@@ -1427,7 +1447,7 @@ function EditAgentModal({
                           setNewSubagent((p) => ({ ...p, description: e.target.value }))
                         }
                         placeholder="Description"
-                        className="w-full px-2.5 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-md text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
+                        className="w-full px-2.5 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-md text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
                       />
                       <textarea
                         value={newSubagent.system_prompt}
@@ -1435,7 +1455,7 @@ function EditAgentModal({
                           setNewSubagent((p) => ({ ...p, system_prompt: e.target.value }))
                         }
                         placeholder="System prompt..."
-                        className="w-full px-2.5 py-2 bg-[var(--bg)] border border-[var(--border)] rounded-md text-xs font-mono text-[var(--text)] focus:outline-none focus:border-[var(--primary)] resize-y"
+                        className="w-full px-2.5 py-2 bg-[var(--bg)] border border-[var(--border)] rounded-md text-xs font-mono text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)] resize-y"
                         rows={4}
                       />
                       <div className="flex gap-1.5 justify-end">
@@ -1530,7 +1550,7 @@ function EditAgentModal({
                       value={skillSearchQuery}
                       onChange={(e) => handleSearchSkills(e.target.value)}
                       placeholder="Search skills..."
-                      className="w-full px-2.5 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-md text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
+                      className="w-full px-2.5 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-md text-xs text-[var(--text)] focus:outline-none focus:border-[var(--border-hover)]"
                       autoFocus
                     />
                     {skillSearchLoading && (
@@ -1590,7 +1610,7 @@ function EditAgentModal({
       </div>
 
       {/* System Prompt card */}
-      <div className={card}>
+      <div className={`${card} lg:col-span-2`}>
         <SectionHeader
           label="System Prompt"
           icon={<Article size={13} />}

@@ -1,24 +1,23 @@
 import { useEffect, useState } from 'react';
 import {
-  ArrowSquareOut,
   FilesIcon,
   GitBranch,
-  GitCommit,
   GithubLogo,
   GraphIcon,
-  HardDrives,
   Info,
 } from '@phosphor-icons/react';
 import { BranchesTab } from './BranchesTab';
-import { FilesTab, type RepoMeta } from './FilesTab';
+import { FilesTab } from './FilesTab';
 import { GraphTab } from './GraphTab';
 import { OverviewTab } from './OverviewTab';
+import { GitHubPanel } from '../GitHubPanel';
 
 interface RepositoryPanelProps {
   projectSlug: string;
+  projectId?: number;
 }
 
-type TabId = 'overview' | 'graph' | 'branches' | 'files';
+type TabId = 'overview' | 'graph' | 'branches' | 'files' | 'github';
 
 interface TabDef {
   id: TabId;
@@ -28,6 +27,12 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
+  {
+    id: 'github',
+    label: 'GitHub',
+    short: 'GitHub',
+    icon: <GithubLogo size={12} weight="bold" />,
+  },
   {
     id: 'overview',
     label: 'Overview',
@@ -65,12 +70,14 @@ function readInitialTab(): TabId {
   } catch {
     // ignore — default below
   }
+  // Default to Overview — works for both GitHub-connected and local-only
+  // repos. (Previously defaulted to GitHub, which made local-only projects
+  // look broken on first load.)
   return 'overview';
 }
 
-export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
+export function RepositoryPanel({ projectSlug, projectId }: RepositoryPanelProps) {
   const [active, setActive] = useState<TabId>(() => readInitialTab());
-  const [meta, setMeta] = useState<RepoMeta | null>(null);
 
   useEffect(() => {
     try {
@@ -82,49 +89,9 @@ export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
 
   return (
     <div className="w-full h-full flex flex-col bg-[var(--bg)] overflow-hidden">
-      {/* Header */}
-      <div className="flex-shrink-0 p-2 pb-0">
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <span className="flex-shrink-0 text-[var(--text-muted)]">
-            {meta?.source === 'github' ? (
-              <GithubLogo size={15} weight="bold" />
-            ) : (
-              <HardDrives size={15} weight="bold" />
-            )}
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[12px] font-semibold text-[var(--text)] truncate">
-                {meta?.source === 'github' && meta.owner && meta.repo
-                  ? `${meta.owner}/${meta.repo}`
-                  : 'Project files'}
-              </span>
-              {meta?.source === 'github' && meta.htmlUrl && (
-                <a
-                  href={meta.htmlUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[var(--text-subtle)] hover:text-[var(--text)] transition-colors flex-shrink-0"
-                  title="Open on GitHub"
-                  aria-label="Open on GitHub"
-                >
-                  <ArrowSquareOut size={11} weight="bold" />
-                </a>
-              )}
-            </div>
-            {meta?.branch && (
-              <div className="flex items-center gap-1 mt-0.5 text-[10px] text-[var(--text-muted)]">
-                <GitCommit size={10} weight="bold" />
-                <span className="truncate max-w-[140px]">{meta.branch}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Tabs */}
       <div
-        className="flex-shrink-0 px-2 pt-1 border-b border-[var(--border)]"
+        className="flex-shrink-0 px-2 pt-2 border-b border-[var(--border)]"
         role="tablist"
         aria-label="Repository views"
       >
@@ -170,7 +137,15 @@ export function RepositoryPanel({ projectSlug }: RepositoryPanelProps) {
         {active === 'overview' && <OverviewTab projectSlug={projectSlug} />}
         {active === 'graph' && <GraphTab projectSlug={projectSlug} />}
         {active === 'branches' && <BranchesTab projectSlug={projectSlug} />}
-        {active === 'files' && <FilesTab projectSlug={projectSlug} onMeta={setMeta} />}
+        {active === 'files' && <FilesTab projectSlug={projectSlug} />}
+        {active === 'github' &&
+          (projectId !== undefined ? (
+            <GitHubPanel projectId={projectId} />
+          ) : (
+            <div className="p-4 text-xs text-[var(--text-muted)]">
+              GitHub sync requires a saved project.
+            </div>
+          ))}
       </div>
     </div>
   );

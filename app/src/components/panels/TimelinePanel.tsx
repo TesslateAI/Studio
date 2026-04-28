@@ -37,7 +37,6 @@ interface TimelinePanelProps {
 // Types
 // ---------------------------------------------------------------------------
 
-/** A rendered item in the timeline: either a checkpoint card or an auto-save gap. */
 type TimelineItem =
   | { type: 'checkpoint'; snapshot: Snapshot; isHead: boolean }
   | { type: 'autosaves'; count: number };
@@ -68,13 +67,6 @@ function formatDate(ts: string): string {
   });
 }
 
-/**
- * Walk prev pointers from a tip hash and build timeline items.
- * Uses `prev` (chronological predecessor) instead of `parent` (which skips
- * intermediates for consolidation snapshots).
- *
- * Returns newest-first: checkpoint cards with auto-save counts between them.
- */
 function buildTimelineItems(
   tipHash: string,
   snapMap: Map<string, Snapshot>,
@@ -90,7 +82,6 @@ function buildTimelineItems(
     const snap = snapMap.get(hash)!;
 
     if (snap.role === 'checkpoint') {
-      // Flush any accumulated syncs before this checkpoint.
       if (syncCount > 0 && items.length > 0) {
         items.push({ type: 'autosaves', count: syncCount });
         syncCount = 0;
@@ -107,7 +98,6 @@ function buildTimelineItems(
     hash = snap.prev || snap.parent;
   }
 
-  // Trailing syncs after the last checkpoint (oldest syncs at the bottom).
   if (syncCount > 0 && items.length > 0) {
     items.push({ type: 'autosaves', count: syncCount });
   }
@@ -115,10 +105,6 @@ function buildTimelineItems(
   return items;
 }
 
-/**
- * Find fork points: hashes in the active branch's ancestor chain that are
- * also pointed to by other branches (i.e. they diverged from this point).
- */
 function findForkPoints(
   activeAncestors: Set<string>,
   branches: TimelineBranch[],
@@ -147,6 +133,20 @@ function findForkPoints(
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+function CurrentChip() {
+  return (
+    <span
+      className="px-1.5 py-0.5 text-[10px] rounded-[var(--radius-small)] flex-shrink-0 font-medium"
+      style={{
+        color: 'var(--status-success)',
+        backgroundColor: 'color-mix(in srgb, var(--status-success) 12%, transparent)',
+      }}
+    >
+      current
+    </span>
+  );
+}
 
 function BranchSelector({
   branches,
@@ -182,25 +182,21 @@ function BranchSelector({
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white hover:border-gray-600 transition-colors"
+        className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 bg-[var(--surface-hover)] border border-[var(--border)] hover:border-[var(--border-hover)] rounded-[var(--radius-small)] text-xs text-[var(--text)] transition-colors"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <GitBranch size={14} className="text-gray-400 flex-shrink-0" />
+          <GitBranch size={12} weight="bold" className="text-[var(--text-muted)] flex-shrink-0" />
           <span className="truncate">{active?.display_name}</span>
-          {active?.is_current && (
-            <span className="px-1.5 py-0.5 bg-green-900/50 text-green-400 text-[10px] rounded flex-shrink-0">
-              current
-            </span>
-          )}
+          {active?.is_current && <CurrentChip />}
         </div>
         <CaretDown
-          size={12}
-          className={`text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`}
+          size={11}
+          className={`text-[var(--text-subtle)] transition-transform ${open ? 'rotate-180' : ''}`}
         />
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-10 overflow-hidden">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius-medium)] z-10 overflow-hidden p-1.5">
           {branches.map((branch) => (
             <button
               key={branch.name}
@@ -208,37 +204,36 @@ function BranchSelector({
                 onSelect(branch.name);
                 setOpen(false);
               }}
-              className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-sm transition-colors ${
+              className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs rounded-[var(--radius-small)] transition-colors ${
                 branch.name === activeBranch
-                  ? 'bg-blue-600/20 text-white'
-                  : 'text-gray-300 hover:bg-gray-750'
+                  ? 'bg-[var(--surface-hover)] text-[var(--text)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]'
               }`}
             >
               <div className="flex items-center gap-2 min-w-0">
-                <GitBranch size={14} className="text-gray-500 flex-shrink-0" />
+                <GitBranch
+                  size={11}
+                  weight="bold"
+                  className="text-[var(--text-subtle)] flex-shrink-0"
+                />
                 <span className="truncate">{branch.display_name}</span>
-                {branch.is_current && (
-                  <span className="px-1.5 py-0.5 bg-green-900/50 text-green-400 text-[10px] rounded flex-shrink-0">
-                    current
-                  </span>
-                )}
+                {branch.is_current && <CurrentChip />}
               </div>
-              <span className="text-xs text-gray-500 flex-shrink-0">
+              <span className="text-[10px] text-[var(--text-subtle)] flex-shrink-0">
                 {branch.checkpoint_count} saves
               </span>
             </button>
           ))}
 
-          {/* Create branch */}
-          <div className="border-t border-gray-700">
+          <div className="border-t border-[var(--border)] mt-1 pt-1">
             {showCreate ? (
-              <div className="p-2 flex flex-col gap-1.5">
+              <div className="p-1 flex flex-col gap-1.5">
                 <input
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Branch name"
-                  className="w-full px-2 py-1.5 bg-gray-900 border border-gray-600 rounded text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                  className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)]"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleCreate();
@@ -252,16 +247,21 @@ function BranchSelector({
                   <button
                     onClick={handleCreate}
                     disabled={creating || !newName.trim()}
-                    className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded text-xs font-medium transition-colors"
+                    className="btn btn-sm btn-primary flex-1"
+                    style={
+                      creating || !newName.trim()
+                        ? { opacity: 0.4, cursor: 'not-allowed' }
+                        : undefined
+                    }
                   >
-                    {creating ? 'Creating...' : 'Create'}
+                    {creating ? 'Creating…' : 'Create'}
                   </button>
                   <button
                     onClick={() => {
                       setShowCreate(false);
                       setNewName('');
                     }}
-                    className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs transition-colors"
+                    className="btn btn-sm flex-1"
                   >
                     Cancel
                   </button>
@@ -270,9 +270,9 @@ function BranchSelector({
             ) : (
               <button
                 onClick={() => setShowCreate(true)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:text-white hover:bg-gray-750 transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] rounded-[var(--radius-small)] transition-colors"
               >
-                <GitBranch size={12} />
+                <GitBranch size={11} weight="bold" />
                 New branch from current state
               </button>
             )}
@@ -292,11 +292,11 @@ function ForkIndicator({
 }) {
   return (
     <div className="relative pl-8 my-1">
-      <div className="absolute left-[9px] top-1/2 w-4 h-px bg-purple-500/50" />
+      <div className="absolute left-[9px] top-1/2 w-4 h-px bg-[var(--border-hover)]" />
       <div className="absolute left-[25px] top-1/2 -translate-y-1/2">
-        <GitFork size={10} className="text-purple-400" />
+        <GitFork size={10} className="text-[var(--text-muted)]" weight="bold" />
       </div>
-      <div className="ml-4 bg-purple-500/10 border border-purple-500/20 rounded-lg px-3 py-2">
+      <div className="ml-4 bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius-small)] px-2.5 py-1.5">
         {branches.map((branch) => (
           <button
             key={branch.name}
@@ -304,10 +304,16 @@ function ForkIndicator({
             className="w-full flex items-center justify-between gap-2 text-xs group"
           >
             <div className="flex items-center gap-1.5 min-w-0">
-              <GitBranch size={12} className="text-purple-400 flex-shrink-0" />
-              <span className="text-purple-300 truncate">{branch.display_name}</span>
+              <GitBranch
+                size={11}
+                weight="bold"
+                className="text-[var(--text-muted)] flex-shrink-0"
+              />
+              <span className="text-[var(--text-muted)] group-hover:text-[var(--text)] truncate transition-colors">
+                {branch.display_name}
+              </span>
             </div>
-            <span className="text-purple-400/60 group-hover:text-purple-300 flex-shrink-0 transition-colors">
+            <span className="text-[10px] text-[var(--text-subtle)] group-hover:text-[var(--text-muted)] flex-shrink-0 transition-colors">
               {branch.checkpoint_count} saves
             </span>
           </button>
@@ -321,8 +327,8 @@ function AutoSaveIndicator({ count }: { count: number }) {
   return (
     <div className="relative pl-8 my-0.5">
       <div className="flex items-center gap-1.5 py-1 px-2">
-        <CloudArrowUp size={10} className="text-gray-600" />
-        <span className="text-[10px] text-gray-600">
+        <CloudArrowUp size={10} className="text-[var(--text-subtle)]" weight="bold" />
+        <span className="text-[10px] text-[var(--text-subtle)]">
           {count} auto-save{count !== 1 ? 's' : ''}
         </span>
       </div>
@@ -342,35 +348,29 @@ function RestoreConfirmDialog({
   onCancel: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 max-w-sm mx-4 shadow-2xl">
-        <h3 className="text-white font-medium mb-2">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-[var(--surface)] border border-[var(--border-hover)] rounded-[var(--radius)] p-5 max-w-sm mx-4">
+        <h3 className="text-[var(--text)] text-sm font-semibold mb-2">
           Restore to &ldquo;{snapshot.label || 'Checkpoint'}&rdquo;?
         </h3>
-        <p className="text-gray-400 text-sm mb-4">
+        <p className="text-[var(--text-muted)] text-xs mb-4 leading-relaxed">
           {isOnCurrentBranch
             ? 'Your current work will be saved as a separate branch so you can return to it later.'
             : 'This will switch your project to this saved state.'}
         </p>
         {isOnCurrentBranch && (
-          <div className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 mb-4">
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <GitBranch size={12} className="text-blue-400" />
+          <div className="bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius-small)] px-2.5 py-1.5 mb-4">
+            <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
+              <GitBranch size={11} weight="bold" />
               <span>Current state will be preserved as a branch</span>
             </div>
           </div>
         )}
         <div className="flex gap-2">
-          <button
-            onClick={onCancel}
-            className="flex-1 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm transition-colors"
-          >
+          <button onClick={onCancel} className="btn flex-1">
             Cancel
           </button>
-          <button
-            onClick={onConfirm}
-            className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
-          >
+          <button onClick={onConfirm} className="btn btn-filled flex-1">
             Restore
           </button>
         </div>
@@ -397,13 +397,8 @@ export function TimelinePanel({
   const [activeBranch, setActiveBranch] = useState('main');
   const [restoreTarget, setRestoreTarget] = useState<Snapshot | null>(null);
 
-  // Volume health
   const [volumeStatus, setVolumeStatus] = useState<VolumeStatus | null>(null);
   const [isRecovering, setIsRecovering] = useState(false);
-
-  // ------------------------------------------------------------------
-  // Data loading
-  // ------------------------------------------------------------------
 
   const loadGraph = useCallback(async () => {
     try {
@@ -435,11 +430,6 @@ export function TimelinePanel({
     return () => clearInterval(id);
   }, [checkVolumeHealth]);
 
-  // ------------------------------------------------------------------
-  // Derived data
-  // ------------------------------------------------------------------
-
-  // ALL snapshots in the map (sync + checkpoint) for traversal.
   const snapMap = useMemo(() => {
     const map = new Map<string, Snapshot>();
     if (graph) {
@@ -455,14 +445,11 @@ export function TimelinePanel({
     [graph, activeBranch]
   );
 
-  // Build timeline items: checkpoints as cards, sync counts between them.
   const timelineItems = useMemo(() => {
     if (!activeBranchObj) return [];
     return buildTimelineItems(activeBranchObj.hash, snapMap, graph?.head ?? '');
   }, [activeBranchObj, snapMap, graph]);
 
-  // Build ancestor chain of the active branch for fork detection.
-  // Walks ALL snapshots (sync + checkpoint) via prev pointers.
   const activeAncestors = useMemo(() => {
     const ancestors = new Set<string>();
     if (!activeBranchObj) return ancestors;
@@ -481,10 +468,6 @@ export function TimelinePanel({
     if (!graph) return new Map<string, TimelineBranch[]>();
     return findForkPoints(activeAncestors, graph.branches, snapMap);
   }, [graph, activeAncestors, snapMap]);
-
-  // ------------------------------------------------------------------
-  // Handlers
-  // ------------------------------------------------------------------
 
   const handleCreateSnapshot = async () => {
     setIsCreating(true);
@@ -539,10 +522,6 @@ export function TimelinePanel({
     }
   };
 
-  // ------------------------------------------------------------------
-  // Render
-  // ------------------------------------------------------------------
-
   const isHealthy = volumeStatus?.status === 'healthy';
   const isDegraded = volumeStatus && !isHealthy;
   const totalCheckpoints = graph?.branches.reduce((sum, b) => sum + b.checkpoint_count, 0) ?? 0;
@@ -550,79 +529,92 @@ export function TimelinePanel({
 
   if (isLoading) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <Spinner className="w-8 h-8 text-gray-400 animate-spin" />
+      <div className="h-full flex items-center justify-center bg-[var(--bg)]">
+        <Spinner className="w-6 h-6 text-[var(--text-muted)] animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col bg-gray-900">
-      {/* Volume Health Section */}
-      <div className="px-4 py-3 border-b border-gray-800">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <HardDrive className="w-4 h-4 text-gray-400" />
-            <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+    <div className="h-full flex flex-col bg-[var(--bg)] overflow-hidden">
+      {/* Storage Health */}
+      <div className="px-4 py-3 border-b border-[var(--border)]">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-1.5">
+            <HardDrive size={12} className="text-[var(--text-subtle)]" weight="bold" />
+            <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-subtle)]">
               Storage
             </span>
           </div>
           <button
             onClick={checkVolumeHealth}
-            className="p-1 rounded hover:bg-gray-800 transition-colors"
+            className="p-1 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"
             title="Refresh status"
           >
-            <ArrowsClockwise size={12} className="text-gray-500" />
+            <ArrowsClockwise size={11} weight="bold" />
           </button>
         </div>
 
         <div className="flex items-center gap-2">
           {isHealthy ? (
-            <CheckCircle size={16} className="text-green-500" weight="fill" />
+            <CheckCircle
+              size={14}
+              weight="fill"
+              style={{ color: 'var(--status-success)' }}
+            />
           ) : isDegraded ? (
-            <Warning size={16} className="text-red-500" weight="fill" />
+            <Warning size={14} weight="fill" style={{ color: 'var(--status-error)' }} />
           ) : (
-            <Spinner size={16} className="text-gray-500 animate-spin" />
+            <Spinner size={14} className="animate-spin text-[var(--text-muted)]" />
           )}
           <span
-            className={`text-sm ${isHealthy ? 'text-green-400' : isDegraded ? 'text-red-400' : 'text-gray-400'}`}
+            className="text-xs"
+            style={{
+              color: isHealthy
+                ? 'var(--status-success)'
+                : isDegraded
+                  ? 'var(--status-error)'
+                  : 'var(--text-muted)',
+            }}
           >
             {isHealthy
               ? 'Connected'
               : isDegraded
                 ? 'Unavailable — storage needs recovery'
-                : 'Checking...'}
+                : 'Checking…'}
           </span>
         </div>
 
         {isDegraded && volumeStatus.recoverable && (
-          <div className="mt-2 flex gap-2">
+          <div className="mt-2">
             <button
               onClick={handleRecover}
               disabled={isRecovering}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600/20 border border-amber-600/30 text-amber-400 rounded-lg text-xs font-medium hover:bg-amber-600/30 transition-colors disabled:opacity-50"
+              className="btn btn-sm w-full flex items-center justify-center gap-1.5"
+              style={{
+                color: 'var(--status-warning)',
+                ...(isRecovering ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
+              }}
             >
-              <FirstAid size={14} />
-              {isRecovering ? 'Recovering...' : 'Recover to Latest'}
+              <FirstAid size={12} weight="bold" />
+              {isRecovering ? 'Recovering…' : 'Recover to Latest'}
             </button>
           </div>
         )}
       </div>
 
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-800">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Clock className="w-5 h-5 text-gray-400" />
-            <h3 className="font-medium text-white">Timeline</h3>
-          </div>
-          <span className="text-xs text-gray-500">{totalCheckpoints} saved</span>
+      <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Clock size={13} className="text-[var(--text-muted)]" weight="bold" />
+          <h3 className="text-xs font-semibold text-[var(--text)]">Timeline</h3>
         </div>
+        <span className="text-[10px] text-[var(--text-subtle)]">{totalCheckpoints} saved</span>
       </div>
 
       {/* Branch Selector */}
       {graph && (
-        <div className="px-4 py-3 border-b border-gray-800">
+        <div className="px-4 py-3 border-b border-[var(--border)]">
           <BranchSelector
             branches={graph.branches}
             activeBranch={activeBranch}
@@ -633,7 +625,7 @@ export function TimelinePanel({
       )}
 
       {/* Create Checkpoint */}
-      <div className="px-4 py-3 border-b border-gray-800">
+      <div className="px-4 py-3 border-b border-[var(--border)]">
         {showLabelInput ? (
           <div className="flex flex-col gap-2">
             <input
@@ -641,7 +633,7 @@ export function TimelinePanel({
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
               placeholder="Checkpoint label (optional)"
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              className="w-full px-2 py-1 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-xs text-[var(--text)] placeholder-[var(--text-subtle)] focus:outline-none focus:border-[var(--border-hover)]"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleCreateSnapshot();
@@ -655,12 +647,15 @@ export function TimelinePanel({
               <button
                 onClick={handleCreateSnapshot}
                 disabled={isCreating || !isHealthy}
-                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+                className="btn btn-filled flex-1 flex items-center justify-center gap-1.5"
+                style={
+                  isCreating || !isHealthy ? { opacity: 0.4, cursor: 'not-allowed' } : undefined
+                }
               >
                 {isCreating ? (
-                  <Spinner className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <Camera className="w-4 h-4" />
+                  <Camera size={13} weight="bold" />
                 )}
                 Save
               </button>
@@ -669,7 +664,7 @@ export function TimelinePanel({
                   setShowLabelInput(false);
                   setNewLabel('');
                 }}
-                className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm transition-colors"
+                className="btn flex-1"
               >
                 Cancel
               </button>
@@ -679,14 +674,15 @@ export function TimelinePanel({
           <button
             onClick={() => setShowLabelInput(true)}
             disabled={!isHealthy}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-750 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors border border-gray-700"
+            className="btn w-full flex items-center justify-center gap-1.5"
+            style={!isHealthy ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
           >
-            <FloppyDisk className="w-4 h-4" />
+            <FloppyDisk size={13} weight="bold" />
             Create Checkpoint
           </button>
         )}
         {!isHealthy && (
-          <p className="mt-2 text-xs text-gray-500 text-center">
+          <p className="mt-2 text-[10px] text-[var(--text-subtle)] text-center">
             Storage must be available to save checkpoints
           </p>
         )}
@@ -695,14 +691,20 @@ export function TimelinePanel({
       {/* Timeline */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {checkpointItems.length === 0 ? (
-          <div className="text-center py-8">
-            <Clock className="w-12 h-12 text-gray-700 mx-auto mb-3" />
-            <p className="text-gray-500 text-sm">No checkpoints yet</p>
-            <p className="text-gray-600 text-xs mt-1">Save your project state to restore later</p>
+          <div className="text-center py-10">
+            <Clock
+              size={32}
+              className="text-[var(--text-subtle)] mx-auto mb-2 opacity-50"
+              weight="bold"
+            />
+            <p className="text-xs text-[var(--text-muted)]">No checkpoints yet</p>
+            <p className="text-[10px] text-[var(--text-subtle)] mt-1">
+              Save your project state to restore later
+            </p>
           </div>
         ) : (
           <div className="relative">
-            <div className="absolute left-3 top-3 bottom-3 w-px bg-gray-700" />
+            <div className="absolute left-3 top-3 bottom-3 w-px bg-[var(--border)]" />
 
             <div className="space-y-1">
               {timelineItems.map((item, idx) => {
@@ -719,36 +721,50 @@ export function TimelinePanel({
                     {/* Checkpoint node */}
                     <div className="relative pl-8">
                       <div
-                        className={`absolute left-1.5 top-3 w-3 h-3 rounded-full ring-4 ring-gray-900 ${
-                          isHead ? 'bg-green-500' : 'bg-blue-500'
-                        }`}
+                        className="absolute left-1.5 top-3 w-2.5 h-2.5 rounded-full"
+                        style={{
+                          backgroundColor: isHead
+                            ? 'var(--status-success)'
+                            : 'var(--text-muted)',
+                          boxShadow: '0 0 0 4px var(--bg)',
+                        }}
                       />
 
-                      <div className="bg-gray-800 rounded-lg p-3 border border-gray-700 hover:border-gray-600 transition-colors">
+                      <div className="bg-[var(--surface-hover)] rounded-[var(--radius-small)] px-3 py-2 border border-[var(--border)] hover:border-[var(--border-hover)] transition-colors">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
+                            <div className="flex items-center gap-1.5 mb-0.5">
                               <CheckCircle
-                                className="text-green-500 flex-shrink-0"
                                 weight="fill"
-                                size={14}
+                                size={12}
+                                style={{ color: 'var(--status-success)' }}
+                                className="flex-shrink-0"
                               />
-                              <span className="font-medium text-white text-sm truncate">
+                              <span className="text-xs font-medium text-[var(--text)] truncate">
                                 {snapshot.label || 'Checkpoint'}
                               </span>
                               {isHead && (
-                                <span className="px-1.5 py-0.5 bg-green-900/50 text-green-400 text-xs rounded flex-shrink-0">
+                                <span
+                                  className="px-1.5 py-0.5 text-[10px] rounded-[var(--radius-small)] flex-shrink-0 font-medium"
+                                  style={{
+                                    color: 'var(--status-success)',
+                                    backgroundColor:
+                                      'color-mix(in srgb, var(--status-success) 12%, transparent)',
+                                  }}
+                                >
                                   Current
                                 </span>
                               )}
                               {isFirst && !isHead && (
-                                <span className="px-1.5 py-0.5 bg-blue-900/50 text-blue-400 text-xs rounded flex-shrink-0">
+                                <span
+                                  className="px-1.5 py-0.5 text-[10px] rounded-[var(--radius-small)] flex-shrink-0 font-medium text-[var(--text-muted)] bg-[var(--surface)]"
+                                >
                                   Latest
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-3 text-xs text-gray-500">
-                              <span>{formatDate(snapshot.ts)}</span>
+                            <div className="text-[10px] text-[var(--text-subtle)]">
+                              {formatDate(snapshot.ts)}
                             </div>
                           </div>
 
@@ -756,16 +772,15 @@ export function TimelinePanel({
                             <button
                               onClick={() => setRestoreTarget(snapshot)}
                               title="Restore to this checkpoint"
-                              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                              className="p-1.5 rounded-[var(--radius-small)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface)] transition-colors"
                             >
-                              <ArrowCounterClockwise className="w-4 h-4" />
+                              <ArrowCounterClockwise size={13} weight="bold" />
                             </button>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    {/* Fork indicator after this node */}
                     {forkedBranches && forkedBranches.length > 0 && (
                       <ForkIndicator branches={forkedBranches} onSwitchBranch={setActiveBranch} />
                     )}
@@ -777,10 +792,8 @@ export function TimelinePanel({
         )}
       </div>
 
-      {/* Footer spacer */}
       <div className="h-2" />
 
-      {/* Restore confirmation dialog */}
       {restoreTarget && (
         <RestoreConfirmDialog
           snapshot={restoreTarget}

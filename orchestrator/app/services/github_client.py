@@ -15,15 +15,23 @@ class GitHubClient:
         Initialize the GitHub API client.
 
         Args:
-            access_token: GitHub OAuth access token or Personal Access Token
+            access_token: GitHub OAuth access token or Personal Access Token.
+                Pass an empty string for unauthenticated requests against
+                public repositories (subject to GitHub's anonymous 60/hr
+                IP-based rate limit).
         """
         self.token = access_token
         self.api_base = "https://api.github.com"
+        # Drop the Authorization header entirely when no token is supplied.
+        # Sending `Authorization: Bearer ` with an empty value makes httpx
+        # raise LocalProtocolError before any request is made — which would
+        # block public-repo reads for users who haven't connected GitHub.
         self.headers = {
-            "Authorization": f"Bearer {access_token}",
             "Accept": "application/vnd.github.v3+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        if access_token:
+            self.headers["Authorization"] = f"Bearer {access_token}"
 
     async def _request(
         self, method: str, endpoint: str, json: dict | None = None, params: dict | None = None

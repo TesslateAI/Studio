@@ -97,13 +97,14 @@ async def _resolve_container_url(
     protocol: str,
     app_domain: str,
 ) -> str:
-    """Compute a public URL for a container, branching on app_role.
+    """Compute a public URL for a container, branching on project_kind.
 
-    Installed AppInstance projects render as
+    Installed app-runtime projects render as
     ``{dir}-{app_handle}-{creator_handle}.{domain}`` (or
     ``{app_handle}-{creator_handle}.{domain}`` for single-container apps).
-    Non-app user projects keep the legacy ``{project_slug}-{dir}.{domain}``.
+    Workspace / app_source projects keep the legacy ``{project_slug}-{dir}.{domain}``.
     """
+    from ..models import PROJECT_KIND_APP_RUNTIME
     from ..services.apps.runtime_urls import (
         container_url as _legacy_url,
     )
@@ -111,7 +112,10 @@ async def _resolve_container_url(
         resolve_app_url_for_container,
     )
 
-    if container is not None and getattr(project, "app_role", "none") == "app_instance":
+    if (
+        container is not None
+        and getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME
+    ):
         url = await resolve_app_url_for_container(db, container, protocol=protocol)
         if url:
             return url
@@ -350,16 +354,16 @@ async def get_projects(
     if not member and not getattr(current_user, "is_superuser", False):
         return []
 
-    # Hide installed-app instance projects from the normal Projects list —
+    # Hide installed-app runtime projects from the normal Projects list —
     # those are rendered in Library > Apps instead. Forks (app_source) remain.
     from ..services.apps.project_scopes import exclude_app_instances_clause
 
-    app_role_filter = exclude_app_instances_clause()
+    project_kind_filter = exclude_app_instances_clause()
 
     # Admins / superusers see all projects in the team
     if (member and member.role == "admin") or getattr(current_user, "is_superuser", False):
         result = await db.execute(
-            select(Project).where(and_(Project.team_id == team_id, app_role_filter))
+            select(Project).where(and_(Project.team_id == team_id, project_kind_filter))
         )
     else:
         # Non-admin: team-visible projects + projects with explicit membership
@@ -367,7 +371,7 @@ async def get_projects(
             select(Project).where(
                 and_(
                     Project.team_id == team_id,
-                    app_role_filter,
+                    project_kind_filter,
                     or_(
                         Project.visibility == "team",
                         Project.id.in_(
@@ -945,6 +949,164 @@ def _no_remote_payload(kind: str) -> dict[str, object]:
     }
 
 
+def _local_git_manager(project: Project, user: User):
+    """Build a GitManager bound to (user, project) for local-repo reads.
+
+    Used as a fallback when a project has no GitHub remote so the
+    Repository panel can still render commits/branches/overview from
+    the on-disk git history.
+    """
+    from ..services.git_manager import GitManager
+
+    return GitManager(
+        user_id=user.id,
+        project_id=str(project.id),
+        user_name=getattr(user, "username", None) or "Tesslate User",
+        user_email=str(user.email) if getattr(user, "email", None) else "user@tesslate.com",
+    )
+
+
+async def _local_commits_payload(
+    project: Project, user: User, branch: str | None, limit: int
+) -> dict[str, object]:
+    """Build a {status:'local', commits:[...]} payload for the Graph/Overview tabs.
+
+    Returns the GitHub-shaped commit envelope so the frontend renders the
+    same way; GitHub-only fields (login, avatar_url, html_url) are nulled.
+    Errors are swallowed into an empty list — "no data" beats a panel crash.
+    """
+    git_mgr = _local_git_manager(project, user)
+    try:
+        raw = await git_mgr.get_commit_history(limit=limit, branch=branch)
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[GIT_COMMITS_LOCAL] {project.slug}: {exc}")
+        raw = []
+
+    def _normalize(c: dict[str, object]) -> dict[str, object]:
+        sha = str(c.get("sha") or "")
+        message = str(c.get("message") or "")
+        title = message.split("\n", 1)[0] if message else ""
+        return {
+            "sha": sha,
+            "short_sha": sha[:7] if sha else "",
+            "message": message,
+            "title": title,
+            "html_url": None,
+            "parents": [],
+            "author": {
+                "login": None,
+                "avatar_url": None,
+                "name": c.get("author"),
+                "email": c.get("email"),
+                "date": c.get("date"),
+            },
+            "committer": {
+                "login": None,
+                "avatar_url": None,
+                "name": c.get("author"),
+                "email": c.get("email"),
+                "date": c.get("date"),
+            },
+            "files_changed": None,
+        }
+
+    return {
+        "status": "local",
+        "owner": None,
+        "repo": None,
+        "branch": branch,
+        "html_url": None,
+        "commits": [_normalize(c) for c in raw if isinstance(c, dict)],
+    }
+
+
+async def _local_branches_payload(project: Project, user: User) -> dict[str, object]:
+    """Build a {status:'local', branches:[...]} payload for the Branches tab.
+
+    ahead/behind counts are unavailable without a remote; we leave them
+    null. The default branch is whichever local branch is currently
+    checked out (falls back to "main").
+    """
+    git_mgr = _local_git_manager(project, user)
+    try:
+        raw = await git_mgr.list_branches()
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[GIT_BRANCHES_LOCAL] {project.slug}: {exc}")
+        raw = []
+
+    default_branch = "main"
+    for b in raw:
+        if isinstance(b, dict) and b.get("current"):
+            default_branch = str(b.get("name") or default_branch)
+            break
+
+    branches = [
+        {
+            "name": str(b.get("name") or ""),
+            "is_default": bool(b.get("name") == default_branch),
+            "protected": False,
+            "sha": None,
+            "html_url": None,
+            "ahead_by": None,
+            "behind_by": None,
+        }
+        for b in raw
+        if isinstance(b, dict) and not b.get("remote")
+    ]
+
+    return {
+        "status": "local",
+        "owner": None,
+        "repo": None,
+        "default_branch": default_branch,
+        "html_url": None,
+        "branches": branches,
+    }
+
+
+async def _local_repo_info_payload(project: Project, user: User) -> dict[str, object]:
+    """Build a {status:'local', ...} payload for the Overview tab.
+
+    Pulls a few cheap stats (current branch, last commit) from local git
+    and leaves GitHub-specific fields (stars, forks, contributors, PRs)
+    null. The Overview tab's UI treats missing fields gracefully.
+    """
+    git_mgr = _local_git_manager(project, user)
+
+    default_branch = "main"
+    last_commit_date: str | None = None
+    try:
+        status = await git_mgr.get_status()
+        if isinstance(status, dict):
+            default_branch = str(status.get("branch") or default_branch)
+            last = status.get("last_commit")
+            if isinstance(last, dict):
+                last_commit_date = last.get("date") if isinstance(last.get("date"), str) else None
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[GIT_REPO_INFO_LOCAL] {project.slug}: status failed: {exc}")
+
+    return {
+        "status": "local",
+        "owner": None,
+        "repo": None,
+        "html_url": None,
+        "description": project.description if hasattr(project, "description") else None,
+        "default_branch": default_branch,
+        "stars": None,
+        "watchers": None,
+        "forks": None,
+        "open_issues": None,
+        "pushed_at": last_commit_date,
+        "updated_at": last_commit_date,
+        "created_at": None,
+        "is_private": True,
+        "topics": [],
+        "contributors": [],
+        "open_pulls": [],
+        "open_pulls_count": 0,
+    }
+
+
 def _error_payload(kind: str, exc: Exception) -> dict[str, object]:
     """Return a safe error envelope for GitHub failures.
 
@@ -994,12 +1156,12 @@ async def get_git_commits(
         files_changed: int | None (only when include_stats=true)
     """
     project = await get_project_by_slug(db, project_slug, current_user)
+    capped = max(1, min(limit, 100))
     resolved = await _resolve_github_client(db, project, current_user)
     if resolved is None:
-        return _no_remote_payload("commit history")
+        return await _local_commits_payload(project, current_user, branch, capped)
 
     owner, repo, client = resolved
-    capped = max(1, min(limit, 100))
 
     try:
         raw_commits = await client.list_commits(owner, repo, sha=branch, per_page=capped)
@@ -1104,7 +1266,7 @@ async def get_git_branches(
     project = await get_project_by_slug(db, project_slug, current_user)
     resolved = await _resolve_github_client(db, project, current_user)
     if resolved is None:
-        return _no_remote_payload("branches")
+        return await _local_branches_payload(project, current_user)
 
     owner, repo, client = resolved
 
@@ -1185,7 +1347,7 @@ async def get_git_repo_info(
     project = await get_project_by_slug(db, project_slug, current_user)
     resolved = await _resolve_github_client(db, project, current_user)
     if resolved is None:
-        return _no_remote_payload("repository info")
+        return await _local_repo_info_payload(project, current_user)
 
     owner, repo, client = resolved
 
@@ -1926,19 +2088,20 @@ async def save_project_file(
             except Exception as docker_error:
                 logger.warning(f"[FILE] ⚠️ Failed to write to shared volume: {docker_error}")
 
-        # 2. Update database record (for version history / backup)
-        result = await db.execute(
-            select(ProjectFile).where(
-                ProjectFile.project_id == project_id, ProjectFile.file_path == file_path
-            )
-        )
-        existing_file = result.scalar_one_or_none()
+        # 2. Update database record (for version history / backup).
+        #
+        # Race-safe via the uq_project_files_project_path unique constraint
+        # plus dialect-native ON CONFLICT DO UPDATE in the helper. Manual
+        # saves, agent saves, and (on supported frontend frameworks) the
+        # design-bridge installer all converge here; the design-bridge case
+        # in particular fires two writes back-to-back during view mount
+        # which used to race the old check-then-insert pattern into
+        # duplicate rows.
+        from ..services.project_files import upsert_project_file
 
-        if existing_file:
-            existing_file.content = content
-        else:
-            new_file = ProjectFile(project_id=project_id, file_path=file_path, content=content)
-            db.add(new_file)
+        await upsert_project_file(
+            db, project_id=project_id, file_path=file_path, content=content
+        )
 
         # Update project's updated_at timestamp
         from datetime import datetime
@@ -2978,49 +3141,55 @@ async def update_project_settings(
         raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}") from e
 
 
-@router.patch("/{project_slug}/app-role", response_model=ProjectSchema)
-async def set_project_app_role(
+@router.patch("/{project_slug}/project-kind", response_model=ProjectSchema)
+async def set_project_kind(
     project_slug: str,
     payload: dict,
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Flip a project between `null` (regular) and `app_source` (publishable).
+    """Flip a project between ``workspace`` and ``app_source`` (publishable).
 
-    Transitions allowed: ``None ↔ 'app_source'``. An ``app_instance`` project
-    is an installed app — not a creator surface — and may NOT be re-roled.
+    Transitions allowed: ``workspace ↔ app_source``. An ``app_runtime``
+    project is an installed app — not a creator surface — and may NOT be
+    re-kinded.
     """
+    from ..models import (
+        PROJECT_KIND_APP_RUNTIME,
+        PROJECT_KIND_APP_SOURCE,
+        PROJECT_KIND_WORKSPACE,
+    )
     from ..permissions import get_project_with_access
 
-    # Accept {"app_role": "app_source" | null} from the request body.
-    if not isinstance(payload, dict) or "app_role" not in payload:
-        raise HTTPException(status_code=400, detail="missing 'app_role' field")
-    requested = payload["app_role"]
-    if requested not in (None, "app_source"):
+    # Accept {"project_kind": "workspace" | "app_source"} from the request body.
+    if not isinstance(payload, dict) or "project_kind" not in payload:
+        raise HTTPException(status_code=400, detail="missing 'project_kind' field")
+    requested = payload["project_kind"]
+    if requested not in (PROJECT_KIND_WORKSPACE, PROJECT_KIND_APP_SOURCE):
         raise HTTPException(
             status_code=400,
-            detail="app_role must be null or 'app_source'",
+            detail="project_kind must be 'workspace' or 'app_source'",
         )
 
     project, _role = await get_project_with_access(
         db, project_slug, current_user.id, Permission.PROJECT_EDIT
     )
 
-    current = project.app_role
-    if current == "app_instance":
+    current = project.project_kind
+    if current == PROJECT_KIND_APP_RUNTIME:
         raise HTTPException(
             status_code=409,
-            detail="installed app_instance projects cannot change app_role",
+            detail="installed app_runtime projects cannot change project_kind",
         )
     if current == requested:
         # No-op; return current.
         return ProjectSchema.model_validate(project)
 
-    project.app_role = requested
+    project.project_kind = requested
     await db.commit()
     await db.refresh(project)
     logger.info(
-        "project %s app_role: %s -> %s (user=%s)",
+        "project %s project_kind: %s -> %s (user=%s)",
         project.id,
         current,
         requested,
@@ -5947,6 +6116,13 @@ async def start_all_containers(
 
     await track_project_activity(project.id, db)
 
+    # Source-of-truth refresh: fold any edits to .tesslate/config.json into
+    # the Container graph before we render manifests. Non-blocking — falls
+    # back to existing DB state if the file is missing or invalid.
+    from ..services.config_sync import ensure_config_synced
+
+    await ensure_config_synced(db, project, current_user.id)
+
     try:
         # Get all containers and connections
         # Use selectinload to eagerly load the base relationship to avoid lazy loading errors
@@ -6353,6 +6529,13 @@ async def start_single_container(
             detail="Project is still being provisioned. Please wait for setup to complete.",
         )
 
+    # Source-of-truth refresh: fold any edits to .tesslate/config.json into
+    # the Container graph before we render manifests. Non-blocking — falls
+    # back to existing DB state if the file is missing or invalid.
+    from ..services.config_sync import ensure_config_synced
+
+    await ensure_config_synced(db, project, current_user.id)
+
     # Verify container exists and belongs to project
     container = await db.get(Container, container_id)
     if not container or container.project_id != project.id:
@@ -6698,6 +6881,16 @@ async def _restart_container_background_task(
 
         if not container or container.project_id != project.id:
             raise RuntimeError("Container not found")
+
+        # Source-of-truth refresh: fold any edits to .tesslate/config.json into
+        # the Container graph before we tear down + re-render. Non-blocking.
+        from ..services.config_sync import ensure_config_synced
+
+        await ensure_config_synced(db, project, user_id)
+        # Container row may have been replaced/updated; re-load before use.
+        container = await db.get(Container, container_id)
+        if not container or container.project_id != project.id:
+            raise RuntimeError("Container not found after config sync")
 
         orchestrator = get_orchestrator()
 

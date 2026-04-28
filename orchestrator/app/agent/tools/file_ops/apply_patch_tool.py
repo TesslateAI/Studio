@@ -579,6 +579,10 @@ def register_apply_patch_tool(registry) -> None:
             },
             executor=apply_patch_tool,
             category=ToolCategory.FILE_OPS,
+            # Structured changes list in, per-op result list out — JSON-clean.
+            state_serializable=True,
+            # Patches applied atomically; no persistent patch session held.
+            holds_external_state=False,
             examples=[
                 (
                     '{"tool_name": "apply_patch", "parameters": {"cwd": "", '

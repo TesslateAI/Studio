@@ -1055,6 +1055,12 @@ def register_bash_tools(registry):
                 "required": ["command"],
             },
             executor=bash_exec_tool,
+            # Command + flags in, captured stdout/stderr/exit_code dict out — JSON-clean.
+            state_serializable=True,
+            # is_background=True spawns a PTY background process whose handle
+            # outlives the call; one-shot foreground commands do not. Mark True
+            # because the tool surface includes the background path.
+            holds_external_state=True,
             examples=[
                 '{"tool_name": "bash_exec", "parameters": {"command": "npm install"}}',
                 '{"tool_name": "bash_exec", "parameters": {"command": "ls -la", "timeout": 30}}',

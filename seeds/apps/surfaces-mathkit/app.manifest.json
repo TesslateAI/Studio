@@ -1,0 +1,88 @@
+{
+  "manifest_schema_version": "2026-05",
+  "app": {
+    "id": "com.tesslate.surfaces-mathkit",
+    "slug": "surfaces-mathkit",
+    "name": "Surfaces MathKit",
+    "version": "0.1.0",
+    "description": "Tiny dependency-target app for surface tests. Exposes one action (multiply) plus a card view (calculator) and a cached data resource (last_result).",
+    "category": "utility",
+    "forkable": true
+  },
+  "runtime": {
+    "tenancy_model": "per_install",
+    "state_model": "per_install_volume",
+    "scaling": {"min_replicas": 1, "max_replicas": 1, "target_concurrency": 4, "idle_timeout_seconds": 600},
+    "storage": {"write_scope": ["/app/data"]}
+  },
+  "billing": {
+    "ai_compute": {"payer_default": "platform"},
+    "general_compute": {"payer_default": "platform"},
+    "platform_fee": {"model": "free"}
+  },
+  "surfaces": [
+    {"kind": "ui", "entrypoint": "/", "container": "web"}
+  ],
+  "actions": [
+    {
+      "name": "multiply",
+      "description": "Multiply two numbers and return the product.",
+      "handler": {"kind": "http_post", "container": "web", "path": "/actions/multiply"},
+      "input_schema": {
+        "type": "object",
+        "required": ["x", "y"],
+        "properties": {
+          "x": {"type": "number"},
+          "y": {"type": "number"}
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": ["product"],
+        "properties": {
+          "product": {"type": "number"}
+        }
+      },
+      "timeout_seconds": 10
+    },
+    {
+      "name": "last_result_action",
+      "description": "Return the last multiplication result (for data_resource backing).",
+      "handler": {"kind": "http_post", "container": "web", "path": "/actions/last_result"},
+      "input_schema": {"type": "object", "properties": {}},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "last_x": {"type": "number"},
+          "last_y": {"type": "number"},
+          "last_product": {"type": "number"},
+          "calls": {"type": "integer"}
+        }
+      },
+      "timeout_seconds": 10
+    }
+  ],
+  "views": [
+    {
+      "name": "calculator",
+      "kind": "card",
+      "entrypoint": "/views/calculator"
+    }
+  ],
+  "data_resources": [
+    {
+      "name": "last_result",
+      "backed_by_action": "last_result_action",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "last_x": {"type": "number"},
+          "last_y": {"type": "number"},
+          "last_product": {"type": "number"},
+          "calls": {"type": "integer"}
+        }
+      },
+      "cache_ttl_seconds": 30
+    }
+  ]
+}

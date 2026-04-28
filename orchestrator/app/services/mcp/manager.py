@@ -13,7 +13,9 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ...config import get_settings
 from ...models import MarketplaceAgent, UserMcpConfig
@@ -183,9 +185,6 @@ class McpManager:
             prompt_catalog : list[dict]
                 Flat list of available prompts across all servers.
         """
-        settings = get_settings()
-        cache_ttl = settings.mcp_tool_cache_ttl
-
         user_uuid = _coerce_uuid(user_id)
         team_uuid = _coerce_uuid(team_id) if team_id else None
         project_uuid = _coerce_uuid(project_id) if project_id else None
@@ -206,6 +205,108 @@ class McpManager:
             project_id=project_uuid,
             agent_id=agent_uuid,
         )
+
+        return await self._process_config_list(configs, user_id, db)
+
+    # ------------------------------------------------------------------
+    # Per-turn extras (called by worker when @-mentions are present)
+    # ------------------------------------------------------------------
+
+    async def get_extra_configs(
+        self,
+        config_ids: list[str],
+        user_id: str,
+        db: AsyncSession,
+        *,
+        exclude_marketplace_agent_ids: set[str] | None = None,
+    ) -> dict[str, Any]:
+        """Load + bridge a specific list of UserMcpConfig ids for THIS run only.
+
+        Used by the @-mention picker: when a user types ``@notion`` in the
+        chat, the worker calls this with that config's id to register the
+        connector's tools just for the current execution. Configs that the
+        user does not own, that are inactive, or that resolve to a server
+        already loaded by the default path (``exclude_marketplace_agent_ids``)
+        are silently skipped — never raises, so a stale/disabled mention can't
+        break the chat turn.
+        """
+        if not config_ids:
+            return {
+                "tools": [],
+                "mcp_configs": {},
+                "resource_catalog": [],
+                "prompt_catalog": [],
+                "unavailable_servers": [],
+            }
+
+        user_uuid = _coerce_uuid(user_id)
+        config_uuids: list[UUID] = []
+        for cid in config_ids:
+            try:
+                config_uuids.append(_coerce_uuid(cid))
+            except (ValueError, TypeError):
+                logger.debug("Skipping non-UUID mention mcp config id: %r", cid)
+
+        if not config_uuids:
+            return {
+                "tools": [],
+                "mcp_configs": {},
+                "resource_catalog": [],
+                "prompt_catalog": [],
+                "unavailable_servers": [],
+            }
+
+        result = await db.execute(
+            select(UserMcpConfig)
+            .where(
+                UserMcpConfig.id.in_(config_uuids),
+                UserMcpConfig.user_id == user_uuid,
+                UserMcpConfig.is_active.is_(True),
+            )
+            .options(selectinload(UserMcpConfig.marketplace_agent))
+        )
+        configs = list(result.scalars().all())
+
+        if exclude_marketplace_agent_ids:
+            configs = [
+                c
+                for c in configs
+                if c.marketplace_agent_id is None
+                or str(c.marketplace_agent_id) not in exclude_marketplace_agent_ids
+            ]
+
+        if not configs:
+            logger.debug(
+                "get_extra_configs: %d ids requested, 0 usable after ownership/active/dedup filters",
+                len(config_ids),
+            )
+            return {
+                "tools": [],
+                "mcp_configs": {},
+                "resource_catalog": [],
+                "prompt_catalog": [],
+                "unavailable_servers": [],
+            }
+
+        return await self._process_config_list(configs, user_id, db)
+
+    # ------------------------------------------------------------------
+    # Internal: shared per-config processing loop
+    # ------------------------------------------------------------------
+
+    async def _process_config_list(
+        self,
+        configs: list[UserMcpConfig],
+        user_id: str,
+        db: AsyncSession,
+    ) -> dict[str, Any]:
+        """Discover + bridge a pre-resolved list of UserMcpConfig rows.
+
+        Shared by ``get_user_mcp_context`` (default path, scope-resolved)
+        and ``get_extra_configs`` (per-turn @-mention path).
+        """
+        settings = get_settings()
+        cache_ttl = settings.mcp_tool_cache_ttl
 
         all_tools = []
         mcp_configs: dict[str, dict[str, Any]] = {}
@@ -324,25 +425,57 @@ class McpManager:
                 "user_mcp_config_id": str(umc.id),
             }
 
-            # 4. Bridge tools
+            # 4. Bridge tools / resources / prompts. Per-server isolation:
+            # a programmer error or schema-shape problem in ONE server's
+            # bridge step must not empty the whole MCP context for the run.
+            # We surface the broken server via ``unavailable_servers`` and
+            # keep going with the rest, mirroring the discovery-failure
+            # branch above. Without this, a single bad MCP made every
+            # other connector silently disappear from the agent's toolset.
             enabled = umc.enabled_capabilities or ["tools", "resources", "prompts"]
+            try:
+                if "tools" in enabled and filtered_tools:
+                    all_tools.extend(bridge_mcp_tools(server_slug, filtered_tools))
 
-            if "tools" in enabled and filtered_tools:
-                all_tools.extend(bridge_mcp_tools(server_slug, filtered_tools))
+                if "resources" in enabled:
+                    resources = schemas.get("resources", [])
+                    templates = schemas.get("resource_templates", [])
+                    resource_tool = bridge_mcp_resources(
+                        server_slug, resources, templates
+                    )
+                    if resource_tool:
+                        all_tools.append(resource_tool)
+                    resource_catalog.extend(
+                        {**r, "server": server_slug} for r in resources
+                    )
 
-            if "resources" in enabled:
-                resources = schemas.get("resources", [])
-                templates = schemas.get("resource_templates", [])
-                resource_tool = bridge_mcp_resources(server_slug, resources, templates)
-                if resource_tool:
-                    all_tools.append(resource_tool)
-                resource_catalog.extend({**r, "server": server_slug} for r in resources)
-
-            if "prompts" in enabled and schemas.get("prompts"):
-                prompt_tool = bridge_mcp_prompts(server_slug, schemas["prompts"])
-                if prompt_tool:
-                    all_tools.append(prompt_tool)
-                prompt_catalog.extend({**p, "server": server_slug} for p in schemas["prompts"])
+                if "prompts" in enabled and schemas.get("prompts"):
+                    prompt_tool = bridge_mcp_prompts(server_slug, schemas["prompts"])
+                    if prompt_tool:
+                        all_tools.append(prompt_tool)
+                    prompt_catalog.extend(
+                        {**p, "server": server_slug} for p in schemas["prompts"]
+                    )
+            except Exception as bridge_err:
+                logger.exception(
+                    "MCP bridge failed for '%s' (user=%s): %s -- skipping this server",
+                    server_slug,
+                    user_id,
+                    bridge_err,
+                )
+                # Drop the mcp_configs entry we added above; otherwise an
+                # executor would think the server is reachable while no
+                # tools point at it, and any direct-call code path would
+                # surface a confusing error.
+                mcp_configs.pop(server_slug, None)
+                unavailable_servers.append(
+                    {
+                        "server_slug": server_slug,
+                        "reason": "bridge_failed",
+                        "error": str(bridge_err)[:200],
+                    }
+                )
+                continue
 
         logger.info(
             "Built MCP context for user %s: %d servers, %d tools, %d resources, %d prompts",

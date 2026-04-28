@@ -97,21 +97,21 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
     const maxRetries = 3;
 
     container.innerHTML = `
-      <div class="h-full flex flex-col rounded-t-3xl overflow-hidden bg-gray-900/50 backdrop-blur-sm">
-        <div class="bg-gradient-to-r from-gray-800/80 to-gray-700/60 border-b border-gray-700/30 p-4 flex items-center justify-between rounded-t-3xl shadow-lg">
+      <div class="h-full flex flex-col rounded-t-3xl overflow-hidden bg-[var(--bg)] backdrop-blur-sm">
+        <div class="bg-[var(--surface)] border-b border-[var(--border)] p-4 flex items-center justify-between rounded-t-3xl">
           <div class="flex items-center gap-3 flex-1">
             <!-- Navigation Controls -->
-            <button id="back-btn" class="p-2.5 hover:bg-gray-600/50 rounded-xl transition-all duration-200 text-gray-300 hover:text-white hover:scale-105" title="Go Back">
+            <button id="back-btn" class="p-2.5 hover:bg-[var(--surface-hover)] rounded-xl transition-all duration-200 text-[var(--text-muted)] hover:text-[var(--text)] hover:scale-105" title="Go Back">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="15 18 9 12 15 6"></polyline>
               </svg>
             </button>
-            <button id="forward-btn" class="p-2.5 hover:bg-gray-600/50 rounded-xl transition-all duration-200 text-gray-300 hover:text-white hover:scale-105" title="Go Forward">
+            <button id="forward-btn" class="p-2.5 hover:bg-[var(--surface-hover)] rounded-xl transition-all duration-200 text-[var(--text-muted)] hover:text-[var(--text)] hover:scale-105" title="Go Forward">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="9 18 15 12 9 6"></polyline>
               </svg>
             </button>
-            <button id="refresh-btn" class="p-2.5 hover:bg-gray-600/50 rounded-xl transition-all duration-200 text-gray-300 hover:text-white hover:scale-105" title="Refresh Preview">
+            <button id="refresh-btn" class="p-2.5 hover:bg-[var(--surface-hover)] rounded-xl transition-all duration-200 text-[var(--text-muted)] hover:text-[var(--text)] hover:scale-105" title="Refresh Preview">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="23 4 23 10 17 10"></polyline>
                 <polyline points="1 20 1 14 7 14"></polyline>
@@ -120,12 +120,12 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
             </button>
 
             <!-- URL Bar -->
-            <div class="flex-1 flex items-center gap-2 bg-gray-800/50 rounded-xl px-4 py-2 border border-gray-600/30">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-400">
+            <div class="flex-1 flex items-center gap-2 bg-[var(--surface)] rounded-xl px-4 py-2 border border-[var(--border)]">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-[var(--text-muted)]">
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                 <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
               </svg>
-              <span id="url-display" class="text-sm text-gray-300 font-mono truncate">${devServerUrl}${currentPath}</span>
+              <span id="url-display" class="text-sm text-[var(--text-muted)] font-mono truncate">${devServerUrl}${currentPath}</span>
             </div>
 
             <button id="restart-btn" class="p-2.5 hover:bg-orange-600/20 rounded-xl transition-all duration-200 text-orange-400 hover:text-orange-300 hover:scale-105 border border-orange-500/20" title="Restart Dev Server">
@@ -133,7 +133,7 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
                 <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
               </svg>
             </button>
-            <button id="external-btn" class="p-2.5 hover:bg-blue-600/20 rounded-xl transition-all duration-200 text-gray-300 hover:text-blue-300 hover:scale-105 border border-blue-500/20" title="Open in New Tab">
+            <button id="external-btn" class="p-2.5 hover:bg-[var(--surface-hover)] rounded-xl transition-all duration-200 text-[var(--text-muted)] hover:text-[var(--text)] hover:scale-105 border border-[var(--border)]" title="Open in New Tab">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -144,14 +144,14 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
 
           <div class="flex items-center gap-4 ml-4">
             <!-- Sliding Toggle -->
-            <div class="relative bg-gray-700/50 backdrop-blur-sm p-1 rounded-2xl border border-gray-600/30 shadow-inner">
-              <div class="absolute top-1 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl shadow-lg transition-all duration-300 ease-in-out ${
+            <div class="relative bg-[var(--surface-hover)] backdrop-blur-sm p-1 rounded-2xl border border-[var(--border)]">
+              <div class="absolute top-1 h-8 bg-[var(--primary)] rounded-xl transition-all duration-300 ease-in-out ${
                 activeTab === 'preview' ? 'left-1 w-20' : 'left-[85px] w-16'
               }"></div>
 
               <div class="relative flex">
                 <button id="tab-preview" class="relative z-10 px-4 py-2 flex items-center gap-2 rounded-xl font-medium transition-all duration-300 text-sm ${
-                  activeTab === 'preview' ? 'text-white' : 'text-gray-400 hover:text-gray-200'
+                  activeTab === 'preview' ? 'text-[var(--text)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                 }">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
@@ -161,7 +161,7 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
                   Preview
                 </button>
                 <button id="tab-code" class="relative z-10 px-4 py-2 flex items-center gap-2 rounded-xl font-medium transition-all duration-300 text-sm ${
-                  activeTab === 'files' ? 'text-white' : 'text-gray-400 hover:text-gray-200'
+                  activeTab === 'files' ? 'text-[var(--text)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'
                 }">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -177,15 +177,16 @@ export default function Preview({ projectId, activeTab = 'preview', setActiveTab
 
             <div class="flex items-center gap-2">
               <div id="live-status-dot" class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span id="live-status-text" class="text-sm text-gray-300 font-medium px-3 py-1 bg-gray-800/50 rounded-full border border-gray-600/30">Live</span>
+              <span id="live-status-text" class="text-sm text-[var(--text-muted)] font-medium px-3 py-1 bg-[var(--surface)] rounded-full border border-[var(--border)]">Live</span>
             </div>
           </div>
         </div>
-        <div class="flex-1 p-2 bg-gray-800/20">
+        <div class="flex-1 p-2 bg-[var(--bg)]">
           <iframe
             id="preview-iframe"
             src="${authenticatedUrl}"
-            class="w-full h-full bg-white rounded-2xl shadow-2xl border border-gray-700/30"
+            class="w-full h-full bg-white rounded-2xl border border-[var(--border)]"
+            style="color-scheme: normal;"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
           ></iframe>
         </div>

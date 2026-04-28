@@ -171,6 +171,10 @@ def register_planning_tools(registry):
             parameters={"type": "object", "properties": {}, "required": []},
             executor=todo_read_tool,
             category=ToolCategory.PROJECT,  # Using PROJECT category since there's no PLANNING category
+            # No params in, todos list dict out — JSON-clean.
+            state_serializable=True,
+            # Reads from session-scoped DB rows; no in-tool state.
+            holds_external_state=False,
             examples=['{"tool_name": "todo_read", "parameters": {}}'],
         )
     )
@@ -208,6 +212,10 @@ def register_planning_tools(registry):
             },
             executor=todo_write_tool,
             category=ToolCategory.PROJECT,
+            # Todos list in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Replaces DB rows atomically; no in-tool state retained.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "todo_write", "parameters": {"todos": [{"content": "Read package.json", "status": "completed"}, {"content": "Update dependencies", "status": "in_progress"}, {"content": "Run tests", "status": "pending", "priority": "high"}]}}'
             ],

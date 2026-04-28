@@ -98,6 +98,10 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                 "typography": theme_data.get("typography", {}),
                 "spacing": theme_data.get("spacing", {}),
                 "animation": theme_data.get("animation", {}),
+                # Borderless mode (top-level boolean). When true, the frontend
+                # forces all border CSS variables to transparent regardless of
+                # the colors block — see applyThemePreset() in themePresets.ts.
+                "borderless": bool(theme_data.get("borderless", False)),
             }
 
             await db.execute(

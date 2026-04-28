@@ -1,4 +1,4 @@
-import { Sparkles } from 'lucide-react';
+import { ChatCircle } from '@phosphor-icons/react';
 import VisualTab from './VisualTab';
 import InspectorTab from './InspectorTab';
 import { askAIAboutElement } from './designStore';
@@ -71,11 +71,11 @@ export default function InspectorPanel({
                 reactComponent: selectedElement.reactComponent,
               })
             }
-            title="Ask AI about this element"
+            title="Pop selected element into chat"
             className="mr-1 flex items-center gap-1 px-2 h-6 text-[10px] font-medium uppercase tracking-wider rounded transition-colors text-[var(--primary)] hover:bg-[var(--primary)]/10"
           >
-            <Sparkles size={11} />
-            Ask AI
+            <ChatCircle size={11} weight="fill" />
+            Pop into chat
           </button>
         )}
       </div>

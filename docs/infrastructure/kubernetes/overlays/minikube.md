@@ -40,7 +40,7 @@ images:
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
 
 # Build
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 
 # Load into Minikube
 minikube -p tesslate image load tesslate-backend:latest
@@ -239,7 +239,7 @@ minikube -p tesslate addons enable ingress
 
 ```bash
 # Backend
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 
 # Frontend
@@ -247,7 +247,7 @@ docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
 minikube -p tesslate image load tesslate-frontend:latest
 
 # Devserver
-docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver orchestrator/
+docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver .
 minikube -p tesslate image load tesslate-devserver:latest
 ```
 
@@ -322,7 +322,7 @@ minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
 docker rmi -f tesslate-backend:latest
 
 # Rebuild with --no-cache
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 
 # Load fresh image
 minikube -p tesslate image load tesslate-backend:latest

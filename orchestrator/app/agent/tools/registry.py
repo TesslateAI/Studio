@@ -14,6 +14,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+# Sentinel used to detect Tool instances that omit the required state-shape
+# annotations. Required because `Tool` is a dataclass instance (not a class
+# hierarchy), so we enforce annotations at construction time via __post_init__
+# instead of via a metaclass on a base class.
+#
+# This is the dataclass-pattern equivalent of the plan's `_ToolStateMeta`
+# metaclass: every Tool MUST declare its serialization story up front. See
+# Phase 1 §"Tool-state CI enforcement" in
+# /Users/smirk/.claude/plans/ultrathink-i-want-to-glittery-pond.md
+_TOOL_STATE_UNSET: Any = object()
+
+
 class ToolCategory(StrEnum):
     """Tool categories for organization."""
 
@@ -41,8 +53,33 @@ class Tool:
         parameters: JSON schema for parameters
         executor: Async function that executes the tool
         category: Tool category
+        state_serializable: Phase 2/Phase 6 checkpoint can serialize this
+            tool's input + output + partial state to JSON. Tools with
+            ``state_serializable=False`` opt out of mid-loop checkpointing
+            and force the run to either ``hard_stop`` on an approval
+            boundary or fall back to the per-pool wait-cap.
+        holds_external_state: Tool keeps state outside the agent run
+            (open sockets, MCP streams, persistent shells, PTYs). Used by
+            the Phase 2 non-blocking HITL pattern to decide whether the
+            in-flight tool can be cleanly cancelled or must be rolled back.
+        compute_tier: Minimum compute tier (0/1/2) required to run this
+            tool. ContractGate rejects calls when the automation
+            contract's ``max_compute_tier`` is lower. Default 0.
+        delegates_to_model: True when the tool wraps a LiteLLM model call.
+            ContractGate skips the per-tool spend estimate for these tools
+            to avoid double-counting against ``max_spend_per_run_usd`` —
+            their spend is captured by the LiteLLM key. Default False.
         examples: Example usage patterns
         system_prompt: Optional additional instructions for this tool
+
+    Enforcement:
+        Both ``state_serializable`` and ``holds_external_state`` are required
+        and validated in ``__post_init__``. Construction raises ``TypeError``
+        if either is omitted or is not a ``bool``. This is the dataclass-
+        instance equivalent of the metaclass enforcement described in the
+        Phase 1 plan; ``orchestrator/tests/agent/test_tool_annotations.py``
+        re-asserts the invariant at CI time across every registered tool so
+        new tools added in any future phase MUST declare or break the build.
     """
 
     name: str
@@ -50,8 +87,44 @@ class Tool:
     parameters: dict[str, Any]
     executor: Callable
     category: ToolCategory
+    state_serializable: bool = _TOOL_STATE_UNSET
+    holds_external_state: bool = _TOOL_STATE_UNSET
     examples: list[str] = field(default_factory=list)
     system_prompt: str = ""
+    # Phase 2 ContractGate fields. Defaults are set so existing tool registrations
+    # don't need to be touched — they keep behavior identical to pre-Phase-2.
+    #
+    # ``compute_tier``: minimum compute tier required to run this tool. Most
+    #   tools live in Tier 0 (control-plane only). A tool that needs a per-
+    #   project pod (e.g., a long-running build) bumps this to 1 or 2;
+    #   ContractGate rejects the call when ``contract.max_compute_tier`` is
+    #   below the required tier.
+    # ``delegates_to_model``: True when the tool wraps a model call (its
+    #   spend is captured by the LiteLLM key, not the per-tool estimator).
+    #   ContractGate skips the spend-estimate check for these tools to avoid
+    #   double-counting against ``max_spend_per_run_usd``.
+    compute_tier: int = 0
+    delegates_to_model: bool = False
+
+    def __post_init__(self):
+        # Enforce the Phase 1 tool-state annotation contract at construction
+        # time. Mirrors the plan's _ToolStateMeta semantics for the dataclass
+        # registration pattern actually used by this codebase.
+        for attr in ("state_serializable", "holds_external_state"):
+            value = getattr(self, attr)
+            if value is _TOOL_STATE_UNSET:
+                raise TypeError(
+                    f"Tool '{self.name}' must declare '{attr}: bool'. "
+                    f"Required for Phase 2 non-blocking HITL and Phase 6 "
+                    f"checkpointing — see Phase 1 §'Tool-state CI enforcement' "
+                    f"in the OpenSail Automation Runtime plan. Add a one-line "
+                    f"comment justifying the value."
+                )
+            if not isinstance(value, bool):
+                raise TypeError(
+                    f"Tool '{self.name}' attribute '{attr}' must be a bool, "
+                    f"got {type(value).__name__}."
+                )
 
     def to_prompt_format(self) -> str:
         """Convert tool to format suitable for LLM system prompt."""
@@ -167,6 +240,8 @@ class ToolRegistry:
         "kanban_move": "kanban.edit",
         "kanban_update": "kanban.edit",
         "kanban_comment": "kanban.edit",
+        # App actions — Phase 1 cross-app primitive
+        "invoke_app_action": "app.invoke",
     }
 
     # Tools that mutate state or reach out to the network — require approval
@@ -186,6 +261,11 @@ class ToolRegistry:
             "container_start",
             "container_stop",
             "container_restart",  # Container lifecycle (state-mutating)
+            # App actions — invoke_app_action runs an installed app's
+            # handler (HTTP POST / k8s Job / hosted agent), can mutate
+            # remote state and consume credits. Requires approval in
+            # ask mode and is blocked in plan mode.
+            "invoke_app_action",
             # 'todo_write', 'save_plan', 'update_plan' excluded - safe planning operations
         }
     )
@@ -244,6 +324,97 @@ class ToolRegistry:
                     "success": False,
                     "tool": tool_name,
                     "error": scope_result,
+                }
+
+        # ============================================================================
+        # ContractGate (Phase 2) — automation contract enforcement
+        # ----------------------------------------------------------------------------
+        # Wedged between the API-key scope gate and the edit-mode (ask/plan)
+        # gate so chat sessions (no contract in context) skip it entirely.
+        # When an :class:`AutomationRun` spawned this invocation, the
+        # dispatcher plumbs ``contract`` into the worker context (see
+        # ``worker.py``); the gate enforces ``allowed_tools`` /
+        # ``allowed_mcps`` / ``allowed_skills``, ``max_compute_tier``, and
+        # the per-tool spend estimate against the remaining run budget.
+        #
+        # Decision-only: a denial is reported via the existing tool-result
+        # error envelope (Phase 2 Wave-1). The dispatcher catches the
+        # ``approval_required`` flag and registers a card; ``hard_stop``
+        # and ``extend_once`` semantics land in a follow-up wave.
+        # ============================================================================
+        contract = context.get("contract")
+        if contract:
+            from .contract_gate import ContractGate
+
+            run_context = {
+                "automation_run_id": context.get("automation_run_id"),
+                "automation_id": context.get("automation_id"),
+                "current_spend_usd": context.get("current_spend_usd"),
+            }
+            gate = ContractGate(contract, run_context)
+            decision = await gate.check(
+                tool_name=tool_name,
+                tool_call_params=parameters,
+                tool=tool,
+            )
+            if not decision.allowed:
+                # Increment ``automation_runs.contract_breaches`` regardless
+                # of the on_breach resolution. Best-effort: never crash the
+                # tool path on a counter write.
+                automation_run_id = context.get("automation_run_id")
+                if automation_run_id is not None:
+                    try:
+                        await _increment_contract_breaches(automation_run_id)
+                    except Exception:  # pragma: no cover — defensive
+                        logger.debug(
+                            "[ContractGate] failed to increment contract_breaches for run %s",
+                            automation_run_id,
+                            exc_info=True,
+                        )
+
+                on_breach = (contract.get("on_breach") or "pause_for_approval").lower()
+                logger.warning(
+                    "[ContractGate] denied tool=%s breach=%s on_breach=%s reason=%s",
+                    tool_name,
+                    decision.breach_kind,
+                    on_breach,
+                    decision.reason,
+                )
+
+                if on_breach == "pause_for_approval":
+                    # Hand off to the existing PendingUserInputManager —
+                    # the dispatcher's approval-card path picks this up just
+                    # like the edit-mode "ask" branch below. Phase 2D layers
+                    # the non-blocking HITL pattern on the same envelope.
+                    return {
+                        "approval_required": True,
+                        "tool": tool_name,
+                        "parameters": parameters,
+                        "session_id": context.get("chat_id", "default"),
+                        "contract_breach": {
+                            "kind": decision.breach_kind,
+                            "reason": decision.reason,
+                            "estimate_usd": str(decision.estimate_usd),
+                            "automation_run_id": automation_run_id,
+                            "automation_id": context.get("automation_id"),
+                        },
+                    }
+
+                # ``hard_stop`` / ``extend_once`` are wired in Phase 2 Wave-1B.
+                # For now, return a plain failure with the breach metadata so
+                # the run terminates cleanly with a recorded reason.
+                return {
+                    "success": False,
+                    "tool": tool_name,
+                    "error": (
+                        f"ContractGate denied tool '{tool_name}' "
+                        f"({decision.breach_kind}): {decision.reason}"
+                    ),
+                    "contract_breach": {
+                        "kind": decision.breach_kind,
+                        "reason": decision.reason,
+                        "on_breach": on_breach,
+                    },
                 }
 
         # ============================================================================
@@ -328,6 +499,41 @@ class ToolRegistry:
             return {"success": False, "tool": tool_name, "error": str(e)}
 
 
+async def _increment_contract_breaches(automation_run_id: Any) -> None:
+    """Best-effort ``UPDATE automation_runs SET contract_breaches = contract_breaches + 1``.
+
+    Each ContractGate denial bumps the counter on the originating
+    :class:`AutomationRun`. We open a short-lived session so the tool path
+    doesn't have to thread the dispatcher's ``db`` through every call site;
+    failures are swallowed (logged) so a transient DB hiccup never takes
+    down a tool dispatch — the agent's failure path already records the
+    breach reason in the run output.
+    """
+    from uuid import UUID
+
+    from sqlalchemy import update
+
+    from ...database import AsyncSessionLocal
+    from ...models_automations import AutomationRun
+
+    try:
+        run_uuid = automation_run_id if isinstance(automation_run_id, UUID) else UUID(str(automation_run_id))
+    except (TypeError, ValueError):
+        logger.debug(
+            "[ContractGate] cannot parse automation_run_id=%r as UUID; skipping increment",
+            automation_run_id,
+        )
+        return
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(AutomationRun)
+            .where(AutomationRun.id == run_uuid)
+            .values(contract_breaches=AutomationRun.contract_breaches + 1)
+        )
+        await session.commit()
+
+
 # Global registry instance
 _registry: ToolRegistry | None = None
 
@@ -344,6 +550,7 @@ def get_tool_registry() -> ToolRegistry:
 
 def _register_all_tools(registry: ToolRegistry):
     """Register all essential tools from modular structure."""
+    from .app_ops import register_all_app_ops_tools
     from .delegation_ops import register_delegation_ops_tools
     from .file_ops import register_all_file_tools
     from .git_ops import register_git_ops_tools
@@ -380,6 +587,14 @@ def _register_all_tools(registry: ToolRegistry):
     register_all_skill_tools(registry)
     # Node config ops: request_node_config, run_with_secrets
     register_all_node_config_tools(registry)
+    # App ops: invoke_app_action — call typed actions on installed Tesslate Apps
+    register_all_app_ops_tools(registry)
+    # Marketplace ops (Phase 5 agent-builder skill): create_agent, update_agent,
+    # assign_skill, assign_mcp, attach_schedule, request_grant. Gated on
+    # marketplace.author / automations.write scopes; depth-1 cap enforced
+    # inside the tool implementations.
+    from .marketplace_ops import register_all_marketplace_ops_tools
+    register_all_marketplace_ops_tools(registry)
 
     logger.info(f"Registered {len(registry._tools)} tools total")
 

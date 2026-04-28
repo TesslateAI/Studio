@@ -203,6 +203,12 @@ def register_execute_tools(registry):
                 "required": ["session_id", "command"],
             },
             executor=shell_exec_executor,
+            # session_id + command in, captured output dict out — JSON-serializable.
+            state_serializable=True,
+            # Operates on a persistent PTY/shell session opened by shell_open;
+            # the underlying file descriptor + PTY state lives outside the run
+            # and cannot be checkpointed.
+            holds_external_state=True,
             examples=[
                 '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "npm install"}}',
                 '{"tool_name": "shell_exec", "parameters": {"session_id": "abc123", "command": "echo \'Hello\'"}}',

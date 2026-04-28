@@ -1,7 +1,10 @@
 import { useRef, type ReactNode } from 'react';
 import {
+  BookOpen,
+  Clock,
   Code as CodeIcon,
-  Folders,
+  Gear,
+  GithubLogo,
   Image as ImageIcon,
   Kanban as KanbanIcon,
   Monitor,
@@ -11,6 +14,12 @@ import {
   TreeStructure,
   X,
 } from '@phosphor-icons/react';
+import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  type DropResult,
+} from '@hello-pangea/dnd';
 import type { TabInstance, ToolType } from '../../hooks/useToolDock';
 
 export interface ToolTabMeta {
@@ -59,12 +68,32 @@ export const TOOL_TAB_META: Record<ToolType, ToolTabMeta> = {
   repository: {
     id: 'repository',
     label: 'Repository',
-    icon: <Folders size={13} weight="bold" />,
+    icon: <GithubLogo size={13} weight="bold" />,
   },
   'node-config': {
     id: 'node-config',
     label: 'Configure',
     icon: <SlidersHorizontal size={13} weight="bold" />,
+  },
+  config: {
+    id: 'config',
+    label: 'Config',
+    icon: <SlidersHorizontal size={13} weight="bold" />,
+  },
+  volume: {
+    id: 'volume',
+    label: 'Snapshots',
+    icon: <Clock size={13} weight="bold" />,
+  },
+  notes: {
+    id: 'notes',
+    label: 'Notes',
+    icon: <BookOpen size={13} weight="bold" />,
+  },
+  settings: {
+    id: 'settings',
+    label: 'Settings',
+    icon: <Gear size={13} weight="bold" />,
   },
 };
 
@@ -77,6 +106,7 @@ export interface ToolTabsPanelProps {
   onClose: (id: string) => void;
   renderers: Partial<Record<ToolType, TabRenderer>>;
   extraHeader?: ReactNode;
+  onReorder?: (fromIndex: number, toIndex: number) => void;
 }
 
 /**
@@ -92,6 +122,7 @@ export function ToolTabsPanel({
   onClose,
   renderers,
   extraHeader,
+  onReorder,
 }: ToolTabsPanelProps) {
   // Every tab instance that has been rendered at least once stays mounted
   // until it's explicitly closed, preserving per-instance state.
@@ -113,58 +144,101 @@ export function ToolTabsPanel({
     tabLabels[t.id] = seq === 1 ? base : `${base} ${seq}`;
   }
 
-  const handleTabMouseDown = (e: React.MouseEvent, id: string) => {
-    if (e.button === 1) {
-      e.preventDefault();
-      onClose(id);
-    }
-  };
-
   const tabById: Record<string, TabInstance> = {};
   for (const t of tabs) tabById[t.id] = t;
 
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    const from = result.source.index;
+    const to = result.destination.index;
+    if (from === to) return;
+    onReorder?.(from, to);
+  };
+
   return (
     <div className="w-full h-full flex flex-col overflow-hidden bg-[var(--bg)]">
-      {/* Tab strip */}
-      <div className="flex items-center h-8 border-b border-[var(--border)] bg-[var(--surface)] flex-shrink-0 overflow-x-auto">
-        {tabs.map((tab) => {
-          const meta = TOOL_TAB_META[tab.type];
-          const isActive = activeTabId === tab.id;
-          const label = tabLabels[tab.id];
-          return (
-            <div
-              key={tab.id}
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => onFocus(tab.id)}
-              onMouseDown={(e) => handleTabMouseDown(e, tab.id)}
-              className={`group flex items-center gap-1.5 px-3 h-full text-[11px] cursor-pointer border-r border-[var(--border)] select-none transition-colors ${
-                isActive
-                  ? 'bg-[var(--bg)] text-[var(--text)]'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]'
-              }`}
-            >
-              <span className={`flex-shrink-0 ${isActive ? 'text-[var(--primary)]' : ''}`}>
-                {meta.icon}
-              </span>
-              <span className="whitespace-nowrap">{label}</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClose(tab.id);
-                }}
-                className={`w-4 h-4 flex items-center justify-center rounded hover:bg-[var(--surface-hover)] ${
-                  isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                }`}
-                title={`Close ${label}`}
-                aria-label={`Close ${label}`}
+      {/* Tab strip — Chrome-style: rounded top, active merges with panel below */}
+      <div className="flex items-end gap-0.5 h-9 px-2 pt-1.5 bg-[var(--surface)] flex-shrink-0 overflow-x-auto overflow-y-hidden snap-x [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <Droppable droppableId="tool-tabs" direction="horizontal">
+            {(dropProvided) => (
+              <div
+                ref={dropProvided.innerRef}
+                {...dropProvided.droppableProps}
+                className="flex items-end gap-0.5 h-full"
               >
-                <X size={10} weight="bold" />
-              </button>
-            </div>
-          );
-        })}
-        {extraHeader && <div className="ml-auto flex items-center pr-2">{extraHeader}</div>}
+                {tabs.map((tab, index) => {
+                  const meta = TOOL_TAB_META[tab.type];
+                  const isActive = activeTabId === tab.id;
+                  const label = tabLabels[tab.id];
+                  return (
+                    <Draggable key={tab.id} draggableId={tab.id} index={index}>
+                      {(dragProvided, snapshot) => {
+                        // The previous version of this component overrode `role`,
+                        // `onMouseDown`, and `onClick` AFTER spreading
+                        // dragHandleProps — JSX prop ordering meant our handlers
+                        // won. @hello-pangea/dnd uses dragHandleProps' role and
+                        // event hooks to wire HTML5 drag, so overriding them
+                        // broke drop. Now we don't override; we only add what
+                        // the library doesn't set, and suppress the focus click
+                        // during drag/drop animation so a stale click doesn't
+                        // re-focus the source tab after a successful drop.
+                        const suppressClick = snapshot.isDragging || snapshot.isDropAnimating;
+                        return (
+                          <div
+                            ref={dragProvided.innerRef}
+                            {...dragProvided.draggableProps}
+                            {...dragProvided.dragHandleProps}
+                            aria-selected={isActive}
+                            onAuxClick={(e) => {
+                              if (e.button === 1) {
+                                e.preventDefault();
+                                onClose(tab.id);
+                              }
+                            }}
+                            onClick={() => {
+                              if (suppressClick) return;
+                              onFocus(tab.id);
+                            }}
+                            className={`group relative flex items-center gap-1.5 px-3.5 h-full text-[11px] font-medium cursor-pointer select-none whitespace-nowrap snap-start rounded-t-lg transition-all duration-150 ${
+                              isActive
+                                ? 'bg-[var(--bg)] text-[var(--text)] mb-[-1px] pb-[1px] z-10'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)]'
+                            } ${snapshot.isDragging ? 'shadow-lg' : ''}`}
+                          >
+                            <span
+                              className={`flex-shrink-0 transition-colors ${isActive ? 'text-[var(--primary)]' : ''}`}
+                            >
+                              {meta.icon}
+                            </span>
+                            <span>{label}</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onClose(tab.id);
+                              }}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className={`w-4 h-4 flex items-center justify-center rounded-full transition-opacity hover:bg-[var(--surface-hover)] ${
+                                isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                              }`}
+                              title={`Close ${label}`}
+                              aria-label={`Close ${label}`}
+                            >
+                              <X size={10} weight="bold" />
+                            </button>
+                          </div>
+                        );
+                      }}
+                    </Draggable>
+                  );
+                })}
+                {dropProvided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
+        {extraHeader && <div className="ml-auto flex items-center pr-2 pb-1">{extraHeader}</div>}
       </div>
 
       {/* Content — keep-alive, CSS hide/show */}

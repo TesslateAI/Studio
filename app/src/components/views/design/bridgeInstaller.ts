@@ -6,6 +6,14 @@
  * add `<Script src="/builtwith.js">` to the Next.js layout. We do the same —
  * this completely sidesteps cross-origin iframe restrictions because the bridge
  * runs in the app's own context.
+ *
+ * Scope — frontend-framework projects only. detectEntryFile() looks for one of:
+ *   - Next.js     → (src/)?app/layout.{tsx,jsx}
+ *   - Vite/CRA/Vue/Svelte/Astro → root index.html
+ *   - Angular     → src/index.html
+ *   - Plain HTML  → any index.html
+ * If none match (backend-only, native, mobile, etc.) install short-circuits
+ * with a console warning and the project simply doesn't get the design bridge.
  */
 
 import { projectsApi } from '../../../lib/api';

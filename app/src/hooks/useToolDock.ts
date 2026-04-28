@@ -10,7 +10,11 @@ export type ToolType =
   | 'assets'
   | 'terminal'
   | 'repository'
-  | 'node-config';
+  | 'node-config'
+  | 'config'
+  | 'volume'
+  | 'notes'
+  | 'settings';
 
 export const TOOL_TYPES: ToolType[] = [
   'architecture',
@@ -22,6 +26,10 @@ export const TOOL_TYPES: ToolType[] = [
   'terminal',
   'repository',
   'node-config',
+  'config',
+  'volume',
+  'notes',
+  'settings',
 ];
 
 /** Type-specific tab payload. `node-config` carries the form schema + values. */
@@ -97,7 +105,7 @@ function loadInitial(slug: string | undefined): DockState {
     const restored = sanitize(JSON.parse(raw));
     // Corrupt / empty persisted state — same treatment as no state at all.
     if (restored.tabs.length === 0) return buildFreshState();
-    return restored;
+    return { ...restored, activeTabId: restored.tabs[0]?.id ?? null };
   } catch {
     return buildFreshState();
   }
@@ -135,6 +143,8 @@ export interface UseToolDockResult {
   closeNodeConfigTabByInputId: (inputId: string) => boolean;
   /** Read the in-memory payload for a node-config tab. */
   getNodeConfigPayload: (id: string) => NodeConfigTabPayload | undefined;
+  /** Reorder a tab from one index to another (drag-and-drop). */
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
 }
 
 export function useToolDock(slug: string | undefined): UseToolDockResult {
@@ -275,6 +285,24 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
     setState({ tabs: [], activeTabId: null });
   }, []);
 
+  const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
+    setState((prev) => {
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= prev.tabs.length ||
+        toIndex >= prev.tabs.length
+      ) {
+        return prev;
+      }
+      const tabs = prev.tabs.slice();
+      const [moved] = tabs.splice(fromIndex, 1);
+      tabs.splice(toIndex, 0, moved);
+      return { ...prev, tabs };
+    });
+  }, []);
+
   const countOf = useCallback(
     (type: ToolType) => state.tabs.filter((t) => t.type === type).length,
     [state]
@@ -308,6 +336,7 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
       openNodeConfigTab,
       closeNodeConfigTabByInputId,
       getNodeConfigPayload,
+      reorderTabs,
     }),
     [
       state,
@@ -324,6 +353,7 @@ export function useToolDock(slug: string | undefined): UseToolDockResult {
       openNodeConfigTab,
       closeNodeConfigTabByInputId,
       getNodeConfigPayload,
+      reorderTabs,
     ]
   );
 }

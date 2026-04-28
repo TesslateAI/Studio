@@ -363,6 +363,11 @@ def register_python_repl_tool(registry) -> None:
                 "required": ["code"],
             },
             executor=python_repl_tool,
+            # code + session_id in, repr/stdout/stderr dict out — JSON-clean.
+            state_serializable=True,
+            # Persistent REPL locals survive across calls within a session_id;
+            # the live interpreter state cannot be serialized into a checkpoint.
+            holds_external_state=True,
             examples=[
                 '{"tool_name": "python_repl", "parameters": {"code": "2 + 2"}}',
                 '{"tool_name": "python_repl", "parameters": {"code": "x = 5"}}',

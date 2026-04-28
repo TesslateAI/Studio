@@ -221,6 +221,10 @@ def register_read_write_tools(registry):
             },
             executor=read_file_tool,
             category=ToolCategory.FILE_OPS,
+            # Input is a path; output is file content text — fully JSON-serializable.
+            state_serializable=True,
+            # No persistent handle; each call returns fresh content.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "read_file", "parameters": {"file_path": "package.json"}}',
                 '{"tool_name": "read_file", "parameters": {"file_path": "src/components/Header.jsx"}}',
@@ -253,6 +257,10 @@ def register_read_write_tools(registry):
             },
             executor=write_file_tool,
             category=ToolCategory.FILE_OPS,
+            # Path + content strings in, success/error dict out — JSON-clean.
+            state_serializable=True,
+            # Atomic write through container backend; no persistent handle held.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "write_file", "parameters": {"file_path": "src/NewComponent.jsx", "content": "import React from \'react\'..."}}'
             ],

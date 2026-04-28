@@ -116,7 +116,7 @@ kubectl apply -k k8s/overlays/minikube
 kubectl apply -k k8s/overlays/aws
 
 # Build backend image
-docker build -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build -t tesslate-backend:latest -f orchestrator/Dockerfile .
 
 # Build frontend image
 docker build -t tesslate-frontend:latest -f app/Dockerfile.prod app/

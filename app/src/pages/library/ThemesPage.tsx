@@ -51,6 +51,8 @@ export interface LibraryTheme {
     typography?: Record<string, unknown>;
     spacing?: Record<string, unknown>;
     animation?: Record<string, unknown>;
+    /** Top-level toggle: when true, all border CSS variables resolve to transparent. */
+    borderless?: boolean;
   };
   added_date?: string;
 }
@@ -121,6 +123,7 @@ function makeNewTheme(): LibraryTheme {
         durationSlow: '0.3s',
         easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
       },
+      borderless: true,
     },
   };
 }
@@ -675,15 +678,12 @@ function ThemeCard({
       animate="animate"
       onClick={onEdit}
       className={`
-        group relative flex flex-col cursor-pointer
-        bg-[var(--surface-hover)] rounded-[var(--radius)] border
+        group relative flex flex-col h-full cursor-pointer
+        bg-[var(--surface)] rounded-[var(--radius)] border border-[var(--border)]
         transition-all duration-200
-        hover:-translate-y-0.5
-        ${
-          isSelected
-            ? 'border-[var(--primary)] ring-1 ring-[var(--primary)]/20'
-            : 'border-[var(--border)] hover:border-[var(--border-hover)]'
-        }
+        hover:-translate-y-1
+        hover:bg-[var(--card-hover)]
+        ${isSelected ? 'border-[var(--primary)] ring-1 ring-[var(--primary)]/20' : ''}
         ${!t.is_enabled ? 'opacity-45' : ''}
       `}
     >
@@ -802,6 +802,9 @@ function EditThemePanel({
   const [icon, setIcon] = useState(theme.icon || 'palette');
   const [category, setCategory] = useState(theme.category || 'general');
   const [tagsInput, setTagsInput] = useState((theme.tags || []).join(', '));
+  const [borderless, setBorderless] = useState<boolean>(
+    Boolean((theme.theme_json as { borderless?: boolean } | undefined)?.borderless)
+  );
   const [themeColors, setThemeColors] = useState<Record<string, string>>(() => {
     const c = (theme.theme_json?.colors || {}) as Record<string, unknown>;
     const flat: Record<string, string> = {};
@@ -942,6 +945,7 @@ function EditThemePanel({
         typography: theme.theme_json?.typography || {},
         spacing: theme.theme_json?.spacing || {},
         animation: theme.theme_json?.animation || {},
+        borderless,
       },
       icon,
       category,
@@ -1112,6 +1116,39 @@ function EditThemePanel({
                 className={inputClass + ' flex-1'}
                 placeholder="dark, minimal, blue"
               />
+            </div>
+            {/* Borderless toggle — when on, the frontend forces every
+                border CSS variable to transparent for this theme. The
+                color values themselves are preserved so flipping it back
+                off restores the original look. */}
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-[var(--text-subtle)] w-14 flex-shrink-0">
+                Borders
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!borderless}
+                onClick={() => setBorderless((v) => !v)}
+                className={`flex-1 flex items-center justify-between px-2.5 py-1.5 rounded-[var(--radius-small)] text-xs transition-colors ${
+                  borderless
+                    ? 'bg-[var(--surface-hover)] text-[var(--text-muted)]'
+                    : 'bg-[var(--bg)] text-[var(--text)]'
+                }`}
+              >
+                <span>{borderless ? 'Hidden (borderless)' : 'Visible'}</span>
+                <span
+                  className={`relative inline-flex h-3.5 w-7 items-center rounded-full transition-colors ${
+                    borderless ? 'bg-[var(--text-subtle)]' : 'bg-[var(--primary)]'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-2.5 w-2.5 transform rounded-full bg-white transition-transform ${
+                      borderless ? 'translate-x-1' : 'translate-x-3.5'
+                    }`}
+                  />
+                </span>
+              </button>
             </div>
           </div>
         )}

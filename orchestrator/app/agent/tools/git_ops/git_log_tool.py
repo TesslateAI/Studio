@@ -224,6 +224,10 @@ def register_git_log_tool(registry) -> None:
             },
             executor=git_log_tool,
             category=ToolCategory.GIT_OPS,
+            # Filter params in, list of commit dicts out — JSON-clean.
+            state_serializable=True,
+            # Read-only git invocation; no persistent index.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "git_log", "parameters": {"max_count": 10}}',
                 '{"tool_name": "git_log", "parameters": {"path": "src/App.jsx", "max_count": 5}}',

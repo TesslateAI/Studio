@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..database import get_db
 from ..models import (
-    AgentSchedule,
     AppInstance,
     AppVersion,
     Container,
@@ -24,13 +23,17 @@ from ..models import (
     Project,
     User,
 )
+from ..models_automations import AutomationDefinition, AutomationTrigger
 from ..services.apps.installer import (
     AlreadyInstalledError,
     ConsentRejectedError,
     IncompatibleAppError,
     InstallError,
+    delete_per_pod_signing_key,
     install_app,
+    propagate_user_secrets_post_install,
 )
+from ..services.apps.user_secret_propagator import delete_user_secrets
 from ..services.hub_client import HubClient
 from ..users import current_active_user
 
@@ -167,6 +170,33 @@ async def install_endpoint(
                 await close()
             except Exception:  # pragma: no cover
                 logger.debug("hub_client close failed", exc_info=True)
+
+    # Best-effort: materialize per-user OAuth/API-key Secrets for any
+    # ``exposure='env'`` connector grants. Failures here MUST NOT roll back
+    # the install — the user can re-trigger via "Resync credentials"
+    # (Phase 5 UI), and the app pod's startup will name any missing env
+    # vars explicitly. The ``exposure='proxy'`` grants are handled by the
+    # Connector Proxy at request time and need nothing here.
+    try:
+        await propagate_user_secrets_post_install(
+            db,
+            app_instance_id=result.app_instance_id,
+            project_id=result.project_id,
+        )
+    except Exception:
+        logger.warning(
+            "install_endpoint: user-secret propagation failed for instance=%s "
+            "(install succeeded; user can resync credentials)",
+            result.app_instance_id,
+            exc_info=True,
+        )
+
+    # The per-pod HMAC signing-key Secret is created at /start time
+    # (see ``app_runtime_status.start_runtime``) — the ``proj-{id}``
+    # namespace doesn't exist yet at install time, so writing the Secret
+    # here would silently 404. The pod template's secretKeyRef is
+    # rendered at start_project time and resolves once /start mints the
+    # Secret in the just-created namespace.
 
     return InstallResponse(
         app_instance_id=result.app_instance_id,
@@ -349,27 +379,64 @@ async def get_install_detail(
                 )
             )
 
-        sched_rows = (
+        # Schedules now live in ``automation_definitions`` (Phase 1 hard
+        # reset dropped ``agent_schedules``). Each install's automations are
+        # the rows whose ``target_project_id`` is the install's runtime
+        # project — the same scope ``/api/app-installs/{id}/schedules``
+        # uses. We pair each definition with its first ``automation_triggers``
+        # row to fill in ``cron_expression`` / ``trigger_kind`` for the
+        # legacy detail row shape.
+        defn_rows = (
             (
                 await db.execute(
-                    select(AgentSchedule)
-                    .where(AgentSchedule.app_instance_id == app_instance_id)
-                    .order_by(AgentSchedule.created_at.asc())
+                    select(AutomationDefinition)
+                    .where(AutomationDefinition.target_project_id == inst.project_id)
+                    .order_by(AutomationDefinition.created_at.asc())
                 )
             )
             .scalars()
             .all()
         )
-        for s in sched_rows:
+        triggers_by_definition: dict[UUID, AutomationTrigger] = {}
+        if defn_rows:
+            trigger_rows = (
+                (
+                    await db.execute(
+                        select(AutomationTrigger)
+                        .where(
+                            AutomationTrigger.automation_id.in_(
+                                [r.id for r in defn_rows]
+                            )
+                        )
+                        .order_by(AutomationTrigger.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for trig in trigger_rows:
+                triggers_by_definition.setdefault(trig.automation_id, trig)
+        for defn in defn_rows:
+            trig = triggers_by_definition.get(defn.id)
+            cron_expr: str | None = None
+            trigger_kind = "manual"
+            next_run_at = None
+            last_run_at = None
+            if trig is not None:
+                trigger_kind = trig.kind
+                if isinstance(trig.config, dict):
+                    cron_expr = trig.config.get("cron")
+                next_run_at = trig.next_run_at
+                last_run_at = trig.last_run_at
             schedules_out.append(
                 AppScheduleDetailRow(
-                    id=s.id,
-                    name=s.name,
-                    trigger_kind=s.trigger_kind,
-                    cron_expression=s.cron_expression,
-                    next_run_at=s.next_run_at,
-                    last_run_at=s.last_run_at,
-                    is_active=bool(s.is_active),
+                    id=defn.id,
+                    name=defn.name,
+                    trigger_kind=trigger_kind,
+                    cron_expression=cron_expr,
+                    next_run_at=next_run_at,
+                    last_run_at=last_run_at,
+                    is_active=bool(defn.is_active),
                 )
             )
 
@@ -437,6 +504,42 @@ async def uninstall_endpoint(
     # orphan-namespace reaper will eventually clean up. Non-blocking so a
     # slow K8s API doesn't block the user's uninstall click.
     if project_id_for_cleanup is not None:
+        # Drop the per-install user-credentials Secret BEFORE the namespace
+        # delete. Both calls are best-effort: namespace delete cascades
+        # Secrets too, so a failure here is purely a defense-in-depth no-op.
+        try:
+            from kubernetes import client as k8s_client
+
+            await delete_user_secrets(
+                k8s_client.CoreV1Api(),
+                app_instance_id=inst.id,
+                target_namespace=f"proj-{project_id_for_cleanup}",
+            )
+        except Exception:
+            logger.warning(
+                "uninstall: user-secret cleanup failed for instance=%s "
+                "(namespace delete will sweep it)",
+                inst.id,
+                exc_info=True,
+            )
+
+        # Drop the per-pod HMAC signing-key Secret. Same best-effort
+        # contract as ``delete_user_secrets`` above — namespace delete
+        # cascades, but explicit cleanup keeps stray Secrets out of the
+        # orchestrator namespace where the installer mirrors them.
+        try:
+            await delete_per_pod_signing_key(
+                app_instance_id=inst.id,
+                target_namespace=f"proj-{project_id_for_cleanup}",
+            )
+        except Exception:
+            logger.warning(
+                "uninstall: per-pod signing-key cleanup failed for instance=%s "
+                "(namespace delete will sweep it)",
+                inst.id,
+                exc_info=True,
+            )
+
         try:
             from ..services.orchestration import get_orchestrator
 

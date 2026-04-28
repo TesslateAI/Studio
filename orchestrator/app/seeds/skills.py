@@ -55,7 +55,7 @@ OPENSOURCE_SKILLS = [
         ],
         "github_raw_url": (
             "https://raw.githubusercontent.com/vercel-labs/agent-skills"
-            "/main/skills/vercel-react-best-practices/SKILL.md"
+            "/main/skills/react-best-practices/SKILL.md"
         ),
         "fallback_skill_body": (
             "## Vercel React Best Practices\n\n"
@@ -200,7 +200,7 @@ OPENSOURCE_SKILLS = [
         ],
         "github_raw_url": (
             "https://raw.githubusercontent.com/remotion-dev/skills"
-            "/main/skills/remotion-best-practices/SKILL.md"
+            "/main/skills/remotion/SKILL.md"
         ),
         "fallback_skill_body": (
             "## Remotion Best Practices\n\n"
@@ -216,54 +216,6 @@ OPENSOURCE_SKILLS = [
             "- Avoid heavy computations during render\n"
             "- Pre-calculate values outside the render loop\n"
             "- Use `delayRender()` for async operations\n"
-        ),
-    },
-    {
-        "name": "Simplify",
-        "slug": "simplify",
-        "description": "Review code for reuse, quality, efficiency",
-        "long_description": (
-            "Community-maintained skill that guides agents to review code for "
-            "simplification opportunities, identifying redundancy, improving "
-            "readability, and suggesting more efficient implementations."
-        ),
-        "category": "code-quality",
-        "item_type": "skill",
-        "icon": "✨",
-        "pricing_type": "free",
-        "price": 0,
-        "source_type": "open",
-        "is_forkable": True,
-        "is_featured": True,
-        "is_active": True,
-        "is_published": True,
-        "git_repo_url": "https://github.com/roin-orca/skills",
-        "downloads": 0,
-        "rating": 5.0,
-        "tags": ["code-quality", "refactoring", "review", "efficiency", "open-source"],
-        "features": [
-            "Code simplification",
-            "Redundancy detection",
-            "Readability improvements",
-            "Efficiency suggestions",
-        ],
-        "github_raw_url": (
-            "https://raw.githubusercontent.com/roin-orca/skills/main/skills/simplify/SKILL.md"
-        ),
-        "fallback_skill_body": (
-            "## Simplify\n\n"
-            "### Code Review Checklist\n"
-            "- Identify duplicated logic and extract shared utilities\n"
-            "- Simplify complex conditionals with guard clauses\n"
-            "- Replace imperative loops with declarative alternatives\n"
-            "- Remove dead code and unused imports\n"
-            "- Flatten deeply nested structures\n\n"
-            "### Quality Principles\n"
-            "- Prefer readability over cleverness\n"
-            "- Keep functions under 20 lines when possible\n"
-            "- Use meaningful variable and function names\n"
-            "- Apply the DRY principle judiciously\n"
-            "- Write code that is easy to delete, not easy to extend\n"
         ),
     },
 ]
@@ -284,7 +236,7 @@ TESSLATE_SKILLS = [
         ),
         "category": "deployment",
         "item_type": "skill",
-        "icon": "🚀",
+        "icon": "▲",
         "pricing_type": "free",
         "price": 0,
         "source_type": "open",

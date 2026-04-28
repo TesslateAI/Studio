@@ -148,7 +148,7 @@ export default function MarketplaceAuthor() {
       >
         {/* Header */}
         <div
-          className={`border-b ${theme === 'light' ? 'border-black/10' : 'border-white/10'} sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}
+          className={`border-b border-[var(--border)] sticky top-0 z-40 backdrop-blur-xl ${theme === 'light' ? 'bg-white/80' : 'bg-[#0a0a0a]/80'}`}
         >
           <div className="max-w-5xl mx-auto px-6 md:px-12">
             <div className="h-14 flex items-center gap-4">

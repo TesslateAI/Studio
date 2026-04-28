@@ -26,6 +26,7 @@ import { DeploymentTargetNode } from '../DeploymentTargetNode';
 import { GraphCanvas } from '../GraphCanvas';
 import { MarketplaceSidebar } from '../MarketplaceSidebar';
 import { ContainerPropertiesPanel } from '../ContainerPropertiesPanel';
+import type { InspectorJumpTarget } from '../apps/PublishAsAppDrawer';
 import {
   ExternalServiceCredentialModal,
   type ExternalServiceItem,
@@ -44,6 +45,7 @@ import { useTheme } from '../../theme/ThemeContext';
 import { fileEvents } from '../../utils/fileEvents';
 import { connectionEvents } from '../../utils/connectionEvents';
 import { nodeConfigEvents } from '../../utils/nodeConfigEvents';
+import { inspectorFocusEvents } from '../../utils/inspectorFocusEvents';
 import { useNodeConfigPending } from '../../contexts/NodeConfigPendingContext';
 import toast from 'react-hot-toast';
 import {
@@ -127,6 +129,13 @@ export interface ArchitectureViewProps {
   onNavigateToContainer: (id: string) => void;
   onStateChange?: (state: { configDirty: boolean; isRunning: boolean }) => void;
   readOnly?: boolean;
+  /**
+   * Deep-link signal forwarded to the floating MarketplaceSidebar. The
+   * unified Deploy hub bumps `nonce` to ask the sidebar to open and
+   * expand a specific category (e.g., "deployment") so the user lands
+   * directly in the right component list.
+   */
+  marketplaceFocus?: { category: string; nonce: number } | null;
 }
 
 export interface ArchitectureViewHandle {
@@ -153,6 +162,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       onNavigateToContainer,
       onStateChange,
       readOnly = false,
+      marketplaceFocus,
     },
     ref
   ) => {
@@ -209,6 +219,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       provider: string | null;
     }>({ isOpen: false, targetId: null, provider: null });
     const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
+
 
     // Confirm dialog state (replaces native confirm() popups)
     const [confirmDialog, setConfirmDialog] = useState<{
@@ -1077,6 +1088,61 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
       }
     }, []);
 
+    /**
+     * Phase 5: PublishAsAppDrawer "Fix in inspector" handler.
+     *
+     * The drawer hands us a container *name* (manifest-side identifier) plus
+     * an optional action / connector to focus. We resolve the React Flow
+     * node by name (case-sensitive — manifest names round-trip exactly),
+     * select it, and emit an inspector-focus-request so the inspector's
+     * effect can scroll the App Contract section to the right row once
+     * it mounts.
+     *
+     * Non-blocking: if no node matches the name, surface a toast and bail
+     * — the drawer has already closed itself per its contract, so the user
+     * isn't stuck.
+     */
+    const handleJumpToInspector = useCallback((target: InspectorJumpTarget) => {
+      const containerNode = nodesRef.current.find(
+        (n) => (n.data?.name as string | undefined) === target.containerName
+      );
+      if (!containerNode) {
+        toast.error(`Container "${target.containerName}" not found on canvas`);
+        return;
+      }
+      setSelectedContainer({
+        id: containerNode.id,
+        name: containerNode.data.name as string,
+        status: containerNode.data.status as string,
+        port: containerNode.data.port as number | undefined,
+        containerType: containerNode.data.containerType as 'base' | 'service' | undefined,
+      });
+      // Defer the focus request one tick so the panel mounts before its
+      // effect listener subscribes. Without the delay, the event fires
+      // before the panel's useEffect attaches its handler.
+      const detail = {
+        containerId: containerNode.id,
+        kind: (target.actionName ? 'action' : 'connector') as 'action' | 'connector',
+        name: target.actionName ?? target.connectorId,
+      };
+      requestAnimationFrame(() => {
+        inspectorFocusEvents.emit('inspector-focus-request', detail);
+      });
+    }, []);
+
+    // The Publish drawer (now hoisted to ProjectPage) emits this event when
+    // the user clicks "Fix in inspector". We're the only listener — we own
+    // the React Flow node graph. Subscribing here means the canvas only
+    // reacts when it's mounted; if the drawer is opened from the toolbar
+    // without the architecture tab open, the event drops silently and the
+    // user gets the YAML-editor fallback.
+    useEffect(() => {
+      const off = inspectorFocusEvents.on('publish-inspector-jump-request', (target) => {
+        handleJumpToInspector(target);
+      });
+      return off;
+    }, [handleJumpToInspector]);
+
     const handleOpenBuilder = useCallback(
       (containerId: string) => {
         onNavigateToContainer(containerId);
@@ -1903,12 +1969,13 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
     return (
       <div className="flex-1 flex relative h-full">
         {/* React Flow canvas area */}
-        <div className="flex-1 relative bg-[#0a0a0a] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform">
+        <div className="flex-1 relative bg-[var(--bg)] [&_.react-flow__renderer]:will-change-transform [&_.react-flow__edges]:will-change-transform [&_.react-flow__nodes]:will-change-transform">
           {/* Floating component drawer — hidden for viewers */}
           {!readOnly && (
             <MarketplaceSidebar
               onAutoLayout={handleAutoLayout}
               autoLayoutDisabled={nodes.length < 2}
+              focusSignal={marketplaceFocus ?? null}
             />
           )}
 
@@ -2007,6 +2074,7 @@ const ArchitectureViewInner = forwardRef<ArchitectureViewHandle, ArchitectureVie
           confirmText={confirmDialog.confirmText}
           variant={confirmDialog.variant}
         />
+
       </div>
     );
   }

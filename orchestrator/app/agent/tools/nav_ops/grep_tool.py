@@ -437,6 +437,10 @@ def register_grep_tool(registry) -> None:
             },
             executor=grep_tool,
             category=ToolCategory.NAV_OPS,
+            # Pattern + flags in, matches/counts dict out — JSON-clean.
+            state_serializable=True,
+            # Stateless ripgrep wrapper; no cached index between calls.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "grep", "parameters": {"pattern": "TODO"}}',
                 '{"tool_name": "grep", "parameters": {"pattern": "def \\\\w+_tool", "output_mode": "content", "-n": true, "-C": 2}}',

@@ -89,6 +89,34 @@ export interface SecretRotatedEvent {
   keys: string[];
 }
 
+/** Payload carried on a `containers_restarting` SSE event — fired after a
+ * config save when consumers of the changed env vars need to restart. */
+export interface ContainersRestartingEvent {
+  trigger_container_id: string;
+  restart_target_ids: string[];
+  container_names: string[];
+}
+
+/** One entry from GET /api/projects/{id}/config. */
+export interface ProjectConfigService {
+  container_id: string;
+  container_name: string;
+  deployment_mode: 'external' | 'container' | string;
+  container_type: string;
+  service_slug: string | null;
+  preset: string;
+  schema: FormSchema;
+  initial_values: NodeConfigInitialValues;
+  needs_restart: boolean;
+  pending_input_id: string | null;
+}
+
+/** Response from GET /api/projects/{id}/config. */
+export interface ProjectConfigResponse {
+  services: ProjectConfigService[];
+  deployment_providers: Array<Record<string, unknown>>;
+}
+
 /** Tab payload for the ToolDock. */
 export interface NodeConfigTabPayload {
   projectId: string;

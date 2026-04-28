@@ -10,12 +10,14 @@ import {
   Folder,
   FolderOpen,
   ArrowRight,
+  Plus,
 } from '@phosphor-icons/react';
-import { TesslateLogo } from '../components/ui/TesslateLogo';
 import { MoodyFace } from '../components/ui/MoodyFace';
 import { CreateProjectModal, RepoImportModal } from '../components/modals';
+import { ChannelsCard } from '../components/channels/ChannelsCard';
 import { projectsApi, tasksApi } from '../lib/api';
 import { useTeam } from '../contexts/TeamContext';
+import { useAuth } from '../contexts/AuthContext';
 
 type RecentProject = {
   id: string;
@@ -109,16 +111,16 @@ function ActionCard({ icon, title, tooltip, onClick, disabled, badge }: ActionCa
         onBlur={handleLeave}
         disabled={disabled}
         aria-disabled={disabled || undefined}
-        aria-label={`${title} — ${tooltip}`}
+        aria-label={`${title}: ${tooltip}`}
         className={[
           'group relative flex h-full w-full min-h-[84px] sm:min-h-[92px] flex-col items-start justify-between gap-2',
-          'rounded-[var(--radius)] border px-3 py-3 sm:px-3.5 sm:py-3.5 text-left',
+          'rounded-[var(--radius)] px-3 py-3 sm:px-3.5 sm:py-3.5 text-left',
           'motion-safe:transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2',
           'focus-visible:ring-offset-[var(--bg)]',
           disabled
-            ? 'cursor-not-allowed border-[var(--border)] bg-[var(--surface)] opacity-60'
-            : 'cursor-pointer border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] hover:border-[var(--border-hover)]',
+            ? 'cursor-not-allowed bg-[var(--surface)] opacity-60'
+            : 'cursor-pointer bg-[var(--surface)] hover:bg-[var(--surface-hover)]',
         ].join(' ')}
       >
         {badge && (
@@ -147,15 +149,154 @@ function ActionCard({ icon, title, tooltip, onClick, disabled, badge }: ActionCa
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
               transition={{ type: 'spring', stiffness: 600, damping: 25, mass: 0.4 }}
+              transformTemplate={(_, generated) => `translate(-50%, -100%) ${generated}`}
               className="pointer-events-none fixed z-[9999]"
               style={{
                 top: `${tipPos.top}px`,
                 left: `${tipPos.left}px`,
-                transform: 'translate(-50%, -100%)',
               }}
             >
               <div className="relative max-w-[240px] rounded-md border border-[var(--border-hover)] bg-black px-2.5 py-1.5 text-center shadow-[var(--shadow-large)]">
                 <span className="text-[11px] font-medium leading-snug text-white">{tooltip}</span>
+                <span
+                  aria-hidden="true"
+                  className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent border-t-black"
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+    </>
+  );
+}
+
+interface SplitActionCardProps {
+  icon: ReactNode;
+  title: string;
+  tooltip: string;
+  onClick?: () => void;
+  secondaryIcon: ReactNode;
+  secondaryTooltip: string;
+  secondaryAriaLabel: string;
+  onSecondaryClick?: () => void;
+}
+
+// Two-pane variant of ActionCard: a wide primary half and a narrow secondary
+// half divided by a hairline. Each half hovers, focuses, and tooltips
+// independently while sharing one rounded surface so they read as a single card.
+function SplitActionCard({
+  icon,
+  title,
+  tooltip,
+  onClick,
+  secondaryIcon,
+  secondaryTooltip,
+  secondaryAriaLabel,
+  onSecondaryClick,
+}: SplitActionCardProps) {
+  const primaryRef = useRef<HTMLButtonElement>(null);
+  const secondaryRef = useRef<HTMLButtonElement>(null);
+  const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeTooltip, setActiveTooltip] = useState<'primary' | 'secondary' | null>(null);
+  const [tipPos, setTipPos] = useState({ top: 0, left: 0 });
+
+  const showTooltip = (which: 'primary' | 'secondary') => {
+    const ref = which === 'primary' ? primaryRef : secondaryRef;
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    setTipPos({ top: rect.top - 10, left: rect.left + rect.width / 2 });
+    setActiveTooltip(which);
+  };
+
+  const handleEnter = (which: 'primary' | 'secondary') => () => {
+    if (showTimerRef.current) clearTimeout(showTimerRef.current);
+    showTimerRef.current = setTimeout(() => showTooltip(which), 250);
+  };
+
+  const handleLeave = () => {
+    if (showTimerRef.current) {
+      clearTimeout(showTimerRef.current);
+      showTimerRef.current = null;
+    }
+    setActiveTooltip(null);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (showTimerRef.current) clearTimeout(showTimerRef.current);
+    };
+  }, []);
+
+  const tooltipText = activeTooltip === 'secondary' ? secondaryTooltip : tooltip;
+
+  return (
+    <>
+      <div className="flex h-full w-full overflow-hidden rounded-[var(--radius)] bg-[var(--surface)]">
+        <button
+          ref={primaryRef}
+          type="button"
+          onClick={onClick}
+          onMouseEnter={handleEnter('primary')}
+          onMouseLeave={handleLeave}
+          onFocus={() => showTooltip('primary')}
+          onBlur={handleLeave}
+          aria-label={`${title}: ${tooltip}`}
+          className={[
+            'group relative flex flex-1 min-h-[84px] sm:min-h-[92px] flex-col items-start justify-between gap-2',
+            'px-3 py-3 sm:px-3.5 sm:py-3.5 text-left',
+            'motion-safe:transition-colors cursor-pointer hover:bg-[var(--surface-hover)]',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-inset',
+          ].join(' ')}
+        >
+          <div className="flex h-7 w-7 items-center justify-center text-[var(--text-muted)] group-hover:text-[var(--primary)] motion-safe:transition-colors">
+            {icon}
+          </div>
+          <span className="text-sm font-semibold text-[var(--text)]">{title}</span>
+        </button>
+
+        <button
+          ref={secondaryRef}
+          type="button"
+          onClick={onSecondaryClick}
+          onMouseEnter={handleEnter('secondary')}
+          onMouseLeave={handleLeave}
+          onFocus={() => showTooltip('secondary')}
+          onBlur={handleLeave}
+          aria-label={secondaryAriaLabel}
+          className={[
+            'group flex w-11 sm:w-12 flex-shrink-0 items-center justify-center',
+            'border-l border-[var(--border)]',
+            'motion-safe:transition-colors cursor-pointer hover:bg-[var(--surface-hover)]',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-inset',
+          ].join(' ')}
+        >
+          <div className="flex h-7 w-7 items-center justify-center text-[var(--text-muted)] group-hover:text-[var(--primary)] motion-safe:transition-colors">
+            {secondaryIcon}
+          </div>
+        </button>
+      </div>
+      {createPortal(
+        <AnimatePresence>
+          {activeTooltip && (
+            <motion.div
+              role="tooltip"
+              initial={{ opacity: 0, y: 4, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ type: 'spring', stiffness: 600, damping: 25, mass: 0.4 }}
+              transformTemplate={(_, generated) => `translate(-50%, -100%) ${generated}`}
+              className="pointer-events-none fixed z-[9999]"
+              style={{
+                top: `${tipPos.top}px`,
+                left: `${tipPos.left}px`,
+              }}
+            >
+              <div className="relative max-w-[240px] rounded-md border border-[var(--border-hover)] bg-black px-2.5 py-1.5 text-center shadow-[var(--shadow-large)]">
+                <span className="text-[11px] font-medium leading-snug text-white">
+                  {tooltipText}
+                </span>
                 <span
                   aria-hidden="true"
                   className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-l-[5px] border-r-[5px] border-t-[5px] border-l-transparent border-r-transparent border-t-black"
@@ -193,9 +334,9 @@ function ConnectorsCard({ onClick }: ConnectorsCardProps) {
     <button
       type="button"
       onClick={onClick}
-      aria-label="Connect your connectors — Linear, Discord, GitHub, HubSpot, Sentry and more"
+      aria-label="Connect your connectors: Linear, Discord, GitHub, HubSpot, Sentry and more"
       title="Hook your workspace up to Linear, Discord, GitHub, HubSpot, Sentry and more via MCP."
-      className="group relative col-span-2 flex w-full min-h-[72px] items-center gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-left motion-safe:transition-colors hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] sm:gap-4 sm:px-4"
+      className="group relative col-span-2 flex w-full min-h-[72px] items-center gap-3 rounded-[var(--radius)] bg-[var(--surface)] px-3.5 py-3 text-left motion-safe:transition-colors hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] sm:gap-4 sm:px-4"
     >
       {/* Logo row */}
       <div className="flex flex-shrink-0 items-center -space-x-1.5">
@@ -204,7 +345,7 @@ function ConnectorsCard({ onClick }: ConnectorsCardProps) {
           return (
             <span
               key={c.slug}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg)] motion-safe:transition-transform group-hover:scale-[1.03]"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--bg)] motion-safe:transition-transform group-hover:scale-[1.03]"
               style={{ zIndex: CONNECTORS.length - i }}
               aria-hidden="true"
             >
@@ -248,6 +389,11 @@ function ConnectorsCard({ onClick }: ConnectorsCardProps) {
 export default function Home() {
   const navigate = useNavigate();
   const { activeTeam, teamSwitchKey } = useTeam();
+  const { user } = useAuth();
+  // Greeting prefers the user's first name if available, otherwise the
+  // full display name. Falls back to "there" so the heading still reads
+  // like a sentence on the very first paint while auth is hydrating.
+  const greetingName = (user?.name?.split(' ')[0] || user?.name || 'there').trim();
 
   const [recent, setRecent] = useState<RecentProject[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
@@ -402,15 +548,10 @@ export default function Home() {
     <div className="h-full w-full overflow-y-auto">
       <div className="flex min-h-full items-center justify-center">
         <div className="flex w-full max-w-[560px] flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12 lg:px-8 lg:py-16">
-          {/* Logo + title + plan line */}
+          {/* Welcome header + plan line */}
           <header className="flex flex-col items-center gap-2 text-center">
-            <TesslateLogo
-              width={56}
-              height={44}
-              className="text-[var(--primary)] sm:h-[52px] sm:w-[64px]"
-            />
             <h1 className="text-xl font-semibold tracking-tight text-[var(--text)] sm:text-2xl">
-              OpenSail
+              Welcome to OpenSail, {greetingName}
             </h1>
             <p className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] sm:text-sm">
               <span>{tierLabel} Plan</span>
@@ -434,7 +575,7 @@ export default function Home() {
             <ActionCard
               icon={<FolderPlus size={20} weight="duotone" />}
               title="New Workspace"
-              tooltip="Create a fresh workspace — name it, pick a template, and start building."
+              tooltip="Create a fresh workspace. Name it, pick a template, and start building."
               onClick={() => setShowCreateDialog(true)}
             />
             <ActionCard
@@ -444,18 +585,25 @@ export default function Home() {
               onClick={() => setShowImportDialog(true)}
             />
             <ActionCard
-              icon={<SquaresFour size={20} weight="duotone" />}
+              icon={<SquaresFour size={20} />}
               title="Apps"
               tooltip="Install and launch prebuilt apps into your workspace."
               onClick={() => navigate('/apps/installed')}
             />
-            <ActionCard
-              icon={<MoodyFace size={20} animate trackPointer />}
+            <SplitActionCard
+              icon={<MoodyFace size={20} animate trackPointer className="text-[var(--primary)]" />}
               title="Agents"
               tooltip="Chat with agents to automate workflows in your projects."
               onClick={() => navigate('/chat')}
+              secondaryIcon={<Plus size={18} weight="bold" />}
+              secondaryTooltip="Build a new custom agent with @agent-builder."
+              secondaryAriaLabel="Create new agent"
+              onSecondaryClick={() =>
+                navigate('/chat', { state: { landingPrompt: '@agent-builder ' } })
+              }
             />
             <ConnectorsCard onClick={() => navigate('/marketplace/browse/mcp_server')} />
+            <ChannelsCard onClick={() => navigate('/library?tab=channels')} />
           </div>
 
           {/* Recent Projects — finder-style list */}
@@ -481,14 +629,14 @@ export default function Home() {
 
             {recentLoading ? (
               <div
-                className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-6 text-center text-xs text-[var(--text-muted)]"
+                className="rounded-[var(--radius)] bg-[var(--surface)] px-4 py-6 text-center text-xs text-[var(--text-muted)]"
                 role="status"
                 aria-live="polite"
               >
                 Loading workspaces…
               </div>
             ) : recent.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 rounded-[var(--radius)] border border-dashed border-[var(--border)] bg-[var(--surface)] px-4 py-8 text-center">
+              <div className="flex flex-col items-center gap-2 rounded-[var(--radius)] bg-[var(--surface)] px-4 py-8 text-center">
                 <FolderOpen size={24} className="text-[var(--text-subtle)]" />
                 <p className="text-sm text-[var(--text-muted)]">No workspaces yet</p>
                 <p className="text-xs text-[var(--text-subtle)]">
@@ -497,8 +645,8 @@ export default function Home() {
                 </p>
               </div>
             ) : (
-              <ul className="flex flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
-                {recent.map((p, i) => (
+              <ul className="flex flex-col overflow-hidden rounded-[var(--radius)] bg-[var(--surface)]">
+                {recent.map((p) => (
                   <li key={p.id}>
                     <button
                       type="button"
@@ -506,7 +654,6 @@ export default function Home() {
                       className={[
                         'flex w-full items-center gap-3 px-3 py-2.5 text-left motion-safe:transition-colors',
                         'hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:bg-[var(--surface-hover)]',
-                        i !== recent.length - 1 ? 'border-b border-[var(--border)]' : '',
                       ].join(' ')}
                     >
                       <Folder

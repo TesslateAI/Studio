@@ -19,6 +19,13 @@ export interface HostedAgentNodeData extends Record<string, unknown> {
   max_tokens?: number;
   thinking_effort?: string;
   warm_pool_size?: number;
+  // Phase 5 — Publish-as-App canvas annotations.
+  // When ``expose_as_action`` is true the inspector auto-fills handler.kind
+  // = ``hosted_agent`` and prefills ``billing.ai_compute.payer_default`` =
+  // ``installer`` for the manifest emitted by the Publish Drawer.
+  expose_as_action?: boolean;
+  action_input_schema?: string;
+  action_output_schema?: string;
 }
 
 export type HostedAgentNodeType = Node<HostedAgentNodeData, 'hostedAgentNode'>;

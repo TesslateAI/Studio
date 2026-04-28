@@ -5,8 +5,8 @@ status endpoint must agree on the exact hostname shape; extracting this
 helper keeps them in lockstep.
 
 ``app_container_url`` emits the creator-branded form for installed
-AppInstance containers; ``container_url`` emits the legacy slug-based
-form for non-app source projects. Both shapes fit under the existing
+app-runtime containers; ``container_url`` emits the legacy slug-based
+form for non-app workspace projects. Both shapes fit under the existing
 ``*.{app_domain}`` wildcard cert (single-level subdomain).
 """
 
@@ -87,13 +87,19 @@ async def resolve_app_url_for_container(
     from sqlalchemy import select
 
     from ...config import get_settings
-    from ...models import AppInstance, MarketplaceApp, Project, User
+    from ...models import (
+        PROJECT_KIND_APP_RUNTIME,
+        AppInstance,
+        MarketplaceApp,
+        Project,
+        User,
+    )
 
     if container is None or container.project_id is None:
         return None
 
     project = await db.get(Project, container.project_id)
-    if project is None or project.app_role != "app_instance":
+    if project is None or project.project_kind != PROJECT_KIND_APP_RUNTIME:
         return None
 
     inst = (

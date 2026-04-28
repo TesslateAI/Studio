@@ -267,6 +267,10 @@ def register_git_status_tool(registry) -> None:
             },
             executor=git_status_tool,
             category=ToolCategory.GIT_OPS,
+            # Optional path/flags in, status dict out — JSON-clean.
+            state_serializable=True,
+            # Read-only git invocation; no persistent state.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "git_status", "parameters": {}}',
                 '{"tool_name": "git_status", "parameters": {"include_untracked": false}}',

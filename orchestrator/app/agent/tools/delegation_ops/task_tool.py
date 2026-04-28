@@ -710,6 +710,11 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=task_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # Role+prompt+config in, agent_id (or final response) dict out — JSON-clean.
+            state_serializable=True,
+            # Spawns a child agent run whose asyncio task + LLM stream live
+            # outside this run; cannot be checkpointed mid-flight.
+            holds_external_state=True,
             examples=[
                 '{"role": "explore-codebase", "prompt": "Map every caller of foo()", "wait": false}',
                 '{"role": "refactor-tests", "prompt": "Port tests to pytest-asyncio", "wait": true, "timeout_ms": 300000}',
@@ -742,6 +747,11 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=wait_agent_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # agent_id + timeout in, trajectory dict out — JSON-clean.
+            state_serializable=True,
+            # Operates on a live child agent task; the underlying handle is
+            # external state owned by the delegation manager.
+            holds_external_state=True,
         )
     )
 
@@ -769,6 +779,11 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=send_message_to_agent_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # agent_id + message in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Mutates the in-memory injected_messages buffer of a live child
+            # agent task — external runtime state.
+            holds_external_state=True,
         )
     )
 
@@ -791,6 +806,10 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=close_agent_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # agent_id in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Cancels a live child agent task — external runtime state.
+            holds_external_state=True,
         )
     )
 
@@ -817,6 +836,10 @@ def register_delegation_ops_tools(registry: ToolRegistry) -> None:
             },
             executor=list_agents_executor,
             category=ToolCategory.DELEGATION_OPS,
+            # Optional filters in, list of agent metadata dicts out — JSON-clean.
+            state_serializable=True,
+            # Pure inspection of the delegation registry; reads only.
+            holds_external_state=False,
         )
     )
 

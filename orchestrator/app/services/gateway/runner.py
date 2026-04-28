@@ -7,6 +7,7 @@ as defense-in-depth for Docker Compose.
 """
 
 import asyncio
+import base64
 import contextlib
 import logging
 import os
@@ -16,10 +17,135 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+# Per-platform file-upload caps. Slack file API rejects > 25 MiB outright;
+# Telegram's Bot API does the same without a local-bot-API server. We
+# enforce a single cross-platform cap so the runner can decide before
+# materialising the payload whether to attach or annotate-and-skip.
+_ARTIFACT_UPLOAD_MAX_BYTES: int = 25 * 1024 * 1024
+
+
+async def _resolve_artifact_bytes(art: Any) -> tuple[bytes | None, str]:
+    """Return ``(content_bytes, reason)`` for an :class:`AutomationRunArtifact`.
+
+    On success returns ``(<bytes>, "ok")``. On any failure returns
+    ``(None, <reason>)`` so the caller can render a "(file not
+    attached: <reason>)" line in the approval card body.
+
+    Storage routing matches :mod:`app.services.automations.artifacts`:
+
+    * ``inline``      — base64-decode ``storage_ref`` directly. Always
+                        succeeds for live rows.
+    * ``cas``         — best-effort fetch via the volume-hub blob API
+                        when present; today the helper returns
+                        ``(None, "cas_unavailable")`` because the RPC
+                        isn't wired (see ``artifacts._upload_to_cas``
+                        for the symmetric write path).
+    * ``s3``          — best-effort GET on ``storage_ref`` (assumed to
+                        be a presigned URL). No bearer is sent — these
+                        URLs MUST self-authenticate.
+    * ``external_url`` — bytes are NOT fetched (the runner posts the
+                        link itself in the card body); returns
+                        ``(None, "external_url")``.
+    """
+    storage_mode = str(getattr(art, "storage_mode", "") or "").lower()
+    storage_ref = getattr(art, "storage_ref", None)
+
+    if not storage_ref:
+        return None, "missing_storage_ref"
+
+    if storage_mode == "inline":
+        try:
+            return base64.b64decode(storage_ref), "ok"
+        except Exception:
+            logger.warning(
+                "[GATEWAY] artifact %s inline storage_ref failed b64 decode",
+                getattr(art, "id", None),
+            )
+            return None, "decode_failed"
+
+    if storage_mode == "external_url":
+        # External URLs are surfaced in the card body verbatim — we
+        # don't proxy-download them.
+        return None, "external_url"
+
+    if storage_mode in ("cas", "s3"):
+        # Best-effort fetch. The CAS layer's PutBlob RPC isn't wired
+        # yet (see services/automations/artifacts.py); for now we
+        # surface a skip reason so the card body can explain it.
+        if storage_mode == "s3":
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(storage_ref)
+                    if resp.status_code != 200:
+                        return None, f"s3_status_{resp.status_code}"
+                    return resp.content, "ok"
+            except Exception as exc:
+                logger.warning(
+                    "[GATEWAY] artifact %s s3 fetch failed: %s",
+                    getattr(art, "id", None),
+                    exc,
+                )
+                return None, "s3_fetch_failed"
+        # CAS — placeholder until services.hub_client.get_blob lands.
+        return None, "cas_unavailable"
+
+    return None, f"unsupported_storage_mode:{storage_mode}"
+
+
+async def _upload_artifact_to_adapter(
+    *,
+    adapter: Any,
+    target_chat_id: str,
+    art: Any,
+    content: bytes,
+) -> dict[str, Any]:
+    """Dispatch ``content`` to the adapter's platform-native file upload.
+
+    Returns the adapter's response dict (``{"ok": ..., "error": ...}``)
+    so the caller can audit per-artifact delivery. If the adapter has
+    no recognised file-upload method we return ``{"ok": False,
+    "error": "no_upload_method"}`` so the caller can fall back to a
+    text note.
+    """
+    name = getattr(art, "name", None) or f"artifact-{getattr(art, 'id', 'unknown')}"
+    mime = getattr(art, "mime_type", None)
+    preview = (getattr(art, "preview_text", None) or "")[:200]
+
+    # Slack — uses files.upload_v2 flow.
+    if hasattr(adapter, "upload_file"):
+        return await adapter.upload_file(
+            channel_id=target_chat_id,
+            filename=name,
+            content=content,
+            title=name,
+            initial_comment=preview or None,
+        )
+
+    # Telegram — uses sendDocument.
+    if hasattr(adapter, "send_document"):
+        return await adapter.send_document(
+            chat_id=target_chat_id,
+            filename=name,
+            content=content,
+            caption=preview or None,
+            mime_type=mime,
+        )
+
+    return {"ok": False, "error": "no_upload_method"}
+
 _PENDING_SENTINEL = object()
 _RECONNECT_BACKOFF_BASE = 30  # seconds
 _RECONNECT_BACKOFF_CAP = 300  # 5 minutes
 _RECONNECT_MAX_ATTEMPTS = 20
+
+# Set on ``GatewayRunner.start`` so ``services/gateway/delivery_client.py``
+# can discover the in-process adapter map for direct DM delivery.
+# ``None`` everywhere outside the gateway pod (API / worker pods route
+# through Redis XADD instead).
+_LOCAL_RUNNER: "GatewayRunner | None" = None
 
 
 class GatewayRunner:
@@ -52,6 +178,11 @@ class GatewayRunner:
         self._running = True
         settings = get_settings()
 
+        # Publish ourselves as the local runner so the delivery client
+        # can route DM approval cards through our adapter map (Phase 4).
+        global _LOCAL_RUNNER
+        _LOCAL_RUNNER = self
+
         logger.info("[GATEWAY] Starting shard %d", self.shard)
 
         # Initial adapter sync
@@ -74,6 +205,18 @@ class GatewayRunner:
         self._background_tasks.add(
             asyncio.create_task(
                 scheduler.run_loop(db_factory, arq_pool, interval=settings.gateway_tick_interval)
+            )
+        )
+
+        # Start AppRuntimeDeployment idle reaper (Phase 4).
+        # Lives alongside the cron tick — the gateway runner's existing
+        # single-firer file lock + replicas=1 keeps it correct enough until
+        # the dedicated automations-controller Deployment lands.
+        self._background_tasks.add(
+            asyncio.create_task(
+                self._runtime_reaper_loop(
+                    db_factory, interval=settings.gateway_tick_interval
+                )
             )
         )
 
@@ -107,6 +250,12 @@ class GatewayRunner:
         """Graceful shutdown."""
         logger.info("[GATEWAY] Shutting down shard %d", self.shard)
         self._running = False
+
+        # Drop the local-runner pointer so the delivery client falls
+        # back to XADD as soon as we begin tearing down.
+        global _LOCAL_RUNNER
+        if _LOCAL_RUNNER is self:
+            _LOCAL_RUNNER = None
 
         # Cancel background tasks
         for task in self._background_tasks:
@@ -757,20 +906,83 @@ class GatewayRunner:
                 await asyncio.sleep(2)
 
     async def _process_delivery(self, data: dict) -> None:
-        """Process a single delivery from the stream."""
-        config_id = data.get(b"config_id", data.get("config_id", ""))
-        session_key = data.get(b"session_key", data.get("session_key", ""))
-        response_text = data.get(b"response", data.get("response", ""))
+        """Process a single delivery from the stream.
 
-        if isinstance(config_id, bytes):
-            config_id = config_id.decode()
-        if isinstance(session_key, bytes):
-            session_key = session_key.decode()
-        if isinstance(response_text, bytes):
-            response_text = response_text.decode()
+        The envelope is parsed via :func:`envelope.parse_envelope` so we get a
+        normalized dict with a real ``kind`` (defaulted to ``"message"`` for
+        backward compatibility) and a decoded ``artifact_refs`` list.
 
-        if not response_text:
+        - ``kind="message"``        — Phase 0; existing send-text path.
+        - ``kind="approval_card"``  — Phase 4; the body is a JSON envelope
+          with ``destination_ids[]`` + the approval payload (input_id,
+          tool_name, summary, actions).
+        - ``kind="artifact"``       — Phase 4; the body carries the
+          destination + artifact_refs and we upload the artifact bytes
+          to each destination as a file attachment.
+
+        Approval-card and artifact deliveries do NOT touch
+        ``_active_sessions`` / ``_pending_messages`` — they're outbound
+        side-channel deliveries to ``CommunicationDestination`` rows
+        that have no concept of "session ordering."
+        """
+        from .envelope import (
+            KIND_APPROVAL_CARD,
+            KIND_ARTIFACT,
+            KIND_MESSAGE,
+            parse_envelope,
+        )
+
+        parsed = parse_envelope(data)
+        kind = parsed["kind"]
+        config_id = parsed["config_id"]
+        session_key = parsed["session_key"]
+        body = parsed["body"]
+        artifact_refs = parsed["artifact_refs"]
+        task_id = parsed["task_id"]
+
+        # ---- Phase 4: approval_card -----------------------------------
+        if kind == KIND_APPROVAL_CARD:
+            try:
+                await self._process_approval_card_delivery(parsed)
+            except Exception:
+                logger.exception(
+                    "[GATEWAY] approval_card delivery failed session=%s task=%s",
+                    session_key,
+                    task_id,
+                )
             return
+
+        # ---- Phase 4: artifact ----------------------------------------
+        if kind == KIND_ARTIFACT:
+            try:
+                await self._process_artifact_delivery(parsed)
+            except Exception:
+                logger.exception(
+                    "[GATEWAY] artifact delivery failed session=%s task=%s",
+                    session_key,
+                    task_id,
+                )
+            return
+
+        if kind != KIND_MESSAGE:
+            # Unknown kind from a future producer — log + skip rather than
+            # crash. The XACK in the consumer loop ensures we don't replay it.
+            logger.warning(
+                "[GATEWAY] unknown delivery kind=%r — skipping session=%s",
+                kind,
+                session_key,
+            )
+            return
+
+        if not body:
+            return
+
+        if artifact_refs:
+            # Phase 4 will resolve and attach these. For now just log.
+            logger.debug(
+                "[GATEWAY] delivery has %d artifact_refs (ignored in Phase 0)",
+                len(artifact_refs),
+            )
 
         adapter = self.adapters.get(config_id)
         if not adapter:
@@ -784,10 +996,10 @@ class GatewayRunner:
 
         try:
             if hasattr(adapter, "send_gateway_response"):
-                await adapter.send_gateway_response(chat_id, response_text)
+                await adapter.send_gateway_response(chat_id, body)
             else:
                 jid = f"{adapter.channel_type}:{chat_id}"
-                await adapter.send_message(jid, response_text)
+                await adapter.send_message(jid, body)
 
             logger.info("[GATEWAY] Delivered response to session %s", session_key)
         except Exception:
@@ -798,15 +1010,11 @@ class GatewayRunner:
             from ...models import ChannelMessage
 
             async with self._db_factory() as db:
-                task_id = data.get(b"task_id", data.get("task_id", ""))
-                if isinstance(task_id, bytes):
-                    task_id = task_id.decode()
-
                 msg = ChannelMessage(
                     channel_config_id=uuid.UUID(config_id) if config_id else None,
                     direction="outbound",
                     jid=f"{adapter.channel_type}:{chat_id}",
-                    content=response_text[:2000],
+                    content=body[:2000],
                     task_id=task_id,
                     status="delivered",
                 )
@@ -824,6 +1032,506 @@ class GatewayRunner:
             if len(pending) > 1:
                 self._pending_messages[session_key] = pending[1:]
             asyncio.create_task(self._handle_message(next_event))
+
+    # ------------------------------------------------------------------
+    # Approval-card delivery (Phase 4)
+    # ------------------------------------------------------------------
+
+    async def _process_approval_card_delivery(self, parsed: dict) -> None:
+        """Handle a ``kind=approval_card`` delivery envelope.
+
+        Envelope shape (the producer in
+        ``services/automations/delivery_fallback.py`` writes this when
+        the approval has paired Slack/Telegram identities; otherwise it
+        skips the gateway entirely and emails directly):
+
+            body = JSON({
+              "input_id": "...",
+              "automation_id": "...",
+              "tool_name": "...",
+              "summary": "...",
+              "actions": ["allow_once", ...],
+              "destination_ids": ["<communication_destination_uuid>", ...]
+                  // OR a single owner_user_id for direct DM delivery
+            })
+
+        For each ``destination_id`` we look up the
+        ``CommunicationDestination`` + its backing ``ChannelConfig``,
+        find the live adapter (by config id), and call its
+        ``send_approval_card(...)``. Track delivery in
+        ``automation_approval_requests.delivered_to`` for audit.
+        """
+        import json
+
+        try:
+            payload = json.loads(parsed.get("body") or "{}") or {}
+        except Exception:
+            logger.warning(
+                "[GATEWAY] approval_card payload not JSON; dropping"
+            )
+            return
+
+        input_id = str(payload.get("input_id") or "")
+        automation_id = str(payload.get("automation_id") or "")
+        tool_name = str(payload.get("tool_name") or "unknown_tool")
+        summary = str(payload.get("summary") or "")
+        actions = list(payload.get("actions") or [])
+        dest_ids = list(payload.get("destination_ids") or [])
+
+        if not input_id:
+            logger.warning("[GATEWAY] approval_card missing input_id; dropping")
+            return
+
+        if not dest_ids:
+            # No destinations on the envelope — nothing to fan out to via
+            # the gateway path. The fallback chain handles email/web.
+            logger.info(
+                "[GATEWAY] approval_card input=%s has no destination_ids; "
+                "falling back to in-process delivery",
+                input_id,
+            )
+            return
+
+        # Resolve destinations + send.
+        from sqlalchemy import select
+
+        from ...models import ChannelConfig
+        from ...models_automations import (
+            AutomationApprovalRequest,
+            AutomationRunArtifact,
+            CommunicationDestination,
+        )
+
+        # Gather artifact UUIDs to attach. Two sources: the envelope
+        # (artifact_refs[]) and the AutomationApprovalRequest row's
+        # context_artifacts column. We union both, deduplicate, and
+        # resolve once below.
+        envelope_refs = list(parsed.get("artifact_refs") or [])
+
+        delivered: list[dict] = []
+        async with self._db_factory() as db:
+            # Load context_artifacts off the approval row so we attach
+            # whatever the contract author registered against the
+            # decision, regardless of producer-side wiring.
+            db_artifact_ids: list[str] = []
+            try:
+                req_for_arts = await db.scalar(
+                    select(AutomationApprovalRequest).where(
+                        AutomationApprovalRequest.id == uuid.UUID(input_id)
+                    )
+                )
+                if req_for_arts is not None and req_for_arts.context_artifacts:
+                    db_artifact_ids = [
+                        str(x) for x in (req_for_arts.context_artifacts or [])
+                    ]
+            except Exception:
+                logger.warning(
+                    "[GATEWAY] approval_card context_artifacts load failed input=%s",
+                    input_id,
+                    exc_info=True,
+                )
+
+            # Union + dedupe (preserve order: envelope wins on first
+            # occurrence so producers can override row-level defaults).
+            seen: set[str] = set()
+            artifact_ids: list[str] = []
+            for ref in (*envelope_refs, *db_artifact_ids):
+                key = str(ref)
+                if key not in seen:
+                    seen.add(key)
+                    artifact_ids.append(key)
+
+            # Resolve to live AutomationRunArtifact rows.
+            artifacts: list[Any] = []
+            for ref in artifact_ids:
+                try:
+                    art_uuid = uuid.UUID(ref)
+                except Exception:
+                    continue
+                art = await db.scalar(
+                    select(AutomationRunArtifact).where(
+                        AutomationRunArtifact.id == art_uuid
+                    )
+                )
+                if art is not None:
+                    artifacts.append(art)
+            for dest_id_raw in dest_ids:
+                try:
+                    dest_uuid = uuid.UUID(str(dest_id_raw))
+                except Exception:
+                    logger.warning(
+                        "[GATEWAY] approval_card bad destination_id=%r",
+                        dest_id_raw,
+                    )
+                    continue
+                dest = await db.scalar(
+                    select(CommunicationDestination).where(
+                        CommunicationDestination.id == dest_uuid
+                    )
+                )
+                if dest is None:
+                    logger.warning(
+                        "[GATEWAY] approval_card destination=%s not found",
+                        dest_uuid,
+                    )
+                    continue
+                cc = await db.scalar(
+                    select(ChannelConfig).where(
+                        ChannelConfig.id == dest.channel_config_id
+                    )
+                )
+                if cc is None:
+                    logger.warning(
+                        "[GATEWAY] approval_card channel_config=%s not found",
+                        dest.channel_config_id,
+                    )
+                    continue
+
+                adapter = self.adapters.get(str(cc.id))
+                if adapter is None or not hasattr(adapter, "send_approval_card"):
+                    logger.warning(
+                        "[GATEWAY] approval_card no live adapter for "
+                        "config=%s (kind=%s)",
+                        cc.id,
+                        cc.channel_type,
+                    )
+                    continue
+
+                config = dest.config or {}
+                target_chat_id = (
+                    config.get("chat_id")
+                    or config.get("channel_id")
+                    or config.get("dm_user_id")
+                )
+
+                # Phase 4: upload artifacts BEFORE the card so the user
+                # sees the files appear above the actionable card. Skip
+                # reasons (size cap, no-upload-method, fetch fail) get
+                # rolled into ``annotated_summary`` so the card body
+                # documents what could not be attached.
+                #
+                # Slack DM path can't easily upload (we'd need to
+                # resolve the IM channel first, then upload, then
+                # post the card into the same channel — kept off the
+                # initial cut to avoid a 3-RTT path that doesn't yet
+                # have a primary user). Channel/group destinations get
+                # the full upload path. The DM path falls through to
+                # text-only delivery with a note.
+                annotated_summary = summary
+                upload_audit: list[dict[str, Any]] = []
+                supports_dm = dest.kind in ("slack_dm",) and config.get("user_id")
+                can_upload_here = (
+                    artifacts
+                    and not supports_dm
+                    and target_chat_id
+                    and (
+                        hasattr(adapter, "upload_file")
+                        or hasattr(adapter, "send_document")
+                    )
+                )
+
+                if can_upload_here:
+                    skip_notes: list[str] = []
+                    attached_count = 0
+                    for art in artifacts:
+                        name = (
+                            getattr(art, "name", None)
+                            or f"artifact-{getattr(art, 'id', 'unknown')}"
+                        )
+                        size = int(getattr(art, "size_bytes", 0) or 0)
+                        if size and size > _ARTIFACT_UPLOAD_MAX_BYTES:
+                            skip_notes.append(
+                                f"`{name}`: file too large to attach "
+                                f"({size // (1024 * 1024)} MiB > 25 MiB cap)"
+                            )
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": False,
+                                    "error": "size_cap",
+                                }
+                            )
+                            continue
+
+                        content, reason = await _resolve_artifact_bytes(art)
+                        if content is None:
+                            if reason == "external_url":
+                                # External URL — surface the link
+                                # rather than upload bytes we don't
+                                # have.
+                                ref = getattr(art, "storage_ref", "") or ""
+                                skip_notes.append(f"`{name}`: {ref}")
+                            else:
+                                skip_notes.append(
+                                    f"`{name}`: not attached ({reason})"
+                                )
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": False,
+                                    "error": reason,
+                                }
+                            )
+                            continue
+
+                        # Final size guard against a producer that wrote
+                        # a row with size_bytes=0 but actually has bulk
+                        # bytes.
+                        if len(content) > _ARTIFACT_UPLOAD_MAX_BYTES:
+                            skip_notes.append(
+                                f"`{name}`: file too large to attach "
+                                f"({len(content) // (1024 * 1024)} MiB > 25 MiB cap)"
+                            )
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": False,
+                                    "error": "size_cap",
+                                }
+                            )
+                            continue
+
+                        try:
+                            up = await _upload_artifact_to_adapter(
+                                adapter=adapter,
+                                target_chat_id=str(target_chat_id),
+                                art=art,
+                                content=content,
+                            )
+                        except Exception as exc:
+                            logger.exception(
+                                "[GATEWAY] approval_card artifact upload raised "
+                                "destination=%s artifact=%s",
+                                dest_uuid,
+                                getattr(art, "id", None),
+                            )
+                            up = {"ok": False, "error": str(exc)}
+
+                        if up.get("ok"):
+                            attached_count += 1
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": True,
+                                }
+                            )
+                        else:
+                            skip_notes.append(
+                                f"`{name}`: upload failed "
+                                f"({up.get('error') or 'unknown'})"
+                            )
+                            upload_audit.append(
+                                {
+                                    "artifact_id": str(getattr(art, "id", "")),
+                                    "ok": False,
+                                    "error": up.get("error") or "unknown",
+                                }
+                            )
+
+                    # Annotate the card body so users always see WHY a
+                    # referenced artifact didn't materialise.
+                    annotation_lines: list[str] = []
+                    if attached_count:
+                        annotation_lines.append(
+                            f"Attached {attached_count} file"
+                            + ("s" if attached_count != 1 else "")
+                        )
+                    if skip_notes:
+                        annotation_lines.append(
+                            "Some files were not attached:\n- "
+                            + "\n- ".join(skip_notes)
+                        )
+                    if annotation_lines:
+                        annotated_summary = (
+                            (summary + "\n\n" if summary else "")
+                            + "\n\n".join(annotation_lines)
+                        )
+
+                try:
+                    if supports_dm:
+                        # DM path — open conversation first.
+                        ok = await adapter.send_approval_card_to_dm(
+                            user_id=str(config["user_id"]),
+                            input_id=input_id,
+                            automation_id=automation_id,
+                            tool_name=tool_name,
+                            summary=annotated_summary,
+                            actions=actions,
+                        )
+                        result = {"ok": ok}
+                    else:
+                        result = await adapter.send_approval_card(
+                            target_chat_id,
+                            input_id,
+                            automation_id,
+                            tool_name,
+                            annotated_summary,
+                            actions=actions,
+                        )
+                except Exception:
+                    logger.exception(
+                        "[GATEWAY] approval_card send failed "
+                        "destination=%s adapter=%s",
+                        dest_uuid,
+                        cc.channel_type,
+                    )
+                    continue
+
+                if result.get("ok"):
+                    audit_entry: dict[str, Any] = {
+                        "destination_id": str(dest_uuid),
+                        "kind": dest.kind,
+                        "surface": str(target_chat_id) if target_chat_id else None,
+                        "delivered_at": datetime.now(UTC).isoformat(),
+                    }
+                    if upload_audit:
+                        audit_entry["artifacts"] = upload_audit
+                    delivered.append(audit_entry)
+
+            if delivered:
+                # Append to the approval request's delivered_to audit.
+                try:
+                    req = await db.scalar(
+                        select(AutomationApprovalRequest).where(
+                            AutomationApprovalRequest.id == uuid.UUID(input_id)
+                        )
+                    )
+                    if req is not None:
+                        existing = list(req.delivered_to or [])
+                        existing.extend(delivered)
+                        req.delivered_to = existing
+                        await db.commit()
+                except Exception:
+                    logger.warning(
+                        "[GATEWAY] approval_card audit write failed input=%s",
+                        input_id,
+                        exc_info=True,
+                    )
+
+    async def _process_artifact_delivery(self, parsed: dict) -> None:
+        """Handle a ``kind=artifact`` delivery envelope.
+
+        Envelope shape:
+
+            body = JSON({
+              "destination_ids": ["..."],
+              "caption": "..."  // optional
+            })
+            artifact_refs = ["<automation_run_artifact_uuid>", ...]
+
+        For each artifact ref we resolve the row, fetch the bytes
+        (inline / CAS / external_url), and post as a file attachment to
+        each destination via the platform-specific upload API
+        (Slack ``files.upload_v2``, Telegram ``sendDocument``, Discord
+        ``POST /channels/{id}/messages`` with ``files``).
+
+        Today we ship the destination resolution + a minimal
+        text-with-link fallback so the runtime is wired end-to-end.
+        Real binary upload per platform lands as the artifacts pipeline
+        in ``services/automations/artifacts.py`` matures.
+        """
+        import json
+
+        try:
+            payload = json.loads(parsed.get("body") or "{}") or {}
+        except Exception:
+            payload = {}
+
+        dest_ids = list(payload.get("destination_ids") or [])
+        artifact_refs = list(parsed.get("artifact_refs") or [])
+        caption = str(payload.get("caption") or "").strip()
+
+        if not dest_ids or not artifact_refs:
+            logger.info(
+                "[GATEWAY] artifact delivery skipped — missing destinations or refs"
+            )
+            return
+
+        from sqlalchemy import select
+
+        from ...models import ChannelConfig
+        from ...models_automations import (
+            AutomationRunArtifact,
+            CommunicationDestination,
+        )
+
+        async with self._db_factory() as db:
+            artifacts = []
+            for ref in artifact_refs:
+                try:
+                    art_uuid = uuid.UUID(str(ref))
+                except Exception:
+                    continue
+                art = await db.scalar(
+                    select(AutomationRunArtifact).where(
+                        AutomationRunArtifact.id == art_uuid
+                    )
+                )
+                if art is not None:
+                    artifacts.append(art)
+
+            if not artifacts:
+                logger.warning(
+                    "[GATEWAY] artifact delivery — no artifacts resolved from refs=%s",
+                    artifact_refs,
+                )
+                return
+
+            for dest_id_raw in dest_ids:
+                try:
+                    dest_uuid = uuid.UUID(str(dest_id_raw))
+                except Exception:
+                    continue
+                dest = await db.scalar(
+                    select(CommunicationDestination).where(
+                        CommunicationDestination.id == dest_uuid
+                    )
+                )
+                if dest is None:
+                    continue
+                cc = await db.scalar(
+                    select(ChannelConfig).where(
+                        ChannelConfig.id == dest.channel_config_id
+                    )
+                )
+                if cc is None:
+                    continue
+                adapter = self.adapters.get(str(cc.id))
+                if adapter is None:
+                    continue
+                config = dest.config or {}
+                target_chat_id = (
+                    config.get("chat_id")
+                    or config.get("channel_id")
+                    or config.get("dm_user_id")
+                )
+                # Best-effort: post a text + preview line per artifact.
+                # Per-platform binary upload is a follow-up patch in
+                # ``services/automations/artifacts.py``.
+                lines: list[str] = []
+                if caption:
+                    lines.append(caption)
+                for art in artifacts:
+                    label = art.name or art.id.hex[:8]
+                    if art.preview_text:
+                        snippet = art.preview_text[:1500]
+                        lines.append(f"*{label}*\n{snippet}")
+                    elif art.storage_mode == "external_url":
+                        lines.append(f"*{label}*: {art.storage_ref}")
+                    else:
+                        lines.append(f"*{label}* (artifact stored {art.storage_mode})")
+                body = "\n\n".join(lines)
+                try:
+                    if hasattr(adapter, "send_gateway_response"):
+                        await adapter.send_gateway_response(target_chat_id, body)
+                    else:
+                        jid = f"{adapter.channel_type}:{target_chat_id}"
+                        await adapter.send_message(jid, body)
+                except Exception:
+                    logger.exception(
+                        "[GATEWAY] artifact delivery to destination=%s failed",
+                        dest_uuid,
+                    )
 
     # ------------------------------------------------------------------
     # Background tasks
@@ -929,6 +1637,39 @@ class GatewayRunner:
                         logger.info("[GATEWAY] Archived %d idle sessions", len(stale))
             except Exception:
                 logger.warning("[GATEWAY] Session reaper error", exc_info=True)
+
+    async def _runtime_reaper_loop(self, db_factory, interval: int = 60) -> None:
+        """Reap idle ``AppRuntimeDeployment`` rows on a fixed interval.
+
+        Runs alongside the cron scheduler with its own DB session per tick.
+        Failures are logged and swallowed so a transient DB blip can't
+        kill the loop. In docker / desktop modes the reaper itself
+        early-returns — the loop still ticks but does no K8s work.
+
+        Note (Phase 4): superseded by the dedicated
+        ``automations-controller`` Deployment. This loop is kept for
+        backwards compatibility with the gateway-as-controller mode used
+        in single-process deployments. Once the controller is wired into
+        all environments this loop will be removed.
+        """
+        from ..apps.runtime_reaper import reap_idle_runtimes
+
+        while self._running:
+            await asyncio.sleep(interval)
+            try:
+                async with db_factory() as db:
+                    result = await reap_idle_runtimes(db)
+                if result.reaped or result.timeout_killed or result.skipped_active:
+                    logger.info(
+                        "[GATEWAY] runtime_reaper: examined=%d reaped=%d "
+                        "timeout_killed=%d skipped_active=%d",
+                        result.examined,
+                        result.reaped,
+                        result.timeout_killed,
+                        result.skipped_active,
+                    )
+            except Exception:
+                logger.warning("[GATEWAY] Runtime reaper error", exc_info=True)
 
     async def _media_cache_cleaner(self) -> None:
         """Clean up old media cache files hourly."""

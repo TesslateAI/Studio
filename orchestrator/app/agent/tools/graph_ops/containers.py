@@ -447,6 +447,10 @@ CONTAINER_TOOLS: list[Tool] = [
             "required": ["container_id"],
         },
         executor=graph_start_container_executor,
+        # container_id in, status+url dict out — JSON-clean.
+        state_serializable=True,
+        # Synchronous orchestrator call; no in-tool handle.
+        holds_external_state=False,
         examples=[
             '{"tool_name": "graph_start_container", "parameters": {"container_id": "abc-123-def"}}'
         ],
@@ -463,6 +467,10 @@ CONTAINER_TOOLS: list[Tool] = [
             "required": ["container_id"],
         },
         executor=graph_stop_container_executor,
+        # container_id in, success dict out — JSON-clean.
+        state_serializable=True,
+        # Synchronous orchestrator call; no in-tool handle.
+        holds_external_state=False,
         examples=[
             '{"tool_name": "graph_stop_container", "parameters": {"container_id": "abc-123-def"}}'
         ],
@@ -473,6 +481,10 @@ CONTAINER_TOOLS: list[Tool] = [
         category=ToolCategory.PROJECT,
         parameters={"type": "object", "properties": {}, "required": []},
         executor=graph_start_all_executor,
+        # No params in, success dict out — JSON-clean.
+        state_serializable=True,
+        # Synchronous orchestrator bring-up; no in-tool handle.
+        holds_external_state=False,
         examples=['{"tool_name": "graph_start_all", "parameters": {}}'],
     ),
     Tool(
@@ -481,6 +493,10 @@ CONTAINER_TOOLS: list[Tool] = [
         category=ToolCategory.PROJECT,
         parameters={"type": "object", "properties": {}, "required": []},
         executor=graph_stop_all_executor,
+        # No params in, success dict out — JSON-clean.
+        state_serializable=True,
+        # Synchronous orchestrator teardown; no in-tool handle.
+        holds_external_state=False,
         examples=['{"tool_name": "graph_stop_all", "parameters": {}}'],
     ),
     Tool(
@@ -489,6 +505,10 @@ CONTAINER_TOOLS: list[Tool] = [
         category=ToolCategory.PROJECT,
         parameters={"type": "object", "properties": {}, "required": []},
         executor=graph_container_status_executor,
+        # No params in, list of container status dicts out — JSON-clean.
+        state_serializable=True,
+        # Pure observation; no in-tool state.
+        holds_external_state=False,
         examples=['{"tool_name": "graph_container_status", "parameters": {}}'],
     ),
 ]

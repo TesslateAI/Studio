@@ -185,7 +185,7 @@ async def test_resource_quotas():
 
 async def main():
     """Run all tests."""
-    logger.info("🚀 Starting Kubernetes-native development environment tests...")
+    logger.info("Starting Kubernetes-native development environment tests...")
     logger.info("=" * 60)
 
     tests = [

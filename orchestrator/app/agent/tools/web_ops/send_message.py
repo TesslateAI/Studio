@@ -287,6 +287,10 @@ def register_send_message_tools(registry):
             },
             executor=send_message_executor,
             category=ToolCategory.WEB,
+            # Message + channel in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Fire-and-forget webhook/POST; no persistent connection retained.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "send_message", "parameters": {"message": "Build completed successfully! The app is ready at port 3000."}}',
                 '{"tool_name": "send_message", "parameters": {"message": "Found 3 critical security vulnerabilities in dependencies.", "channel": "discord"}}',

@@ -7,12 +7,14 @@ import type {
   DBMessage,
   ToolCallDetail,
   AgentStep,
+  ChatMention,
 } from '../types/agent';
 import type { ChatAgent } from '../types/chat';
 import type { EditMode } from '../components/chat/EditModeStatus';
 import { nodeConfigEvents } from '../utils/nodeConfigEvents';
 import type {
   ArchitectureNodeAddedEvent,
+  ContainersRestartingEvent,
   NodeConfigCancelledEvent,
   NodeConfigResumedEvent,
   SecretRotatedEvent,
@@ -45,6 +47,12 @@ function dispatchNodeConfigEvent(type: string, data: Record<string, unknown> | u
     case 'secret_rotated':
       nodeConfigEvents.emit('secret-rotated', data as unknown as SecretRotatedEvent);
       return true;
+    case 'containers_restarting':
+      nodeConfigEvents.emit(
+        'containers-restarting',
+        data as unknown as ContainersRestartingEvent
+      );
+      return true;
     default:
       return false;
   }
@@ -65,9 +73,18 @@ function formatAgentError(raw: string): string {
   return raw.length > 120 ? raw.slice(0, 120) + '...' : raw;
 }
 
+export interface BuilderReviewSummary {
+  name: string;
+  description?: string;
+  mcps?: { slug?: string; name?: string }[];
+  schedule?: { cron?: string; tz?: string; humanized?: string };
+  delivery_targets?: { kind?: string; name?: string }[];
+  draft_url?: string;
+}
+
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'ai' | 'approval_request';
+  type: 'user' | 'ai' | 'approval_request' | 'builder_review_request';
   content: string;
   attachments?: SerializedAttachment[];
   agentData?: AgentMessageData;
@@ -78,6 +95,10 @@ export interface ChatMessage {
   toolName?: string;
   toolParameters?: Record<string, unknown>;
   toolDescription?: string;
+  // Set on `builder_review_request` messages — drives the chat-side
+  // BuilderReviewCard render. The summary shape mirrors the dict the
+  // `request_review` agent tool emits.
+  builderReviewSummary?: BuilderReviewSummary;
 }
 
 interface UseAgentChatOptions {
@@ -392,7 +413,22 @@ export function useAgentChat({
               // handled via nodeConfigEvents bus
             } else if (data.type === 'approval_required') {
               const approvalData = data.data || data;
-              if (editModeRef.current === 'allow') {
+              // The `agent-builder` flow surfaces a richer review card
+              // (publish + activate buttons + summary) instead of the
+              // generic allow/deny gate. The backend marks it via
+              // `kind: 'builder_review'` in the same approval envelope.
+              if (approvalData.kind === 'builder_review') {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `builder-review-${crypto.randomUUID()}`,
+                    type: 'builder_review_request',
+                    content: '',
+                    approvalId: approvalData.approval_id,
+                    builderReviewSummary: (approvalData.summary || {}) as BuilderReviewSummary,
+                  },
+                ]);
+              } else if (editModeRef.current === 'allow') {
                 chatApi
                   .sendApprovalResponse(approvalData.approval_id, 'allow_all')
                   .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
@@ -513,7 +549,12 @@ export function useAgentChat({
   }, [chatId, agent]);
 
   const sendMessage = useCallback(
-    async (message: string, overrideChatId?: string, attachments?: SerializedAttachment[]) => {
+    async (
+      message: string,
+      overrideChatId?: string,
+      attachments?: SerializedAttachment[],
+      mentions?: ChatMention[]
+    ) => {
       if ((!message.trim() && (!attachments || attachments.length === 0)) || isExecuting) return;
 
       // Resolve the chat ID — create a session on the fly if needed
@@ -569,6 +610,10 @@ export function useAgentChat({
             max_iterations: undefined,
             edit_mode: editModeRef.current,
             attachments,
+            // @-mention picker entries — backend splits these by kind
+            // into mention_agent_ids / mention_mcp_config_ids /
+            // mention_app_instance_ids on the AgentTaskPayload.
+            mentions: mentions && mentions.length > 0 ? mentions : undefined,
           },
           (event) => {
             if (!isMountedRef.current) return;
@@ -781,7 +826,18 @@ export function useAgentChat({
             ) {
               // handled via nodeConfigEvents bus
             } else if (event.type === 'approval_required') {
-              if (editModeRef.current === 'allow') {
+              const approvalKind = event.data.kind as string | undefined;
+              if (approvalKind === 'builder_review') {
+                const reviewMessage: ChatMessage = {
+                  id: `builder-review-${crypto.randomUUID()}`,
+                  type: 'builder_review_request',
+                  content: '',
+                  approvalId: event.data.approval_id as string,
+                  builderReviewSummary:
+                    (event.data.summary as BuilderReviewSummary | undefined) ?? { name: '' },
+                };
+                setMessages((prev) => [...prev, reviewMessage]);
+              } else if (editModeRef.current === 'allow') {
                 chatApi
                   .sendApprovalResponse(event.data.approval_id as string, 'allow_all')
                   .catch((err) => console.error('[APPROVAL] Auto-approve failed:', err));
@@ -893,14 +949,29 @@ export function useAgentChat({
   }, []);
 
   const handleApproval = useCallback(
-    async (approvalId: string, response: 'allow_once' | 'allow_all' | 'stop') => {
+    async (
+      approvalId: string,
+      response:
+        | 'allow_once'
+        | 'allow_all'
+        | 'stop'
+        | 'publish_and_activate'
+        | 'save_draft'
+        | 'cancel'
+    ) => {
       try {
         await chatApi.sendApprovalResponse(approvalId, response);
       } catch (err) {
         console.error('[APPROVAL] Failed to send response:', err);
       }
       setMessages((prev) =>
-        prev.filter((msg) => !(msg.type === 'approval_request' && msg.approvalId === approvalId))
+        prev.filter(
+          (msg) =>
+            !(
+              (msg.type === 'approval_request' || msg.type === 'builder_review_request') &&
+              msg.approvalId === approvalId
+            )
+        )
       );
     },
     []

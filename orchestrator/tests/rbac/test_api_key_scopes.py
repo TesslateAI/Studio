@@ -459,6 +459,8 @@ class TestToolScopeEnforcement:
             parameters={"type": "object", "properties": {}},
             executor=lambda p, c: {"success": True},
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         ))
 
         context = {
@@ -484,6 +486,8 @@ class TestToolScopeEnforcement:
             parameters={"type": "object", "properties": {}},
             executor=mock_write,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         ))
 
         context = {
@@ -510,6 +514,8 @@ class TestToolScopeEnforcement:
             parameters={"type": "object", "properties": {}},
             executor=mock_write,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         ))
 
         context = {

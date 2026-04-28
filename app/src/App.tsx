@@ -48,7 +48,6 @@ import TeamSettingsPage from './pages/settings/TeamSettingsPage';
 import TeamMembersPage from './pages/settings/TeamMembersPage';
 import AuditLogPage from './pages/settings/AuditLogPage';
 import ConnectionsSettings from './pages/settings/ConnectionsSettings';
-import ChannelsSettings from './pages/settings/ChannelsSettings';
 import SchedulesSettings from './pages/settings/SchedulesSettings';
 import InviteAcceptPage from './pages/InviteAcceptPage';
 import { useReferralTracking } from './hooks/useReferralTracking';
@@ -65,13 +64,22 @@ import AppWorkspacePage from './pages/AppWorkspacePage';
 import AppSourceBrowserPage from './pages/AppSourceBrowserPage';
 import ForkPage from './pages/ForkPage';
 import CreatorStudioPage from './pages/CreatorStudioPage';
-import CreatorAppPublishPage from './pages/CreatorAppPublishPage';
 import CreatorBillingPage from './pages/CreatorBillingPage';
 import AdminMarketplaceReviewPage from './pages/AdminMarketplaceReviewPage';
 import AdminSubmissionWorkbenchPage from './pages/AdminSubmissionWorkbenchPage';
 import AdminYankCenterPage from './pages/AdminYankCenterPage';
 import AdminCreatorReputationPage from './pages/AdminCreatorReputationPage';
 import AdminAdversarialSuitePage from './pages/AdminAdversarialSuitePage';
+// Phase 5 admin polish
+import SpendDashboard from './pages/admin/SpendDashboard';
+// Phase 5 marketplace polish
+import ContractTemplates from './pages/marketplace/ContractTemplates';
+// Automations (Phase 1 — basic builder)
+import AutomationsListPage from './pages/automations/AutomationsListPage';
+import AutomationCreatePage from './pages/automations/AutomationCreatePage';
+import AutomationDetailPage from './pages/automations/AutomationDetailPage';
+import RunDetailPage from './pages/automations/RunDetailPage';
+import ApprovalsPage from './pages/automations/ApprovalsPage';
 
 const IS_TAURI = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
 
@@ -345,7 +353,6 @@ function AppContent() {
 
           {/* Creator Studio */}
           <Route path="/creator" element={<CreatorStudioPage />} />
-          <Route path="/creator/publish/:appId" element={<CreatorAppPublishPage />} />
           <Route path="/creator/billing" element={<CreatorBillingPage />} />
 
           {/* Admin Marketplace */}
@@ -357,6 +364,34 @@ function AppContent() {
           <Route path="/admin/marketplace/yanks" element={<AdminYankCenterPage />} />
           <Route path="/admin/marketplace/reputation" element={<AdminCreatorReputationPage />} />
           <Route path="/admin/marketplace/adversarial" element={<AdminAdversarialSuitePage />} />
+
+          {/* Phase 5 admin polish — spend rollup dashboard. */}
+          <Route path="/admin/spend" element={<SpendDashboard />} />
+
+          {/* Phase 5 marketplace polish — contract templates. */}
+          <Route
+            path="/marketplace/contract-templates"
+            element={<ContractTemplates />}
+          />
+
+          {/* Automations (Phase 1) — list + create + detail + run-detail */}
+          <Route path="/automations" element={<AutomationsListPage />} />
+          <Route path="/automations/new" element={<AutomationCreatePage />} />
+          {/* Phase 2 HITL — cross-automation pending-approvals inbox.
+              Defined before "/automations/:id" so the literal segment wins. */}
+          <Route path="/automations/approvals" element={<ApprovalsPage />} />
+          <Route path="/automations/:id" element={<AutomationDetailPage />} />
+          <Route
+            path="/automations/:id/runs/:run_id"
+            element={<RunDetailPage />}
+          />
+
+          {/* Project builder — shares the same NavigationSidebar instance so
+              navigating Dashboard ↔ Project doesn't unmount/remount the
+              sidebar shell. ProjectPage publishes its sidebar additions via
+              BuilderShellContext. */}
+          <Route path="/project/:slug" element={<ProjectPage />} />
+          <Route path="/project/:slug/builder" element={<ProjectPage />} />
         </Route>
 
         {/* Standalone Routes */}
@@ -366,22 +401,6 @@ function AppContent() {
           element={
             <PrivateRoute>
               <AppWorkspacePage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/project/:slug"
-          element={
-            <PrivateRoute>
-              <ProjectPage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/project/:slug/builder"
-          element={
-            <PrivateRoute>
-              <ProjectPage />
             </PrivateRoute>
           }
         />
@@ -421,7 +440,11 @@ function AppContent() {
           <Route path="api-keys" element={<ApiKeysSettings />} />
           <Route path="billing" element={<Navigate to="/settings/team/billing" replace />} />
           <Route path="messaging" element={<ConnectionsSettings />} />
-          <Route path="messaging/channels" element={<ChannelsSettings />} />
+          {/* Channels moved to Library → Channels. Old route stays as a redirect for bookmarks. */}
+          <Route
+            path="messaging/channels"
+            element={<Navigate to="/library?tab=channels" replace />}
+          />
           <Route path="messaging/schedules" element={<SchedulesSettings />} />
           <Route path="team" element={<TeamSettingsPage />} />
           <Route path="team/members" element={<TeamMembersPage />} />

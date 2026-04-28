@@ -192,6 +192,10 @@ def register_skill_tools(registry):
             },
             executor=load_skill_executor,
             category=ToolCategory.PROJECT,  # Read-only, safe operation
+            # Skill name in, instructions text dict out — JSON-clean.
+            state_serializable=True,
+            # Loads from marketplace catalog/disk; no persistent skill session.
+            holds_external_state=False,
         )
     )
 

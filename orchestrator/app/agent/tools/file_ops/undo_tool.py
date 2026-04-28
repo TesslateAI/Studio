@@ -164,6 +164,10 @@ def register_undo_tool(registry) -> None:
             },
             executor=file_undo_tool,
             category=ToolCategory.FILE_OPS,
+            # Path in, success/error dict out — JSON-clean.
+            state_serializable=True,
+            # History is persisted in DB by edit_history, not in-tool state.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "file_undo", "parameters": {"file_path": "src/App.jsx"}}',
             ],

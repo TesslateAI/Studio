@@ -48,8 +48,13 @@ ENV PATH="/home/node/.local/bin:$PATH"
 RUN go install github.com/air-verse/air@latest
 
 # Install bun globally (fastest package manager, creates flat node_modules)
-# Install to /usr/local/bin so it's available for all users
-RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+# Install to /usr/local/bin so it's available for all users.
+# pipefail + version postcheck: if the curl ever returns empty (transient
+# DNS/network), the layer would otherwise commit without bun and fail at
+# runtime with `bun: not found`. Fail the build instead.
+RUN set -o pipefail \
+ && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \
+ && /usr/local/bin/bun --version
 ENV PATH="/usr/local/bin:$PATH"
 
 # Install common global npm packages for development

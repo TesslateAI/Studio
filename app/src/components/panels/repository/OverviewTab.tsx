@@ -200,9 +200,13 @@ export function OverviewTab({ projectSlug }: OverviewTabProps) {
     return <ErrorState message={info?.message ?? 'GitHub is not responding right now.'} />;
   }
 
+  // Local-only repos (git init'd, no GitHub remote): hide GitHub-specific
+  // affordances like stars / open PRs / contributors / "All commits" link.
+  const isLocal = info.status === 'local';
+
   return (
     <div className="flex flex-col gap-3 p-3">
-      <ExplainerCard />
+      {!isLocal && <ExplainerCard />}
 
       {/* Description */}
       {info.description && (
@@ -218,35 +222,45 @@ export function OverviewTab({ projectSlug }: OverviewTabProps) {
           hint={<Term term="defaultBranch">What's this?</Term>}
         />
         <StatCard
-          icon={<GitPullRequest size={12} weight="bold" />}
-          label="Open PRs"
-          value={info.open_pulls_count ?? 0}
-          hint={<Term term="pullRequest">What's a PR?</Term>}
-        />
-        <StatCard icon={<Star size={12} weight="bold" />} label="Stars" value={info.stars ?? 0} />
-        <StatCard
           icon={<Clock size={12} weight="bold" />}
           label="Last activity"
           value={formatRelativeTime(info.pushed_at) || '—'}
           hint={info.pushed_at ? formatAbsoluteDate(info.pushed_at) : undefined}
         />
+        {!isLocal && (
+          <>
+            <StatCard
+              icon={<GitPullRequest size={12} weight="bold" />}
+              label="Open PRs"
+              value={info.open_pulls_count ?? 0}
+              hint={<Term term="pullRequest">What's a PR?</Term>}
+            />
+            <StatCard
+              icon={<Star size={12} weight="bold" />}
+              label="Stars"
+              value={info.stars ?? 0}
+            />
+          </>
+        )}
       </div>
 
-      {/* Contributors */}
-      <div className="bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius)] p-2.5">
-        <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] uppercase tracking-wide">
-          <UsersThree size={12} weight="bold" />
-          <span>Contributors</span>
-          {info.contributors && info.contributors.length > 0 && (
-            <span className="ml-auto text-[10px] text-[var(--text-muted)] normal-case tracking-normal">
-              {info.contributors.length} total
-            </span>
-          )}
+      {/* Contributors — GitHub-only data; hidden for local-only repos. */}
+      {!isLocal && (
+        <div className="bg-[var(--surface-hover)] border border-[var(--border)] rounded-[var(--radius)] p-2.5">
+          <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)] uppercase tracking-wide">
+            <UsersThree size={12} weight="bold" />
+            <span>Contributors</span>
+            {info.contributors && info.contributors.length > 0 && (
+              <span className="ml-auto text-[10px] text-[var(--text-muted)] normal-case tracking-normal">
+                {info.contributors.length} total
+              </span>
+            )}
+          </div>
+          <div className="mt-1.5">
+            <ContributorRow contributors={info.contributors ?? []} />
+          </div>
         </div>
-        <div className="mt-1.5">
-          <ContributorRow contributors={info.contributors ?? []} />
-        </div>
-      </div>
+      )}
 
       {/* Recent activity */}
       <div>

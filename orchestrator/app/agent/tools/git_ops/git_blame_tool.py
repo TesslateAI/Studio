@@ -214,6 +214,10 @@ def register_git_blame_tool(registry) -> None:
             },
             executor=git_blame_tool,
             category=ToolCategory.GIT_OPS,
+            # File path + range in, blame entries dict out — JSON-clean.
+            state_serializable=True,
+            # Read-only git invocation.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "git_blame", "parameters": {"file_path": "src/App.jsx"}}',
                 '{"tool_name": "git_blame", "parameters": {"file_path": "README.md", "line_start": 1, "line_end": 10}}',

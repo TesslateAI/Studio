@@ -44,6 +44,14 @@ COPY orchestrator/ ./
 # /app/seeds/apps/<slug>/.
 COPY seeds ./seeds
 
+# Tier-1 ephemeral pod template (Phase 4). Lives at the repo root so
+# ops can review the canonical pod surface alongside the rest of the
+# k8s manifests, but the orchestrator renders it at runtime via
+# ``services/automations/ephemeral_pod.py``. The path resolution there
+# walks ``parents[4]`` from /app/app/services/automations/ → /, so the
+# template MUST be copied to /k8s/base/compute-pool/ in the image.
+COPY k8s/base/compute-pool /k8s/base/compute-pool
+
 EXPOSE 8000
 
 # Production/beta: drop --reload (dev-only flag that spawns a filesystem

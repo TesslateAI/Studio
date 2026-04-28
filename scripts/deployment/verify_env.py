@@ -173,7 +173,7 @@ def check_configuration():
     print(f"{Colors.GRAY}  docker-compose up -d{Colors.RESET}")
     print()
     print(f"{Colors.WHITE}Then access at:")
-    print(f"{Colors.GREEN}  🚀 Application: {app_url}")
+    print(f"{Colors.GREEN}  Application: {app_url}")
     print(f"  📊 Traefik Dashboard: {app_url}/traefik (admin:admin){Colors.RESET}")
     print(f"{Colors.CYAN}{'='*60}{Colors.RESET}")
 

@@ -179,7 +179,7 @@ const DeploymentTargetNodeComponent = ({ data, id }: DeploymentTargetNodeProps) 
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(true);
   const [isDeploying, setIsDeploying] = useState(false);
 
-  const providerLogo = PROVIDER_LOGOS[data.provider] || '🚀';
+  const providerLogo = PROVIDER_LOGOS[data.provider] || '◆';
   const providerColor = PROVIDER_COLORS[data.provider] || '#888888';
   const providerName =
     data.providerInfo?.display_name || PROVIDER_DISPLAY_NAMES[data.provider] || data.provider;

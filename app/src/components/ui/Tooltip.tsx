@@ -116,11 +116,11 @@ export function Tooltip({
             damping: 25,
             mass: 0.4,
           }}
+          transformTemplate={(_, generated) => `${getTransform()} ${generated}`}
           className="fixed z-[9999] pointer-events-none whitespace-nowrap flex items-center"
           style={{
             top: `${position.top}px`,
             left: `${position.left}px`,
-            transform: getTransform(),
           }}
         >
           {/* Arrow - positioned before the tooltip box for right side */}

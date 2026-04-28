@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GearSix, CaretLeft, Check, MagnifyingGlass, Lightning } from '@phosphor-icons/react';
 import { marketplaceApi } from '../../lib/api';
@@ -119,19 +119,25 @@ function AgentConfigPanel({
     }
   }, [isLoading]);
 
-  const filtered = search.trim()
-    ? models.filter(
-        (m) =>
-          m.id.toLowerCase().includes(search.toLowerCase()) ||
-          (m.name && m.name.toLowerCase().includes(search.toLowerCase())) ||
-          (m.provider_name && m.provider_name.toLowerCase().includes(search.toLowerCase()))
-      )
-    : models;
+  const filtered = useMemo(() => {
+    const base = search.trim()
+      ? models.filter(
+          (m) =>
+            m.id.toLowerCase().includes(search.toLowerCase()) ||
+            (m.name && m.name.toLowerCase().includes(search.toLowerCase())) ||
+            (m.provider_name && m.provider_name.toLowerCase().includes(search.toLowerCase()))
+        )
+      : models;
+    if (!activeModel) return base;
+    const idx = base.findIndex((m) => m.id === activeModel);
+    if (idx <= 0) return base;
+    return [base[idx], ...base.slice(0, idx), ...base.slice(idx + 1)];
+  }, [models, search, activeModel]);
 
   return (
     <>
       {/* Header */}
-      <div className="px-3 py-2.5 flex items-center gap-2 border-b border-white/[0.06]">
+      <div className="px-3 py-2.5 flex items-center gap-2 border-b border-[var(--border)]">
         <button
           type="button"
           onClick={onBack}
@@ -157,7 +163,7 @@ function AgentConfigPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search models..."
-            className="w-full pl-8 pr-3 py-1.5 bg-white/[0.06] border border-white/[0.08] rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-[var(--primary)]/40 transition-colors"
+            className="w-full pl-8 pr-3 py-1.5 bg-white/[0.06] border border-[var(--border)] rounded-lg text-xs text-white placeholder-white/30 focus:outline-none focus:border-[var(--border-hover)] transition-colors"
             onKeyDown={(e) => {
               if (e.key === 'Escape') onBack();
             }}
@@ -374,7 +380,7 @@ export function AgentSelector({
             />
           ) : (
             <>
-              <div className="px-4 py-2 text-xs text-gray-400 border-b border-white/5">
+              <div className="px-4 py-2 text-xs text-gray-400 border-b border-[var(--border)]">
                 PURCHASED AGENTS
               </div>
 

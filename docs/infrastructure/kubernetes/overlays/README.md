@@ -295,7 +295,7 @@ kubectl describe pod -n tesslate {pod-name} | grep Image
 **Solution**: Delete image from Minikube before loading new one
 ```bash
 minikube -p tesslate ssh -- docker rmi -f tesslate-backend:latest
-docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile orchestrator/
+docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
 kubectl delete pod -n tesslate -l app=tesslate-backend
 ```

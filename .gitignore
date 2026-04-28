@@ -28,6 +28,7 @@ env/
 venv/
 ENV/
 .venv
+.venv-*/
 pip-log.txt
 pip-delete-this-directory.txt
 .pytest_cache/
@@ -91,6 +92,8 @@ Thumbs.db
 .env.production
 .env.prod
 .env.minikube
+*.env
+!*.env.example
 .tfvars
 
 # Docker

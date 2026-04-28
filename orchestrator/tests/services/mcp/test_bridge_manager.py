@@ -78,13 +78,20 @@ def test_is_auth_error_rejects_unrelated():
 
 
 def test_manager_uses_flush_not_commit():
-    """get_user_mcp_context must use db.flush() for needs_reauth updates.
+    """The shared per-config processing loop must use db.flush() for
+    needs_reauth updates.
 
     Using db.commit() on the shared worker session can flush or discard
-    in-flight state from other operations in the same task lifecycle."""
+    in-flight state from other operations in the same task lifecycle.
+
+    The actual loop body lives on ``_process_config_list`` (extracted
+    so it can be reused by both the default ``get_user_mcp_context``
+    path and the @-mention ``get_extra_configs`` path); we inspect that
+    method instead of ``get_user_mcp_context`` (which is now a thin
+    wrapper that resolves configs and delegates to the shared loop)."""
     from app.services.mcp.manager import McpManager
 
-    source = textwrap.dedent(inspect.getsource(McpManager.get_user_mcp_context))
+    source = textwrap.dedent(inspect.getsource(McpManager._process_config_list))
 
     # Should use flush, not commit/rollback
     assert "db.flush()" in source, "needs_reauth updates must use db.flush()"

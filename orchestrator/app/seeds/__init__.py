@@ -9,7 +9,10 @@ import logging
 from .community_bases import seed_community_bases
 from .deployment_targets import seed_deployment_targets
 from .marketplace_agents import (
+    auto_add_agent_builder_to_users,
+    auto_add_automation_builder_to_users,
     auto_add_librarian_agent_to_users,
+    auto_add_service_integrator_to_users,
     auto_add_tesslate_agent_to_users,
     get_or_create_tesslate_account,
     seed_marketplace_agents,
@@ -36,6 +39,9 @@ __all__ = [
     "seed_deployment_targets",
     "auto_add_tesslate_agent_to_users",
     "auto_add_librarian_agent_to_users",
+    "auto_add_agent_builder_to_users",
+    "auto_add_automation_builder_to_users",
+    "auto_add_service_integrator_to_users",
     "get_or_create_tesslate_account",
     "WORKFLOW_TEMPLATES",
 ]
@@ -82,20 +88,46 @@ async def run_all_seeds():
             logger.exception("Failed to seed open-source agents")
             await db.rollback()
 
-        # 4. Auto-add Tesslate Agent to all users
-        try:
-            count = await auto_add_tesslate_agent_to_users(db)
-            logger.info("Auto-add Tesslate Agent: %d users updated", count)
-        except Exception:
-            logger.exception("Failed to auto-add Tesslate Agent to users")
-            await db.rollback()
-
-        # 4b. Auto-add Librarian agent to all users
+        # 4a. Auto-add Librarian agent to all users
         try:
             count = await auto_add_librarian_agent_to_users(db)
             logger.info("Auto-add Librarian agent: %d users updated", count)
         except Exception:
             logger.exception("Failed to auto-add Librarian agent to users")
+            await db.rollback()
+
+        # 4b. Auto-add Agent Builder to all users
+        try:
+            count = await auto_add_agent_builder_to_users(db)
+            logger.info("Auto-add Agent Builder: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Agent Builder to users")
+            await db.rollback()
+
+        # 4c. Auto-add Automation Builder to all users
+        try:
+            count = await auto_add_automation_builder_to_users(db)
+            logger.info("Auto-add Automation Builder: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Automation Builder to users")
+            await db.rollback()
+
+        # 4d. Auto-add Service Integrator to all users
+        try:
+            count = await auto_add_service_integrator_to_users(db)
+            logger.info("Auto-add Service Integrator: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Service Integrator to users")
+            await db.rollback()
+
+        # 4e. Auto-add Tesslate Agent LAST so its purchase_date is the most
+        # recent — library order is `purchase_date DESC` and the chat picks
+        # `library[0]` as the default. Tesslate Agent must be at the top.
+        try:
+            count = await auto_add_tesslate_agent_to_users(db)
+            logger.info("Auto-add Tesslate Agent: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Tesslate Agent to users")
             await db.rollback()
 
         # 5. Skills (item_type='skill')

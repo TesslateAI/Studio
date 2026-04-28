@@ -34,6 +34,30 @@ export interface AgentStep {
   };
 }
 
+/**
+ * Categories surfaced by the @-mention picker. Maps directly to the backend
+ * field-split: `agent` -> mention_agent_ids, `mcp` -> mention_mcp_config_ids,
+ * `app` -> mention_app_instance_ids.
+ */
+export type ChatMentionKind = 'agent' | 'mcp' | 'app';
+
+/**
+ * One @-mention emitted by the picker. The `display` token (e.g. `@coworker`)
+ * stays inline in `message` for chat-history rendering; the backend uses
+ * the structured `ref_id` for run semantics and never re-parses `message`.
+ *
+ *   ref_id is:
+ *     - kind=agent -> MarketplaceAgent.id
+ *     - kind=mcp   -> UserMcpConfig.id
+ *     - kind=app   -> AppInstance.id
+ */
+export interface ChatMention {
+  kind: ChatMentionKind;
+  ref_id: string;
+  display: string;
+  offset: number;
+}
+
 export interface AgentChatRequest {
   project_id?: string;
   message: string;
@@ -45,6 +69,12 @@ export interface AgentChatRequest {
   edit_mode?: 'allow' | 'ask' | 'plan'; // Edit control mode
   view_context?: string; // UI view context: 'graph', 'builder', 'terminal', 'kanban'
   attachments?: SerializedAttachment[];
+  /**
+   * Structured @-mentions from the chat input picker. Empty/undefined for
+   * legacy callers — the backend treats these as additive context for THIS
+   * turn only. See orchestrator AgentTaskPayload.mention_* for behaviour.
+   */
+  mentions?: ChatMention[];
 }
 
 export interface AgentChatResponse {

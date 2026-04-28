@@ -1,0 +1,111 @@
+# OpenSail Connector Proxy NetworkPolicy
+#
+# Two pieces:
+#   * Ingress  — only compute-pool + proj-* namespaces (where app pods
+#                live) plus the orchestrator namespace can reach :8400.
+#   * Egress   — DNS, the in-cluster Postgres, and external 443/80 so
+#                the proxy can call upstream OAuth providers (Slack,
+#                GitHub, Linear, Gmail, ...). Internal CIDRs are blocked
+#                from the external rule so a misconfigured adapter can't
+#                use the proxy as a stepping stone into the cluster.
+#
+# This policy is the whole point of breaking the proxy out of the
+# orchestrator process: it makes the trust boundary explicit at the
+# network layer instead of relying on the orchestrator's broader
+# allowlist.
+
+---
+# Ingress: who is allowed to call the proxy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensail-runtime-ingress
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: opensail-runtime
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # compute-pool — Tier 1 ephemeral pods reach the proxy through
+        # OPENSAIL_RUNTIME_URL (injected by the installer).
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/component: compute-pool
+        # proj-* namespaces — per-project app pods (Tier 2 environment
+        # tenancy). Each project namespace carries this label at create
+        # time (services/orchestration/k8s_namespace.py).
+        - namespaceSelector:
+            matchLabels:
+              tesslate.io/scope: project
+        # tesslate namespace — the orchestrator itself may proxy on
+        # behalf of admin / debug surfaces.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tesslate
+      ports:
+        - protocol: TCP
+          port: 8400
+
+---
+# Egress: where the proxy is allowed to talk.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensail-runtime-egress
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: opensail-runtime
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # In-cluster Postgres (grant lookup + audit row write).
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # Kubernetes API — read the per-pod-key Secret on token verify.
+    # K8s API server isn't pod-labelled; allow apiserver via the default
+    # in-cluster CIDR. Calico/Cilium also accept named-component matches
+    # but plain CIDR is portable.
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+
+    # Upstream OAuth providers — Slack, GitHub, Linear, Gmail, etc.
+    # Internal CIDRs are excluded so a misconfigured adapter can't
+    # reach back into the cluster network.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16  # link-local / metadata
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80

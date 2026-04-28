@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, FileCode, X, List, Plus, Plug } from 'lucide-react';
+import { useHotkeys } from 'react-hotkeys-hook';
+import { Loader2, FileCode, X, List, Plus, Plug, Pause } from 'lucide-react';
 import { PencilSimple, Storefront } from '@phosphor-icons/react';
+import { nodeConfigEvents } from '../../utils/nodeConfigEvents';
+import { useCommandHandlers } from '../../contexts/CommandContext';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { type EditMode } from './EditModeStatus';
@@ -17,6 +20,7 @@ import {
   type AgentMessageData,
   type DBMessage,
   type SerializedAttachment,
+  type ChatMention,
 } from '../../types/agent';
 import { type ChatAgent } from '../../types/chat';
 
@@ -88,6 +92,18 @@ interface ChatContainerProps {
   onEnvironmentStopped?: (reason: string) => void;
   onVolumeReady?: () => void;
   disabled?: boolean;
+  /**
+   * Deep-link target session. When set on mount, seeds `currentChatId` so
+   * the "load most recent session" effect doesn't override it. When the
+   * prop later changes (e.g. user clicks a different chat in the sidebar
+   * while the builder is already open), we swap to that session in place.
+   */
+  initialChatId?: string | null;
+  /**
+   * Open the persistent Config tab. Wired from ProjectPage so the chat-side
+   * pause banner can take the user to the relevant card with one click.
+   */
+  onOpenConfigTab?: () => void;
 }
 
 export function ChatContainer({
@@ -112,19 +128,58 @@ export function ChatContainer({
   onEnvironmentStopped,
   onVolumeReady,
   disabled: disabledProp,
+  initialChatId = null,
+  onOpenConfigTab,
 }: ChatContainerProps) {
   const navigate = useNavigate();
   const { hasRole } = useAuth();
   const isAdmin = hasRole('admin');
   const [showDebugModal, setShowDebugModal] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  // Pinned-banner pauses: agent has called request_node_config(wait_for_input=True)
+  // and is parked on a pending input. Cleared on resume / cancel.
+  const [pendingPauses, setPendingPauses] = useState<
+    Array<{ inputId: string; containerId: string; containerName: string }>
+  >([]);
+  useEffect(() => {
+    const unsubs: Array<() => void> = [];
+    unsubs.push(
+      nodeConfigEvents.on('user-input-required', (payload) => {
+        setPendingPauses((prev) =>
+          prev.some((p) => p.inputId === payload.input_id)
+            ? prev
+            : [
+                ...prev,
+                {
+                  inputId: payload.input_id,
+                  containerId: payload.container_id,
+                  containerName: payload.container_name,
+                },
+              ]
+        );
+      })
+    );
+    unsubs.push(
+      nodeConfigEvents.on('node-config-resumed', (payload) => {
+        setPendingPauses((prev) => prev.filter((p) => p.inputId !== payload.input_id));
+      })
+    );
+    unsubs.push(
+      nodeConfigEvents.on('node-config-cancelled', (payload) => {
+        setPendingPauses((prev) => prev.filter((p) => p.inputId !== payload.input_id));
+      })
+    );
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, []);
   useEffect(() => {
     onExpandedChange?.(isExpanded);
   }, [isExpanded, onExpandedChange]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [agents, setAgents] = useState<ChatAgent[]>(initialAgents);
   const [currentAgent, setCurrentAgent] = useState<ChatAgent>(initialCurrentAgent);
-  const [toolCallsCollapsed, setToolCallsCollapsed] = useState(false);
+  const [toolCallsCollapsed, setToolCallsCollapsed] = useState(true);
   const [availableSkills, setAvailableSkills] = useState<{ name: string; description: string }[]>(
     []
   );
@@ -205,7 +260,10 @@ export function ChatContainer({
   // When docked, always show as expanded
   const effectiveIsExpanded = isDocked || isExpanded;
 
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  // Seed from initialChatId so the "load most recent session" fallback in
+  // loadSessions() (gated on `!currentChatId`) leaves the deep-linked
+  // session intact on first paint.
+  const [currentChatId, setCurrentChatId] = useState<string | null>(initialChatId ?? null);
   const [sessions, setSessions] = useState<
     {
       id: string;
@@ -236,6 +294,24 @@ export function ChatContainer({
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
+
+  // Sidebar deep-link reactor: when the user clicks a different project
+  // chat in the sidebar while this builder is already mounted, the parent
+  // re-renders with a new `initialChatId`. Mirror handleSelectSession so
+  // the swap looks identical to picking from the in-chat session popover.
+  // Deps intentionally exclude currentChatId — including it would let an
+  // internal session change (e.g. "New chat") trigger this effect and
+  // bounce us back to the stale prop value.
+  useEffect(() => {
+    if (initialChatId && initialChatId !== currentChatIdRef.current) {
+      setSessionTransitioning(true);
+      setMessages([]);
+      animatedMessagesRef.current.clear();
+      setCurrentChatId(initialChatId);
+      const t = setTimeout(() => setSessionTransitioning(false), 200);
+      return () => clearTimeout(t);
+    }
+  }, [initialChatId]);
 
   // Track mounted state to guard orphaned SSE callbacks after unmount
   useEffect(() => {
@@ -1164,7 +1240,11 @@ export function ChatContainer({
     };
   }, [agentExecuting, stopAgentExecution]);
 
-  const sendAgentMessage = async (message: string, attachments?: SerializedAttachment[]) => {
+  const sendAgentMessage = async (
+    message: string,
+    attachments?: SerializedAttachment[],
+    mentions?: ChatMention[]
+  ) => {
     if ((!message.trim() && (!attachments || attachments.length === 0)) || agentExecuting) return;
 
     const userMessage: Message = {
@@ -1211,6 +1291,10 @@ export function ChatContainer({
           edit_mode: editMode,
           view_context: viewContext, // UI view context for scoped tools
           attachments,
+          // @-mention picker entries — backend splits these by kind into
+          // mention_agent_ids / mention_mcp_config_ids /
+          // mention_app_instance_ids on the AgentTaskPayload.
+          mentions: mentions && mentions.length > 0 ? mentions : undefined,
         },
         (event) => {
           // Guard against state updates after unmount (orphaned SSE callbacks)
@@ -1706,10 +1790,16 @@ export function ChatContainer({
     }
   };
 
-  const handleSendMessage = (message: string, attachments?: SerializedAttachment[]) => {
-    // Use agent's mode to determine stream vs agent execution
+  const handleSendMessage = (
+    message: string,
+    attachments?: SerializedAttachment[],
+    mentions?: ChatMention[]
+  ) => {
+    // Use agent's mode to determine stream vs agent execution. Mentions
+    // only make sense for the agent path — stream mode bypasses the
+    // worker / payload pipeline entirely, so we drop them silently.
     if (currentAgent.mode === 'agent') {
-      sendAgentMessage(message, attachments);
+      sendAgentMessage(message, attachments, mentions);
     } else {
       sendStreamMessage(message);
     }
@@ -1886,6 +1976,113 @@ export function ChatContainer({
       }
     },
     [currentChatId, sessions]
+  );
+
+  // -------------------------------------------------------------------------
+  // Command palette / keyboard wiring for chat actions.
+  // -------------------------------------------------------------------------
+
+  const cycleSession = useCallback(
+    (delta: number) => {
+      if (sessions.length === 0) return;
+      const idx = sessions.findIndex((s) => s.id === currentChatId);
+      const next = sessions[(idx + delta + sessions.length) % sessions.length];
+      if (next && next.id !== currentChatId) handleSelectSession(next.id);
+    },
+    [sessions, currentChatId, handleSelectSession]
+  );
+
+  const cycleEditMode = useCallback(() => {
+    setEditMode((prev) => {
+      const order: EditMode[] = ['ask', 'plan', 'allow'];
+      const i = order.indexOf(prev);
+      return order[(i + 1) % order.length];
+    });
+  }, []);
+
+  const renameCurrentSession = useCallback(() => {
+    if (!currentChatId) return;
+    const session = sessions.find((s) => s.id === currentChatId);
+    const proposed = window.prompt('Rename session', session?.title ?? '');
+    if (proposed && proposed.trim() && proposed !== session?.title) {
+      handleRenameSession(currentChatId, proposed.trim());
+    }
+  }, [currentChatId, sessions, handleRenameSession]);
+
+  const deleteCurrentSession = useCallback(() => {
+    if (!currentChatId) return;
+    if (window.confirm('Delete this chat session?')) {
+      handleDeleteSession(currentChatId);
+    }
+  }, [currentChatId, handleDeleteSession]);
+
+  useCommandHandlers({
+    clearChat: () => {
+      handleClearHistory();
+    },
+    newChatSession: handleNewSession,
+    nextChatSession: () => cycleSession(1),
+    prevChatSession: () => cycleSession(-1),
+    stopAgent: () => {
+      stopAgentExecution();
+    },
+    toggleEditMode: cycleEditMode,
+    renameChatSession: renameCurrentSession,
+    deleteChatSession: deleteCurrentSession,
+    switchModel: () => {
+      // The agent dropdown is rendered above the input — focus the chat
+      // input first so the user is anchored, then dispatch a window event
+      // that the dropdown listens for to open itself.
+      window.dispatchEvent(new Event('tesslate:focus-chat'));
+      window.dispatchEvent(new Event('tesslate:open-agent-picker'));
+    },
+    focusChatInput: () => {
+      window.dispatchEvent(new Event('tesslate:focus-chat'));
+    },
+    attachChatFile: () => {
+      window.dispatchEvent(new Event('tesslate:open-attach'));
+    },
+  });
+
+  useHotkeys(
+    'mod+shift+j',
+    (e) => {
+      e.preventDefault();
+      handleNewSession();
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+]',
+    (e) => {
+      e.preventDefault();
+      cycleSession(1);
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+[',
+    (e) => {
+      e.preventDefault();
+      cycleSession(-1);
+    },
+    { enableOnFormTags: false }
+  );
+  useHotkeys(
+    'mod+.',
+    (e) => {
+      e.preventDefault();
+      if (agentExecuting) stopAgentExecution();
+    },
+    { enableOnFormTags: ['INPUT', 'TEXTAREA'] }
+  );
+  useHotkeys(
+    'mod+shift+c',
+    (e) => {
+      e.preventDefault();
+      window.dispatchEvent(new Event('tesslate:focus-chat'));
+    },
+    { enableOnFormTags: false }
   );
 
   // Get current session title for header
@@ -2093,11 +2290,11 @@ export function ChatContainer({
           bg-[var(--bg)]
           ${
             isDocked
-              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border)] overflow-hidden'
+              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border-hover)] overflow-hidden'
               : `
               fixed
               z-40
-              border border-[var(--border)]
+              border border-[var(--border-hover)]
               transition-all duration-400 ease-[var(--ease)]
               rounded-[var(--radius)]
               max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:rounded-b-none max-md:w-full
@@ -2413,6 +2610,36 @@ export function ChatContainer({
 
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Pause banner — pinned just above the input so the user can't miss
+            that the agent stopped and which card needs filling. */}
+        {pendingPauses.length > 0 && (
+          <div className="pointer-events-auto px-3 pb-2 space-y-2">
+            {pendingPauses.map((p) => (
+              <button
+                key={p.inputId}
+                type="button"
+                onClick={onOpenConfigTab}
+                disabled={!onOpenConfigTab}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--primary)]/10 border border-[var(--primary)]/40 rounded-[var(--radius-small)] text-left hover:bg-[var(--primary)]/15 transition-colors disabled:cursor-default"
+              >
+                <Pause
+                  size={14}
+                  className="text-[var(--primary)] flex-shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-medium text-[var(--text)] truncate">
+                    Agent paused — waiting on{' '}
+                    <span className="font-semibold">{p.containerName}</span> config
+                  </p>
+                  <p className="text-[10px] text-[var(--text-muted)] truncate">
+                    {onOpenConfigTab ? 'Click to open the Config tab and fill the card.' : 'Open the Config tab to fill the card.'}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Chat input */}
         <div onFocus={handleInputFocus} className="pointer-events-auto">

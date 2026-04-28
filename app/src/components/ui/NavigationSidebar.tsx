@@ -3,30 +3,43 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Tooltip } from './Tooltip';
 import { HelpMenu } from './HelpMenu';
+import { SidebarTree } from './SidebarTree';
+import { CreateProjectModal } from '../modals';
 import { motion } from 'framer-motion';
 import {
   Home,
   FolderOpen,
   BookOpen,
   PanelLeft,
-  ChevronDown,
   ArrowUp,
   Cpu,
   Palette,
   Zap,
   Plug,
   Rocket,
-  Clock,
+  Workflow,
+  MessageSquare,
 } from 'lucide-react';
 import { MoodyFace } from './MoodyFace';
-import { User, CaretDown, Coins, CreditCard, Gear, SignOut, Plus, Package, SquaresFour } from '@phosphor-icons/react';
+import {
+  User,
+  CaretDown,
+  Coins,
+  CreditCard,
+  Gear,
+  SignOut,
+  Plus,
+  Package,
+  SquaresFour,
+} from '@phosphor-icons/react';
 import { KeyboardShortcutsModal } from '../KeyboardShortcutsModal';
-import { billingApi, chatApi, projectsApi, teamsApi } from '../../lib/api';
+import { billingApi, projectsApi, tasksApi, teamsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../contexts/TeamContext';
 import { modKey } from '../../lib/keyboard-registry';
 import type { CreditBalanceResponse } from '../../types/billing';
+import { usePendingApprovals } from '../../hooks/usePendingApprovals';
 
 interface NavigationSidebarProps {
   activePage:
@@ -38,7 +51,8 @@ interface NavigationSidebarProps {
     | 'library'
     | 'feedback'
     | 'builder'
-    | 'settings';
+    | 'settings'
+    | 'automations';
   showContent?: boolean;
   /** Render prop for injecting builder-specific items into the sidebar */
   builderSection?: (ctx: {
@@ -58,34 +72,15 @@ interface NavigationSidebarProps {
   forceVisible?: boolean;
 }
 
-// Recent activity item type
-type RecentItem = {
-  id: string;
-  type: 'chat' | 'project';
-  title: string;
-  slug?: string;
-  updatedAt: string;
-};
-
-function formatRelativeTime(dateStr: string): string {
-  if (!dateStr) return '';
-  const diffMs = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-// Library sub-items for dropdown
-// MoodyFace replaces the Agents icon — inherits color via currentColor,
-// blinks gently on desktop, and respects prefers-reduced-motion.
+// Library sub-items for dropdown.
+// MoodyFace replaces the Agents icon. We keep it pinned to the brand
+// orange (var(--primary)) regardless of selection state — the eyes
+// already telegraph activity, so flipping the body color to the sidebar
+// foreground (white in dark mode) drained the personality. Selection is
+// expressed via opacity at the call site instead.
 type SidebarIconProps = { size?: number; className?: string };
 const AgentFaceIcon = ({ size, className }: SidebarIconProps) => (
-  <MoodyFace size={size ?? 14} className={className} animate />
+  <MoodyFace size={size ?? 14} className={className} animate trackPointer />
 );
 
 const LIBRARY_ITEMS: Array<{
@@ -97,6 +92,7 @@ const LIBRARY_ITEMS: Array<{
   { key: 'bases', label: 'Bases', icon: Rocket },
   { key: 'skills', label: 'Skills', icon: Zap },
   { key: 'mcp_servers', label: 'Connectors', icon: Plug },
+  { key: 'channels', label: 'Channels', icon: MessageSquare },
   { key: 'models', label: 'Models', icon: Cpu },
   { key: 'themes', label: 'Themes', icon: Palette },
 ];
@@ -129,7 +125,7 @@ export function NavigationSidebar({
     top: number;
     left: number;
   }>({ open: false, top: 0, left: 0 });
-  const libraryButtonRef = useRef<HTMLButtonElement>(null);
+  const libraryButtonRef = useRef<HTMLDivElement>(null);
   const libraryFlyoutRef = useRef<HTMLDivElement>(null);
   const libraryCloseTimer = useRef<number | null>(null);
 
@@ -164,10 +160,7 @@ export function NavigationSidebar({
     if (!libraryFlyout.open) return;
     const onClick = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (
-        libraryButtonRef.current?.contains(t) ||
-        libraryFlyoutRef.current?.contains(t)
-      ) {
+      if (libraryButtonRef.current?.contains(t) || libraryFlyoutRef.current?.contains(t)) {
         return;
       }
       setLibraryFlyout((s) => ({ ...s, open: false }));
@@ -199,8 +192,9 @@ export function NavigationSidebar({
       window.removeEventListener('scroll', reposition, true);
     };
   }, [libraryFlyout.open]);
-  const [recentOpen, setRecentOpen] = useState(true);
-  const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
+  const [showCreateProject, setShowCreateProject] = useState(false);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [sidebarReloadKey, setSidebarReloadKey] = useState(0);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
   const userDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -209,7 +203,15 @@ export function NavigationSidebar({
     activePage === 'library' ? new URLSearchParams(location.search).get('tab') || 'agents' : null;
 
   // Team + user profile state
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated } = useAuth();
+
+  // Pending approvals — drives the badge on the Automations nav item.
+  // The hook polls every 30s and is shared with /automations/approvals so
+  // the two surfaces stay in lockstep without extra coordination.
+  const { count: pendingApprovalsCount } = usePendingApprovals({
+    pollMs: 30_000,
+    enabled: isAuthenticated,
+  });
   const { activeTeam, teams, switchTeam, refreshTeams, can, teamSwitchKey } = useTeam();
   const canChat = can('chat.send');
   const subscriptionTier = activeTeam?.subscription_tier || 'free';
@@ -310,60 +312,45 @@ export function NavigationSidebar({
     onExpandedChange?.(isExpanded);
   }, [isExpanded, onExpandedChange]);
 
-  // Fetch recent chats + projects for sidebar (refreshes on route change)
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      chatApi.getUserSessions({ limit: 5 }).catch(() => ({ sessions: [] })),
-      projectsApi.getAll().catch(() => []), // API returns all; sliced below
-    ]).then(([chatData, projects]) => {
-      if (cancelled) return;
-      const chats: RecentItem[] = (
-        (chatData as { sessions?: Array<Record<string, unknown>> }).sessions || []
-      )
-        .slice(0, 5)
-        .map((s) => ({
-          id: s.id as string,
-          type: 'chat' as const,
-          title: (s.title as string) || 'Untitled chat',
-          updatedAt: (s.updated_at as string) || (s.created_at as string) || '',
-        }));
-      const projs: RecentItem[] = (projects as Array<Record<string, unknown>>)
-        .map((p) => ({
-          id: p.id as string,
-          type: 'project' as const,
-          title: (p.name as string) || 'Untitled project',
-          slug: p.slug as string,
-          updatedAt:
-            (p.updated_at as string) || (p.created_at as string) || new Date(0).toISOString(),
-        }))
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .slice(0, 5);
-      const merged = [...chats, ...projs]
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-        .slice(0, 5);
-      setRecentItems(merged);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [teamSwitchKey]); // Re-fetch when team changes
-
-  const handleRecentClick = useCallback(
-    (item: RecentItem) => {
-      // Move clicked item to top immediately
-      setRecentItems((prev) => {
-        const key = `${item.type}-${item.id}`;
-        const without = prev.filter((i) => `${i.type}-${i.id}` !== key);
-        return [{ ...item, updatedAt: new Date().toISOString() }, ...without].slice(0, 5);
-      });
-      if (item.type === 'project') {
-        navigate(`/project/${item.slug}/builder`);
-      } else {
-        navigate('/chat', { state: { sessionId: item.id } });
+  // Create-project flow wired to the "+" button in the sidebar tree.
+  // Mirrors Dashboard.handleCreateProject: create → poll task → route to setup.
+  const handleCreateProject = useCallback(
+    async (projectName: string, baseId?: string, baseVersion?: string) => {
+      if (isCreatingProject) return;
+      setIsCreatingProject(true);
+      const creatingToast = toast.loading('Creating project...');
+      try {
+        const response = await projectsApi.create(
+          projectName,
+          '',
+          'base',
+          undefined,
+          'main',
+          baseId,
+          baseVersion || undefined
+        );
+        const project = response.project;
+        const taskId = response.task_id;
+        if (taskId) {
+          toast.loading('Setting up project...', { id: creatingToast });
+          await tasksApi.pollUntilComplete(taskId).catch(() => {
+            /* non-blocking: setup may complete async */
+          });
+        }
+        toast.success('Project created!', { id: creatingToast, duration: 2000 });
+        setShowCreateProject(false);
+        setSidebarReloadKey((k) => k + 1);
+        navigate(`/project/${project.slug}/setup`);
+      } catch (err) {
+        const detail =
+          (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ||
+          'Failed to create project';
+        toast.error(detail, { id: creatingToast });
+      } finally {
+        setIsCreatingProject(false);
       }
     },
-    [navigate]
+    [isCreatingProject, navigate]
   );
 
   const handleLogout = async () => {
@@ -747,7 +734,16 @@ export function NavigationSidebar({
                 }
                 style={!canChat ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
               >
-                <MoodyFace size={16} animate className={iconClass(activePage === 'chat')} />
+                <MoodyFace
+                  size={16}
+                  animate
+                  trackPointer
+                  className={`text-[var(--primary)] transition-opacity ${
+                    activePage === 'chat'
+                      ? 'opacity-100'
+                      : 'opacity-70 group-hover:opacity-100'
+                  }`}
+                />
                 {isExpanded && (
                   <span className={`${labelClass(activePage === 'chat')} flex items-center gap-1`}>
                     Agents
@@ -771,8 +767,56 @@ export function NavigationSidebar({
                 }
               >
                 <SquaresFour size={16} className={iconClass(activePage === 'apps')} />
+                {isExpanded && <span className={labelClass(activePage === 'apps')}>Apps</span>}
+              </button>
+            </Tooltip>
+
+            <Tooltip
+              content={
+                pendingApprovalsCount > 0
+                  ? `Automations · ${pendingApprovalsCount} pending approval${pendingApprovalsCount === 1 ? '' : 's'}`
+                  : 'Automations'
+              }
+              side="right"
+              delay={200}
+            >
+              <button
+                onClick={() => navigate('/automations')}
+                className={
+                  isExpanded
+                    ? navButtonClass(activePage === 'automations')
+                    : navButtonClassCollapsed(activePage === 'automations')
+                }
+              >
+                <span className="relative inline-flex flex-shrink-0">
+                  <Workflow size={16} className={iconClass(activePage === 'automations')} />
+                  {!isExpanded && pendingApprovalsCount > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[var(--primary)] ring-2 ring-[var(--sidebar-bg)]"
+                      aria-hidden="true"
+                    />
+                  )}
+                </span>
                 {isExpanded && (
-                  <span className={labelClass(activePage === 'apps')}>Apps</span>
+                  <span
+                    className={`${labelClass(activePage === 'automations')} flex items-center gap-2 flex-1 min-w-0`}
+                  >
+                    <span className="truncate">Automations</span>
+                    {pendingApprovalsCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate('/automations/approvals');
+                        }}
+                        className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--primary)] text-[10px] font-semibold text-black tabular-nums"
+                        aria-label={`${pendingApprovalsCount} pending approvals`}
+                        title="View pending approvals"
+                      >
+                        {pendingApprovalsCount > 99 ? '99+' : pendingApprovalsCount}
+                      </button>
+                    )}
+                  </span>
                 )}
               </button>
             </Tooltip>
@@ -811,104 +855,68 @@ export function NavigationSidebar({
 
             {/* Library — flyout (#307 follow-up). Hover OR click opens a
                 popover anchored to the right of the sidebar listing all
-                library tabs; the sidebar itself never expands inline. */}
-            {!isExpanded ? (
-              <Tooltip content="Library" shortcut={`${modKey} L`} side="right" delay={200}>
-                <button
-                  ref={libraryButtonRef}
-                  onClick={openLibraryFlyout}
-                  onMouseEnter={openLibraryFlyout}
-                  onMouseLeave={scheduleLibraryClose}
-                  className={navButtonClassCollapsed(activePage === 'library')}
-                >
-                  <BookOpen size={16} className={iconClass(activePage === 'library')} />
-                </button>
-              </Tooltip>
-            ) : (
-              <button
-                ref={libraryButtonRef}
-                onClick={openLibraryFlyout}
-                onMouseEnter={openLibraryFlyout}
-                onMouseLeave={scheduleLibraryClose}
-                className={navButtonClass(activePage === 'library')}
-              >
-                <BookOpen
-                  size={16}
-                  className={`flex-shrink-0 ${iconClass(activePage === 'library')}`}
-                />
-                <span className={labelClass(activePage === 'library')}>Library</span>
-              </button>
-            )}
-
-            {/* Feedback and Docs moved to HelpMenu (sidebar "?" button) */}
-
-            {/* Recent — collapsible, mixed chats + projects */}
-            {recentItems.length > 0 &&
-              (!isExpanded ? (
-                <Tooltip content="Recent" side="right" delay={200}>
+                library tabs; the sidebar itself never expands inline.
+                The wrapper is `flex flex-col` so the inline-block trigger
+                that Tooltip injects stretches to the sidebar width and
+                the icon centers like every other collapsed-mode item. */}
+            <div
+              ref={libraryButtonRef}
+              className="flex flex-col"
+              onMouseEnter={openLibraryFlyout}
+              onMouseLeave={scheduleLibraryClose}
+            >
+              {!isExpanded ? (
+                <Tooltip content="Library" shortcut={`${modKey} L`} side="right" delay={200}>
                   <button
-                    onClick={() => {
-                      setIsExpanded(true);
-                      setRecentOpen(true);
-                    }}
-                    className={navButtonClassCollapsed(false)}
+                    onClick={openLibraryFlyout}
+                    className={navButtonClassCollapsed(activePage === 'library')}
                   >
-                    <Clock size={16} className={inactiveIconClass} />
+                    <BookOpen size={16} className={iconClass(activePage === 'library')} />
                   </button>
                 </Tooltip>
               ) : (
-                <>
-                  <div className="h-px bg-[var(--sidebar-border)] my-1 mx-3 flex-shrink-0" />
-                  <button onClick={() => setRecentOpen(!recentOpen)} className={inactiveNavButton}>
-                    <Clock size={16} className={`flex-shrink-0 ${inactiveIconClass}`} />
-                    <span className={`${inactiveLabelClass} flex items-center gap-1`}>
-                      Recent
-                      <ChevronDown
-                        size={10}
-                        className={`transition-transform duration-200 text-[var(--text-subtle)] ${
-                          recentOpen ? '' : '-rotate-90'
-                        }`}
-                      />
-                    </span>
-                  </button>
-                  {recentOpen && (
-                    <div className="flex flex-col gap-0.5 mt-0.5">
-                      {recentItems.map((item) => (
-                        <button
-                          key={`${item.type}-${item.id}`}
-                          onClick={() => handleRecentClick(item)}
-                          className="group flex items-center h-7 w-full transition-colors rounded-lg pl-[7px] pr-[7px] gap-2 hover:bg-[var(--sidebar-hover)]"
-                        >
-                          <span className="text-[13px] text-[var(--text-muted)] group-hover:text-[var(--sidebar-text)] truncate flex-1 text-left transition-colors">
-                            {item.title}
-                          </span>
-                          <span className="text-[10px] text-[var(--text-subtle)] tabular-nums flex-shrink-0">
-                            {formatRelativeTime(item.updatedAt)}
-                          </span>
-                        </button>
-                      ))}
-                      <button
-                        onClick={() => navigate('/dashboard')}
-                        className="group flex items-center h-7 w-full transition-colors rounded-lg pl-[7px] pr-[7px] gap-2 hover:bg-[var(--sidebar-hover)]"
-                      >
-                        <span className="text-[11px] text-[var(--text-subtle)] group-hover:text-[var(--text-muted)] transition-colors">
-                          See all →
-                        </span>
-                      </button>
-                    </div>
-                  )}
-                </>
-              ))}
+                <button
+                  onClick={openLibraryFlyout}
+                  className={navButtonClass(activePage === 'library')}
+                >
+                  <BookOpen
+                    size={16}
+                    className={`flex-shrink-0 ${iconClass(activePage === 'library')}`}
+                  />
+                  <span className={labelClass(activePage === 'library')}>Library</span>
+                </button>
+              )}
+            </div>
+
+            {/* Feedback and Docs moved to HelpMenu (sidebar "?" button) */}
+
+            {/* Projects-as-folders tree: every chat (standalone or project-scoped)
+                is findable here. "+" creates a new project (= new folder). */}
+            <SidebarTree
+              reloadKey={`${teamSwitchKey}-${sidebarReloadKey}`}
+              onCreateProject={() => {
+                setIsExpanded(true);
+                setShowCreateProject(true);
+              }}
+              collapsed={!isExpanded}
+              activeProjectSlug={
+                location.pathname.startsWith('/project/')
+                  ? location.pathname.split('/')[2] || null
+                  : null
+              }
+            />
 
             {/* Settings is accessed via user dropdown, not sidebar nav */}
           </>
         )}
 
-        {/* Builder Section — injected when in builder view */}
-        {builderSection && (
-          <>
-            <div className="h-px bg-[var(--sidebar-border)] my-0.5 mx-3 flex-shrink-0" />
-            {builderSection({
+        {/* Builder Section — injected when in builder view. The render prop
+            may return null (e.g., when expanded the project page wants the
+            sidebar to look identical to the dashboard). Suppress the divider
+            when the section produces no content. */}
+        {builderSection &&
+          (() => {
+            const content = builderSection({
               isExpanded,
               navButtonClass,
               navButtonClassCollapsed,
@@ -918,9 +926,15 @@ export function NavigationSidebar({
               inactiveNavButtonCollapsed,
               inactiveIconClass,
               inactiveLabelClass,
-            })}
-          </>
-        )}
+            });
+            if (!content) return null;
+            return (
+              <>
+                <div className="h-px bg-[var(--sidebar-border)] my-0.5 mx-3 flex-shrink-0" />
+                {content}
+              </>
+            );
+          })()}
 
         {/* Spacer to push bottom items down */}
         <div className="flex-1" />
@@ -982,6 +996,14 @@ export function NavigationSidebar({
         onClose={() => setShowShortcutsModal(false)}
       />
 
+      {/* Create-project modal, triggered by the "+" button in the SidebarTree */}
+      <CreateProjectModal
+        isOpen={showCreateProject}
+        onClose={() => setShowCreateProject(false)}
+        onConfirm={handleCreateProject}
+        isLoading={isCreatingProject}
+      />
+
       {/* Library flyout — rendered via portal into document.body so it
           escapes the sidebar's animated motion.div (which sets a transform
           and traps even position:fixed children inside its containing
@@ -1009,6 +1031,15 @@ export function NavigationSidebar({
             </div>
             {LIBRARY_ITEMS.map(({ key, label, icon: Icon }) => {
               const isActive = activeLibraryTab === key;
+              // The agents row uses the moody face — keep it pinned to the
+              // brand orange and signal selection with opacity, matching
+              // the main sidebar Agents button.
+              const isAgents = key === 'agents';
+              const iconClassName = isAgents
+                ? `text-[var(--primary)] transition-opacity ${isActive ? 'opacity-100' : 'opacity-70'}`
+                : isActive
+                  ? 'text-[var(--text)]'
+                  : 'text-[var(--text-subtle)]';
               return (
                 <button
                   key={key}
@@ -1022,16 +1053,13 @@ export function NavigationSidebar({
                       : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
                   }`}
                 >
-                  <Icon
-                    size={14}
-                    className={isActive ? 'text-[var(--text)]' : 'text-[var(--text-subtle)]'}
-                  />
+                  <Icon size={14} className={iconClassName} />
                   <span className="truncate">{label}</span>
                 </button>
               );
             })}
           </motion.div>,
-          document.body,
+          document.body
         )}
     </motion.div>
   );

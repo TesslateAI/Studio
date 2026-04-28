@@ -39,6 +39,8 @@ class TestToolRegistry:
             },
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         registry.register(tool)
@@ -54,6 +56,8 @@ class TestToolRegistry:
             parameters={},
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         tool2 = Tool(
@@ -62,6 +66,8 @@ class TestToolRegistry:
             parameters={},
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         registry.register(tool1)
@@ -83,6 +89,8 @@ class TestToolRegistry:
             parameters={},
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         tool2 = Tool(
@@ -91,6 +99,8 @@ class TestToolRegistry:
             parameters={},
             executor=mock_tool_executor,
             category=ToolCategory.SHELL,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         registry.register(tool1)
@@ -110,6 +120,8 @@ class TestToolRegistry:
             parameters={},
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         shell_tool = Tool(
@@ -118,6 +130,8 @@ class TestToolRegistry:
             parameters={},
             executor=mock_tool_executor,
             category=ToolCategory.SHELL,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         registry.register(file_tool)
@@ -144,6 +158,8 @@ class TestToolRegistry:
             parameters={},
             executor=success_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         registry.register(tool)
@@ -177,6 +193,8 @@ class TestToolRegistry:
             parameters={},
             executor=failing_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         registry.register(tool)
@@ -201,6 +219,8 @@ class TestToolRegistry:
             },
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
             examples=["Example usage"],
         )
 
@@ -226,6 +246,8 @@ class TestToolRegistry:
             },
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         shell_tool = Tool(
@@ -238,6 +260,8 @@ class TestToolRegistry:
             },
             executor=mock_tool_executor,
             category=ToolCategory.SHELL,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         registry.register(file_tool)
@@ -265,6 +289,8 @@ class TestToolRegistry:
             parameters={},
             executor=context_checker,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         registry.register(tool)
@@ -294,11 +320,15 @@ class TestScopedToolRegistry:
         """Create a registry with multiple tools."""
         registry = ToolRegistry()
 
+        # Test fixture tools — trivially serializable, no external state.
+        _ann = {"state_serializable": True, "holds_external_state": False}
         tools = [
-            Tool("read_file", "Read file", {}, mock_tool_executor, ToolCategory.FILE_OPS),
-            Tool("write_file", "Write file", {}, mock_tool_executor, ToolCategory.FILE_OPS),
-            Tool("bash_exec", "Execute bash", {}, mock_tool_executor, ToolCategory.SHELL),
-            Tool("get_project_info", "Get info", {}, mock_tool_executor, ToolCategory.PROJECT),
+            Tool("read_file", "Read file", {}, mock_tool_executor, ToolCategory.FILE_OPS, **_ann),
+            Tool("write_file", "Write file", {}, mock_tool_executor, ToolCategory.FILE_OPS, **_ann),
+            Tool("bash_exec", "Execute bash", {}, mock_tool_executor, ToolCategory.SHELL, **_ann),
+            Tool(
+                "get_project_info", "Get info", {}, mock_tool_executor, ToolCategory.PROJECT, **_ann
+            ),
         ]
 
         for tool in tools:
@@ -382,6 +412,8 @@ class TestToolDataclass:
             parameters={"type": "object"},
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
             examples=["Example 1", "Example 2"],
         )
 
@@ -398,6 +430,8 @@ class TestToolDataclass:
             parameters={},
             executor=mock_tool_executor,
             category=ToolCategory.FILE_OPS,
+            state_serializable=True,
+            holds_external_state=False,
         )
 
         assert tool.examples is None

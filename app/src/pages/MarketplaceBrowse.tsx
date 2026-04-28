@@ -16,7 +16,7 @@ import { isCanceledError } from '../lib/utils';
 import { SEO, generateBreadcrumbStructuredData } from '../components/SEO';
 import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 
-type ItemType = 'agent' | 'base' | 'theme' | 'tool' | 'integration' | 'skill' | 'mcp_server';
+type ItemType = 'agent' | 'base' | 'theme' | 'skill' | 'mcp_server';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -51,8 +51,6 @@ const itemTypeLabels: Record<ItemType, string> = {
   agent: 'Agents',
   base: 'Bases',
   theme: 'Themes',
-  tool: 'Tools',
-  integration: 'Integrations',
   skill: 'Skills',
   mcp_server: 'MCP Servers',
 };
@@ -69,8 +67,6 @@ export default function MarketplaceBrowse() {
     'agent',
     'base',
     'theme',
-    'tool',
-    'integration',
     'skill',
     'mcp_server',
   ].includes(itemTypeParam || '')

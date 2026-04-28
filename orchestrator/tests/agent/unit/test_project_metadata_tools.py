@@ -149,7 +149,7 @@ class TestProjectMetadataTools:
         self, test_context, mock_project, mock_db
     ):
         """Test project info with special characters in name/description."""
-        mock_project.name = "Project with émojis 🚀 and spëcial chars"
+        mock_project.name = "Project with émojis 🐍 and spëcial chars"
         mock_project.description = "Description with\nmultiple\nlines"
 
         mock_result = Mock()
@@ -158,7 +158,7 @@ class TestProjectMetadataTools:
 
         result = await get_project_info_tool({}, test_context)
 
-        assert "🚀" in result["name"]
+        assert "🐍" in result["name"]
         assert "émojis" in result["name"]
         assert "\n" in result["description"]
 

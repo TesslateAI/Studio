@@ -8,6 +8,12 @@ canonical state machine.
 
 This module MUST NOT import the LiteLLM HTTP client directly — callers inject
 a `LiteLLMDelegate` (see `services.litellm_keys.LiteLLMDelegate`).
+
+Phase 4 note (idle reaper): the Phase 4 controller's idle reaper will
+sweep ``app_runtime_deployments`` (not ``app_instances``) so reaping
+shared-singleton apps scales every install's view simultaneously. This
+module's session-mint path stays installer-scoped — the reaper acts on
+the shared deployment row above it.
 """
 
 from __future__ import annotations
@@ -37,6 +43,18 @@ class AppRuntimeError(Exception):
 
 class AppNotRunnableError(AppRuntimeError):
     """Raised when an AppInstance cannot be started (wrong state, yanked, missing)."""
+
+
+class ApiKeyExtractionError(AppRuntimeError):
+    """Raised when the api_key for a freshly minted LiteLLM key cannot be
+    extracted from the delegate.
+
+    The mint itself succeeded (the ledger row was written) but the delegate
+    did not surface the api_key value back to us — without it, downstream
+    callers cannot authenticate to LiteLLM. Loud-fail is mandatory: a silent
+    empty string would propagate into invocation handles and only manifest
+    as opaque 401s at request time.
+    """
 
 
 @dataclass(frozen=True)
@@ -116,21 +134,40 @@ async def _begin(
 
 
 def _extract_api_key(delegate, key_id: str) -> str:
-    """Best-effort: pull the api_key from a delegate that exposes a `.minted` list
-    (FakeDelegate in tests, or a production delegate that caches the last mint).
-    Returns empty string if unavailable — the caller will have to re-mint or
-    query LiteLLM directly if they need it. This keeps the module testable
-    without forcing a change to LiteLLMDelegate."""
+    """Pull the api_key for a freshly minted LiteLLM key from the delegate.
+
+    Inspects the delegate's `.minted` audit list (FakeDelegate in tests, or a
+    production delegate that caches the last mint) for an entry matching
+    `key_id` and returns its `api_key` field.
+
+    Raises:
+        ApiKeyExtractionError: when the delegate exposes no `.minted` list,
+            when no entry matches `key_id`, or when the matched entry's
+            `api_key` is empty/None. Callers MUST NOT swallow this — a missing
+            api_key means the resulting handle would be unusable, and the
+            failure must surface as a typed invocation error rather than a
+            silent empty string.
+    """
+    delegate_name = type(delegate).__name__
     minted = getattr(delegate, "minted", None)
-    if minted:
-        for entry in reversed(minted):
-            if entry.get("key_id") == key_id:
-                api_key = entry.get("api_key")
-                if api_key:
-                    return api_key
-                # FakeDelegate builds api_key deterministically
-                return f"sk-fake-{key_id}"
-    return ""
+    if minted is None:
+        raise ApiKeyExtractionError(
+            f"delegate {delegate_name!r} does not expose a `.minted` audit list; "
+            f"cannot recover api_key for key_id={key_id!r}"
+        )
+    for entry in reversed(minted):
+        if entry.get("key_id") == key_id:
+            api_key = entry.get("api_key")
+            if api_key:
+                return api_key
+            raise ApiKeyExtractionError(
+                f"delegate {delegate_name!r} minted entry for key_id={key_id!r} "
+                f"has empty/missing api_key field"
+            )
+    raise ApiKeyExtractionError(
+        f"delegate {delegate_name!r} has no minted entry matching "
+        f"key_id={key_id!r} (mint succeeded but delegate audit log lost it)"
+    )
 
 
 async def begin_session(

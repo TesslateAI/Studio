@@ -142,6 +142,55 @@ export function HostedAgentInspector({ spec, onUpdate }: HostedAgentInspectorPro
           className={inputCls}
         />
       </Field>
+
+      {/* App Contract — Publish-as-App canvas annotation. When toggled
+          on, the Publish Drawer emits a manifest action with
+          handler.kind=hosted_agent and billing.ai_compute.payer_default=
+          installer; the input/output schemas below feed that action's
+          schema. Persisted via the same configSyncApi path as the rest
+          of the spec (the parent ``onUpdate`` callback round-trips into
+          .tesslate/config.json). */}
+      <div className="border-t border-[var(--border)] pt-3 mt-3 space-y-2">
+        <h3 className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+          App Contract
+        </h3>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="field-expose-as-action"
+            checked={local.expose_as_action ?? false}
+            onChange={(e) => setField('expose_as_action', e.target.checked)}
+          />
+          <span className="text-sm">Expose as callable action</span>
+        </label>
+        {local.expose_as_action && (
+          <>
+            <p className="text-[10px] text-[var(--text-muted)]">
+              handler.kind = <code>hosted_agent</code>
+              <br />
+              billing.ai_compute.payer_default = <code>installer</code>
+            </p>
+            <Field label="input_schema (JSON)">
+              <textarea
+                data-testid="field-action-input-schema"
+                value={local.action_input_schema ?? '{}'}
+                onChange={(e) => setField('action_input_schema', e.target.value)}
+                rows={4}
+                className={`${inputCls} font-mono text-xs`}
+              />
+            </Field>
+            <Field label="output_schema (JSON)">
+              <textarea
+                data-testid="field-action-output-schema"
+                value={local.action_output_schema ?? '{}'}
+                onChange={(e) => setField('action_output_schema', e.target.value)}
+                rows={4}
+                className={`${inputCls} font-mono text-xs`}
+              />
+            </Field>
+          </>
+        )}
+      </div>
     </div>
   );
 }

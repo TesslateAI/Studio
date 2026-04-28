@@ -67,6 +67,12 @@ def bridge_mcp_tools(server_slug: str, mcp_tools: list[dict[str, Any]]) -> list[
                 parameters=input_schema,
                 executor=executor,
                 category=ToolCategory.WEB,
+                # Remote MCP server owns the tool's state (sessions,
+                # cursors, server-side auth) — not locally checkpointable.
+                state_serializable=False,
+                # Each call opens a fresh MCP session (stdio subprocess
+                # or streamable-http) outside the agent loop.
+                holds_external_state=True,
             )
         )
 
@@ -121,6 +127,10 @@ def bridge_mcp_resources(
         },
         executor=_make_resource_executor(server_slug),
         category=ToolCategory.WEB,
+        # Remote server owns resource state; each call opens a fresh
+        # MCP session outside the agent loop.
+        state_serializable=False,
+        holds_external_state=True,
     )
 
 
@@ -169,6 +179,10 @@ def bridge_mcp_prompts(
         },
         executor=_make_prompt_executor(server_slug),
         category=ToolCategory.WEB,
+        # Remote server owns prompt state; each call opens a fresh
+        # MCP session outside the agent loop.
+        state_serializable=False,
+        holds_external_state=True,
     )
 
 

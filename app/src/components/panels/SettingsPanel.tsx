@@ -422,7 +422,7 @@ export function SettingsPanel({ projectSlug }: SettingsPanelProps) {
                   const display = PROVIDER_DISPLAY[cred.provider] || {
                     name: cred.provider,
                     display_name: cred.provider,
-                    icon: '🚀',
+                    icon: '◆',
                     color: '#6B7280',
                   };
                   return (

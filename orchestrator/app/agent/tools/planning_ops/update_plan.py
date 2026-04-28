@@ -811,6 +811,10 @@ def register_update_plan_tool(registry) -> None:
             },
             executor=update_plan_tool,
             category=ToolCategory.PLANNING,
+            # Action + plan in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Plan persisted as markdown on disk + DB pointer; no in-tool state.
+            holds_external_state=False,
             examples=[
                 (
                     '{"tool_name": "update_plan", "parameters": {"action": "create", '

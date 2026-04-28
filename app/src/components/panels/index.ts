@@ -10,3 +10,7 @@ export { TimelinePanel } from './TimelinePanel';
 export { RepositoryPanel } from './repository';
 export { NodeConfigPanel } from './NodeConfigPanel';
 export type { NodeConfigPanelProps } from './NodeConfigPanel';
+export { ConfigPanel } from './ConfigPanel';
+export type { ConfigPanelProps } from './ConfigPanel';
+export { ConfigCard } from './ConfigCard';
+export type { ConfigCardProps } from './ConfigCard';

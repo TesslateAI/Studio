@@ -482,6 +482,10 @@ def register_read_many_files_tool(registry) -> None:
             },
             executor=read_many_files_tool,
             category=ToolCategory.FILE_OPS,
+            # Glob patterns in, list of file content strings out — JSON-serializable.
+            state_serializable=True,
+            # Each call is a fresh batch read; no persistent file handles.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "read_many_files", "parameters": {"include": ["**/*.py"]}}',
                 '{"tool_name": "read_many_files", "parameters": {"include": ["src/**/*.ts", "src/**/*.tsx"], "exclude": ["**/*.test.ts"]}}',

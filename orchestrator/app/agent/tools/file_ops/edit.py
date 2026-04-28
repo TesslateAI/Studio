@@ -443,6 +443,10 @@ def register_edit_tools(registry) -> None:
             },
             executor=patch_file_tool,
             category=ToolCategory.FILE_OPS,
+            # Search/replace strings in, success+diff dict out — JSON-serializable.
+            state_serializable=True,
+            # Single atomic edit per call; no persistent matcher state across calls.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "patch_file", "parameters": {"file_path": "src/App.jsx", "old_str": "bg-blue-500", "new_str": "bg-green-500"}}',
             ],
@@ -483,6 +487,10 @@ def register_edit_tools(registry) -> None:
             },
             executor=multi_edit_tool,
             category=ToolCategory.FILE_OPS,
+            # List of edit objects in, list of per-edit results out — all JSON.
+            state_serializable=True,
+            # Each call self-contained; no in-flight matcher session held open.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "multi_edit", "parameters": {"file_path": "src/App.jsx", "edits": [{"old_str": "useState(0)", "new_str": "useState(10)"}, {"old_str": "bg-blue-500", "new_str": "bg-green-500"}]}}',
             ],

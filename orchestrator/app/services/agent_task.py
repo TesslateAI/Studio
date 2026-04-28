@@ -72,6 +72,38 @@ class AgentTaskPayload:
     # Desktop multi-agent ticket tracking (None = not ticket-bound)
     agent_task_id: str | None = None  # AgentTask UUID; worker atomically claims it on pickup
 
+    # Automation Runtime (Phase 1) — these flow through dispatcher.py when an
+    # AutomationRun spawns an agent.run action. Phase 1 just plumbs them
+    # through the worker (logged for traceability); Phase 2 wires the
+    # ContractGate / spend attribution / pause-for-approval semantics on top.
+    # Legacy callers (chat.py, channels, schedules, external_agent) leave
+    # these unset; ``from_dict`` silently accepts dicts without these keys.
+    automation_run_id: str | None = None  # AutomationRun UUID this invocation belongs to
+    automation_id: str | None = None      # AutomationDefinition UUID
+    contract: dict | None = None          # JSONB contract (allowed_tools, max_compute_tier, on_breach, ...)
+    trigger_kind: str | None = None       # e.g., "manual", "cron", "webhook", "app_event"
+    trigger_payload: dict | None = None   # the original event payload that fired the run
+    trigger_event_id: str | None = None   # AutomationEvent UUID
+
+    # Per-turn @-mentions from the chat input. None of these mutate the agent
+    # record — they only affect THIS run. Empty defaults mean legacy callers
+    # (channels, schedules, external_agent, automations) need no changes.
+    mention_agent_ids: list[str] = field(default_factory=list)
+    """MarketplaceAgent.id values authorized for delegation via the call_agent tool.
+    Empty list = call_agent tool is NOT registered (depth-1 cap is structural)."""
+
+    mention_mcp_config_ids: list[str] = field(default_factory=list)
+    """UserMcpConfig.id values to inject as MCP tools for this run only.
+    Loaded by mcp_manager.get_extra_configs(); deduped against assigned MCPs."""
+
+    mention_app_instance_ids: list[str] = field(default_factory=list)
+    """AppInstance.id values surfaced as a system-prompt context hint.
+    The agent already has invoke_app_action; this just tells it which instance to use."""
+
+    parent_task_id: str | None = None
+    """Set by the call_agent tool when dispatching a sub-run. Lets the
+    sub-chat row link back to the parent for the drill-in UI."""
+
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""
         return asdict(self)

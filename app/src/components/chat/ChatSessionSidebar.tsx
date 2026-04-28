@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { SquarePen, MessageSquare, Trash2, Pencil, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { SquarePen, MessageSquare, Trash2, Pencil, PanelLeftClose } from 'lucide-react';
 import type { ChatSession } from '../../hooks/useChatSessions';
 
 interface ChatSessionSidebarProps {
@@ -55,7 +55,6 @@ function formatRelativeTime(dateStr: string | null): string {
 export function ChatSessionSidebar({
   sessions,
   currentSessionId,
-  isOpen,
   onToggle,
   onSelectSession,
   onNewSession,
@@ -88,22 +87,15 @@ export function ChatSessionSidebar({
 
   const groups = groupByDate(sessions);
 
-  if (!isOpen) {
-    return (
-      <button
-        onClick={onToggle}
-        className="flex-shrink-0 flex items-center justify-center w-8 h-full border-r border-[var(--border)] bg-[var(--bg)] hover:bg-[var(--surface-hover)] transition-colors"
-        aria-label="Open session sidebar"
-      >
-        <PanelLeft size={14} className="text-[var(--text-subtle)]" />
-      </button>
-    );
-  }
-
   return (
     <div className="flex-shrink-0 w-[260px] h-full flex flex-col border-r border-[var(--border)] bg-[var(--bg)]">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 pt-3 pb-2">
+      {/* Header — height + padding mirrored on ChatTopBar so toggle/new
+          buttons sit in the same place whether the sidebar is open or
+          closed (no visual jump on toggle). */}
+      <div
+        className="flex items-center gap-1 h-10 border-b border-[var(--border)]"
+        style={{ paddingLeft: 7, paddingRight: 10 }}
+      >
         <button
           onClick={onToggle}
           className="flex items-center justify-center w-7 h-7 rounded-[var(--radius-small)] text-[var(--text-subtle)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] transition-colors"

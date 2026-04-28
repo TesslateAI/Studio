@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react';
 import { ChatMessage } from './ChatMessage';
 import AgentMessage from '../AgentMessage';
 import { ApprovalRequestCard } from './ApprovalRequestCard';
+import { BuilderReviewCard } from './BuilderReviewCard';
 import type { ChatMessage as ChatMessageType } from '../../hooks/useAgentChat';
 
 interface ChatMessageListProps {
@@ -9,7 +10,13 @@ interface ChatMessageListProps {
   isExecuting: boolean;
   onApproval?: (
     approvalId: string,
-    response: 'allow_once' | 'allow_all' | 'stop',
+    response:
+      | 'allow_once'
+      | 'allow_all'
+      | 'stop'
+      | 'publish_and_activate'
+      | 'save_draft'
+      | 'cancel',
     toolName: string
   ) => void;
   emptyState?: React.ReactNode;
@@ -83,6 +90,19 @@ export function ChatMessageList({
                 toolParameters={msg.toolParameters || {}}
                 onRespond={(approvalId, response, toolName) =>
                   onApproval?.(approvalId, response, toolName)
+                }
+              />
+            );
+          }
+
+          if (msg.type === 'builder_review_request') {
+            return (
+              <BuilderReviewCard
+                key={msg.id}
+                approvalId={msg.approvalId || ''}
+                summary={msg.builderReviewSummary || { name: 'Draft agent' }}
+                onRespond={(approvalId, response) =>
+                  onApproval?.(approvalId, response, 'request_review')
                 }
               />
             );

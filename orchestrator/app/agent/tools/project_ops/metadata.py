@@ -64,6 +64,10 @@ def register_project_tools(registry):
             parameters={"type": "object", "properties": {}, "required": []},
             executor=get_project_info_tool,
             category=ToolCategory.PROJECT,
+            # No params in, project metadata dict out — JSON-clean.
+            state_serializable=True,
+            # Single DB read; no in-tool state.
+            holds_external_state=False,
             examples=['{"tool_name": "get_project_info", "parameters": {}}'],
         )
     )

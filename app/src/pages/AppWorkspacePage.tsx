@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   ArrowClockwise,
@@ -14,21 +14,42 @@ import {
 } from '@phosphor-icons/react';
 import { useApps } from '../contexts/AppsContext';
 import {
+  appActionsApi,
+  appCompositionApi,
   appInstallsApi,
   appRuntimeApi,
   appRuntimeStatusApi,
   appVersionsApi,
+  automationsApi,
   marketplaceAppsApi,
   appBillingApi,
+  type AppActionRow,
+  type AppCompositionLink,
   type AppInstance,
   type AppRuntimeStatus,
   type AppScheduleRow,
   type AppVersionDetail,
+  type AutomationDefinitionSummary,
+  type AutomationRunSummary,
   type MarketplaceApp,
   type SessionHandle,
   type SpendSummary,
 } from '../lib/api';
 import WorkspaceSurface, { type Surface } from '../components/apps/WorkspaceSurface';
+
+/**
+ * Phase 5 — drawer tab ids. Each maps to a lazy-loaded data source so
+ * we never fetch what the user never opens.
+ */
+type DrawerTab =
+  | 'schedules'
+  | 'actions'
+  | 'automations'
+  | 'connections'
+  | 'modules'
+  | 'spend'
+  | 'runs'
+  | 'embed';
 
 function parseSurfaces(manifest: AppVersionDetail['manifest_json']): Surface[] {
   if (!manifest) return [];
@@ -315,6 +336,302 @@ function SurfacesList({ surfaces }: { surfaces: Surface[] }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Phase 5 drawer tabs — Actions, Automations, Connections, Modules, Runs
+// ---------------------------------------------------------------------------
+
+const TAB_DEFS: { key: DrawerTab; label: string }[] = [
+  { key: 'schedules', label: 'Schedules' },
+  { key: 'actions', label: 'Actions' },
+  { key: 'automations', label: 'Automations' },
+  { key: 'connections', label: 'Connections' },
+  { key: 'modules', label: 'Modules' },
+  { key: 'spend', label: 'Spend' },
+  { key: 'runs', label: 'Runs' },
+  { key: 'embed', label: 'Embed' },
+];
+
+function DrawerTabBar({
+  active,
+  onChange,
+}: {
+  active: DrawerTab;
+  onChange: (tab: DrawerTab) => void;
+}) {
+  return (
+    <div
+      className="flex items-center gap-1 px-3 py-2 border-b border-[var(--border)] overflow-x-auto"
+      data-testid="drawer-tab-bar"
+    >
+      {TAB_DEFS.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          className={`px-2 py-1 text-[11px] rounded-[var(--radius-small)] whitespace-nowrap ${
+            active === t.key
+              ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
+              : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+          }`}
+          data-testid={`drawer-tab-btn-${t.key}`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ActionsList({ actions }: { actions: AppActionRow[] | null }) {
+  if (actions === null) {
+    return <div className="text-[11px] text-[var(--text-subtle)]">Loading…</div>;
+  }
+  if (actions.length === 0) {
+    return (
+      <div className="text-[11px] text-[var(--text-subtle)]" data-testid="actions-empty">
+        No actions declared in this app's manifest.
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2" data-testid="actions-panel">
+      {actions.map((a) => (
+        <div
+          key={a.id}
+          className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+          data-testid={`action-row-${a.name}`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-[var(--text)] truncate">{a.name}</span>
+            {a.timeout_seconds ? (
+              <span className="text-[10px] text-[var(--text-subtle)]">
+                timeout {a.timeout_seconds}s
+              </span>
+            ) : null}
+          </div>
+          <div className="text-[10px] text-[var(--text-subtle)] mt-1">
+            {a.required_connectors.length > 0
+              ? `connectors: ${a.required_connectors.join(', ')}`
+              : 'no connectors'}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AutomationsList({
+  automations,
+}: {
+  automations: AutomationDefinitionSummary[] | null;
+}) {
+  if (automations === null) {
+    return <div className="text-[11px] text-[var(--text-subtle)]">Loading…</div>;
+  }
+  if (automations.length === 0) {
+    return (
+      <div
+        className="text-[11px] text-[var(--text-subtle)]"
+        data-testid="automations-empty"
+      >
+        No automations yet. Create one from the Automations page.
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2" data-testid="automations-panel">
+      {automations.map((a) => (
+        <Link
+          key={a.id}
+          to={`/automations/${a.id}`}
+          className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 hover:bg-[var(--surface-hover)] transition-colors"
+          data-testid={`automation-row-${a.id}`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-[var(--text)] truncate flex-1">
+              {a.name}
+            </span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide ${
+                a.is_active
+                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                  : 'bg-[var(--surface-hover)] text-[var(--text-subtle)]'
+              }`}
+            >
+              {a.is_active ? 'active' : 'paused'}
+            </span>
+          </div>
+          {a.paused_reason ? (
+            <div className="text-[10px] text-[var(--text-subtle)] mt-1">
+              {a.paused_reason}
+            </div>
+          ) : null}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function ConnectionsList({
+  manifest,
+}: {
+  manifest: AppVersionDetail['manifest_json'];
+}) {
+  const connectors = (() => {
+    if (!manifest) return [] as Array<{
+      id: string;
+      kind: string;
+      exposure: string;
+    }>;
+    const raw = (manifest as Record<string, unknown>).connectors;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((c) => c && typeof c === 'object')
+      .map((c) => {
+        const r = c as Record<string, unknown>;
+        return {
+          id: String(r.id ?? ''),
+          kind: String(r.kind ?? ''),
+          exposure: String(r.exposure ?? ''),
+        };
+      });
+  })();
+
+  if (connectors.length === 0) {
+    return (
+      <div
+        className="text-[11px] text-[var(--text-subtle)]"
+        data-testid="connections-empty"
+      >
+        No connectors declared in this app's manifest.
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2" data-testid="connections-panel">
+      {connectors.map((c) => (
+        <div
+          key={c.id}
+          className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+          data-testid={`connection-row-${c.id}`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-[var(--text)]">{c.id}</span>
+            <span className="text-[10px] text-[var(--text-subtle)] uppercase tracking-wide">
+              {c.kind}
+            </span>
+            <span
+              className={`ml-auto text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide ${
+                c.exposure === 'env'
+                  ? 'bg-amber-500/15 text-amber-600 border border-amber-500/30'
+                  : 'bg-emerald-500/15 text-emerald-600'
+              }`}
+              title={
+                c.exposure === 'env'
+                  ? 'env: app process can read this secret directly'
+                  : 'proxy: token never reaches the app pod'
+              }
+            >
+              {c.exposure}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ModulesList({ links }: { links: AppCompositionLink[] | null }) {
+  if (links === null) {
+    return <div className="text-[11px] text-[var(--text-subtle)]">Loading…</div>;
+  }
+  if (links.length === 0) {
+    return (
+      <div
+        className="text-[11px] text-[var(--text-subtle)]"
+        data-testid="modules-empty"
+      >
+        This app has no module dependencies.
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2" data-testid="modules-panel">
+      {links.map((l) => (
+        <div
+          key={`${l.alias}-${l.child_install_id}`}
+          className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+          data-testid={`module-row-${l.alias}`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-[var(--text)]">{l.alias}</span>
+            <span className="text-[10px] text-[var(--text-subtle)] truncate">
+              → {l.child_app_name ?? l.child_app_slug ?? l.child_app_id}
+            </span>
+            {l.required ? (
+              <span className="ml-auto text-[10px] text-[var(--accent)] uppercase tracking-wide">
+                required
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RunsList({ runs }: { runs: AutomationRunSummary[] | null }) {
+  if (runs === null) {
+    return <div className="text-[11px] text-[var(--text-subtle)]">Loading…</div>;
+  }
+  if (runs.length === 0) {
+    return (
+      <div
+        className="text-[11px] text-[var(--text-subtle)]"
+        data-testid="runs-empty"
+      >
+        No recent runs.
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1.5" data-testid="runs-panel">
+      {runs.map((r) => (
+        <Link
+          key={r.id}
+          to={`/automations/${r.automation_id}/runs/${r.id}`}
+          className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 hover:bg-[var(--surface-hover)] transition-colors"
+          data-testid={`run-row-${r.id}`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono text-[var(--text-subtle)]">
+              {r.id.slice(0, 8)}
+            </span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide ${
+                r.status === 'succeeded'
+                  ? 'bg-emerald-500/15 text-emerald-600'
+                  : r.status === 'failed' || r.status === 'expired'
+                  ? 'bg-red-500/15 text-red-600'
+                  : 'bg-[var(--surface-hover)] text-[var(--text-subtle)]'
+              }`}
+            >
+              {r.status}
+            </span>
+            <span className="ml-auto text-[10px] font-mono text-[var(--text-muted)]">
+              ${Number(r.spend_usd).toFixed(4)}
+            </span>
+          </div>
+          <div className="text-[10px] text-[var(--text-subtle)] mt-1">
+            {r.started_at
+              ? new Date(r.started_at).toLocaleString()
+              : new Date(r.created_at).toLocaleString()}
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 function EmbedShareBlock({ instanceId }: { instanceId: string }) {
   const embedUrl = `${window.location.origin}/apps/embed/${instanceId}`;
   return (
@@ -385,6 +702,16 @@ export default function AppWorkspacePage() {
 
   // Right-side settings drawer: closed by default. Persists per-session.
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Phase 5 — extended drawer tabs (UX surface #4): Actions ·
+  // Automations · Connections · Modules · Spend · Runs.
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>('schedules');
+  const [actions, setActions] = useState<AppActionRow[] | null>(null);
+  const [automations, setAutomations] = useState<AutomationDefinitionSummary[] | null>(
+    null
+  );
+  const [recentRuns, setRecentRuns] = useState<AutomationRunSummary[] | null>(null);
+  const [moduleLinks, setModuleLinks] = useState<AppCompositionLink[] | null>(null);
 
   useEffect(() => {
     if (!appInstanceId) return;
@@ -608,6 +935,63 @@ export default function AppWorkspacePage() {
   const isJobOnly = runtime?.state === 'job_only' || manifestComputeModel === 'job-only';
   const isHeadless = surfaces.length === 0 || isJobOnly;
 
+  // Phase 5 — lazy data loaders for the new drawer tabs. Each fires
+  // once when its tab becomes active for the first time; the result is
+  // cached in component state until the install changes.
+  const refreshActions = useCallback(async () => {
+    if (!instance) return;
+    try {
+      const data = await appActionsApi.list(instance.id);
+      setActions(data.actions ?? []);
+    } catch {
+      setActions([]);
+    }
+  }, [instance]);
+  const refreshAutomations = useCallback(async () => {
+    if (!instance) return;
+    try {
+      const rows = await automationsApi.list({
+        app_instance_id: instance.id,
+        limit: 100,
+      });
+      setAutomations(rows);
+    } catch {
+      setAutomations([]);
+    }
+  }, [instance]);
+  const refreshRuns = useCallback(async () => {
+    if (!instance) return;
+    try {
+      const rows = await automationsApi.listRunsByInstall(instance.id, {
+        limit: 25,
+      });
+      setRecentRuns(rows);
+    } catch {
+      setRecentRuns([]);
+    }
+  }, [instance]);
+  const refreshModuleLinks = useCallback(async () => {
+    if (!instance) return;
+    const rows = await appCompositionApi.listLinks(instance.id);
+    setModuleLinks(rows);
+  }, [instance]);
+  useEffect(() => {
+    if (drawerTab === 'actions' && actions === null) void refreshActions();
+    if (drawerTab === 'automations' && automations === null) void refreshAutomations();
+    if (drawerTab === 'modules' && moduleLinks === null) void refreshModuleLinks();
+    if (drawerTab === 'runs' && recentRuns === null) void refreshRuns();
+  }, [
+    drawerTab,
+    actions,
+    automations,
+    recentRuns,
+    moduleLinks,
+    refreshActions,
+    refreshAutomations,
+    refreshRuns,
+    refreshModuleLinks,
+  ]);
+
   const refreshSchedules = useCallback(async () => {
     if (!instance) return;
     try {
@@ -665,6 +1049,23 @@ export default function AppWorkspacePage() {
     const path = rawEntry.startsWith('/') ? rawEntry : `/${rawEntry}`;
     return `${base}${path}`;
   }, [primary?.entrypoint, runtime?.primary_url]);
+
+  // Primary container id, resolved by matching `runtime.primary_url` against
+  // the per-container URLs the orchestrator exposes. Used to drive the
+  // health-check polling that gates iframe mount in WorkspaceSurface.
+  // Falls back to the first container so single-container apps still work
+  // when primary_url has trailing-slash / casing drift versus container.url.
+  const primaryContainerId = useMemo<string | null>(() => {
+    if (!runtime || runtime.containers.length === 0) return null;
+    const norm = (u: string | null | undefined) =>
+      (u ?? '').replace(/\/+$/, '').toLowerCase();
+    const target = norm(runtime.primary_url);
+    if (target) {
+      const match = runtime.containers.find((c) => norm(c.url) === target);
+      if (match) return match.id;
+    }
+    return runtime.containers[0]?.id ?? null;
+  }, [runtime]);
 
   const beginSessionSilent = useCallback(async (): Promise<SessionHandle | null> => {
     if (!instance) return null;
@@ -787,6 +1188,9 @@ export default function AppWorkspacePage() {
         appInstanceId={instance.id}
         sessionId={session?.session_id ?? null}
         apiKey={session?.api_key ?? null}
+        appName={app.name}
+        projectSlug={runtime?.project_slug ?? null}
+        primaryContainerId={primaryContainerId}
       />
     );
   };
@@ -909,26 +1313,58 @@ export default function AppWorkspacePage() {
                 <X size={12} />
               </button>
             </div>
-            <div className="p-3 space-y-2">
-              <DrawerSection label="Schedules" count={schedules.length}>
-                <SchedulesList
-                  rows={schedules}
-                  loaded={schedulesLoaded}
-                  onToggle={toggleScheduleEnabled}
-                  onRun={runScheduleNow}
-                />
-              </DrawerSection>
-              <DrawerSection label="Spend">
-                <SpendList spendForThisApp={spendForThisApp} spend={spend} />
-              </DrawerSection>
-              {surfaces.length > 1 && (
+            <DrawerTabBar active={drawerTab} onChange={setDrawerTab} />
+            <div className="p-3 space-y-2" data-testid={`drawer-tab-${drawerTab}`}>
+              {drawerTab === 'schedules' && (
+                <DrawerSection label="Schedules" count={schedules.length}>
+                  <SchedulesList
+                    rows={schedules}
+                    loaded={schedulesLoaded}
+                    onToggle={toggleScheduleEnabled}
+                    onRun={runScheduleNow}
+                  />
+                </DrawerSection>
+              )}
+              {drawerTab === 'actions' && (
+                <DrawerSection label="Actions" count={actions?.length ?? 0}>
+                  <ActionsList actions={actions} />
+                </DrawerSection>
+              )}
+              {drawerTab === 'automations' && (
+                <DrawerSection label="Automations" count={automations?.length ?? 0}>
+                  <AutomationsList automations={automations} />
+                </DrawerSection>
+              )}
+              {drawerTab === 'connections' && (
+                <DrawerSection label="Connections">
+                  <ConnectionsList manifest={version?.manifest_json ?? null} />
+                </DrawerSection>
+              )}
+              {drawerTab === 'modules' && (
+                <DrawerSection label="Modules" count={moduleLinks?.length ?? 0}>
+                  <ModulesList links={moduleLinks} />
+                </DrawerSection>
+              )}
+              {drawerTab === 'spend' && (
+                <DrawerSection label="Spend">
+                  <SpendList spendForThisApp={spendForThisApp} spend={spend} />
+                </DrawerSection>
+              )}
+              {drawerTab === 'runs' && (
+                <DrawerSection label="Recent runs" count={recentRuns?.length ?? 0}>
+                  <RunsList runs={recentRuns} />
+                </DrawerSection>
+              )}
+              {drawerTab === 'embed' && (
+                <DrawerSection label="Embed" defaultExpanded>
+                  <EmbedShareBlock instanceId={instance.id} />
+                </DrawerSection>
+              )}
+              {surfaces.length > 1 && drawerTab === 'schedules' && (
                 <DrawerSection label="Other surfaces" defaultExpanded={false}>
                   <SurfacesList surfaces={surfaces.slice(1)} />
                 </DrawerSection>
               )}
-              <DrawerSection label="Embed" defaultExpanded={false}>
-                <EmbedShareBlock instanceId={instance.id} />
-              </DrawerSection>
             </div>
           </aside>
         )}

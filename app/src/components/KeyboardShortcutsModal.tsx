@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { MagnifyingGlass, X } from '@phosphor-icons/react';
-import { useTheme } from '../theme/ThemeContext';
 import { shortcutGroups, modKey, type ShortcutGroup } from '../lib/keyboard-registry';
 
 interface KeyboardShortcutsModalProps {
@@ -9,18 +8,31 @@ interface KeyboardShortcutsModalProps {
   onClose: () => void;
 }
 
+// Treatment-aligned shortcuts panel.
+// All colors flow through CSS custom properties set by the active theme
+// preset (themePresets.ts), so the panel adapts to every light/dark theme
+// without per-mode branching. The previous implementation hardcoded
+// white/* and black/* opacity colors and gated them on `theme === 'dark'`,
+// which broke for any non-default preset.
 export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModalProps) {
   const [search, setSearch] = useState('');
-  const { theme } = useTheme();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
-  // Filter shortcuts based on search
   const filteredGroups = useMemo<ShortcutGroup[]>(() => {
-    if (!search) return shortcutGroups;
+    // Hide paletteOnly entries — they have no keybinding and live in the
+    // command palette only.
+    const visibleGroups = shortcutGroups
+      .map((group) => ({
+        ...group,
+        shortcuts: group.shortcuts.filter((s) => !s.paletteOnly),
+      }))
+      .filter((group) => group.shortcuts.length > 0);
+
+    if (!search) return visibleGroups;
 
     const searchLower = search.toLowerCase();
-    return shortcutGroups
+    return visibleGroups
       .map((group) => ({
         ...group,
         shortcuts: group.shortcuts.filter(
@@ -33,7 +45,6 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
       .filter((group) => group.shortcuts.length > 0);
   }, [search]);
 
-  // Focus search input when modal opens
   useEffect(() => {
     if (open) {
       setTimeout(() => searchInputRef.current?.focus(), 100);
@@ -42,7 +53,6 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
     }
   }, [open]);
 
-  // Handle escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && open) {
@@ -58,7 +68,6 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
     }
   }, [open, onClose]);
 
-  // Trap focus within modal
   useEffect(() => {
     if (!open) return;
 
@@ -86,8 +95,6 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
 
   if (!open) return null;
 
-  const isDark = theme === 'dark';
-
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh]">
       {/* Backdrop */}
@@ -97,36 +104,26 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
         aria-hidden="true"
       />
 
-      {/* Modal */}
+      {/* Modal — floating panel, hairline border, no shadow */}
       <div
         ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="shortcuts-title"
-        className={`
-          relative w-full max-w-lg mx-4 rounded-xl shadow-2xl overflow-hidden
-          ${isDark ? 'bg-[#1a1a1c] border border-white/10' : 'bg-white border border-black/10'}
-        `}
+        className="relative w-full max-w-lg mx-4 rounded-[var(--radius)] overflow-hidden bg-[var(--surface)] border border-[var(--border)]"
       >
         {/* Header */}
-        <div
-          className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-white/10' : 'border-black/10'}`}
-        >
-          <h2
-            id="shortcuts-title"
-            className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-black'}`}
-          >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+          <h2 id="shortcuts-title" className="text-lg font-semibold text-[var(--text)]">
             Keyboard Shortcuts
           </h2>
           <div className="flex items-center gap-2">
-            <div
-              className={`flex items-center gap-1 px-2 py-1 rounded-lg ${isDark ? 'bg-white/10 text-white/60' : 'bg-black/5 text-black/60'}`}
-            >
+            <div className="flex items-center gap-1 px-2 py-1 rounded-[var(--radius-small)] bg-[var(--surface-hover)] text-[var(--text-muted)]">
               <span className="font-mono text-sm">{modKey}+/</span>
             </div>
             <button
               onClick={onClose}
-              className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-white/10 text-white/60' : 'hover:bg-black/5 text-black/60'}`}
+              className="p-2 rounded-[var(--radius-small)] transition-colors text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
               aria-label="Close"
             >
               <X size={18} />
@@ -134,25 +131,18 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           </div>
         </div>
 
-        {/* Search */}
-        <div className={`px-6 py-3 border-b ${isDark ? 'border-white/10' : 'border-black/10'}`}>
-          <div
-            className={`
-              flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-colors
-              ${isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'}
-            `}
-          >
-            <MagnifyingGlass size={18} className={isDark ? 'text-white/40' : 'text-black/40'} />
+        {/* Search — flat fill, no border on the wrapper or the input so
+            focusing the textbox never paints a highlight ring. */}
+        <div className="px-6 py-3 border-b border-[var(--border)]">
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-[var(--radius-small)] bg-[var(--surface-hover)]">
+            <MagnifyingGlass size={18} className="text-[var(--text-subtle)]" />
             <input
               ref={searchInputRef}
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search shortcuts..."
-              className={`
-                flex-1 bg-transparent text-sm
-                ${isDark ? 'text-white placeholder-white/40' : 'text-black placeholder-black/40'}
-              `}
+              className="flex-1 bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--text-subtle)] border-none outline-none focus:outline-none focus:ring-0 focus:border-transparent shadow-none"
               style={{ outline: 'none', boxShadow: 'none' }}
             />
             {search && (
@@ -161,10 +151,10 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
                   setSearch('');
                   searchInputRef.current?.focus();
                 }}
-                className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/10'}`}
+                className="p-1 rounded-[var(--radius-small)] hover:bg-[var(--surface)] transition-colors"
                 aria-label="Clear search"
               >
-                <X size={14} className={isDark ? 'text-white/40' : 'text-black/40'} />
+                <X size={14} className="text-[var(--text-subtle)]" />
               </button>
             )}
           </div>
@@ -173,37 +163,27 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
         {/* Shortcuts List */}
         <div className="max-h-[60vh] overflow-y-auto px-6 py-4 space-y-6">
           {filteredGroups.length === 0 ? (
-            <p className={`text-center py-8 ${isDark ? 'text-white/40' : 'text-black/40'}`}>
+            <p className="text-center py-8 text-[var(--text-subtle)]">
               No shortcuts found matching "{search}"
             </p>
           ) : (
             filteredGroups.map((group) => (
               <div key={group.title}>
-                <h3
-                  className={`text-xs font-medium uppercase tracking-wider mb-3 ${isDark ? 'text-white/50' : 'text-black/50'}`}
-                >
+                <h3 className="text-xs font-medium uppercase tracking-wider mb-3 text-[var(--text-muted)]">
                   {group.title}
                 </h3>
                 <div className="space-y-1">
                   {group.shortcuts.map((shortcut) => (
                     <div
                       key={shortcut.id}
-                      className={`
-                        flex items-center justify-between py-2.5 px-3 rounded-lg transition-colors
-                        ${isDark ? 'hover:bg-white/5' : 'hover:bg-black/5'}
-                      `}
+                      className="flex items-center justify-between py-2.5 px-3 rounded-[var(--radius-small)] transition-colors hover:bg-[var(--surface-hover)]"
                     >
-                      <span className={isDark ? 'text-white/80' : 'text-black/80'}>
-                        {shortcut.label}
-                      </span>
+                      <span className="text-[var(--text)]">{shortcut.label}</span>
                       <div className="flex items-center gap-1">
                         {shortcut.keys.map((key, i) => (
                           <kbd
                             key={i}
-                            className={`
-                              px-2 py-1 rounded text-xs font-mono min-w-[24px] text-center
-                              ${isDark ? 'bg-white/10 text-white/70' : 'bg-black/10 text-black/70'}
-                            `}
+                            className="px-2 py-1 rounded-[var(--radius-small)] text-xs font-mono min-w-[24px] text-center bg-[var(--surface-hover)] text-[var(--text-muted)]"
                           >
                             {key}
                           </kbd>
@@ -218,20 +198,14 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
         </div>
 
         {/* Footer */}
-        <div
-          className={`px-6 py-3 border-t text-xs ${isDark ? 'border-white/10 text-white/40' : 'border-black/10 text-black/40'}`}
-        >
+        <div className="px-6 py-3 border-t border-[var(--border)] text-xs text-[var(--text-subtle)]">
           <span>
             Press{' '}
-            <kbd
-              className={`px-1.5 py-0.5 rounded font-mono ${isDark ? 'bg-white/10' : 'bg-black/10'}`}
-            >
+            <kbd className="px-1.5 py-0.5 rounded-[var(--radius-small)] font-mono bg-[var(--surface-hover)] text-[var(--text-muted)]">
               {modKey}+/
             </kbd>{' '}
             or{' '}
-            <kbd
-              className={`px-1.5 py-0.5 rounded font-mono ${isDark ? 'bg-white/10' : 'bg-black/10'}`}
-            >
+            <kbd className="px-1.5 py-0.5 rounded-[var(--radius-small)] font-mono bg-[var(--surface-hover)] text-[var(--text-muted)]">
               ?
             </kbd>{' '}
             anywhere to open this panel

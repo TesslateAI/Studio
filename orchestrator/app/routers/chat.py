@@ -106,7 +106,16 @@ async def _get_arq_pool():
 async def get_chats(
     current_user: User = Depends(get_authenticated_user), db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Chat).where(Chat.user_id == current_user.id))
+    # Delegated runs (Chat.is_delegated_run=True) are hidden from the user's
+    # chat list — they are reachable only via the drill-in UI from the
+    # parent's call_agent step. The chat-detail endpoint does NOT filter,
+    # so navigating by id still works.
+    result = await db.execute(
+        select(Chat).where(
+            Chat.user_id == current_user.id,
+            Chat.is_delegated_run.is_(False),
+        )
+    )
     chats = result.scalars().all()
     return chats
 
@@ -216,6 +225,7 @@ async def get_user_sessions(
         Chat.user_id == current_user.id,
         Chat.origin == "standalone",
         Chat.status != "deleted",
+        Chat.is_delegated_run.is_(False),
     ]
     # Team-scope: show chats belonging to the active team OR legacy chats with no team
     if current_user.default_team_id:
@@ -361,7 +371,11 @@ async def list_chat_sessions(
             sa_func.count(Message.id).label("message_count"),
         )
         .outerjoin(Message, Message.chat_id == Chat.id)
-        .where(Chat.user_id == current_user.id, Chat.project_id == project_id)
+        .where(
+            Chat.user_id == current_user.id,
+            Chat.project_id == project_id,
+            Chat.is_delegated_run.is_(False),
+        )
         .group_by(Chat.id)
         .order_by(Chat.updated_at.desc().nullslast(), Chat.created_at.desc())
     )
@@ -976,15 +990,19 @@ async def agent_chat(
                 detail="User does not have a LiteLLM API key. Please contact support.",
             )
 
-        # 2.5. Get user's selected model override (if any)
+        # 2.5. Get user's selected model override (if any). Use ``.first()``
+        # so users with multiple team-scoped rows for the same agent don't
+        # crash the run.
         try:
             user_purchase_result = await db.execute(
-                select(UserPurchasedAgent).where(
+                select(UserPurchasedAgent)
+                .where(
                     UserPurchasedAgent.user_id == current_user.id,
                     UserPurchasedAgent.agent_id == agent_model.id,
                 )
+                .limit(1)
             )
-            user_purchase = user_purchase_result.scalar_one_or_none()
+            user_purchase = user_purchase_result.scalars().first()
         except Exception as e:
             logger.error(f"[HTTP-AGENT] Error fetching user purchase: {e}", exc_info=True)
             await db.rollback()
@@ -1722,6 +1740,21 @@ async def agent_chat_stream(
             from ..services.agent_context import build_tier_snapshot
 
             _tier_snapshot = await build_tier_snapshot(project, db)
+            # Pre-split @-mentions for both the queue (payload) and in-process
+            # (context) paths. The worker rebuilds context from the payload,
+            # so the queue path picks these up via payload.mention_*. The
+            # in-process path consumes the context dict directly below.
+            _ctx_mentions = list(request.mentions or [])
+            _ctx_mention_agent_ids = [
+                m.ref_id for m in _ctx_mentions if m.kind == "agent" and m.ref_id
+            ]
+            _ctx_mention_mcp_config_ids = [
+                m.ref_id for m in _ctx_mentions if m.kind == "mcp" and m.ref_id
+            ]
+            _ctx_mention_app_instance_ids = [
+                m.ref_id for m in _ctx_mentions if m.kind == "app" and m.ref_id
+            ]
+
             context = {
                 "user_id": current_user.id,
                 "project_id": request.project_id,
@@ -1746,6 +1779,9 @@ async def agent_chat_stream(
                 "attachments": [a.model_dump() for a in request.attachments]
                 if request.attachments
                 else [],
+                "mention_agent_ids": _ctx_mention_agent_ids,
+                "mention_mcp_config_ids": _ctx_mention_mcp_config_ids,
+                "mention_app_instance_ids": _ctx_mention_app_instance_ids,
             }
 
             # ================================================================
@@ -1792,6 +1828,28 @@ async def agent_chat_stream(
                     yield f"data: {json.dumps(error_event)}\n\n"
                     return
 
+                # Split @-mentions by kind. Validation happens later in the
+                # worker — here we just slice the structured array. Empty/None
+                # request.mentions means legacy behavior (no @-effects).
+                _mentions = list(request.mentions or [])
+                _mention_agent_ids = [
+                    m.ref_id for m in _mentions if m.kind == "agent" and m.ref_id
+                ]
+                _mention_mcp_config_ids = [
+                    m.ref_id for m in _mentions if m.kind == "mcp" and m.ref_id
+                ]
+                _mention_app_instance_ids = [
+                    m.ref_id for m in _mentions if m.kind == "app" and m.ref_id
+                ]
+
+                if _mentions:
+                    logger.info(
+                        "[SSE-AGENT] @-mentions: agents=%d mcps=%d apps=%d",
+                        len(_mention_agent_ids),
+                        len(_mention_mcp_config_ids),
+                        len(_mention_app_instance_ids),
+                    )
+
                 payload = AgentTaskPayload(
                     task_id=agent_task_id,
                     user_id=str(current_user.id),
@@ -1809,6 +1867,9 @@ async def agent_chat_stream(
                     attachments=[a.model_dump() for a in request.attachments]
                     if request.attachments
                     else [],
+                    mention_agent_ids=_mention_agent_ids,
+                    mention_mcp_config_ids=_mention_mcp_config_ids,
+                    mention_app_instance_ids=_mention_app_instance_ids,
                 )
 
                 # Enqueue the job
@@ -2893,13 +2954,18 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     try:
         logger.info("[UNIFIED-CHAT] Creating agent instance via factory")
 
-        # Get user's selected model override (if any)
+        # Get user's selected model override (if any). Use ``.first()`` so a
+        # user with multiple team-scoped purchase rows for the same agent
+        # doesn't crash the chat run — any row carries the same
+        # ``selected_model``.
         user_purchase_result = await db.execute(
-            select(UserPurchasedAgent).where(
+            select(UserPurchasedAgent)
+            .where(
                 UserPurchasedAgent.user_id == user.id, UserPurchasedAgent.agent_id == agent_model.id
             )
+            .limit(1)
         )
-        user_purchase = user_purchase_result.scalar_one_or_none()
+        user_purchase = user_purchase_result.scalars().first()
 
         # Use user's selected model if available, otherwise use agent's default model
         model_name = (
@@ -3145,21 +3211,19 @@ async def save_file(
     print(f"💾 Saving file: {file_path}")
 
     try:
-        # 1. Save to database (for backup/version history)
+        # 1. Save to database (for backup/version history).
+        #
+        # Agent runs are inherently concurrent — the old check-then-insert
+        # pattern raced under load and produced duplicate rows that later
+        # broke `scalar_one_or_none()`. Always go through
+        # upsert_project_file(), which is race-safe via
+        # uq_project_files_project_path + ON CONFLICT DO UPDATE.
         try:
-            result = await db.execute(
-                select(ProjectFile).where(
-                    ProjectFile.project_id == project_id, ProjectFile.file_path == file_path
-                )
+            from ..services.project_files import upsert_project_file
+
+            await upsert_project_file(
+                db, project_id=project_id, file_path=file_path, content=code
             )
-            db_file = result.scalar_one_or_none()
-
-            if db_file:
-                db_file.content = code
-            else:
-                db_file = ProjectFile(project_id=project_id, file_path=file_path, content=code)
-                db.add(db_file)
-
             await db.commit()
             print(f"[DB] Saved {file_path} to database")
         except Exception as e:

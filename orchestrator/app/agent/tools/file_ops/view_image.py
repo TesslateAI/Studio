@@ -271,6 +271,11 @@ def register_view_image_tool(registry) -> None:
             },
             executor=view_image_tool,
             category=ToolCategory.FILE_OPS,
+            # Path in, base64-encoded image payload out — JSON-serializable
+            # (large but bounded at 20 MiB).
+            state_serializable=True,
+            # No persistent image session; one-shot read.
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "view_image", "parameters": {"path": "design/mockup.png"}}',
                 '{"tool_name": "view_image", "parameters": {"path": "assets/logo.jpg", "detail": "high"}}',

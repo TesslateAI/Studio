@@ -18,6 +18,14 @@ from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
+# Phase 5 — automation workspace project ("~automations~") is created
+# LAZILY by ``services.automations.lazy_workspace.ensure_user_automation_workspace``
+# the first time a ``user_automation_workspace`` automation actually
+# fires. Do NOT eagerly create one in this router (signup, profile
+# update, /me, etc.) — most users never trigger an automation that
+# needs one, and a pre-creation pass would litter the projects table.
+# See ``orchestrator/app/services/automations/lazy_workspace.py``.
+
 router = APIRouter()
 
 

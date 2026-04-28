@@ -129,7 +129,7 @@ async def main() -> int:
             visibility="team",
             volume_id=volume_id,
             cache_node=node_name,
-            app_role="app_source",
+            project_kind="app_source",
         )
         db.add(proj)
         await db.flush()

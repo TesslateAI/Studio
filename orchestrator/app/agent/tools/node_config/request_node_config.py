@@ -213,7 +213,10 @@ async def request_node_config_executor(
     params: dict[str, Any], context: dict[str, Any]
 ) -> dict[str, Any]:
     """Executor — see module docstring for flow."""
-    from ....routers.node_config import apply_node_config
+    from ....routers.node_config import (
+        apply_node_config,
+        dispatch_restart_after_config_change,
+    )
     from ...tools.approval_manager import get_pending_input_manager
     from ...tools.output_formatter import error_output, success_output
 
@@ -223,6 +226,7 @@ async def request_node_config_executor(
     mode: str = params.get("mode") or "create"
     container_id = params.get("container_id")
     position = params.get("position")
+    wait_for_input: bool = params.get("wait_for_input", True)
 
     if mode not in ("create", "edit"):
         return error_output(message=f"Invalid mode '{mode}' (must be create|edit)")
@@ -282,6 +286,33 @@ async def request_node_config_executor(
                     "preset": preset_key,
                 },
             },
+        )
+
+    # Fire-and-forget branch: agent does not pause. Card lands in the user's
+    # Config tab; the user fills it via the direct-edit flow whenever.
+    if not wait_for_input:
+        configured_keys = sorted([f.key for f in schema.fields])
+        secret_keys = sorted([f.key for f in schema.fields if f.is_secret])
+        non_secret_values = _build_initial_values_from_schema(container, schema)
+        # Strip the __SET__ sentinel — agent only sees actual values it can use.
+        non_secret_values = {
+            k: v for k, v in non_secret_values.items() if v != "__SET__"
+        }
+        return success_output(
+            message=(
+                f"Created node '{container.name}' — user will fill credentials in the Config tab. "
+                f"Keys available for code references: {', '.join(configured_keys)}."
+            ),
+            container_id=str(container.id),
+            node_name=container.name,
+            configured_keys=configured_keys,
+            secret_keys=secret_keys,
+            non_secret_values=non_secret_values,
+            updated_keys=[],
+            rotated_secrets=[],
+            cleared_secrets=[],
+            created=created,
+            deferred=True,
         )
 
     # 2. Pending input.
@@ -365,6 +396,16 @@ async def request_node_config_executor(
     )
     await db.commit()
 
+    # 4b. Schedule restarts for any consumer of the changed env vars.
+    restart_payload = await dispatch_restart_after_config_change(
+        db,
+        container,
+        summary,
+        project_id=project_id,
+        user_id=user_id,
+        pubsub_target=task_id,
+    )
+
     # 5. Emit resumed + rotation events.
     await _publish(
         task_id,
@@ -415,6 +456,8 @@ async def request_node_config_executor(
         rotated_secrets=summary["rotated_secrets"],
         cleared_secrets=summary["cleared_secrets"],
         created=created,
+        restart_target_ids=restart_payload["restart_target_ids"],
+        restart_target_names=restart_payload["container_names"],
     )
 
 
@@ -423,12 +466,18 @@ def register_node_config_tool(registry) -> None:
         Tool(
             name="request_node_config",
             description=(
-                "Create (or edit) a Container node on the Architecture canvas and "
-                "pause until the user fills in its configuration via the dock tab. "
-                "Use for external services (Supabase, Postgres, Stripe, REST APIs) "
-                "or any custom node that needs user-provided values. The tool returns "
-                "only key names and non-secret values — secret values are stored "
-                "encrypted and never exposed to the agent."
+                "Create (or edit) a Container node on the Architecture canvas. The new "
+                "node appears as a card in the user's persistent Config tab. The user "
+                "can edit the card's keys at any time from the Config tab — "
+                "independent of you. Use for external services (Supabase, Postgres, "
+                "Stripe, REST APIs) or any custom node that needs user-provided values. "
+                "Set wait_for_input=True (default) to pause until the user submits the "
+                "card — use this only when you need the values to act next (e.g., "
+                "testing a REST API). Set wait_for_input=False to fire-and-forget — "
+                "the card is created and you continue immediately, useful when you're "
+                "just scaffolding code that references env keys. Returns only key "
+                "names and non-secret values; secrets stay encrypted and are never "
+                "exposed."
             ),
             category=ToolCategory.PROJECT,
             parameters={
@@ -469,13 +518,30 @@ def register_node_config_tool(registry) -> None:
                         "type": "object",
                         "description": "Optional {x, y} placement on the canvas.",
                     },
+                    "wait_for_input": {
+                        "type": "boolean",
+                        "description": (
+                            "True: pause until the user submits the card. Use when you "
+                            "need the values to do something next (e.g. test a REST API). "
+                            "False: fire-and-forget — return immediately with key names; "
+                            "user fills the card whenever via the Config tab. Use when "
+                            "you're just scaffolding code that references env keys."
+                        ),
+                        "default": True,
+                    },
                 },
                 "required": ["node_name"],
             },
             executor=request_node_config_executor,
+            # Node spec in, non-secret config map dict out — JSON-clean.
+            state_serializable=True,
+            # Pauses on a DB-backed pending-input row; the wait state lives
+            # in the approval/HITL surface, not in this tool. Phase 2 HITL
+            # may treat this specially but the tool itself is checkpointable.
+            holds_external_state=False,
             examples=[
-                '{"tool_name": "request_node_config", "parameters": {"node_name": "supabase", "preset": "supabase"}}',
-                '{"tool_name": "request_node_config", "parameters": {"node_name": "payments", "preset": "rest_api", "field_overrides": [{"key": "PAYMENTS_API_KEY", "label": "Payments API Key", "type": "secret", "is_secret": true, "required": true}]}}',
+                '{"tool_name": "request_node_config", "parameters": {"node_name": "supabase", "preset": "supabase", "wait_for_input": false}}',
+                '{"tool_name": "request_node_config", "parameters": {"node_name": "payments", "preset": "rest_api", "wait_for_input": true, "field_overrides": [{"key": "PAYMENTS_API_KEY", "label": "Payments API Key", "type": "secret", "is_secret": true, "required": true}]}}',
             ],
         )
     )

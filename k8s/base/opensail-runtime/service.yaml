@@ -1,0 +1,24 @@
+# OpenSail Connector Proxy Service
+#
+# In-cluster DNS the SDK reaches via OPENSAIL_RUNTIME_URL=http://opensail-runtime:8400.
+# ClusterIP — never exposed externally; ingress is restricted to
+# compute-pool + proj-* namespaces by the sibling NetworkPolicy.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensail-runtime
+  namespace: tesslate
+  labels:
+    app: opensail-runtime
+    component: connector-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: opensail-runtime
+    component: connector-proxy
+  ports:
+    - name: http
+      port: 8400
+      targetPort: 8400
+      protocol: TCP

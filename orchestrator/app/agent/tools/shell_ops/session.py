@@ -133,6 +133,13 @@ def register_session_tools(registry):
                 "required": [],
             },
             executor=shell_open_executor,
+            # Optional command in, session_id string out — JSON-clean.
+            state_serializable=True,
+            # Spawns and retains a PTY-backed shell process whose file
+            # descriptor and child PID live outside the agent run; the
+            # session_id is the user-facing handle but the underlying state
+            # cannot be serialized into a checkpoint.
+            holds_external_state=True,
             examples=[
                 '{"tool_name": "shell_open", "parameters": {}}',
                 '{"tool_name": "shell_open", "parameters": {"command": "/bin/sh"}}',
@@ -157,6 +164,11 @@ def register_session_tools(registry):
                 "required": ["session_id"],
             },
             executor=shell_close_executor,
+            # session_id in, success dict out — JSON-clean.
+            state_serializable=True,
+            # Tears down the PTY/shell handle owned by shell_open; while this
+            # call itself is one-shot, it operates on external session state.
+            holds_external_state=True,
             examples=['{"tool_name": "shell_close", "parameters": {"session_id": "abc123"}}'],
         )
     )

@@ -400,6 +400,10 @@ GRID_TOOLS: list[Tool] = [
             "required": ["name"],
         },
         executor=graph_add_container_executor,
+        # Container spec in, new container_id dict out — JSON-clean.
+        state_serializable=True,
+        # Single DB write; no in-tool persistent handle.
+        holds_external_state=False,
         examples=[
             '{"tool_name": "graph_add_container", "parameters": {"name": "frontend", "container_type": "base", "port": 3000}}',
             '{"tool_name": "graph_add_container", "parameters": {"name": "postgres", "container_type": "service", "service_slug": "postgres"}}',
@@ -422,6 +426,10 @@ GRID_TOOLS: list[Tool] = [
             "required": [],
         },
         executor=graph_add_browser_preview_executor,
+        # Optional container_id + position in, preview_id dict out — JSON-clean.
+        state_serializable=True,
+        # Single DB write; no in-tool state.
+        holds_external_state=False,
         examples=[
             '{"tool_name": "graph_add_browser_preview", "parameters": {"container_id": "abc-123", "position_x": 400}}'
         ],
@@ -455,6 +463,10 @@ GRID_TOOLS: list[Tool] = [
             "required": ["source_container_id", "target_container_id"],
         },
         executor=graph_add_connection_executor,
+        # Source/target/type in, connection_id dict out — JSON-clean.
+        state_serializable=True,
+        # Single DB write; no in-tool state.
+        holds_external_state=False,
         examples=[
             '{"tool_name": "graph_add_connection", "parameters": {"source_container_id": "abc", "target_container_id": "def", "connector_type": "database"}}'
         ],
@@ -476,6 +488,10 @@ GRID_TOOLS: list[Tool] = [
             "required": ["item_type", "item_id"],
         },
         executor=graph_remove_item_executor,
+        # item_type + item_id in, success dict out — JSON-clean.
+        state_serializable=True,
+        # Single DB delete; no in-tool state.
+        holds_external_state=False,
         examples=[
             '{"tool_name": "graph_remove_item", "parameters": {"item_type": "container", "item_id": "abc-123"}}'
         ],

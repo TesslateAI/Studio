@@ -61,7 +61,7 @@ export function FeaturedCard({ item, onInstall, isAuthenticated = true }: Featur
           {/* Title + Creator */}
           <div className="mb-1.5">
             <div className="flex items-start justify-between gap-2">
-              <h3 className="text-sm sm:text-base font-bold leading-tight line-clamp-2 min-w-0 group-hover:text-[var(--primary)] transition-colors text-[var(--text)]">
+              <h3 className="text-sm sm:text-base font-bold leading-tight line-clamp-2 min-w-0 transition-colors text-[var(--text)]">
                 {item.name}
               </h3>
               {/* Featured badge — inline on mobile */}

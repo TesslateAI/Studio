@@ -16,10 +16,29 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DESKTOP_DIR="$(cd "$HERE/.." && pwd)"
+REPO_ROOT="$(cd "$DESKTOP_DIR/.." && pwd)"
 SIDECAR_DIR="$DESKTOP_DIR/sidecar"
+VENV_DIR="$REPO_ROOT/.venv"
+PY_VERSION="${OPENSAIL_PY_VERSION:-3.12}"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv not on PATH — install with: brew install uv  (or curl -LsSf https://astral.sh/uv/install.sh | sh)" >&2
+  exit 1
+fi
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  echo "[build-all] creating .venv via uv (python $PY_VERSION)" >&2
+  uv venv --python "$PY_VERSION" "$VENV_DIR"
+fi
+if ! VIRTUAL_ENV="$VENV_DIR" "$VENV_DIR/bin/python" -c \
+    "import PyInstaller, app, tesslate_agent" >/dev/null 2>&1; then
+  echo "[build-all] installing sidecar deps via uv pip" >&2
+  VIRTUAL_ENV="$VENV_DIR" uv pip install pyinstaller \
+    -e "$REPO_ROOT/packages/tesslate-agent" \
+    -e "$REPO_ROOT/orchestrator"
+fi
 
 echo "[build-all] building sidecar" >&2
-python3 "$SIDECAR_DIR/build_sidecar.py"
+"$VENV_DIR/bin/python" "$SIDECAR_DIR/build_sidecar.py"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "cargo not on PATH — source \$HOME/.cargo/env or install rustup" >&2

@@ -39,6 +39,16 @@ from .models_kanban import (  # noqa: F401
     ProjectNote,
 )
 
+# Project kinds — replaces the legacy `app_role` field. Values constrained
+# by DB-level CHECK in alembic 0074
+# (`ck_projects_project_kind`: project_kind IN ('workspace','app_source','app_runtime')).
+PROJECT_KIND_WORKSPACE = "workspace"
+PROJECT_KIND_APP_SOURCE = "app_source"
+PROJECT_KIND_APP_RUNTIME = "app_runtime"
+PROJECT_KINDS = frozenset(
+    {PROJECT_KIND_WORKSPACE, PROJECT_KIND_APP_SOURCE, PROJECT_KIND_APP_RUNTIME}
+)
+
 
 class Project(Base):
     __tablename__ = "projects"
@@ -96,10 +106,18 @@ class Project(Base):
     active_compute_pod = Column(String(255), nullable=True)
 
     # Tesslate Apps primitive: role of this Project in the app lifecycle.
-    # none: ordinary user project (default, existing behavior)
-    # app_source: the authoring project a creator publishes AppVersions from
-    # app_instance: a runtime mount of an installed AppVersion (one per install)
-    app_role = Column(String(20), default="none", server_default="none", nullable=False, index=True)
+    # workspace:    ordinary user project (default, existing behavior)
+    # app_source:   the authoring project a creator publishes AppVersions from
+    # app_runtime:  a runtime mount of an installed AppVersion (one per install)
+    # Values constrained by DB-level CHECK in alembic 0074. Use the
+    # PROJECT_KIND_* constants below rather than string literals.
+    project_kind = Column(
+        String(20),
+        default=PROJECT_KIND_WORKSPACE,
+        server_default=PROJECT_KIND_WORKSPACE,
+        nullable=False,
+        index=True,
+    )
 
     # Per-project runtime selector: "local" | "docker" | "k8s".
     # NULL falls back to the deployment-wide default (see OrchestratorFactory).
@@ -111,6 +129,24 @@ class Project(Base):
 
     # Long-form mission statement propagated into agent goal ancestry.
     mission = Column(Text, nullable=True)
+
+    # Phase 5 — UX convenience: Automation Builder seeds new automation
+    # contracts from this template. Per-project, admin-settable. Empty
+    # dict by default. Not a legacy backfill mechanism.
+    default_contract_template = Column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    # Phase 5 — strong project ↔ MarketplaceApp link. Set when the user
+    # publishes this project as an app via the Publish Drawer. Lets us
+    # answer "which app does this project publish to?" in a single
+    # column lookup (vs traversing AppVersion.bundle_hash).
+    published_app_id = Column(
+        GUID(),
+        ForeignKey("marketplace_apps.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -522,6 +558,16 @@ class DeploymentTargetConnection(Base):
 
 class ProjectFile(Base):
     __tablename__ = "project_files"
+    # Race-safety: every writer must go through services.project_files
+    # .upsert_project_file(), which relies on this unique constraint plus
+    # dialect-native ON CONFLICT DO UPDATE. Never `db.add(ProjectFile(...))`
+    # directly for an existing (project_id, file_path) — concurrent writes
+    # would collide. Migration 0072 backfills + adds this constraint.
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "file_path", name="uq_project_files_project_path"
+        ),
+    )
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     project_id = Column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
@@ -598,6 +644,22 @@ class Chat(Base):
     )
     last_active_at = Column(DateTime(timezone=True), nullable=True)
     idle_timeout_minutes = Column(Integer, nullable=True)
+
+    # Multi-agent delegation (@-mention call_agent path). When the calling
+    # agent invokes ``@coworker`` via the ``call_agent`` tool, the dispatched
+    # run gets its own disposable Chat row tagged with the parent's
+    # task_id and ``is_delegated_run=True``. This is distinct from the
+    # in-process ``task`` / subagent tools in the tesslate-agent submodule
+    # (those run inside the same process, never touch the DB, and never
+    # set this flag).
+    #
+    # All chat-list queries filter ``is_delegated_run=False`` so delegated
+    # runs do not pollute the user's sidebar. The chat-detail loader does
+    # NOT filter, so the drill-in UI (expand the ``call_agent`` tool call
+    # in the parent's transcript → "View full trajectory") can navigate
+    # by id.
+    parent_task_id = Column(String(64), nullable=True, index=True)
+    is_delegated_run = Column(Boolean, nullable=False, server_default="0", default=False)
 
     __table_args__ = (Index("ix_chats_user_project", "user_id", "project_id"),)
 
@@ -1143,6 +1205,16 @@ class MarketplaceAgent(Base):
     is_featured = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     is_published = Column(Boolean, default=True)  # For user-created forked agents
+
+    # Phase 5 — agent-builder provenance. When the agent-builder skill
+    # creates a new agent, this points back to the source automation.
+    # Lets the dispatcher walk parent/child chains for cycle detection
+    # and budget rollup. NULL for agents created via the UI directly.
+    # FK constraint added in Postgres only (SQLite cannot ALTER existing
+    # tables to add cross-table FKs without batch_alter; the migration
+    # writes the column on both backends and conditionally adds the FK).
+    created_by_automation_id = Column(GUID(), nullable=True, index=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -1889,106 +1961,12 @@ class AppVersion(Base):
     yanked_second_admin = relationship("User", foreign_keys=[yanked_second_admin_id])
 
 
-class AppInstance(Base):
-    """Per-install leaf. One installed App per Project (partial UNIQUE)."""
-
-    __tablename__ = "app_instances"
-
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    app_id = Column(
-        GUID(),
-        ForeignKey("marketplace_apps.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    app_version_id = Column(
-        GUID(),
-        ForeignKey("app_versions.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    installer_user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    project_id = Column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
-    state = Column(
-        String(24), nullable=False, default="installing", server_default="installing"
-    )  # installing | installed | upgrading | uninstalled | error
-    consent_record = Column(JSON, nullable=False, default=dict, server_default="{}")
-    wallet_mix = Column(JSON, nullable=False, default=dict, server_default="{}")
-    update_policy = Column(
-        String(16), nullable=False, default="manual", server_default="manual"
-    )  # manual | patch-auto | minor-auto | pinned
-    volume_id = Column(Text, nullable=True)
-    feature_set_hash = Column(Text, nullable=True)
-    # Materialized pointer to the manifest's primary container, so the
-    # runtime-status endpoint can resolve ``primary_url`` without scanning
-    # ``containers``. Set by the installer from manifest compute.containers.
-    primary_container_id = Column(
-        GUID(),
-        ForeignKey("containers.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    installed_at = Column(DateTime(timezone=True), nullable=True)
-    uninstalled_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-
-    app = relationship("MarketplaceApp", back_populates="instances")
-    app_version = relationship("AppVersion", back_populates="instances")
-    installer = relationship("User", foreign_keys=[installer_user_id])
-    project = relationship("Project", foreign_keys=[project_id])
-    consents = relationship(
-        "McpConsentRecord", back_populates="app_instance", cascade="all, delete-orphan"
-    )
-
-
-class AppInstallAttempt(Base):
-    """Append-only ledger for the Apps installer saga.
-
-    The installer mints a row here in an independent session **immediately
-    after** the Hub-side volume is materialized, so every Hub volume has a
-    persistent marker that predates any downstream DB writes. If the rest of
-    the install succeeds the row is flipped to ``state='committed'`` and
-    linked to the resulting ``AppInstance``. If the install crashes (worker
-    SIGKILL, flush fails, commit fails), the row stays at ``state='hub_created'``
-    with no linked instance, and the orphan reaper picks it up, calls
-    ``hub_client.delete_volume``, and marks it ``reaped``.
-    """
-
-    __tablename__ = "app_install_attempts"
-
-    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    marketplace_app_id = Column(
-        GUID(),
-        ForeignKey("marketplace_apps.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    app_version_id = Column(
-        GUID(),
-        ForeignKey("app_versions.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    installer_user_id = Column(
-        GUID(),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    # hub_created | committed | reaped | reap_failed
-    state = Column(String(32), nullable=False, default="hub_created", server_default="hub_created")
-    volume_id = Column(String, nullable=True)
-    node_name = Column(String, nullable=True)
-    bundle_hash = Column(String, nullable=True)
-    app_instance_id = Column(
-        GUID(),
-        ForeignKey("app_instances.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    committed_at = Column(DateTime(timezone=True), nullable=True)
-    reaped_at = Column(DateTime(timezone=True), nullable=True)
-    last_error = Column(Text, nullable=True)
+# NOTE: AppInstance and AppInstallAttempt were previously defined here, but
+# under the Phase 1 hard reset they are recreated in ``models_automations``
+# (with the new ``runtime_deployment_id`` column reserved for Phase 3). The
+# canonical definitions now live there. We re-export them at the bottom of
+# this module so existing ``from .models import AppInstance`` imports keep
+# working without two ORM classes pointing at the same ``__tablename__``.
 
 
 class McpConsentRecord(Base):
@@ -2090,12 +2068,26 @@ class SpendRecord(Base):
     )
     settled = Column(Boolean, nullable=False, default=False, server_default="false")
     settled_at = Column(DateTime(timezone=True), nullable=True)
+    # Automation Runtime attribution columns (Phase 0).
+    # ``automation_run_id`` and ``invocation_subject_id`` are intentionally
+    # FK-less today: their target tables (``automation_runs`` /
+    # ``invocation_subjects``) land in Phase 1 / Phase 2 alembics, which will
+    # add the FK constraints at that time. The columns ship now so spend
+    # written between phases is never orphaned of attribution.
+    automation_run_id = Column(GUID(), nullable=True)
+    invocation_subject_id = Column(GUID(), nullable=True)
+    agent_id = Column(
+        GUID(),
+        ForeignKey("marketplace_agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     meta = Column(JSON, nullable=False, default=dict, server_default="{}")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     installer = relationship("User", foreign_keys=[installer_user_id])
     payer_user = relationship("User", foreign_keys=[payer_user_id])
     usage_log = relationship("UsageLog", foreign_keys=[usage_log_id])
+    agent = relationship("MarketplaceAgent", foreign_keys=[agent_id])
 
 
 # ============================================================================
@@ -2658,6 +2650,15 @@ class ChannelConfig(Base):
     name = Column(String(100), nullable=False)
     credentials = Column(Text, nullable=False)  # Fernet-encrypted JSON
     webhook_secret = Column(String(64), nullable=False)  # random secret for URL signing
+    # Phase 4 — team-scoped destinations. NULL = personal. Set = the
+    # whole team can resolve a CommunicationDestination that points at
+    # this ChannelConfig (e.g., shared Slack workspace credential).
+    team_id = Column(
+        GUID(),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     default_agent_id = Column(
         GUID(), ForeignKey("marketplace_agents.id", ondelete="SET NULL"), nullable=True
     )
@@ -2975,6 +2976,41 @@ class ScheduleTriggerEvent(Base):
     schedule = relationship("AgentSchedule", back_populates="trigger_events")
 
 
+class ContractTemplate(Base):
+    """Reusable starter contract for the AutomationCreatePage builder.
+
+    Phase 5 polish — the ``ContractEditor`` form lets users browse a
+    catalog of curated contracts (allowed_tools / spend caps / max
+    iterations). Templates are user-creatable; ``is_published=True``
+    means the row shows up in
+    ``GET /api/contract-templates`` for the marketplace browse list.
+
+    The ``contract_json`` column stores the full contract object the
+    dispatcher's ContractGate consumes — applying a template just copies
+    this dict into the new automation's ``contract`` field.
+    """
+
+    __tablename__ = "contract_templates"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    name = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    # Free-form taxonomy — common values are 'research', 'coding', 'ops',
+    # 'general'. Frontend filters by category but doesn't enforce a
+    # closed set so seeds can ship new categories without an API change.
+    category = Column(String(48), nullable=False, server_default="general")
+    contract_json = Column(JSON, nullable=False)
+    created_by_user_id = Column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    is_published = Column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 # Import team models so they're included in Base.metadata (same pattern as models_kanban)
 from .models_team import (  # noqa: F401, E402
     AuditLog,
@@ -2982,4 +3018,13 @@ from .models_team import (  # noqa: F401, E402
     Team,
     TeamInvitation,
     TeamMembership,
+)
+
+# Re-export AppInstance + AppInstallAttempt from the Phase 1 module. The
+# canonical ORM definitions live there (with the Phase 3 runtime_deployment_id
+# FK); existing ``from .models import AppInstance`` imports keep working
+# without two classes pointing at the same ``__tablename__``.
+from .models_automations import (  # noqa: F401, E402
+    AppInstallAttempt,
+    AppInstance,
 )

@@ -141,6 +141,10 @@ def register_web_search_tool(registry) -> None:
             },
             executor=web_search_tool,
             category=ToolCategory.WEB,
+            # Query + flags in, list of result dicts out — JSON-clean.
+            state_serializable=True,
+            # Stateless provider call (Tavily/Brave/DuckDuckGo).
+            holds_external_state=False,
             examples=[
                 '{"tool_name": "web_search", "parameters": {"query": "React 19 new features"}}',
                 '{"tool_name": "web_search", "parameters": {"query": "FastAPI websocket tutorial", "max_results": 3, "detailed": true}}',

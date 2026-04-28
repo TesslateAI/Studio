@@ -228,10 +228,10 @@ export function ModelSelector({
     if (!hasFetched) return [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list = models.filter((m: any) => !m.disabled);
-    if (activeModel && !list.some((m) => m.id === activeModel)) {
-      list.unshift({ id: activeModel, pricing: null, provider: 'internal' });
-    }
-    return list;
+    if (!activeModel) return list;
+    const active = list.find((m) => m.id === activeModel) ?? { id: activeModel, pricing: null, provider: 'internal' };
+    const rest = list.filter((m) => m.id !== activeModel);
+    return [active, ...rest];
   }, [hasFetched, models, activeModel]);
 
   // Get unique providers for tabs
@@ -283,8 +283,15 @@ export function ModelSelector({
     // Sort groups by provider order
     return Array.from(groups.entries())
       .sort(([a], [b]) => providerOrder(a) - providerOrder(b))
-      .map(([id, g]) => ({ id, ...g }));
-  }, [filteredModels, activeTab]);
+      .map(([id, g]) => {
+        const sorted = activeModel
+          ? [...g.models].sort((a, b) =>
+              a.id === activeModel ? -1 : b.id === activeModel ? 1 : 0
+            )
+          : g.models;
+        return { id, ...g, models: sorted };
+      });
+  }, [filteredModels, activeTab, activeModel]);
 
   // Find the active model's info for button label
   const activeModelInfo = useMemo(() => {
