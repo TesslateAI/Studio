@@ -2583,7 +2583,10 @@ class Theme(Base):
 
     __tablename__ = "themes"
 
-    id = Column(String(100), primary_key=True, index=True)  # e.g., "midnight-dark"
+    # GUID PK (Wave 1.5). Pre-Wave-1.5 the id was the slug string itself
+    # (e.g. ``"midnight-dark"``); the slug column below is now the stable
+    # human-readable identifier.
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String(100), nullable=False)  # Display name: "Midnight"
     slug = Column(String(200), unique=True, index=True, nullable=True)  # URL-safe identifier
     mode = Column(String(10), nullable=False)  # "dark" or "light"
@@ -2617,7 +2620,7 @@ class Theme(Base):
     category = Column(String(50), default="general")  # general / minimal / vibrant / professional
     source_type = Column(String(20), default="open")  # open / closed
     parent_theme_id = Column(
-        String(100), ForeignKey("themes.id", ondelete="SET NULL"), nullable=True
+        GUID(), ForeignKey("themes.id", ondelete="SET NULL"), nullable=True
     )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -2669,7 +2672,7 @@ class UserLibraryTheme(Base):
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     team_id = Column(GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
-    theme_id = Column(String(100), ForeignKey("themes.id", ondelete="CASCADE"), nullable=False)
+    theme_id = Column(GUID(), ForeignKey("themes.id", ondelete="CASCADE"), nullable=False)
     added_date = Column(DateTime(timezone=True), server_default=func.now())
     purchase_type = Column(String(20), nullable=False, default="free")  # free / purchased
     stripe_payment_intent = Column(String, nullable=True)

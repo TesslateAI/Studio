@@ -56,6 +56,21 @@ class ThemeListItem(BaseModel):
         from_attributes = True
 
 
+def _public_theme_id(theme: Theme) -> str:
+    """The stable user-facing identifier the frontend treats as ``id``.
+
+    Wave 1.5 split ``Theme.id`` (now a GUID) from ``Theme.slug`` (the
+    human-readable identifier, e.g. ``"midnight-dark"``). Every existing
+    frontend caller — ``themePresets.ts``, ``ThemeContext.tsx``,
+    ``user.theme_preset`` round-trip — keys themes on the slug-shaped
+    string. Continue exposing the slug as ``id`` from these public theme
+    endpoints so Wave 1.5 is non-breaking for the frontend; Wave 5 is
+    where the source-aware ``/marketplace/{source}/{kind}/{slug}`` URLs
+    let us safely move to the GUID at the API surface.
+    """
+    return theme.slug or str(theme.id)
+
+
 @router.get("", response_model=list[ThemeListItem])
 async def list_themes(db: AsyncSession = Depends(get_db)):
     """List all available themes (lightweight, no full JSON)."""
@@ -66,7 +81,7 @@ async def list_themes(db: AsyncSession = Depends(get_db)):
 
     return [
         ThemeListItem(
-            id=theme.id,
+            id=_public_theme_id(theme),
             name=theme.name,
             mode=theme.mode,
             author=theme.author,
@@ -93,7 +108,7 @@ async def list_themes_full(db: AsyncSession = Depends(get_db)):
 
         responses.append(
             ThemeResponse(
-                id=theme.id,
+                id=_public_theme_id(theme),
                 name=theme.name,
                 mode=theme.mode,
                 author=theme.author,
@@ -112,9 +127,36 @@ async def list_themes_full(db: AsyncSession = Depends(get_db)):
 
 @router.get("/{theme_id}", response_model=ThemeResponse)
 async def get_theme(theme_id: str, db: AsyncSession = Depends(get_db)):
-    """Get a single theme by ID with full JSON."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id, Theme.is_active))
-    theme = result.scalar_one_or_none()
+    """Get a single theme by ID with full JSON.
+
+    Wave 1.5: ``theme_id`` is the GUID PK or the legacy slug
+    (e.g. ``"midnight-dark"``). Look up by slug first because that's
+    how every existing API client (frontend ``api.ts``,
+    desktop sidecar) addresses themes today, then fall through to the
+    GUID lookup so callers that already hold the new id keep working.
+    """
+    from uuid import UUID as _UUID
+
+    try:
+        guid_id = _UUID(theme_id)
+    except (ValueError, AttributeError):
+        guid_id = None
+
+    if guid_id is not None:
+        result = await db.execute(
+            select(Theme).where(Theme.id == guid_id, Theme.is_active)
+        )
+        theme = result.scalar_one_or_none()
+        if theme is None:
+            result = await db.execute(
+                select(Theme).where(Theme.slug == theme_id, Theme.is_active)
+            )
+            theme = result.scalar_one_or_none()
+    else:
+        result = await db.execute(
+            select(Theme).where(Theme.slug == theme_id, Theme.is_active)
+        )
+        theme = result.scalar_one_or_none()
 
     if not theme:
         raise HTTPException(status_code=404, detail=f"Theme '{theme_id}' not found")
@@ -125,7 +167,7 @@ async def get_theme(theme_id: str, db: AsyncSession = Depends(get_db)):
         logger.warning(f"Theme validation failed: theme_id={theme.id}, error={error}")
 
     return ThemeResponse(
-        id=theme.id,
+        id=_public_theme_id(theme),
         name=theme.name,
         mode=theme.mode,
         author=theme.author,
@@ -165,7 +207,7 @@ async def get_default_theme(mode: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"No {mode} theme available")
 
     return ThemeResponse(
-        id=theme.id,
+        id=_public_theme_id(theme),
         name=theme.name,
         mode=theme.mode,
         author=theme.author,

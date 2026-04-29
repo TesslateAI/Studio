@@ -95,9 +95,14 @@ def setup_database(test_db_container):
     # Get directory where alembic.ini is located
     base_dir = Path(__file__).parent.parent.parent
 
-    # Run alembic upgrade head
+    # Run alembic upgrade head — invoke via current python interpreter
+    # (`sys.executable -m alembic`) so the venv's alembic is used regardless
+    # of PATH state. Avoids FileNotFoundError when pytest is run via
+    # `.venv/bin/python -m pytest` from a non-activated shell.
+    import sys
+
     result = subprocess.run(
-        ["alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=base_dir,
         capture_output=True,
         text=True,

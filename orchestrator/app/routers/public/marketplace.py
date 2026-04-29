@@ -149,10 +149,19 @@ def _base_to_dict(base: MarketplaceBase, *, include_detail: bool = False) -> dic
 
 
 def _theme_to_dict(theme: Theme, *, include_detail: bool = False) -> dict:
-    """Serialize a Theme to a response dict."""
+    """Serialize a Theme to a response dict.
+
+    Wave 1.5: ``Theme.id`` is now a GUID; the slug is the
+    human-readable identifier external API clients (desktop sidecar,
+    SDKs) key on. Expose the slug as ``id`` so clients pinned to the
+    public ``/api/v1/marketplace`` surface keep working through the PK
+    migration. Wave 5 ships source-aware URLs and lets us safely flip
+    the public field to the GUID.
+    """
     colors = (theme.theme_json or {}).get("colors", {})
+    public_id = theme.slug or str(theme.id)
     data: dict[str, Any] = {
-        "id": theme.id,
+        "id": public_id,
         "name": theme.name,
         "slug": theme.slug,
         "description": theme.description,
@@ -182,7 +191,9 @@ def _theme_to_dict(theme: Theme, *, include_detail: bool = False) -> dict:
                 "long_description": theme.long_description,
                 "theme_json": theme.theme_json,
                 "source_type": theme.source_type,
-                "parent_theme_id": theme.parent_theme_id,
+                "parent_theme_id": str(theme.parent_theme_id)
+                if theme.parent_theme_id
+                else None,
             }
         )
     return data

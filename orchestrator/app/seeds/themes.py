@@ -106,6 +106,11 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                 "borderless": bool(theme_data.get("borderless", False)),
             }
 
+            # Wave 1.5: themes.id is now a GUID PK. The ``id`` field in the
+            # JSON file (e.g. ``"midnight-dark"``) becomes the row's slug,
+            # and the PK is auto-generated for new rows. Existing rows are
+            # matched on ``slug`` (the ON CONFLICT key) so reseeding stays
+            # idempotent across the PK migration.
             await db.execute(
                 text("""
                     INSERT INTO themes (
@@ -115,14 +120,14 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                         source_id
                     )
                     VALUES (
-                        :id, :name, :slug, :mode, :author, :version, :description, :theme_json,
+                        gen_random_uuid(), :name, :slug, :mode, :author, :version,
+                        :description, :theme_json,
                         :sort_order, :is_default, true, :icon, 'free', 0,
                         0, 5.0, :is_featured, true, :category, :tags, 'open',
                         :source_id
                     )
-                    ON CONFLICT (id) DO UPDATE SET
+                    ON CONFLICT (slug) DO UPDATE SET
                         name = EXCLUDED.name,
-                        slug = EXCLUDED.slug,
                         mode = EXCLUDED.mode,
                         author = EXCLUDED.author,
                         version = EXCLUDED.version,
@@ -139,7 +144,6 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                         updated_at = NOW()
                 """),
                 {
-                    "id": theme_id,
                     "name": theme_data.get("name", theme_id),
                     "slug": theme_id,
                     "mode": theme_data.get("mode", "dark"),

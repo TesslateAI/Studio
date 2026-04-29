@@ -352,14 +352,14 @@ def _make_app(*, source_id: uuid.UUID, slug: str) -> models.MarketplaceApp:
 
 
 def _make_theme(*, source_id: uuid.UUID, slug: str) -> models.Theme:
-    # Theme.id is the legacy String(100) PK. We always derive a fresh
-    # uuid suffix so two themes can share the same slug across two
-    # sources without colliding on the PK — which would mask the slug
+    # Wave 1.5: Theme.id is now a GUID auto-populated by ``default=uuid.uuid4``.
+    # We pass an explicit id so two themes can share the same slug across
+    # two sources without colliding on the PK — which would mask the slug
     # uniqueness constraint we're actually testing. Theme.slug is
     # nullable=True at the column level but both Wave-1 invariants are
     # about (source_id, slug) pairs, so we always populate it.
     return models.Theme(
-        id=f"theme-{uuid.uuid4().hex[:12]}",
+        id=uuid.uuid4(),
         source_id=source_id,
         slug=slug,
         name=f"theme-{slug}",

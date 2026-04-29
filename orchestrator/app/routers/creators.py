@@ -137,7 +137,9 @@ async def _build_creator_response(user: User, db: AsyncSession) -> dict:
         ],
         "themes": [
             {
-                "id": theme.id,
+                # Wave 1.5: theme.id is now a GUID. Continue exposing the
+                # slug as ``id`` for frontend / external API parity.
+                "id": theme.slug or str(theme.id),
                 "name": theme.name,
                 "slug": theme.slug,
                 "description": theme.description,

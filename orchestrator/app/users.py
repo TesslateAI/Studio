@@ -168,10 +168,15 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         try:
             from .models import Theme, UserLibraryTheme
 
-            default_theme_ids = ["default-dark", "default-light"]
+            # Wave 1.5: Theme.id is now a GUID; the human-readable
+            # identifiers ("default-dark", "default-light") are stored as
+            # ``slug``. Look up by slug, then FK into the new GUID id.
+            default_theme_slugs = ["default-dark", "default-light"]
             theme_rows = (
                 await self.user_db.session.execute(
-                    select(Theme.id, Theme.name).where(Theme.id.in_(default_theme_ids))
+                    select(Theme.id, Theme.slug, Theme.name).where(
+                        Theme.slug.in_(default_theme_slugs)
+                    )
                 )
             ).all()
 
@@ -194,10 +199,10 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
                 await self.user_db.session.commit()
                 for row in theme_rows:
                     logger.info(f"Auto-added theme {row.name} to user {user.username}")
-            missing = set(default_theme_ids) - {row.id for row in theme_rows}
-            for theme_id in missing:
+            missing = set(default_theme_slugs) - {row.slug for row in theme_rows}
+            for theme_slug in missing:
                 logger.warning(
-                    f"Theme {theme_id} not found - user registered without this default theme"
+                    f"Theme {theme_slug} not found - user registered without this default theme"
                 )
         except Exception as e:
             logger.error(f"Failed to add default themes to user {user.username}: {e}")

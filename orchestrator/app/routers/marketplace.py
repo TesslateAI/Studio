@@ -72,6 +72,38 @@ def _reject_if_builtin(agent: MarketplaceAgent) -> None:
         )
 
 
+async def _resolve_theme_by_identifier(
+    db: AsyncSession, identifier: str
+) -> Theme | None:
+    """Resolve a Theme row given a path identifier.
+
+    Wave 1.5: ``Theme.id`` is now a GUID. Pre-Wave-1.5 the id was the
+    slug string itself (e.g. ``"midnight-dark"``); the desktop apps,
+    URL bookmarks, and existing API clients all keep sending the slug
+    in the ``{theme_id}`` path slot. Accept both forms so legacy
+    callers keep working:
+
+      - if ``identifier`` parses as a UUID, look up by ``Theme.id``;
+      - otherwise look up by ``Theme.slug``.
+
+    Returns ``None`` if no theme matches; the router maps that to a
+    404. Active vs inactive filtering is left to the caller because
+    different mutation routes have different semantics there.
+    """
+    try:
+        guid_id = UUID(identifier)
+    except (ValueError, AttributeError):
+        guid_id = None
+
+    if guid_id is not None:
+        row = await db.execute(select(Theme).where(Theme.id == guid_id))
+        theme = row.scalar_one_or_none()
+        if theme is not None:
+            return theme
+    row = await db.execute(select(Theme).where(Theme.slug == identifier))
+    return row.scalar_one_or_none()
+
+
 # Cache TTL for LiteLLM models (5 minutes - models rarely change)
 _MODELS_CACHE_TTL = 300
 
@@ -3917,10 +3949,17 @@ def _theme_to_dict(
         resolved_username = None
         resolved_avatar = creator_avatar_url
 
+    # Wave 1.5: theme.id is now a GUID; the slug remains the
+    # human-readable identifier the frontend / desktop sidecar / external
+    # API consumers all key on. Continue serializing the slug as ``id``
+    # in the marketplace browse payload so this migration is non-breaking
+    # for the frontend (Wave 5 introduces source-aware URLs and lets us
+    # safely flip to the GUID at the public API layer).
+    public_id = theme.slug or str(theme.id)
     return {
-        "id": theme.id,
+        "id": public_id,
         "name": theme.name,
-        "slug": theme.slug or theme.id,
+        "slug": theme.slug or str(theme.id),
         "description": theme.description or "",
         "long_description": theme.long_description or "",
         "category": theme.category or "general",
@@ -3950,7 +3989,7 @@ def _theme_to_dict(
         "creator_avatar_url": resolved_avatar,
         "created_by_user_id": str(theme.created_by_user_id) if theme.created_by_user_id else None,
         "forked_by_user_id": None,  # Themes don't track forked_by separately
-        "parent_theme_id": theme.parent_theme_id,
+        "parent_theme_id": str(theme.parent_theme_id) if theme.parent_theme_id else None,
         "color_swatches": colors,
         "theme_mode": theme.mode,
         "theme_json": None,  # Excluded from browse listings for size
@@ -4028,8 +4067,9 @@ async def browse_themes(
     result = await db.execute(query)
     themes = result.scalars().all()
 
-    # Check which themes are in user's library (scoped to active team)
-    user_theme_ids: set[str] = set()
+    # Check which themes are in user's library (scoped to active team).
+    # Wave 1.5: theme_id is now a GUID, not a string.
+    user_theme_ids: set[UUID] = set()
     if current_user:
         team_id = current_user.default_team_id
         theme_filter = (
@@ -4076,15 +4116,65 @@ async def browse_themes(
     }
 
 
+@router.get("/themes/legacy/{theme_id}", include_in_schema=False)
+async def legacy_theme_detail_redirect(theme_id: str):
+    """Wave 1.5: 301 redirect for legacy theme-detail bookmarks.
+
+    Pre-Wave-1.5 the canonical theme-detail URL was
+    ``/marketplace/themes/{old_string_id}`` where ``old_string_id`` was
+    the slug-as-PK. The post-1.5 canonical shape ships in Wave 5 as
+    ``/marketplace/{source_handle}/{kind}/{slug}``. Until that route
+    exists, redirect to the closest stable URL we have today —
+    ``/marketplace/themes/{slug}`` — which now resolves themes by slug
+    or by GUID via ``_resolve_theme_by_identifier``. The redirect target
+    will move to the Wave-5 source-prefixed form in a follow-up commit
+    so external bookmarks remain stable.
+
+    Mounting under ``/themes/legacy/`` (rather than reusing
+    ``/themes/{theme_id}`` itself) keeps the live route 200-OK for
+    callers that already pass a slug while still giving us a typed
+    redirect surface that integration tests can lock in. The new
+    forward-stable target is documented inside the redirect URL
+    template; updating it is a one-line change once Wave 5 lands.
+    """
+    from fastapi.responses import RedirectResponse
+
+    target = f"/api/marketplace/tesslate-official/theme/{theme_id}"
+    return RedirectResponse(url=target, status_code=301)
+
+
+@router.get("/tesslate-official/theme/{slug}", include_in_schema=False)
+async def get_theme_detail_source_prefixed(
+    slug: str,
+    current_user: User | None = Depends(current_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Wave 1.5: forward-stable source-prefixed alias for theme detail.
+
+    The Wave 5 source-aware URL pattern is
+    ``/marketplace/{source_handle}/{kind}/{slug}``. We hardcode the
+    ``tesslate-official`` source here so that the
+    ``/themes/legacy/{theme_id}`` 301 has a real target today; Wave 5
+    promotes this into a generic ``/{source_handle}/{kind}/{slug}``
+    route. Behaviour is identical to ``GET /marketplace/themes/{slug}``.
+    """
+    return await get_theme_detail(
+        slug=slug, current_user=current_user, db=db
+    )
+
+
 @router.get("/themes/{slug}")
 async def get_theme_detail(
     slug: str,
     current_user: User | None = Depends(current_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get full theme detail by slug."""
-    result = await db.execute(select(Theme).where(or_(Theme.slug == slug, Theme.id == slug)))
-    theme = result.scalar_one_or_none()
+    """Get full theme detail by slug.
+
+    Wave 1.5: Theme.id is now a GUID. We accept either the slug or the
+    GUID PK in the path slot — see ``_resolve_theme_by_identifier``.
+    """
+    theme = await _resolve_theme_by_identifier(db, slug)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4170,9 +4260,13 @@ async def add_theme_to_library(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
-    """Add a free theme to user's library."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    """Add a free theme to user's library.
+
+    ``{theme_id}`` accepts either the GUID PK or the legacy slug-form
+    identifier (``"midnight-dark"`` etc) — see
+    ``_resolve_theme_by_identifier`` for why.
+    """
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme or not theme.is_active:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4189,13 +4283,13 @@ async def add_theme_to_library(
     existing_result = await db.execute(
         select(UserLibraryTheme).where(
             ownership_filter,
-            UserLibraryTheme.theme_id == theme_id,
+            UserLibraryTheme.theme_id == theme.id,
         )
     )
     existing = existing_result.scalar_one_or_none()
 
     if existing and existing.is_active:
-        return {"message": "Theme already in your library", "theme_id": theme_id}
+        return {"message": "Theme already in your library", "theme_id": str(theme.id)}
 
     if existing:
         # Reactivate
@@ -4205,7 +4299,7 @@ async def add_theme_to_library(
         lib_entry = UserLibraryTheme(
             user_id=current_user.id,
             team_id=team_id,
-            theme_id=theme_id,
+            theme_id=theme.id,
             purchase_type="free",
             is_active=True,
         )
@@ -4216,7 +4310,7 @@ async def add_theme_to_library(
 
     return {
         "message": "Theme added to your library",
-        "theme_id": theme_id,
+        "theme_id": str(theme.id),
         "success": True,
     }
 
@@ -4227,8 +4321,16 @@ async def remove_theme_from_library(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
-    """Remove a theme from user's library. Cannot remove default-dark or default-light."""
-    if theme_id in ("default-dark", "default-light"):
+    """Remove a theme from user's library. Cannot remove default-dark or default-light.
+
+    Wave 1.5 note: ``user.theme_preset`` is the slug string (not the
+    GUID). Compare on slug, reset on slug.
+    """
+    theme = await _resolve_theme_by_identifier(db, theme_id)
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    if theme.slug in ("default-dark", "default-light"):
         raise HTTPException(
             status_code=400,
             detail="Cannot remove default themes from your library",
@@ -4245,7 +4347,7 @@ async def remove_theme_from_library(
     result = await db.execute(
         select(UserLibraryTheme).where(
             ownership_filter,
-            UserLibraryTheme.theme_id == theme_id,
+            UserLibraryTheme.theme_id == theme.id,
         )
     )
     lib_entry = result.scalar_one_or_none()
@@ -4255,15 +4357,17 @@ async def remove_theme_from_library(
 
     lib_entry.is_active = False
 
-    # If user is currently using this theme, reset to default-dark
-    if current_user.theme_preset == theme_id:
+    # If user is currently using this theme, reset to default-dark.
+    # ``theme_preset`` stores the slug (the user-facing identifier),
+    # not the GUID PK.
+    if current_user.theme_preset == theme.slug:
         current_user.theme_preset = "default-dark"
 
     await db.commit()
 
     return {
         "message": "Theme removed from library",
-        "theme_id": theme_id,
+        "theme_id": str(theme.id),
         "success": True,
         "reset_theme": current_user.theme_preset == "default-dark",
     }
@@ -4277,6 +4381,10 @@ async def toggle_library_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Toggle a theme enabled/disabled in user's library."""
+    theme = await _resolve_theme_by_identifier(db, theme_id)
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
     ownership_filter = (
@@ -4288,7 +4396,7 @@ async def toggle_library_theme(
     result = await db.execute(
         select(UserLibraryTheme).where(
             ownership_filter,
-            UserLibraryTheme.theme_id == theme_id,
+            UserLibraryTheme.theme_id == theme.id,
         )
     )
     lib_entry = result.scalar_one_or_none()
@@ -4301,7 +4409,7 @@ async def toggle_library_theme(
 
     return {
         "message": f"Theme {'enabled' if enabled else 'disabled'} successfully",
-        "theme_id": theme_id,
+        "theme_id": str(theme.id),
         "enabled": enabled,
         "success": True,
     }
@@ -4322,15 +4430,13 @@ async def create_custom_theme(
     """Create a custom theme and add it to user's library."""
     import time
 
-    # Generate a slug from name + user + timestamp
+    # Generate a slug from name + user + timestamp. Wave 1.5: the row's
+    # PK is now an auto-generated GUID; the slug is the user-facing
+    # identifier. Both are persisted independently.
     slug_base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     slug = f"{slug_base}-{int(time.time())}"
 
-    # Use slug as the theme ID (String PK)
-    theme_id = slug
-
     theme = Theme(
-        id=theme_id,
         name=name,
         slug=slug,
         mode=mode,
@@ -4348,11 +4454,14 @@ async def create_custom_theme(
         created_by_user_id=current_user.id,
     )
     db.add(theme)
+    # Flush so the GUID PK is populated before we FK from
+    # UserLibraryTheme.theme_id below.
+    await db.flush()
 
     # Auto-add to user's library
     lib_entry = UserLibraryTheme(
         user_id=current_user.id,
-        theme_id=theme_id,
+        theme_id=theme.id,
         purchase_type="free",
         is_active=True,
     )
@@ -4384,8 +4493,7 @@ async def update_theme(
 ):
     """Update a custom theme. Only the creator can edit their themes.
     If the user edits an open-source theme they don't own, auto-fork it."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4443,8 +4551,7 @@ async def delete_custom_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Delete a custom theme. Only unpublished themes owned by the creator can be deleted."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4471,8 +4578,7 @@ async def publish_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Publish a custom theme to the marketplace."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4493,8 +4599,7 @@ async def unpublish_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Unpublish a theme from the marketplace."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4524,8 +4629,7 @@ async def fork_theme(
     """Fork an open-source theme. Creates a copy owned by the current user."""
     import time
 
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    original = result.scalar_one_or_none()
+    original = await _resolve_theme_by_identifier(db, theme_id)
 
     if not original:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4536,10 +4640,10 @@ async def fork_theme(
     fork_name = name or f"{original.name} (Fork)"
     slug_base = re.sub(r"[^a-z0-9]+", "-", fork_name.lower()).strip("-")
     slug = f"{slug_base}-{int(time.time())}"
-    fork_id = slug
 
     forked = Theme(
-        id=fork_id,
+        # Wave 1.5: id is auto-generated GUID; the human-readable
+        # identifier moves to slug.
         name=fork_name,
         slug=slug,
         mode=mode or original.mode,
@@ -4558,11 +4662,12 @@ async def fork_theme(
         parent_theme_id=original.id,
     )
     db.add(forked)
+    await db.flush()  # populate forked.id GUID
 
     # Auto-add to user's library
     lib_entry = UserLibraryTheme(
         user_id=current_user.id,
-        theme_id=fork_id,
+        theme_id=forked.id,
         purchase_type="free",
         is_active=True,
     )
