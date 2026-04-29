@@ -50,8 +50,18 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import bindparam
 
 from app.types.guid import GUID
+
+
+def _uuid_param(name: str, value: uuid.UUID) -> bindparam:
+    """Bind a uuid.UUID via the GUID TypeDecorator so the value is dispatched
+    correctly per dialect (native ``uuid`` on Postgres, ``CHAR(36)`` on SQLite).
+    Plain ``bindparams(name=str(uuid))`` binds as VARCHAR and Postgres rejects
+    that against a native uuid column with DatatypeMismatchError.
+    """
+    return bindparam(name, value=value, type_=GUID())
 
 revision: str = "0088_marketplace_sources"
 down_revision: str | Sequence[str] | None = "0087_automation_app_inst"
@@ -234,9 +244,9 @@ def upgrade() -> None:
                  'local://filesystem', 'system', 'local', :is_active_true)
             """
         ).bindparams(
-            tesslate_id=str(TESSLATE_OFFICIAL_ID),
-            local_id=str(LOCAL_SOURCE_ID),
-            is_active_true=True,
+            _uuid_param("tesslate_id", TESSLATE_OFFICIAL_ID),
+            _uuid_param("local_id", LOCAL_SOURCE_ID),
+            bindparam("is_active_true", value=True, type_=sa.Boolean()),
         )
     )
 
@@ -264,59 +274,44 @@ def upgrade() -> None:
     # Tesslate-authored rows (no creator FK) → tesslate-official.
     # All remaining rows                       → local.
     # Order matters: WHERE creator IS NULL first, then WHERE source_id IS NULL.
-    tess_param = {"tess_id": str(TESSLATE_OFFICIAL_ID)}
-    local_param = {"local_id": str(LOCAL_SOURCE_ID)}
+    def _exec_tess(sql: str) -> None:
+        op.execute(sa.text(sql).bindparams(_uuid_param("tess_id", TESSLATE_OFFICIAL_ID)))
 
-    op.execute(
-        sa.text(
-            "UPDATE marketplace_agents SET source_id = :tess_id WHERE created_by_user_id IS NULL"
-        ).bindparams(**tess_param)
+    def _exec_local(sql: str) -> None:
+        op.execute(sa.text(sql).bindparams(_uuid_param("local_id", LOCAL_SOURCE_ID)))
+
+    _exec_tess(
+        "UPDATE marketplace_agents SET source_id = :tess_id WHERE created_by_user_id IS NULL"
     )
-    op.execute(
-        sa.text(
-            "UPDATE marketplace_agents SET source_id = :local_id WHERE source_id IS NULL"
-        ).bindparams(**local_param)
+    _exec_local(
+        "UPDATE marketplace_agents SET source_id = :local_id WHERE source_id IS NULL"
     )
 
-    op.execute(
-        sa.text(
-            "UPDATE marketplace_bases SET source_id = :tess_id WHERE created_by_user_id IS NULL"
-        ).bindparams(**tess_param)
+    _exec_tess(
+        "UPDATE marketplace_bases SET source_id = :tess_id WHERE created_by_user_id IS NULL"
     )
-    op.execute(
-        sa.text(
-            "UPDATE marketplace_bases SET source_id = :local_id WHERE source_id IS NULL"
-        ).bindparams(**local_param)
+    _exec_local(
+        "UPDATE marketplace_bases SET source_id = :local_id WHERE source_id IS NULL"
     )
 
     # marketplace_apps uses creator_user_id (different name)
-    op.execute(
-        sa.text(
-            "UPDATE marketplace_apps SET source_id = :tess_id WHERE creator_user_id IS NULL"
-        ).bindparams(**tess_param)
+    _exec_tess(
+        "UPDATE marketplace_apps SET source_id = :tess_id WHERE creator_user_id IS NULL"
     )
-    op.execute(
-        sa.text(
-            "UPDATE marketplace_apps SET source_id = :local_id WHERE source_id IS NULL"
-        ).bindparams(**local_param)
+    _exec_local(
+        "UPDATE marketplace_apps SET source_id = :local_id WHERE source_id IS NULL"
     )
 
-    op.execute(
-        sa.text(
-            "UPDATE themes SET source_id = :tess_id WHERE created_by_user_id IS NULL"
-        ).bindparams(**tess_param)
+    _exec_tess(
+        "UPDATE themes SET source_id = :tess_id WHERE created_by_user_id IS NULL"
     )
-    op.execute(
-        sa.text(
-            "UPDATE themes SET source_id = :local_id WHERE source_id IS NULL"
-        ).bindparams(**local_param)
+    _exec_local(
+        "UPDATE themes SET source_id = :local_id WHERE source_id IS NULL"
     )
 
     # workflow_templates has no creator column → all to tesslate-official.
-    op.execute(
-        sa.text(
-            "UPDATE workflow_templates SET source_id = :tess_id WHERE source_id IS NULL"
-        ).bindparams(**tess_param)
+    _exec_tess(
+        "UPDATE workflow_templates SET source_id = :tess_id WHERE source_id IS NULL"
     )
 
     # app_versions inherit from parent marketplace_apps. Run AFTER the
