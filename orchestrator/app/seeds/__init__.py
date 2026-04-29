@@ -18,6 +18,7 @@ from .marketplace_agents import (
     seed_marketplace_agents,
 )
 from .marketplace_bases import seed_marketplace_bases
+from .marketplace_sources import seed_marketplace_sources
 from .mcp_servers import seed_mcp_servers
 from .opensource_agents import seed_opensource_agents
 from .skills import seed_skills
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "run_all_seeds",
+    "seed_marketplace_sources",
     "seed_marketplace_bases",
     "seed_community_bases",
     "seed_marketplace_agents",
@@ -56,6 +58,19 @@ async def run_all_seeds():
     from ..database import AsyncSessionLocal
 
     async with AsyncSessionLocal() as db:
+        # 0. Marketplace sources MUST seed first — every other catalog seed
+        # row carries source_id (NOT NULL FK to marketplace_sources). The
+        # alembic migration creates the two system rows on first upgrade;
+        # this seed is the safety net for environments that bypassed
+        # migrations or restored from a partial backup, and refreshes the
+        # mutable display_name/base_url fields on every boot.
+        try:
+            count = await seed_marketplace_sources(db)
+            logger.info("Seed marketplace sources: %d new", count)
+        except Exception:
+            logger.exception("Failed to seed marketplace sources")
+            await db.rollback()
+
         # 1. Marketplace bases (no dependencies)
         try:
             count = await seed_marketplace_bases(db)
