@@ -1,0 +1,16 @@
+# Per-deployment state — generated on first boot, never commit
+.hub_id
+.attestation_key
+app/bundles/.bundle_url_secret
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+build/
+dist/
+
+# OS
+.DS_Store

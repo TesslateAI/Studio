@@ -1,0 +1,902 @@
+[
+  {
+    "name": "Context7",
+    "slug": "mcp-context7",
+    "description": "Up-to-date, version-specific library documentation and code examples pulled straight from the source.",
+    "long_description": "Context7 pulls up-to-date, version-specific documentation and code examples directly from library source \u2014 and places them right into your prompt. No more hallucinated APIs, outdated code examples, or generic answers for old package versions. Resolve a library name to its Context7 ID, then query for relevant docs and code snippets. Supports thousands of libraries across all major ecosystems.",
+    "item_type": "mcp_server",
+    "category": "developer-tools",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://context7.liam.sh/mcp",
+      "auth_type": "none",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "resolve-library-id",
+      "query-docs"
+    ],
+    "tags": [
+      "documentation",
+      "libraries",
+      "code-examples",
+      "developer-tools",
+      "context"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": false,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "BookOpen",
+    "source_type": "open",
+    "git_repo_url": "https://github.com/upstash/context7",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Linear",
+    "slug": "mcp-linear",
+    "description": "Search issues, create tickets, update status across your Linear workspace.",
+    "long_description": "Official Linear MCP server. Connect once with OAuth to let Tesslate agents search and manage your Linear issues, projects, and cycles.",
+    "item_type": "mcp_server",
+    "category": "productivity",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.linear.app/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools",
+        "resources"
+      ]
+    },
+    "features": [
+      "list-issues",
+      "create-issue",
+      "update-status",
+      "search"
+    ],
+    "tags": [
+      "linear",
+      "issues",
+      "project-management",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Kanban",
+    "avatar_url": "https://linear.app/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "is_published": true,
+    "tech_stack": []
+  },
+  {
+    "name": "GitHub",
+    "slug": "mcp-github-oauth",
+    "description": "Read repos, manage issues and PRs, search code across your GitHub account.",
+    "long_description": "GitHub Copilot MCP server over OAuth. Uses the Tesslate-owned platform app for registration \u2014 users just click Connect and approve scopes.",
+    "item_type": "mcp_server",
+    "category": "developer-tools",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "auth_type": "oauth",
+      "registration_method": "platform_app",
+      "scopes": [
+        "repo",
+        "read:user",
+        "read:org"
+      ],
+      "oauth_endpoints": {
+        "authorization_server": "https://github.com",
+        "authorization_endpoint": "https://github.com/login/oauth/authorize",
+        "token_endpoint": "https://github.com/login/oauth/access_token"
+      },
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "repo-read",
+      "issues",
+      "pull-requests",
+      "code-search"
+    ],
+    "tags": [
+      "github",
+      "git",
+      "oauth",
+      "developer-tools"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "GithubLogo",
+    "avatar_url": "https://github.githubassets.com/favicons/favicon.svg",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "is_published": true,
+    "tech_stack": []
+  },
+  {
+    "name": "Notion",
+    "slug": "mcp-notion",
+    "description": "Search pages, create documents, query databases across your Notion workspace.",
+    "long_description": "Official Notion MCP server. OAuth-only. DCR means no client registration paperwork \u2014 users just connect and approve.",
+    "item_type": "mcp_server",
+    "category": "productivity",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.notion.com/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools",
+        "resources"
+      ]
+    },
+    "features": [
+      "search-pages",
+      "create-document",
+      "query-database"
+    ],
+    "tags": [
+      "notion",
+      "docs",
+      "knowledge-base",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Notebook",
+    "avatar_url": "https://www.notion.so/images/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "is_published": true,
+    "tech_stack": []
+  },
+  {
+    "name": "Atlassian",
+    "slug": "mcp-atlassian",
+    "description": "Search and manage Jira issues and Confluence pages.",
+    "long_description": "Atlassian MCP server covering Jira + Confluence. OAuth 2.1 via DCR.",
+    "item_type": "mcp_server",
+    "category": "productivity",
+    "config": {
+      "transport": "sse",
+      "url": "https://mcp.atlassian.com/v1/sse",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "jira-search",
+      "jira-create",
+      "confluence-search"
+    ],
+    "tags": [
+      "atlassian",
+      "jira",
+      "confluence",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Stack",
+    "avatar_url": "https://www.atlassian.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "is_published": true,
+    "tech_stack": []
+  },
+  {
+    "name": "Sentry",
+    "slug": "mcp-sentry",
+    "description": "Search issues, fetch error details, and inspect release health across your Sentry org.",
+    "long_description": "Official Sentry MCP server. Connect once with OAuth \u2014 agents can list issues, pull stack traces and breadcrumbs, query events, and check release health.",
+    "item_type": "mcp_server",
+    "category": "observability",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.sentry.dev/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-issues",
+      "get-issue-details",
+      "search-events",
+      "release-health"
+    ],
+    "tags": [
+      "sentry",
+      "errors",
+      "observability",
+      "monitoring",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Bug",
+    "avatar_url": "https://sentry.io/_assets/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Canva",
+    "slug": "mcp-canva",
+    "description": "Create, edit, and export Canva designs from natural language.",
+    "long_description": "Official Canva MCP server. OAuth-only via DCR \u2014 no API key setup. Agents can create designs, list assets, and export to common formats.",
+    "item_type": "mcp_server",
+    "category": "design",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.canva.com/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "create-design",
+      "list-designs",
+      "export-design",
+      "manage-assets"
+    ],
+    "tags": [
+      "canva",
+      "design",
+      "graphics",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Palette",
+    "avatar_url": "https://www.canva.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Figma",
+    "slug": "mcp-figma",
+    "description": "Read Figma files, inspect frames and components, and post comments.",
+    "long_description": "Official Figma MCP server. OAuth via DCR. Agents can list files, read frame and component metadata, fetch design tokens, and add comments to designs.",
+    "item_type": "mcp_server",
+    "category": "design",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.figma.com/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-files",
+      "read-frames",
+      "read-components",
+      "post-comments"
+    ],
+    "tags": [
+      "figma",
+      "design",
+      "prototyping",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "PenNib",
+    "avatar_url": "https://www.figma.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Granola",
+    "slug": "mcp-granola",
+    "description": "Search meeting notes and pull transcripts from your Granola account.",
+    "long_description": "Official Granola MCP server. OAuth via DCR. Agents can list meetings, search notes, and pull full transcripts with action items.",
+    "item_type": "mcp_server",
+    "category": "productivity",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.granola.ai/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-meetings",
+      "search-notes",
+      "get-transcript"
+    ],
+    "tags": [
+      "granola",
+      "meetings",
+      "notes",
+      "transcripts",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Notebook",
+    "avatar_url": "https://www.granola.ai/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Ahrefs",
+    "slug": "mcp-ahrefs",
+    "description": "Keyword research, backlink analysis, and SERP data via the Ahrefs API.",
+    "long_description": "Official Ahrefs MCP server. OAuth via DCR. Requires an Ahrefs Lite plan or higher. Agents can run keyword research, pull backlink profiles, and inspect competitor SERPs.",
+    "item_type": "mcp_server",
+    "category": "marketing",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://api.ahrefs.com/mcp/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "keyword-research",
+      "backlink-analysis",
+      "serp-overview",
+      "competitor-gap"
+    ],
+    "tags": [
+      "ahrefs",
+      "seo",
+      "marketing",
+      "research",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "MagnifyingGlass",
+    "avatar_url": "https://ahrefs.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Stripe",
+    "slug": "mcp-stripe",
+    "description": "Read customers, payments, subscriptions, and invoices from your Stripe account.",
+    "long_description": "Official Stripe MCP server. Connect once with OAuth \u2014 agents can list customers, inspect payments and subscriptions, look up invoices, and generate payment links. Operates against the connected Stripe account scope.",
+    "item_type": "mcp_server",
+    "category": "finance",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.stripe.com",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-customers",
+      "inspect-payments",
+      "manage-subscriptions",
+      "create-payment-link"
+    ],
+    "tags": [
+      "stripe",
+      "payments",
+      "billing",
+      "finance",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "CreditCard",
+    "avatar_url": "https://stripe.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Clay",
+    "slug": "mcp-clay",
+    "description": "Enrich contacts and companies with Clay's data providers from natural language.",
+    "long_description": "Official Clay MCP server. OAuth-only. Agents can run contact and company enrichments, query waterfalls, and pull results from your Clay tables.",
+    "item_type": "mcp_server",
+    "category": "sales",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.clay.earth/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "enrich-contact",
+      "enrich-company",
+      "query-table",
+      "run-waterfall"
+    ],
+    "tags": [
+      "clay",
+      "sales",
+      "enrichment",
+      "prospecting",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Sparkle",
+    "avatar_url": "https://clay.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Miro",
+    "slug": "mcp-miro",
+    "description": "List boards, read frames, and create sticky notes and shapes on Miro whiteboards.",
+    "long_description": "Official Miro MCP server. OAuth-based. Workspace admin must enable the Miro AI / MCP integration. Agents can list boards, read frame content, and add sticky notes, shapes, and connectors.",
+    "item_type": "mcp_server",
+    "category": "productivity",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.miro.com/",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-boards",
+      "read-frames",
+      "create-sticky",
+      "create-shape"
+    ],
+    "tags": [
+      "miro",
+      "whiteboard",
+      "collaboration",
+      "diagramming",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Squares",
+    "avatar_url": "https://miro.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "HubSpot",
+    "slug": "mcp-hubspot",
+    "description": "Read and update CRM contacts, companies, and deals across your HubSpot portal.",
+    "long_description": "Official HubSpot MCP server (GA April 2026). Uses HubSpot's self-service OAuth auth-app flow \u2014 no Tesslate-owned client required. Agents can list and update contacts, companies, and deals, and run associations.",
+    "item_type": "mcp_server",
+    "category": "sales",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.hubspot.com",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-contacts",
+      "manage-deals",
+      "update-company",
+      "associations"
+    ],
+    "tags": [
+      "hubspot",
+      "crm",
+      "sales",
+      "marketing",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Users",
+    "avatar_url": "https://www.hubspot.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Box",
+    "slug": "mcp-box",
+    "description": "List, search, and read files across your Box account.",
+    "long_description": "Official Box MCP server. OAuth-based \u2014 connect with Box Business plan or higher. Agents can list folders, search files by name and content, and download file content.",
+    "item_type": "mcp_server",
+    "category": "data",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.box.com",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools",
+        "resources"
+      ]
+    },
+    "features": [
+      "list-files",
+      "search-files",
+      "read-file",
+      "metadata"
+    ],
+    "tags": [
+      "box",
+      "storage",
+      "files",
+      "documents",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Cube",
+    "avatar_url": "https://www.box.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Fireflies",
+    "slug": "mcp-fireflies",
+    "description": "Search meeting transcripts and summaries across your Fireflies workspace.",
+    "long_description": "Official Fireflies MCP server. OAuth-based. Agents can list and search recorded meetings, retrieve transcripts and AI summaries, and surface action items.",
+    "item_type": "mcp_server",
+    "category": "productivity",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://api.fireflies.ai/mcp",
+      "auth_type": "oauth",
+      "registration_method": "dcr",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-meetings",
+      "get-transcript",
+      "get-summary",
+      "search-meetings"
+    ],
+    "tags": [
+      "fireflies",
+      "meetings",
+      "transcripts",
+      "ai-notes",
+      "oauth"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Microphone",
+    "avatar_url": "https://fireflies.ai/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Microsoft Learn",
+    "slug": "mcp-microsoft-learn",
+    "description": "Search Microsoft Learn documentation, code samples, and reference material.",
+    "long_description": "Official Microsoft Learn MCP server. Fully public \u2014 no auth required. Agents can search docs, fetch reference pages, and pull code samples for Azure, Microsoft 365, .NET, and the rest of the Microsoft developer stack.",
+    "item_type": "mcp_server",
+    "category": "developer-tools",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://learn.microsoft.com/api/mcp",
+      "auth_type": "none",
+      "env_vars": [],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "search-docs",
+      "fetch-page",
+      "code-samples"
+    ],
+    "tags": [
+      "microsoft",
+      "documentation",
+      "learning",
+      "azure",
+      "dotnet"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "BookOpen",
+    "avatar_url": "https://learn.microsoft.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Intercom",
+    "slug": "mcp-intercom",
+    "description": "Read conversations, contacts, and articles from your Intercom workspace.",
+    "long_description": "Official Intercom MCP server. Authenticate with an Intercom Access Token (Settings \u2192 Developers \u2192 Access Tokens). US-hosted workspaces only at the moment. Agents can list conversations, look up contacts, and search the help center.",
+    "item_type": "mcp_server",
+    "category": "communication",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.intercom.com/mcp",
+      "auth_type": "bearer",
+      "env_vars": [
+        "INTERCOM_ACCESS_TOKEN"
+      ],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-conversations",
+      "get-contact",
+      "search-articles",
+      "send-reply"
+    ],
+    "tags": [
+      "intercom",
+      "support",
+      "customer-success",
+      "messaging"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "ChatCircle",
+    "avatar_url": "https://www.intercom.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Mermaid Chart",
+    "slug": "mcp-mermaid-chart",
+    "description": "Create and update Mermaid diagrams stored in your Mermaid Chart account.",
+    "long_description": "Official Mermaid Chart MCP server. Authenticate with a Mermaid Chart API key (Account \u2192 API). Agents can list diagrams, create new ones from Mermaid source, and update existing diagrams in place.",
+    "item_type": "mcp_server",
+    "category": "developer-tools",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.mermaid.ai/mcp",
+      "auth_type": "bearer",
+      "env_vars": [
+        "MERMAID_API_KEY"
+      ],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "create-diagram",
+      "update-diagram",
+      "list-diagrams"
+    ],
+    "tags": [
+      "mermaid",
+      "diagrams",
+      "charts",
+      "developer-tools"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "FlowArrow",
+    "avatar_url": "https://www.mermaidchart.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Smartsheet",
+    "slug": "mcp-smartsheet",
+    "description": "Read and update sheets, rows, and reports across your Smartsheet account.",
+    "long_description": "Official Smartsheet MCP server. Authenticate with a Smartsheet Personal Access Token (Account \u2192 Personal Settings \u2192 API Access). Agents can list sheets, read and update rows, and run reports.",
+    "item_type": "mcp_server",
+    "category": "productivity",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.smartsheet.com/mcp",
+      "auth_type": "bearer",
+      "env_vars": [
+        "SMARTSHEET_ACCESS_TOKEN"
+      ],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "list-sheets",
+      "read-rows",
+      "update-rows",
+      "run-report"
+    ],
+    "tags": [
+      "smartsheet",
+      "spreadsheets",
+      "project-management",
+      "productivity"
+    ],
+    "is_active": true,
+    "is_featured": false,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Table",
+    "avatar_url": "https://www.smartsheet.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Zapier",
+    "slug": "mcp-zapier",
+    "description": "Trigger Zaps and run actions across 7,000+ Zapier-connected apps.",
+    "long_description": "Official Zapier MCP server. Authenticate with a Zapier MCP API key from mcp.zapier.com. Each user gets a personal MCP endpoint scoped to the actions they enable, so the agent only sees explicitly-allowed tools.",
+    "item_type": "mcp_server",
+    "category": "productivity",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.zapier.com/api/mcp/mcp",
+      "auth_type": "bearer",
+      "env_vars": [
+        "ZAPIER_MCP_API_KEY"
+      ],
+      "capabilities": [
+        "tools"
+      ]
+    },
+    "features": [
+      "trigger-zaps",
+      "run-actions",
+      "search-records"
+    ],
+    "tags": [
+      "zapier",
+      "automation",
+      "integration",
+      "productivity"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Lightning",
+    "avatar_url": "https://zapier.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  },
+  {
+    "name": "Supabase",
+    "slug": "mcp-supabase",
+    "description": "Query Postgres tables, inspect schemas, and run RPC functions on your Supabase project.",
+    "long_description": "Official Supabase MCP server. Authenticate with a Supabase Personal Access Token (Account \u2192 Access Tokens). Agents can run read-only SQL, inspect schemas, list projects, and call RPC functions across your Supabase org.",
+    "item_type": "mcp_server",
+    "category": "data",
+    "config": {
+      "transport": "streamable-http",
+      "url": "https://mcp.supabase.com/mcp",
+      "auth_type": "bearer",
+      "env_vars": [
+        "SUPABASE_ACCESS_TOKEN"
+      ],
+      "capabilities": [
+        "tools",
+        "resources"
+      ]
+    },
+    "features": [
+      "query-tables",
+      "inspect-schema",
+      "list-projects",
+      "run-rpc"
+    ],
+    "tags": [
+      "supabase",
+      "database",
+      "postgres",
+      "backend"
+    ],
+    "is_active": true,
+    "is_featured": true,
+    "is_published": true,
+    "pricing_type": "free",
+    "price": 0,
+    "icon": "Database",
+    "avatar_url": "https://supabase.com/favicon.ico",
+    "source_type": "closed",
+    "kind": "mcp_server",
+    "tech_stack": []
+  }
+]
