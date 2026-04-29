@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import MarketplaceBase, User
+from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -1243,12 +1244,15 @@ async def seed_community_bases(db: AsyncSession) -> int:
                     setattr(existing, key, value)
             if not existing.created_by_user_id:
                 existing.created_by_user_id = community_user.id
+            if not existing.source_id:
+                existing.source_id = TESSLATE_OFFICIAL_ID
             updated += 1
             logger.info("Updated community base: %s", base_data["slug"])
         else:
             base = MarketplaceBase(
                 **base_data,
                 created_by_user_id=community_user.id,
+                source_id=TESSLATE_OFFICIAL_ID,
             )
             db.add(base)
             created += 1

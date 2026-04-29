@@ -15,6 +15,8 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
+
 logger = logging.getLogger(__name__)
 
 # Sort order for built-in Tesslate themes (defaults first, then originals).
@@ -109,12 +111,14 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                     INSERT INTO themes (
                         id, name, slug, mode, author, version, description, theme_json,
                         sort_order, is_default, is_active, icon, pricing_type, price,
-                        downloads, rating, is_featured, is_published, category, tags, source_type
+                        downloads, rating, is_featured, is_published, category, tags, source_type,
+                        source_id
                     )
                     VALUES (
                         :id, :name, :slug, :mode, :author, :version, :description, :theme_json,
                         :sort_order, :is_default, true, :icon, 'free', 0,
-                        0, 5.0, :is_featured, true, :category, :tags, 'open'
+                        0, 5.0, :is_featured, true, :category, :tags, 'open',
+                        :source_id
                     )
                     ON CONFLICT (id) DO UPDATE SET
                         name = EXCLUDED.name,
@@ -130,6 +134,7 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                         category = EXCLUDED.category,
                         tags = EXCLUDED.tags,
                         source_type = EXCLUDED.source_type,
+                        source_id = COALESCE(themes.source_id, EXCLUDED.source_id),
                         is_published = true,
                         updated_at = NOW()
                 """),
@@ -148,6 +153,7 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                     "is_featured": is_featured,
                     "category": category,
                     "tags": json.dumps(tags),
+                    "source_id": TESSLATE_OFFICIAL_ID,
                 },
             )
             seeded += 1

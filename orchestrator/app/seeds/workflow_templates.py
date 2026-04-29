@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import WorkflowTemplate
+from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
 
 # Workflow template definitions
 WORKFLOW_TEMPLATES = [
@@ -459,6 +460,8 @@ async def seed_workflow_templates(db: AsyncSession = None) -> int:
                 existing.price = template_data.get("price", 0)
                 existing.is_featured = template_data.get("is_featured", False)
                 existing.is_active = True
+                if not existing.source_id:
+                    existing.source_id = TESSLATE_OFFICIAL_ID
                 updated += 1
                 logger.info("Updated workflow: %s", template_data["slug"])
             else:
@@ -477,6 +480,7 @@ async def seed_workflow_templates(db: AsyncSession = None) -> int:
                     price=template_data.get("price", 0),
                     is_featured=template_data.get("is_featured", False),
                     is_active=True,
+                    source_id=TESSLATE_OFFICIAL_ID,
                 )
                 session.add(workflow)
                 created += 1

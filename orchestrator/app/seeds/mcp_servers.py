@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import MarketplaceAgent
+from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -714,9 +715,11 @@ async def seed_mcp_servers(db: AsyncSession) -> int:
                 if key == "slug":
                     continue
                 setattr(existing, key, value)
+            if not existing.source_id:
+                existing.source_id = TESSLATE_OFFICIAL_ID
             updated += 1
         else:
-            db.add(MarketplaceAgent(**server_data))
+            db.add(MarketplaceAgent(**server_data, source_id=TESSLATE_OFFICIAL_ID))
             created += 1
 
     await db.commit()

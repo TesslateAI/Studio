@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import MarketplaceBase
+from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -169,10 +170,12 @@ async def seed_marketplace_bases(db: AsyncSession) -> int:
             for key, value in base_data.items():
                 if key != "slug":
                     setattr(existing, key, value)
+            if not existing.source_id:
+                existing.source_id = TESSLATE_OFFICIAL_ID
             updated += 1
             logger.info("Updated base: %s", base_data["slug"])
         else:
-            base = MarketplaceBase(**base_data)
+            base = MarketplaceBase(**base_data, source_id=TESSLATE_OFFICIAL_ID)
             db.add(base)
             created += 1
             logger.info("Created base: %s", base_data["name"])

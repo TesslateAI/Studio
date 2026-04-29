@@ -75,6 +75,7 @@ from ..schemas import Container as ContainerSchema
 from ..schemas import ContainerConnection as ContainerConnectionSchema
 from ..schemas import Project as ProjectSchema
 from ..schemas import ProjectFile as ProjectFileSchema
+from ..services.marketplace_constants import LOCAL_SOURCE_ID
 from ..services.secret_manager_env import build_env_overrides, get_injected_env_vars_for_container
 from ..services.service_definitions import get_service
 from ..services.task_manager import Task, get_task_manager
@@ -3226,6 +3227,7 @@ async def export_project_as_template(
         pricing_type="free",
         price=0,
         source_type="archive",
+        source_id=LOCAL_SOURCE_ID,
         git_repo_url=None,
         source_project_id=project.id,
         created_by_user_id=current_user.id,

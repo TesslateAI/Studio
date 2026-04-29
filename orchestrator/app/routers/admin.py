@@ -47,6 +47,7 @@ from ..models import (
 from ..models_team import Team
 from ..services.git_providers.url_utils import strip_git_credentials as _strip_git_credentials
 from ..services.litellm_service import litellm_service
+from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
 from ..users import current_superuser
 
 logger = logging.getLogger(__name__)
@@ -924,6 +925,7 @@ async def create_agent(
             api_pricing_input=agent_data.api_pricing_input,
             api_pricing_output=agent_data.api_pricing_output,
             source_type=agent_data.source_type,
+            source_id=TESSLATE_OFFICIAL_ID,
             is_forkable=agent_data.is_forkable,
             requires_user_keys=agent_data.requires_user_keys,
             features=agent_data.features,
@@ -1405,6 +1407,7 @@ async def create_base(
             git_repo_url=base_data.git_repo_url,
             default_branch=base_data.default_branch,
             source_type=base_data.source_type,
+            source_id=TESSLATE_OFFICIAL_ID,
             category=base_data.category,
             icon=base_data.icon,
             preview_image=base_data.preview_image,

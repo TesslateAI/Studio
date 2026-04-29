@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import MarketplaceAgent
+from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
 from .marketplace_agents import get_or_create_tesslate_account
 
 logger = logging.getLogger(__name__)
@@ -46,12 +47,15 @@ async def seed_opensource_agents(db: AsyncSession) -> int:
                     setattr(existing, key, value)
             if not existing.created_by_user_id:
                 existing.created_by_user_id = tesslate_user.id
+            if not existing.source_id:
+                existing.source_id = TESSLATE_OFFICIAL_ID
             updated += 1
             logger.info("Updated open-source agent: %s", agent_data["slug"])
         else:
             agent = MarketplaceAgent(
                 **agent_data,
                 created_by_user_id=tesslate_user.id,
+                source_id=TESSLATE_OFFICIAL_ID,
             )
             db.add(agent)
             created += 1

@@ -271,43 +271,44 @@ def upgrade() -> None:
     # ------------------------------------------------------------------
     # 4. Backfill source_id
     # ------------------------------------------------------------------
-    # Tesslate-authored rows (no creator FK) → tesslate-official.
-    # All remaining rows                       → local.
-    # Order matters: WHERE creator IS NULL first, then WHERE source_id IS NULL.
+    # "Tesslate-authored" means either:
+    #   (a) ``created_by_user_id IS NULL`` (the historical signal), OR
+    #   (b) the row was authored by the seeded official Tesslate account
+    #       (``users.email = 'official@tesslate.com'``).
+    # Existing system seeds (``app/seeds/marketplace_agents.py``,
+    # ``community_bases.py``, etc.) populate ``created_by_user_id`` with
+    # the Tesslate account, so without rule (b) the backfill would
+    # misassign every seeded row to ``local``.
+    #
+    # All remaining rows → ``local``.
+    #
+    # Order matters: assign tesslate-official first (rules a + b), then
+    # everything still NULL falls into local.
+    TESSLATE_EMAIL = "official@tesslate.com"
+
     def _exec_tess(sql: str) -> None:
         op.execute(sa.text(sql).bindparams(_uuid_param("tess_id", TESSLATE_OFFICIAL_ID)))
 
     def _exec_local(sql: str) -> None:
         op.execute(sa.text(sql).bindparams(_uuid_param("local_id", LOCAL_SOURCE_ID)))
 
-    _exec_tess(
-        "UPDATE marketplace_agents SET source_id = :tess_id WHERE created_by_user_id IS NULL"
-    )
-    _exec_local(
-        "UPDATE marketplace_agents SET source_id = :local_id WHERE source_id IS NULL"
-    )
+    def _backfill_authored(table: str, creator_col: str) -> None:
+        _exec_tess(
+            f"""
+            UPDATE {table} SET source_id = :tess_id
+            WHERE source_id IS NULL
+              AND ({creator_col} IS NULL
+                   OR {creator_col} IN (
+                        SELECT id FROM users WHERE email = '{TESSLATE_EMAIL}'
+                   ))
+            """
+        )
+        _exec_local(f"UPDATE {table} SET source_id = :local_id WHERE source_id IS NULL")
 
-    _exec_tess(
-        "UPDATE marketplace_bases SET source_id = :tess_id WHERE created_by_user_id IS NULL"
-    )
-    _exec_local(
-        "UPDATE marketplace_bases SET source_id = :local_id WHERE source_id IS NULL"
-    )
-
-    # marketplace_apps uses creator_user_id (different name)
-    _exec_tess(
-        "UPDATE marketplace_apps SET source_id = :tess_id WHERE creator_user_id IS NULL"
-    )
-    _exec_local(
-        "UPDATE marketplace_apps SET source_id = :local_id WHERE source_id IS NULL"
-    )
-
-    _exec_tess(
-        "UPDATE themes SET source_id = :tess_id WHERE created_by_user_id IS NULL"
-    )
-    _exec_local(
-        "UPDATE themes SET source_id = :local_id WHERE source_id IS NULL"
-    )
+    _backfill_authored("marketplace_agents", "created_by_user_id")
+    _backfill_authored("marketplace_bases", "created_by_user_id")
+    _backfill_authored("marketplace_apps", "creator_user_id")
+    _backfill_authored("themes", "created_by_user_id")
 
     # workflow_templates has no creator column → all to tesslate-official.
     _exec_tess(

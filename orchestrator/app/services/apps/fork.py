@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models import PROJECT_KIND_APP_SOURCE, AppVersion, MarketplaceApp, Project
 from ..hub_client import HubClient
+from ..marketplace_constants import LOCAL_SOURCE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ async def fork_app(
         visibility="private",
         state="draft",
         reputation={},
+        source_id=LOCAL_SOURCE_ID,
     )
     db.add(new_app)
     try:

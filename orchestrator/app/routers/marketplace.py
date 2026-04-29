@@ -31,6 +31,7 @@ from ..models import (
 )
 from ..schemas import BaseSubmitRequest, BaseUpdateRequest, SkillInstallRequest
 from ..services.cache_service import cache
+from ..services.marketplace_constants import LOCAL_SOURCE_ID
 from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..username_validation import resolve_display_name
 from ..users import current_active_user, current_optional_user
@@ -1291,6 +1292,7 @@ async def fork_agent(
         pricing_type="free",
         price=0,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         requires_user_keys=parent_agent.requires_user_keys,
         downloads=0,
         rating=5.0,
@@ -1412,6 +1414,7 @@ async def create_custom_agent(
         pricing_type="free",
         price=0,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         requires_user_keys=False,
         downloads=0,
         rating=5.0,
@@ -1547,6 +1550,7 @@ async def update_custom_agent(
                 pricing_type="free",
                 price=0,
                 source_type="open",
+                source_id=LOCAL_SOURCE_ID,
                 requires_user_keys=agent.requires_user_keys,
                 downloads=0,
                 rating=5.0,
@@ -1880,6 +1884,7 @@ async def create_subagent(
         pricing_type="free",
         price=0,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         is_active=True,
         is_published=False,
     )
@@ -1946,6 +1951,7 @@ async def update_subagent(
             pricing_type="free",
             price=0,
             source_type="open",
+            source_id=LOCAL_SOURCE_ID,
             is_active=True,
             is_published=False,
         )
@@ -3312,6 +3318,7 @@ async def submit_base(
         created_by_user_id=current_user.id,
         visibility=request.visibility,
         is_active=True,
+        source_id=LOCAL_SOURCE_ID,
     )
     db.add(new_base)
     await db.flush()
@@ -4334,6 +4341,7 @@ async def create_custom_theme(
         category=category,
         tags=tags,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         pricing_type="free",
         is_published=False,
         is_active=True,
@@ -4542,6 +4550,7 @@ async def fork_theme(
         category=category or original.category or "general",
         tags=tags or original.tags or [],
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         pricing_type="free",
         is_published=False,
         is_active=True,
