@@ -316,8 +316,9 @@ async def _build_container_url(db: AsyncSession, project: Project, container: Co
         dir_or_name = resolve_k8s_container_dir(container)
         service_name = f"dev-{dir_or_name}"
         namespace = f"proj-{project.id}"
-        port = container.port or container.internal_port or 3000
-        return f"{protocol}://{service_name}.{namespace}.svc.cluster.local:{port}"
+        return (
+            f"{protocol}://{service_name}.{namespace}.svc.cluster.local:{container.effective_port}"
+        )
 
     from ...models import PROJECT_KIND_APP_RUNTIME
 
