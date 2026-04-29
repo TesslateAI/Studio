@@ -531,11 +531,12 @@ map.on('click', e => {
 map.on('dblclick', e => {
   if (!drawMode || drawMode === 'marker') return;
   L.DomEvent.stopPropagation(e);
-  // Leaflet always fires exactly 2 click events before dblclick at the same position.
-  // Remove those spurious points the click handler already added, then add the final
-  // point once via the dblclick coordinates.
-  const spurious = Math.min(2, drawPoints.length);
-  drawPoints.splice(drawPoints.length - spurious, spurious);
+  // Browsers fire 0-2 click events at the same position before dblclick (browser/sandbox
+  // dependent — cannot assume exactly 2). Remove all trailing drawPoints that landed at
+  // the same latlng as this dblclick, then push the final point once.
+  while (drawPoints.length > 0 && drawPoints[drawPoints.length - 1].equals(e.latlng)) {
+    drawPoints.pop();
+  }
   drawPoints.push(e.latlng);
   if (drawMode === 'line' && drawPoints.length >= 2) {
     pendingGeom = { type: 'LineString', coordinates: drawPoints.map(p => [p.lng, p.lat]) };

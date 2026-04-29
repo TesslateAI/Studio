@@ -312,13 +312,13 @@ async def _build_container_url(db: AsyncSession, project: Project, container: Co
     protocol = getattr(settings, "k8s_container_url_protocol", "http")
 
     if settings.is_kubernetes_mode:
-        # Internal cluster dispatch — ClusterIP service is always reachable.
+        # Internal cluster dispatch always uses plain HTTP regardless of
+        # k8s_container_url_protocol. TLS terminates at the ingress; the
+        # ClusterIP service never has a cert and will reject TLS handshakes.
         dir_or_name = resolve_k8s_container_dir(container)
         service_name = f"dev-{dir_or_name}"
         namespace = f"proj-{project.id}"
-        return (
-            f"{protocol}://{service_name}.{namespace}.svc.cluster.local:{container.effective_port}"
-        )
+        return f"http://{service_name}.{namespace}.svc.cluster.local:{container.effective_port}"
 
     from ...models import PROJECT_KIND_APP_RUNTIME
 

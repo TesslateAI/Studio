@@ -93,7 +93,12 @@ export function IframeAppHost({
       const frame = iframeRef.current;
       if (!frame || !frame.contentWindow) return;
       const envelope: Envelope = { v: 1, kind: 'response', id, topic, payload };
-      frame.contentWindow.postMessage(envelope, allowedOrigin);
+      try {
+        frame.contentWindow.postMessage(envelope, allowedOrigin);
+      } catch {
+        // Frame origin hasn't settled to allowedOrigin yet (still navigating).
+        // The onLoad re-send will deliver the message once navigation completes.
+      }
     };
 
     const handleRequest = async (env: Envelope) => {
@@ -183,7 +188,13 @@ export function IframeAppHost({
           app_instance_id: appInstanceId,
         },
       };
-      frame.contentWindow.postMessage(boot, allowedOrigin);
+      try {
+        frame.contentWindow.postMessage(boot, allowedOrigin);
+      } catch {
+        // The iframe origin is still about:blank (inherits parent origin) while
+        // navigating to allowedOrigin. The onLoad handler below re-fires send()
+        // once the iframe document has settled to its real origin.
+      }
     };
     // Fire once on mount; the iframe's own 'load' re-triggers it.
     const onLoad = () => send();
@@ -207,7 +218,7 @@ export function IframeAppHost({
     <iframe
       ref={iframeRef}
       src={entrypoint}
-      sandbox="allow-scripts allow-same-origin allow-forms"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
       title="Tesslate App"
       className="w-full h-full border-0 rounded-xl bg-white"
       style={{ colorScheme: 'normal' }}

@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  appBillingApi,
-  type LedgerEntry,
-  type WalletSnapshot,
-} from '../lib/api';
+import { appBillingApi, type LedgerEntry, type WalletSnapshot } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 interface CreatorUser {
@@ -46,6 +42,16 @@ export function CreatorBillingPanel() {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Skip the network call entirely for users without a Stripe account.
+    // The backend would return 403 anyway, and we already know the state
+    // from the user object — no need to make a round trip.
+    if (!creator?.creator_stripe_account_id) {
+      setOnboardingRequired(true);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setOnboardingRequired(false);
@@ -188,11 +194,7 @@ export function CreatorBillingPanel() {
               </thead>
               <tbody>
                 {ledger.map((entry) => (
-                  <tr
-                    key={entry.id}
-                    className="border-t"
-                    style={{ borderColor: 'var(--border)' }}
-                  >
+                  <tr key={entry.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
                     <td className="px-3 py-2 text-[var(--text-muted)]">
                       {entry.created_at.slice(0, 10)}
                     </td>

@@ -7,11 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import {
-  appBillingApi,
-  type LedgerEntry,
-  type WalletSnapshot,
-} from '../lib/api';
+import { appBillingApi, type LedgerEntry, type WalletSnapshot } from '../lib/api';
 import { useAuth } from './AuthContext';
 
 /**
@@ -39,10 +35,6 @@ function extractError(err: unknown, fallback: string): string {
   return e?.response?.data?.detail ?? e?.message ?? fallback;
 }
 
-function statusOf(err: unknown): number | undefined {
-  return (err as { response?: { status?: number } })?.response?.status;
-}
-
 export function WalletProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
   const [installerWallet, setInstallerWallet] = useState<WalletSnapshot | null>(null);
@@ -63,9 +55,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     setError(null);
 
-    const [installerResult, creatorResult, ledgerResult] = await Promise.allSettled([
+    // Creator wallet is fetched on-demand by creator-specific pages (CreatorBillingPage,
+    // CreatorStudioPage) which gate the call on creator_stripe_account_id. Fetching it
+    // here would fire a 403 for every non-creator user on every page load.
+    // TODO: wire creatorWallet here once AuthUser exposes creator_stripe_account_id
+    // so we can gate the call without an unnecessary round-trip.
+    const [installerResult, ledgerResult] = await Promise.allSettled([
       appBillingApi.getInstallerWallet(),
-      appBillingApi.getCreatorWallet(),
       appBillingApi.getLedger({ limit: 20 }),
     ]);
 
@@ -73,16 +69,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setInstallerWallet(installerResult.value);
     } else {
       setError(extractError(installerResult.reason, 'Failed to load wallet'));
-    }
-
-    if (creatorResult.status === 'fulfilled') {
-      setCreatorWallet(creatorResult.value);
-    } else if (statusOf(creatorResult.reason) === 403) {
-      // User isn't a creator — not an error, just no wallet.
-      setCreatorWallet(null);
-    } else {
-      // Non-403 creator-wallet failures are surfaced but non-fatal.
-      setCreatorWallet(null);
     }
 
     if (ledgerResult.status === 'fulfilled') {

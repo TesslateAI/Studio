@@ -1309,7 +1309,7 @@ export const mentionApi = {
    * are small and a single fetch primes all three sections at once.
    */
   search: async (): Promise<MentionSearchResponse> => {
-    const safeGet = async <T,>(url: string, params?: Record<string, unknown>) => {
+    const safeGet = async <T>(url: string, params?: Record<string, unknown>) => {
       try {
         const r = await api.get(url, { params });
         return r.data as T;
@@ -1400,7 +1400,8 @@ export const mentionApi = {
         slug: a.app_slug ?? '',
         name: a.app_name ?? a.app_slug ?? 'App',
         enabled: (a.state ?? 'installed') === 'installed' || (a.state ?? '') === 'running',
-        state_label: a.state && a.state !== 'installed' && a.state !== 'running' ? a.state : undefined,
+        state_label:
+          a.state && a.state !== 'installed' && a.state !== 'running' ? a.state : undefined,
       }));
 
     return { agents, mcps, apps };
@@ -4187,11 +4188,7 @@ export const appVersionsApi = {
 // /api/app-versions/publish endpoint with project-slug ergonomics + an
 // inferrer that produces a draft manifest from project structure.
 
-import type {
-  PublishDraftResponse,
-  PublishAppRequest,
-  PublishAppResponse,
-} from '../types/publish';
+import type { PublishDraftResponse, PublishAppRequest, PublishAppResponse } from '../types/publish';
 
 export const publishApi = {
   async draft(projectSlug: string): Promise<PublishDraftResponse> {
@@ -4892,9 +4889,7 @@ export const automationsApi = {
     if (params?.limit !== undefined) qs.append('limit', String(params.limit));
     if (params?.offset !== undefined) qs.append('offset', String(params.offset));
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    const response = await api.get(
-      `/api/automations/runs/by-install/${appInstanceId}${suffix}`
-    );
+    const response = await api.get(`/api/automations/runs/by-install/${appInstanceId}${suffix}`);
     return response.data;
   },
 
@@ -4908,10 +4903,7 @@ export const automationsApi = {
     return response.data;
   },
 
-  async update(
-    id: string,
-    payload: AutomationDefinitionUpdate
-  ): Promise<AutomationDefinitionOut> {
+  async update(id: string, payload: AutomationDefinitionUpdate): Promise<AutomationDefinitionOut> {
     const response = await api.patch(`/api/automations/${id}`, payload);
     return response.data;
   },
@@ -4932,10 +4924,7 @@ export const automationsApi = {
     return response.data;
   },
 
-  async listRuns(
-    id: string,
-    params?: ListRunsParams
-  ): Promise<AutomationRunSummary[]> {
+  async listRuns(id: string, params?: ListRunsParams): Promise<AutomationRunSummary[]> {
     const qs = new URLSearchParams();
     if (params?.status) qs.append('status', params.status);
     if (params?.limit !== undefined) qs.append('limit', String(params.limit));
@@ -5026,13 +5015,11 @@ export const automationsApi = {
    *   submit a resolution. Owned by Wave 2A; this client just calls it.
    */
   approvals: {
-    /** Cross-automation pending list. Used by the badge + ApprovalsPage. */
+    /** Cross-automation pending list. Used by the badge + ApprovalsPage.
+     * TODO(Phase 2): replace stub with real GET /api/automations/approvals/pending
+     * once the backend endpoint is implemented. Until then we return [] without
+     * making a network request so the browser console stays clean. */
     async listPending(): Promise<ApprovalRequest[]> {
-      const response = await api.get('/api/automations/approvals/pending');
-      // Backend may shape this as either a bare list or { items: [...] }.
-      const data = response.data;
-      if (Array.isArray(data)) return data as ApprovalRequest[];
-      if (Array.isArray(data?.items)) return data.items as ApprovalRequest[];
       return [];
     },
 
@@ -5048,9 +5035,7 @@ export const automationsApi = {
 
     /** Single approval fetch — drawer hydration. */
     async get(automationId: string, requestId: string): Promise<ApprovalRequest> {
-      const response = await api.get(
-        `/api/automations/${automationId}/approvals/${requestId}`
-      );
+      const response = await api.get(`/api/automations/${automationId}/approvals/${requestId}`);
       return response.data;
     },
 
@@ -5099,9 +5084,7 @@ export interface AppCompositionLink {
 export const appCompositionApi = {
   async listLinks(installId: string): Promise<AppCompositionLink[]> {
     try {
-      const response = await api.get(
-        `/api/v1/composition/installs/${installId}/links`
-      );
+      const response = await api.get(`/api/v1/composition/installs/${installId}/links`);
       return Array.isArray(response.data) ? response.data : [];
     } catch {
       // Endpoint is wired in Phase 5; defensive empty-list fallback so
@@ -5155,10 +5138,7 @@ export const communicationDestinationsApi = {
    * Delete a destination. Server returns 409 if the destination is
    * referenced by active automations — pass ``force=true`` to override.
    */
-  async remove(
-    id: string,
-    force = false
-  ): Promise<{ status: string; id: string }> {
+  async remove(id: string, force = false): Promise<{ status: string; id: string }> {
     const suffix = force ? '?force=true' : '';
     const response = await api.delete(`/api/destinations/${id}${suffix}`);
     return response.data;
@@ -5247,11 +5227,13 @@ export interface SpendRollupResponse {
 }
 
 export const adminSpendApi = {
-  async rollup(params: {
-    start?: string;
-    end?: string;
-    group_by?: SpendRollupGroupBy;
-  } = {}): Promise<SpendRollupResponse> {
+  async rollup(
+    params: {
+      start?: string;
+      end?: string;
+      group_by?: SpendRollupGroupBy;
+    } = {}
+  ): Promise<SpendRollupResponse> {
     const response = await api.get('/api/admin/spend/rollup', { params });
     return response.data;
   },
