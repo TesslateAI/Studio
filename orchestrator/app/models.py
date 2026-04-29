@@ -1138,6 +1138,89 @@ class Deployment(Base):
 # ============================================================================
 
 
+class MarketplaceSource(Base):
+    """Federated marketplace source registry.
+
+    Each row is a hub the orchestrator can pull catalog content from. Two
+    immutable system rows are seeded by alembic 0088:
+
+    - ``tesslate-official`` (UUID 00000000-0000-0000-0000-000000000001) —
+      canonical Tesslate-hosted hub at https://marketplace.tesslate.com
+    - ``local`` (UUID 00000000-0000-0000-0000-000000000002) — sentinel
+      source for user-authored rows that have no upstream hub yet
+
+    Users and teams can register additional sources (URL + optional bearer
+    token, encrypted via ``services/credential_manager.py``). ``trust_level``
+    drives install gating; ``pinned_hub_id`` is verified against the
+    ``X-Tesslate-Hub-Id`` header on every response so URL hijacks fail fast.
+    """
+
+    __tablename__ = "marketplace_sources"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    handle = Column(String(64), nullable=False)
+    display_name = Column(String(128), nullable=False)
+    base_url = Column(String(500), nullable=False)
+    encrypted_token = Column(Text, nullable=True)
+    scope = Column(String(16), nullable=False)  # "system" | "user" | "team"
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True)
+    trust_level = Column(
+        String(16), nullable=False
+    )  # official | admin_trusted | local | private | untrusted
+    pinned_hub_id = Column(String(128), nullable=True)
+    capabilities_cache = Column(JSON, nullable=True)
+    policies_cache = Column(JSON, nullable=True)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    sync_etag = Column(String(128), nullable=True)
+    last_sync_error = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        # Partial unique indexes per scope: handles must be unique within
+        # their scope bucket (system / per-user / per-team), but the same
+        # handle can legitimately appear once per bucket.
+        Index(
+            "uq_msrc_system_handle",
+            "handle",
+            unique=True,
+            postgresql_where=text("scope = 'system'"),
+            sqlite_where=text("scope = 'system'"),
+        ),
+        Index(
+            "uq_msrc_user_handle",
+            "user_id",
+            "handle",
+            unique=True,
+            postgresql_where=text("scope = 'user'"),
+            sqlite_where=text("scope = 'user'"),
+        ),
+        Index(
+            "uq_msrc_team_handle",
+            "team_id",
+            "handle",
+            unique=True,
+            postgresql_where=text("scope = 'team'"),
+            sqlite_where=text("scope = 'team'"),
+        ),
+        # Owner shape must match scope: system rows have neither user nor
+        # team; user rows have exactly user; team rows have exactly team.
+        CheckConstraint(
+            "(scope = 'system' AND user_id IS NULL AND team_id IS NULL) OR "
+            "(scope = 'user'   AND user_id IS NOT NULL AND team_id IS NULL) OR "
+            "(scope = 'team'   AND team_id IS NOT NULL AND user_id IS NULL)",
+            name="ck_msrc_scope_owner",
+        ),
+    )
+
+
 class MarketplaceAgent(Base):
     """Marketplace items: agents, bases, tools, integrations."""
 
@@ -1251,6 +1334,36 @@ class MarketplaceAgent(Base):
     # They are hidden from all user-facing agent selection UIs and cannot be
     # manually invoked by users. Set only via seed code.
     is_system = Column(Boolean, nullable=False, server_default="false", default=False)
+
+    # ---- Federated-marketplace cache / provenance (Wave 1) -----------------
+    # ``source_id`` points at the hub this row was synced from; legacy rows
+    # are backfilled to either ``tesslate-official`` or ``local`` system
+    # sources by alembic 0088. Composite ``(source_id, slug)`` uniqueness is
+    # enforced via ``__table_args__`` below alongside the existing global
+    # slug ``unique=True`` invariant — both coexist until Wave 5.
+    source_id = Column(
+        GUID(),
+        ForeignKey("marketplace_sources.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    source_etag = Column(String(128), nullable=True)
+    source_remote_id = Column(String(128), nullable=True)
+    source_pricing_type_original = Column(String(32), nullable=True)
+    source_pricing_payload_original = Column(JSON, nullable=True)
+    source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
+    source_pricing_ignored = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
+    deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("source_id", "slug", name="uq_marketplace_agents_source_slug"),
+    )
 
 
 class AgentSkillAssignment(Base):
@@ -1409,6 +1522,31 @@ class MarketplaceBase(Base):
     )
     reviews = relationship("BaseReview", back_populates="base", cascade="all, delete-orphan")
 
+    # ---- Federated-marketplace cache / provenance (Wave 1) -----------------
+    source_id = Column(
+        GUID(),
+        ForeignKey("marketplace_sources.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    source_etag = Column(String(128), nullable=True)
+    source_remote_id = Column(String(128), nullable=True)
+    source_pricing_type_original = Column(String(32), nullable=True)
+    source_pricing_payload_original = Column(JSON, nullable=True)
+    source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
+    source_pricing_ignored = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
+    deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("source_id", "slug", name="uq_marketplace_bases_source_slug"),
+    )
+
 
 class UserPurchasedBase(Base):
     """Tracks which bases users have purchased/acquired."""
@@ -1511,6 +1649,31 @@ class WorkflowTemplate(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ---- Federated-marketplace cache / provenance (Wave 1) -----------------
+    source_id = Column(
+        GUID(),
+        ForeignKey("marketplace_sources.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    source_etag = Column(String(128), nullable=True)
+    source_remote_id = Column(String(128), nullable=True)
+    source_pricing_type_original = Column(String(32), nullable=True)
+    source_pricing_payload_original = Column(JSON, nullable=True)
+    source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
+    source_pricing_ignored = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
+    deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("source_id", "slug", name="uq_workflow_templates_source_slug"),
+    )
 
 
 class UserAPIKey(Base):
@@ -1907,8 +2070,36 @@ class MarketplaceApp(Base):
         backref="forks",
     )
 
+    # ---- Federated-marketplace cache / provenance (Wave 1) -----------------
+    source_id = Column(
+        GUID(),
+        ForeignKey("marketplace_sources.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    source_etag = Column(String(128), nullable=True)
+    source_remote_id = Column(String(128), nullable=True)
+    source_pricing_type_original = Column(String(32), nullable=True)
+    source_pricing_payload_original = Column(JSON, nullable=True)
+    source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
+    source_pricing_ignored = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
+    deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         UniqueConstraint("creator_user_id", "handle", name="uq_marketplace_apps_creator_handle"),
+        UniqueConstraint("source_id", "slug", name="uq_marketplace_apps_source_slug"),
+        UniqueConstraint(
+            "source_id",
+            "creator_user_id",
+            "handle",
+            name="uq_marketplace_apps_source_creator_handle",
+        ),
     )
 
 
@@ -1952,6 +2143,30 @@ class AppVersion(Base):
     )
     published_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # ---- Federated-marketplace cache / provenance (Wave 1) -----------------
+    # AppVersion has no slug column, so no (source_id, slug) unique index;
+    # source_id is backfilled by inheriting from the parent MarketplaceApp.
+    source_id = Column(
+        GUID(),
+        ForeignKey("marketplace_sources.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    source_etag = Column(String(128), nullable=True)
+    source_remote_id = Column(String(128), nullable=True)
+    source_pricing_type_original = Column(String(32), nullable=True)
+    source_pricing_payload_original = Column(JSON, nullable=True)
+    source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
+    source_pricing_ignored = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
+    deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
+    yanked_upstream_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (UniqueConstraint("app_id", "version", name="uq_app_version_app_slug"),)
 
@@ -2412,6 +2627,34 @@ class Theme(Base):
     creator = relationship("User", foreign_keys=[created_by_user_id])
     library_entries = relationship(
         "UserLibraryTheme", back_populates="theme", cascade="all, delete-orphan"
+    )
+
+    # ---- Federated-marketplace cache / provenance (Wave 1) -----------------
+    # Theme.id is the legacy String(100) PK (e.g. "midnight-dark"); leaving
+    # it untouched in Wave 1 (PK migration is Wave 1.5). source_id is just
+    # an additive provenance column here.
+    source_id = Column(
+        GUID(),
+        ForeignKey("marketplace_sources.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    source_etag = Column(String(128), nullable=True)
+    source_remote_id = Column(String(128), nullable=True)
+    source_pricing_type_original = Column(String(32), nullable=True)
+    source_pricing_payload_original = Column(JSON, nullable=True)
+    source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
+    source_pricing_ignored = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
+    deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("source_id", "slug", name="uq_themes_source_slug"),
     )
 
 
