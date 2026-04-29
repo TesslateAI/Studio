@@ -47,78 +47,6 @@ async function startDragging(): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// macOS traffic-light button
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MAC_COLORS = {
-  close: { base: '#FF5F57', hover: '#FF5F57' },
-  minimize: { base: '#FEBC2E', hover: '#FEBC2E' },
-  maximize: { base: '#28C840', hover: '#28C840' },
-};
-
-const MacTrafficLight = ({
-  kind,
-  onClick,
-  showIcon,
-}: {
-  kind: 'close' | 'minimize' | 'maximize';
-  onClick: () => void;
-  showIcon: boolean;
-}) => {
-  const color = MAC_COLORS[kind];
-
-  const icon =
-    kind === 'close' ? (
-      // × glyph
-      <svg width="6" height="6" viewBox="0 0 6 6" fill="none">
-        <path d="M1 1L5 5M5 1L1 5" stroke="#4d0000" strokeWidth="1.2" strokeLinecap="round" />
-      </svg>
-    ) : kind === 'minimize' ? (
-      // − glyph
-      <svg width="6" height="6" viewBox="0 0 6 6" fill="none">
-        <path d="M1 3H5" stroke="#5a3a00" strokeWidth="1.2" strokeLinecap="round" />
-      </svg>
-    ) : (
-      // ⊞ glyph (two diagonal arrows)
-      <svg width="6" height="6" viewBox="0 0 6 6" fill="none">
-        <path
-          d="M1 1L5 5M3.5 1H5V2.5M1 3.5V5H2.5"
-          stroke="#003a1a"
-          strokeWidth="1.1"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-
-  return (
-    <button
-      onClick={onClick}
-      style={
-        {
-          WebkitAppRegion: 'no-drag',
-          width: 12,
-          height: 12,
-          borderRadius: '50%',
-          background: color.base,
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          transition: 'opacity 150ms ease',
-        } as React.CSSProperties
-      }
-      aria-label={kind}
-    >
-      {showIcon && icon}
-    </button>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Windows / Linux control button
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -192,18 +120,17 @@ const WinControlButton = ({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Custom window titlebar rendered only inside the Tauri shell.
- * Replaces the native OS titlebar removed via `decorations: false`.
+ * Window title strip rendered inside the Tauri shell.
  *
- * - macOS: traffic-light circles on the left, app name centred.
- * - Windows/Linux: app name on the left, win32-style control buttons on the right.
+ * - macOS: native traffic lights overlay this bar via `titleBarStyle: "Overlay"`,
+ *   so we just reserve space on the left and act as the drag region.
+ * - Windows/Linux: native decorations are disabled in the host; this component
+ *   draws its own min/max/close trio on the right.
  *
  * All colours come from the active theme's CSS variables so the bar
  * automatically adjusts when the user switches themes.
  */
 export function TitleBar() {
-  const [macHovered, setMacHovered] = useState(false);
-
   const handleMinimize = useCallback(() => invokeCmd('minimize_window'), []);
   const handleMaximize = useCallback(() => invokeCmd('toggle_maximize_window'), []);
   const handleClose = useCallback(() => invokeCmd('close_window'), []);
@@ -233,10 +160,12 @@ export function TitleBar() {
   }, []);
 
   if (PLATFORM === 'mac') {
+    // The Tauri host runs with `titleBarStyle: "Overlay"` on macOS, so the OS
+    // draws real traffic lights at trafficLightPosition (configured in
+    // tauri.conf.json). We just reserve room for them on the left and act as
+    // the drag region for the rest of the strip.
     return (
       <div
-        onMouseEnter={() => setMacHovered(true)}
-        onMouseLeave={() => setMacHovered(false)}
         onMouseDown={handleDragMouseDown}
         style={
           {
@@ -244,28 +173,16 @@ export function TitleBar() {
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
-            backgroundColor: 'var(--sidebar-bg)',
+            backgroundColor: 'transparent',
             WebkitAppRegion: 'drag',
             position: 'relative',
             userSelect: 'none',
+            // Keep the leftmost ~80px clear so the native traffic lights at
+            // (20, 20) don't overlap interactive content.
+            paddingLeft: 80,
           } as React.CSSProperties
         }
       >
-        {/* Traffic lights on the left */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingLeft: 16,
-            paddingRight: 8,
-          }}
-        >
-          <MacTrafficLight kind="close" onClick={handleClose} showIcon={macHovered} />
-          <MacTrafficLight kind="minimize" onClick={handleMinimize} showIcon={macHovered} />
-          <MacTrafficLight kind="maximize" onClick={handleMaximize} showIcon={macHovered} />
-        </div>
-
         {/* Centred title */}
         <div
           style={{

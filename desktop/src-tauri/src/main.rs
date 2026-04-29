@@ -9,6 +9,7 @@ mod sidecar;
 mod tokens;
 mod tray;
 mod updater;
+mod window;
 
 use std::time::Duration;
 
@@ -47,16 +48,20 @@ fn main() {
                 eprintln!("[host] tray install failed: {e}");
             }
 
+            window::register_main_window(handle);
+
             // Inject the local user's JWT into the WebView so the frontend
             // can auto-authenticate without a registration / login flow.
             // Runs async so it doesn't block the setup callback.
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // The sidecar emits TESSLATE_READY before uvicorn is fully
-                // accepting connections.  Poll at a fixed 300 ms interval
-                // until local-auth responds (max ~15 s total).
-                const ATTEMPTS: u32 = 50;
-                const POLL_INTERVAL_MS: u64 = 300;
+                // The sidecar emits TESSLATE_READY before `import uvicorn`
+                // even runs (entrypoint.py:182), so on a cold start uvicorn
+                // won't actually bind for another 10-30 s while alembic /
+                // SQLAlchemy / app.main warm up. Budget enough retries to
+                // cover that worst case (~120 s) so auto-login is reliable.
+                const ATTEMPTS: u32 = 240;
+                const POLL_INTERVAL_MS: u64 = 500;
 
                 let mut token: Option<String> = None;
                 for attempt in 1..=ATTEMPTS {
@@ -94,17 +99,25 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
+        .run(|app_handle, event| match &event {
             // Kill the sidecar when the host exits (any reason) so we
             // never leave an orphan holding the loopback port + SQLite
             // file. Without this, force-quit or crash leaves the child
             // parented to init(1) and the next launch fails with
             // "address already in use".
-            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
                 if let Some(handle) = app_handle.try_state::<sidecar::SidecarHandle>() {
                     sidecar::kill_on_exit(&handle);
                 }
             }
+            // macOS dock-icon click while no window is visible (close-to-tray
+            // hid the window). Without this, the dock click does nothing and
+            // the only re-open path is the menu-bar tray.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { has_visible_windows, .. } if !has_visible_windows => {
+                window::show_main(app_handle);
+            }
+            _ => {}
         });
 }
 
