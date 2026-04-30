@@ -1,5 +1,5 @@
 import type { AutomationTriggerIn, AutomationTriggerKind } from '../../../types/automations';
-import { humanizeCron } from '../utils/humanize';
+import { ScheduleBuilder } from './ScheduleBuilder';
 
 interface Props {
   value: AutomationTriggerIn;
@@ -37,9 +37,6 @@ const KIND_OPTIONS: Array<{ value: AutomationTriggerKind; label: string; help: s
  * receive URL once the automation is created.
  */
 export function TriggerEditor({ value, onChange, webhookUrl }: Props) {
-  const updateConfig = (patch: Record<string, unknown>) =>
-    onChange({ ...value, config: { ...(value.config || {}), ...patch } });
-
   return (
     <div className="space-y-3">
       <label className="block">
@@ -63,49 +60,20 @@ export function TriggerEditor({ value, onChange, webhookUrl }: Props) {
       </label>
 
       {value.kind === 'cron' && (
-        <label className="block">
-          <span className="block text-xs font-medium text-[var(--text)] mb-1">
-            Schedule (cron expression)
-          </span>
-          <input
-            type="text"
-            value={String(value.config.expression ?? '')}
-            onChange={(e) => updateConfig({ expression: e.target.value })}
-            placeholder="0 9 * * 1-5"
-            className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-          />
-          {value.config.expression ? (
-            <span className="mt-1 block text-[10px] text-emerald-400">
-              {humanizeCron(
-                String(value.config.expression),
-                value.config.timezone ? String(value.config.timezone) : null
-              )}
-            </span>
-          ) : (
-            <span className="mt-1 block text-[10px] text-[var(--text-subtle)]">
-              Five fields: minute, hour, day-of-month, month, weekday. Example:{' '}
-              <code className="font-mono">0 9 * * 1-5</code> = every weekday at 9 AM.
-            </span>
-          )}
-        </label>
-      )}
-
-      {value.kind === 'cron' && (
-        <label className="block">
-          <span className="block text-xs font-medium text-[var(--text)] mb-1">
-            Timezone (optional)
-          </span>
-          <input
-            type="text"
-            value={String(value.config.timezone ?? '')}
-            onChange={(e) => updateConfig({ timezone: e.target.value })}
-            placeholder="UTC"
-            className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
-          />
-          <span className="mt-1 block text-[10px] text-[var(--text-subtle)]">
-            IANA timezone name. Defaults to UTC if omitted.
-          </span>
-        </label>
+        <ScheduleBuilder
+          expression={String(value.config.expression ?? '')}
+          timezone={String(value.config.timezone ?? '')}
+          onChange={(next) =>
+            onChange({
+              ...value,
+              config: {
+                ...(value.config || {}),
+                expression: next.expression,
+                timezone: next.timezone,
+              },
+            })
+          }
+        />
       )}
 
       {value.kind === 'webhook' && (

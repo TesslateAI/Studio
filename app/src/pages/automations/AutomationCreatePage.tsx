@@ -13,37 +13,15 @@ import type {
 } from '../../types/automations';
 import { TriggerEditor } from './components/TriggerEditor';
 import { ActionEditor } from './components/ActionEditor';
-import { ContractEditor } from './components/ContractEditor';
 import { DestinationPicker } from './components/DestinationPicker';
+import { WorkspacePicker } from './components/WorkspacePicker';
+import { LimitsForm } from './components/LimitsForm';
 
 const DEFAULT_CONTRACT = `{
   "allowed_tools": ["read", "write", "bash"],
   "max_compute_tier": 1,
   "max_iterations": 25
 }`;
-
-const SCOPES: Array<{ value: AutomationWorkspaceScope; label: string; help: string }> = [
-  {
-    value: 'none',
-    label: 'No files needed',
-    help: 'The automation just runs an action — no project files involved.',
-  },
-  {
-    value: 'user_automation_workspace',
-    label: 'In my personal automation folder',
-    help: 'Use a private folder shared across your automations.',
-  },
-  {
-    value: 'team_automation_workspace',
-    label: "In our team's automation folder",
-    help: 'Use a shared folder visible to everyone on the team.',
-  },
-  {
-    value: 'target_project',
-    label: 'Inside one of my projects',
-    help: 'Run inside an existing project. Pick the project below.',
-  },
-];
 
 /**
  * /automations/new — single-form create page. Submits to
@@ -221,45 +199,14 @@ export default function AutomationCreatePage() {
               />
             </label>
 
-            <fieldset className="space-y-1.5">
-              <legend className="text-xs font-medium text-[var(--text)] mb-1">
-                Where should it run?
-              </legend>
-              {SCOPES.map((opt) => (
-                <label key={opt.value} className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="scope"
-                    value={opt.value}
-                    checked={scope === opt.value}
-                    onChange={() => setScope(opt.value)}
-                    className="mt-0.5"
-                  />
-                  <span className="flex-1">
-                    <span className="block text-xs text-[var(--text)]">{opt.label}</span>
-                    <span className="block text-[10px] text-[var(--text-subtle)]">{opt.help}</span>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-
-            {scope === 'target_project' && (
-              <label className="block">
-                <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Project ID
-                </span>
-                <input
-                  type="text"
-                  value={targetProjectId}
-                  onChange={(e) => setTargetProjectId(e.target.value)}
-                  placeholder="project UUID"
-                  className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                />
-                <span className="mt-1 block text-[10px] text-[var(--text-subtle)]">
-                  Paste a project UUID for now. A picker is coming soon.
-                </span>
-              </label>
-            )}
+            <WorkspacePicker
+              scope={scope}
+              targetProjectId={targetProjectId}
+              onChange={({ scope: nextScope, targetProjectId: nextProjectId }) => {
+                setScope(nextScope);
+                setTargetProjectId(nextProjectId);
+              }}
+            />
           </Section>
 
           <Section title="When" description="Pick the trigger that should start each run.">
@@ -285,58 +232,8 @@ export default function AutomationCreatePage() {
           </Section>
 
           <Section
-            title="Limits (optional)"
-            description="Cap how powerful and how expensive each run can be."
-          >
-            <div className="grid grid-cols-3 gap-3">
-              <label className="block">
-                <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Power level
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={maxComputeTier}
-                  onChange={(e) => setMaxComputeTier(e.target.value)}
-                  className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                />
-                <span className="mt-1 block text-[10px] text-[var(--text-subtle)]">
-                  0 = light, 1 = standard, 2+ = heavy.
-                </span>
-              </label>
-              <label className="block">
-                <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Max $ per run
-                </span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={maxSpendPerRun}
-                  onChange={(e) => setMaxSpendPerRun(e.target.value)}
-                  placeholder="e.g. 0.50"
-                  className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                />
-              </label>
-              <label className="block">
-                <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Max $ per day
-                </span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={maxSpendPerDay}
-                  onChange={(e) => setMaxSpendPerDay(e.target.value)}
-                  placeholder="e.g. 5.00"
-                  className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                />
-              </label>
-            </div>
-          </Section>
-
-          <Section
-            title="Permissions"
-            description="Required guardrails for what this automation is allowed to do."
+            title="Permissions & limits"
+            description="Cap what this automation can do and how much it can spend."
           >
             {appliedTemplateName && (
               <div
@@ -357,7 +254,16 @@ export default function AutomationCreatePage() {
                 </button>
               </div>
             )}
-            <ContractEditor value={contractText} onChange={setContractText} />
+            <LimitsForm
+              contractText={contractText}
+              onContractTextChange={setContractText}
+              maxComputeTier={maxComputeTier}
+              onMaxComputeTierChange={setMaxComputeTier}
+              maxSpendPerRun={maxSpendPerRun}
+              onMaxSpendPerRunChange={setMaxSpendPerRun}
+              maxSpendPerDay={maxSpendPerDay}
+              onMaxSpendPerDayChange={setMaxSpendPerDay}
+            />
           </Section>
 
           <div className="flex items-center justify-end gap-2 pt-2">
