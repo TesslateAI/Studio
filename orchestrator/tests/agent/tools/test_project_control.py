@@ -776,9 +776,25 @@ class TestHealthCheckAction:
 @pytest.mark.unit
 class TestProjectArchitectureSkillSeed:
     def _skill(self):
-        from app.seeds.skills import TESSLATE_SKILLS
+        # After Wave 10 the canonical skill body lives in the federated
+        # marketplace service; the orchestrator's catalog rows are the
+        # cached output of services/marketplace_sync.py. Read the upstream
+        # JSON directly so this skill-body contract is asserted against
+        # the same source the live system pulls from.
+        import json
+        from pathlib import Path
 
-        return next(s for s in TESSLATE_SKILLS if s["slug"] == "project-architecture")
+        # parents[4] resolves to the repo root (tools → agent → tests → orchestrator → root).
+        seed_path = (
+            Path(__file__).resolve().parents[4]
+            / "packages"
+            / "tesslate-marketplace"
+            / "app"
+            / "seeds"
+            / "skills_tesslate.json"
+        )
+        skills = json.loads(seed_path.read_text(encoding="utf-8"))
+        return next(s for s in skills if s["slug"] == "project-architecture")
 
     def test_skill_exists(self):
         skill = self._skill()

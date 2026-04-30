@@ -53,11 +53,13 @@ def _resolve_display_name(user: User) -> str:
 def _reject_if_builtin(agent: MarketplaceAgent) -> None:
     """Guard — refuse to mutate built-in skill rows via user/admin endpoints.
 
-    Built-in skills (``is_builtin=True``) are managed exclusively by seed
-    code (``orchestrator/app/seeds/skills.py``). Any edit to a built-in via
-    the UI would (a) be silently overwritten on the next orchestrator
-    startup when the idempotent seed reruns, or (b) drift the deployed
-    state away from what the seed template + live marker renderers produce.
+    Built-in skills (``is_builtin=True``) are managed by the upstream
+    marketplace service (after Wave 10 the orchestrator's catalog rows are
+    the cached output of ``services/marketplace_sync.py`` pulling from
+    ``packages/tesslate-marketplace/app/seeds/skills_*.json``). Any edit to
+    a built-in via the UI would either (a) be silently overwritten on the
+    next federation sync poll, or (b) drift the deployed state away from
+    the canonical seed.
 
     Callers that allow forking (which creates a NEW row with
     ``is_builtin=False``) should still call this on the *source* row before
@@ -68,10 +70,10 @@ def _reject_if_builtin(agent: MarketplaceAgent) -> None:
         raise HTTPException(
             status_code=403,
             detail=(
-                "Built-in skills are managed in seed code "
-                "(orchestrator/app/seeds/skills.py). Edit the seed and "
-                "redeploy. Users can fork built-in skills to create editable "
-                "copies."
+                "Built-in skills are managed upstream by the federated "
+                "marketplace (packages/tesslate-marketplace/app/seeds/). "
+                "Edit the upstream seed and let the next sync poll propagate. "
+                "Users can fork built-in skills to create editable copies."
             ),
         )
 

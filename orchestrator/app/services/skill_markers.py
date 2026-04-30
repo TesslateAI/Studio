@@ -1,11 +1,12 @@
 """Live marker substitution for built-in skill bodies.
 
-Skill bodies authored in ``seeds/skills.py`` may contain marker tokens of the
-form ``{{MARKER_NAME}}``. When an agent calls ``load_skill`` on a built-in,
-each marker is replaced by a freshly-rendered block sourced directly from the
-authoritative Python modules (Pydantic models, ``SERVICES`` catalog,
-validation constants, etc.). This eliminates drift between the skill body
-and the code it documents.
+Skill bodies authored upstream in
+``packages/tesslate-marketplace/app/seeds/skills_*.json`` may contain
+marker tokens of the form ``{{MARKER_NAME}}``. When an agent calls
+``load_skill`` on a built-in, each marker is replaced by a freshly-rendered
+block sourced directly from the authoritative Python modules (Pydantic
+models, ``SERVICES`` catalog, validation constants, etc.). This
+eliminates drift between the skill body and the code it documents.
 
 Caching is trivially simple: once a skill slug has been rendered in this
 process, the result is memoised in ``_RENDERED`` and returned on every

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from .config import get_settings
+from .config import env_bool, get_settings
 from .database import get_session_factory
 from .models import AttestationKey
 from .routers import (
@@ -34,6 +34,7 @@ from .routers import (
 )
 from .services.attestations import get_attestor
 from .services.hub_id import resolve_hub_id
+from .services.seed_loader import load_seeds
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,22 @@ async def lifespan(app: FastAPI):
                 await session.commit()
             except IntegrityError:
                 await session.rollback()
+
+    # Wave 10: the orchestrator no longer carries any catalog seed scripts.
+    # The marketplace service owns the canonical seeds and re-asserts them on
+    # every boot via an idempotent UPSERT-by-(kind, slug). The federation
+    # sync worker drains the resulting `/v1/changes` feed to populate the
+    # orchestrator's local cache.
+    #
+    # Default ON. Disable via `MARKETPLACE_LOAD_SEEDS_ON_STARTUP=false` for
+    # bare-metal test harnesses that prefer to run `scripts/init_db.py`
+    # explicitly (the orchestrator integration suite still does this so its
+    # asserts can rely on a known seed-set timing).
+    if env_bool("MARKETPLACE_LOAD_SEEDS_ON_STARTUP", True):
+        try:
+            await load_seeds(session_factory=factory, settings=settings)
+        except Exception:  # noqa: BLE001 - never block startup on a seed glitch
+            logger.exception("marketplace boot — seed loader failed; continuing anyway")
 
     yield
 

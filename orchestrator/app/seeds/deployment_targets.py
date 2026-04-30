@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import MarketplaceAgent
 from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
-from .marketplace_agents import get_or_create_tesslate_account
+from ..services.tesslate_account import get_or_create_tesslate_account
 
 logger = logging.getLogger(__name__)
 

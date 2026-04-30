@@ -1342,10 +1342,12 @@ class MarketplaceAgent(Base):
     # Skill-specific field (item_type='skill')
     skill_body = Column(Text, nullable=True)  # Full SKILL.md body (after frontmatter)
 
-    # Built-in flag — True only for rows created by seed code. Users cannot set
-    # this field (no Pydantic schema exposes it). Built-ins are immutable via
-    # user/admin UI endpoints and are auto-discovered for every agent regardless
-    # of AgentSkillAssignment. See services/skill_discovery.py + seeds/skills.py.
+    # Built-in flag — True only for rows synced from upstream seed manifests
+    # (``packages/tesslate-marketplace/app/seeds/``) by the federation sync
+    # worker. Users cannot set this field (no Pydantic schema exposes it).
+    # Built-ins are immutable via user/admin UI endpoints and are
+    # auto-discovered for every agent regardless of AgentSkillAssignment.
+    # See services/skill_discovery.py + services/marketplace_sync.py.
     is_builtin = Column(Boolean, nullable=False, server_default="false", default=False)
 
     # System agents run automatically by the platform (e.g. Librarian on import).
@@ -2610,7 +2612,14 @@ class CreatorReputation(Base):
 
 
 class Theme(Base):
-    """UI themes stored as JSON. Auto-seeded from app/seeds/themes/ on startup."""
+    """UI themes stored as JSON.
+
+    After Wave 10 themes are no longer seeded inside the orchestrator;
+    they're pulled from the federated marketplace service (see
+    ``packages/tesslate-marketplace/app/seeds/themes.json``) by
+    ``services/marketplace_sync.py``. The orchestrator's ``themes`` table
+    is now the local cache for sync output.
+    """
 
     __tablename__ = "themes"
 
