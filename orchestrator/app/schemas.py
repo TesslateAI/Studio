@@ -84,7 +84,7 @@ class ProjectCreate(ProjectBase):
     @field_validator("source_type")
     @classmethod
     def validate_source_type(cls, v):
-        valid_types = ["template", "github", "gitlab", "bitbucket", "base"]
+        valid_types = ["template", "github", "gitlab", "bitbucket", "base", "empty"]
         if v not in valid_types:
             raise ValueError(f"source_type must be one of: {', '.join(valid_types)}")
         return v
@@ -94,6 +94,13 @@ class ProjectCreate(ProjectBase):
         """Automatically set source_type to 'base' when base_id is provided."""
         if self.base_id is not None and self.source_type == "template":
             self.source_type = "base"
+        return self
+
+    @model_validator(mode="after")
+    def reject_base_id_for_empty_source(self):
+        """Empty workspaces have no template — refuse a stray base_id."""
+        if self.source_type == "empty" and self.base_id is not None:
+            raise ValueError("source_type='empty' is incompatible with base_id")
         return self
 
     @field_validator("github_repo_url")
@@ -140,6 +147,9 @@ class ProjectCreate(ProjectBase):
         # When import_path is set we're adopting an existing directory; no
         # template / base scaffolding runs, so base_id is not required.
         if info.data.get("import_path"):
+            return v
+        # Empty workspaces are blank by design — base_id stays None.
+        if info.data.get("source_type") == "empty":
             return v
         if info.data.get("source_type") == "base":
             if not v:

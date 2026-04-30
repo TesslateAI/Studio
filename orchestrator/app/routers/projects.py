@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
@@ -508,6 +509,99 @@ def _resolve_default_runtime(settings) -> str:
     return "docker"
 
 
+async def _materialize_empty_workspace(project: Project, settings: Any) -> None:
+    """Create the on-disk + Volume Hub state for a blank ``Project`` row.
+
+    Empty workspaces are knowledge-base style: no template, no files. We
+    still need a place for users / the agent to drop files later, and we
+    still want ``has_git_repo=True`` so file-history tools work the same
+    way as for template projects.
+
+    Per-runtime resolution:
+
+    * desktop  → ``$OPENSAIL_HOME/projects/{slug}-{id}`` via
+      ``_get_project_root``. Created synchronously, ``git init`` inline.
+    * docker   → ``DockerComposeOrchestrator.get_project_path(slug)``.
+      Created synchronously, ``git init`` inline.
+    * k8s      → ``volume_manager.create_empty_volume()`` for the cluster
+      volume; ``volume_id`` is recorded on the row. Git is initialized
+      lazily by the first compute pod that mounts the volume.
+
+    Failures are logged but do NOT block project creation — a partial
+    workspace is still better than a 500 to the user, and the next
+    file-tool call will materialize what's missing.
+    """
+    deployment_mode = (settings.deployment_mode or "").lower()
+    runtime = (project.runtime or "").lower()
+
+    # K8s path: ask the Volume Hub for an empty subvolume.
+    if deployment_mode == "kubernetes" or runtime == "k8s":
+        try:
+            from ..services.volume_manager import get_volume_manager
+
+            vm = get_volume_manager()
+            volume_id, node_name = await vm.create_empty_volume()
+            project.volume_id = volume_id
+            project.cache_node = node_name
+            logger.info(
+                "[CREATE-EMPTY] k8s volume created project=%s volume=%s node=%s",
+                project.id,
+                volume_id,
+                node_name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[CREATE-EMPTY] k8s volume creation failed for %s: %s",
+                project.id,
+                exc,
+            )
+        return
+
+    # Local / desktop / docker path: create a directory and git init.
+    project_root: str | None = None
+    try:
+        if deployment_mode == "desktop" or runtime == "local":
+            from ..services.orchestration.local import _get_project_root
+
+            project_root = str(_get_project_root(project))
+        else:
+            # Docker (default for cloud non-k8s) — use the orchestrator's path.
+            from ..services.orchestration import get_orchestrator
+
+            orchestrator = get_orchestrator()
+            get_path = getattr(orchestrator, "get_project_path", None)
+            if get_path is not None:
+                project_root = str(get_path(project.slug))
+        if not project_root:
+            return
+        os.makedirs(project_root, exist_ok=True)
+        # Best-effort git init so file-history tools work uniformly.
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "init",
+                "--initial-branch=main",
+                cwd=project_root,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            project.has_git_repo = True
+        except Exception as exc:
+            logger.debug("[CREATE-EMPTY] git init skipped for %s: %s", project.id, exc)
+        logger.info(
+            "[CREATE-EMPTY] empty workspace materialized project=%s root=%s",
+            project.id,
+            project_root,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[CREATE-EMPTY] failed to materialize empty workspace for %s: %s",
+            project.id,
+            exc,
+        )
+
+
 def _materialize_imported_root(source_path: str, project_root: str) -> None:
     """Point ``project_root`` at an existing ``source_path``.
 
@@ -588,20 +682,35 @@ async def create_project_from_payload(
                 detail=f"A project already exists for this path: {canonical_source}",
             )
 
+    is_empty_workspace = payload.source_type == "empty" and not payload.import_path
+
     project_slug = generate_project_slug(payload.name)
     max_retries = 10
     db_project: Project | None = None
     for attempt in range(max_retries):
         try:
-            db_project = Project(
-                name=payload.name,
-                slug=project_slug,
-                description=payload.description,
-                owner_id=current_user.id,
-                team_id=current_user.default_team_id,
-                runtime=resolved_runtime,
-                source_path=canonical_source,
-            )
+            project_kwargs: dict[str, Any] = {
+                "name": payload.name,
+                "slug": project_slug,
+                "description": payload.description,
+                "owner_id": current_user.id,
+                "team_id": current_user.default_team_id,
+                "runtime": resolved_runtime,
+                "source_path": canonical_source,
+            }
+            if canonical_source is not None:
+                project_kwargs["created_via"] = "import"
+            elif is_empty_workspace:
+                # Empty workspaces are knowledge-base-style projects: no
+                # containers, no template, never auto-started.
+                project_kwargs["created_via"] = "empty"
+                project_kwargs["compute_tier"] = "none"
+                project_kwargs["environment_status"] = "active"
+            elif payload.source_type in ("github", "gitlab", "bitbucket") or payload.git_repo_url:
+                project_kwargs["created_via"] = "github"
+            else:
+                project_kwargs["created_via"] = "template"
+            db_project = Project(**project_kwargs)
             db.add(db_project)
             await db.flush()
 
@@ -650,6 +759,16 @@ async def create_project_from_payload(
                 db_project.id,
                 exc,
             )
+        return {"project": db_project, "task_id": None, "status_endpoint": None}
+
+    # Empty-workspace flow: knowledge-base style — no template, no files, no
+    # containers, never auto-started. Resolve a volume / project directory
+    # synchronously so file tools work the moment the row exists.
+    if is_empty_workspace:
+        await _materialize_empty_workspace(db_project, settings)
+        db_project.environment_status = "active"
+        await db.commit()
+        await db.refresh(db_project)
         return {"project": db_project, "task_id": None, "status_endpoint": None}
 
     # Template flow: hand off to the existing background setup pipeline.

@@ -124,6 +124,11 @@ class Project(Base):
     runtime = Column(String(16), nullable=True)
     # Host-path the desktop shell imported this project from (optional).
     source_path = Column(String(1024), nullable=True)
+    # Provenance: how the project was created. "template" (from a marketplace
+    # base), "empty" (no template, no files — knowledge-base style),
+    # "import" (existing host-path adopted), "github" (cloned from git).
+    # NULL on legacy rows; callers must treat NULL as "unknown / legacy".
+    created_via = Column(String(20), nullable=True)
     # Per-project sync toggle for desktop → cloud reverse-sync.
     sync_enabled = Column(Boolean, nullable=True, default=False, server_default=expression.false())
 
@@ -133,9 +138,7 @@ class Project(Base):
     # Phase 5 — UX convenience: Automation Builder seeds new automation
     # contracts from this template. Per-project, admin-settable. Empty
     # dict by default. Not a legacy backfill mechanism.
-    default_contract_template = Column(
-        JSON, nullable=False, default=dict, server_default="{}"
-    )
+    default_contract_template = Column(JSON, nullable=False, default=dict, server_default="{}")
 
     # Phase 5 — strong project ↔ MarketplaceApp link. Set when the user
     # publishes this project as an app via the Publish Drawer. Lets us
@@ -564,9 +567,7 @@ class ProjectFile(Base):
     # directly for an existing (project_id, file_path) — concurrent writes
     # would collide. Migration 0072 backfills + adds this constraint.
     __table_args__ = (
-        UniqueConstraint(
-            "project_id", "file_path", name="uq_project_files_project_path"
-        ),
+        UniqueConstraint("project_id", "file_path", name="uq_project_files_project_path"),
     )
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
@@ -3288,26 +3289,12 @@ class ContractTemplate(Base):
     # closed set so seeds can ship new categories without an API change.
     category = Column(String(48), nullable=False, server_default="general")
     contract_json = Column(JSON, nullable=False)
-    created_by_user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    is_published = Column(
-        Boolean, nullable=False, default=True, server_default="true"
-    )
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_by_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_published = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 # Import team models so they're included in Base.metadata (same pattern as models_kanban)
-from .models_team import (  # noqa: F401, E402
-    AuditLog,
-    ProjectMembership,
-    Team,
-    TeamInvitation,
-    TeamMembership,
-)
-
 # Re-export AppInstance + AppInstallAttempt from the Phase 1 module. The
 # canonical ORM definitions live there (with the Phase 3 runtime_deployment_id
 # FK); existing ``from .models import AppInstance`` imports keep working
@@ -3315,4 +3302,11 @@ from .models_team import (  # noqa: F401, E402
 from .models_automations import (  # noqa: F401, E402
     AppInstallAttempt,
     AppInstance,
+)
+from .models_team import (  # noqa: F401, E402
+    AuditLog,
+    ProjectMembership,
+    Team,
+    TeamInvitation,
+    TeamMembership,
 )
