@@ -1,7 +1,7 @@
 """drop legacy global slug uniqueness on catalog tables (Wave 5).
 
 Revision ID: 0091_drop_legacy_slug_uq
-Revises: 0090_marketplace_attestation_pubkey
+Revises: 0090_msrc_pubkey
 Create Date: 2026-04-29
 
 Wave 5 of the federated-marketplace decoupling. With source-prefixed URLs
@@ -44,7 +44,7 @@ from alembic import op
 
 
 revision: str = "0091_drop_legacy_slug_uq"
-down_revision: str | Sequence[str] | None = "0090_marketplace_attestation_pubkey"
+down_revision: str | Sequence[str] | None = "0090_msrc_pubkey"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

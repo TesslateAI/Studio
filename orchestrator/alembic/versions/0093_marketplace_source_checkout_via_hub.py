@@ -1,7 +1,7 @@
 """marketplace sources: per-source hub-checkout opt-in column (Wave 9).
 
-Revision ID: 0093_marketplace_source_checkout_via_hub
-Revises: 0092_app_versions_source_id_backfill
+Revision ID: 0093_msrc_checkout_hub
+Revises: 0092_appver_source_id
 Create Date: 2026-04-29
 
 Wave 9 of the federated-marketplace decoupling. Adds a single nullable-
@@ -33,8 +33,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = "0093_marketplace_source_checkout_via_hub"
-down_revision: str | Sequence[str] | None = "0092_app_versions_source_id_backfill"
+revision: str = "0093_msrc_checkout_hub"
+down_revision: str | Sequence[str] | None = "0092_appver_source_id"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -1,0 +1,27 @@
+# Marketplace Patches for Minikube
+#
+# Ensures the locally-built tesslate-marketplace:latest image is used
+# (Never pull) and overrides hub branding so the manifest banner is
+# obviously dev. Also pins capabilities to what Wave 8 ships so a stale
+# DISABLED_CAPABILITIES env in another overlay doesn't accidentally
+# carry into local testing.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-marketplace
+  namespace: tesslate
+spec:
+  template:
+    spec:
+      initContainers:
+      - name: alembic-migrate
+        imagePullPolicy: Never
+      containers:
+      - name: marketplace
+        imagePullPolicy: Never
+        env:
+        - name: HUB_DISPLAY_NAME
+          value: "Tesslate Official (Minikube)"
+        - name: BUILD_REVISION
+          value: "minikube-dev"

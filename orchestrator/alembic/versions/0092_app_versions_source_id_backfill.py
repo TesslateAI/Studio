@@ -1,6 +1,6 @@
 """backfill app_versions.source_id from the parent marketplace_apps row (Wave 7).
 
-Revision ID: 0092_app_versions_source_id_backfill
+Revision ID: 0092_appver_source_id
 Revises: 0091_drop_legacy_slug_uq
 Create Date: 2026-04-29
 
@@ -37,7 +37,7 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = "0092_app_versions_source_id_backfill"
+revision: str = "0092_appver_source_id"
 down_revision: str | Sequence[str] | None = "0091_drop_legacy_slug_uq"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

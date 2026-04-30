@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: marketplace-data
+  namespace: tesslate
+  labels:
+    app: tesslate-marketplace
+    component: marketplace
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: tesslate-block-storage
+  resources:
+    requests:
+      storage: 5Gi

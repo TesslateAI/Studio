@@ -19,6 +19,7 @@ created lazily on first draft save by the marketplace_sources router
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 
 from sqlalchemy import select
@@ -32,12 +33,21 @@ logger = logging.getLogger(__name__)
 TESSLATE_OFFICIAL_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 
+# Tesslate Official's hub URL is mutable per-deployment so a self-hosted
+# install (or a minikube/dev cluster running its own marketplace pod) can
+# point the federated reads at an in-cluster service. The seed runs on every
+# boot and refreshes ``base_url`` from this env var, so flipping it does
+# not require a manual SQL UPDATE.
+DEFAULT_TESSLATE_OFFICIAL_URL = "https://marketplace.tesslate.com"
+
 SYSTEM_SOURCES = [
     {
         "id": TESSLATE_OFFICIAL_ID,
         "handle": "tesslate-official",
         "display_name": "Tesslate Official",
-        "base_url": "https://marketplace.tesslate.com",
+        "base_url": os.environ.get(
+            "TESSLATE_OFFICIAL_BASE_URL", DEFAULT_TESSLATE_OFFICIAL_URL
+        ),
         "scope": "system",
         "trust_level": "official",
     },

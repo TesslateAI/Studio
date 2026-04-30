@@ -1,6 +1,6 @@
 """marketplace sources: attestation_pubkey column (Wave 6).
 
-Revision ID: 0090_marketplace_attestation_pubkey
+Revision ID: 0090_msrc_pubkey
 Revises: 0089_theme_id_uuid
 Create Date: 2026-04-29
 
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = "0090_marketplace_attestation_pubkey"
+revision: str = "0090_msrc_pubkey"
 down_revision: str | Sequence[str] | None = "0089_theme_id_uuid"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
