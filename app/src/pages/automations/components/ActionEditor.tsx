@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { appActionsApi, marketplaceApi } from '../../../lib/api';
 import type {
   AutomationActionIn,
@@ -6,6 +6,8 @@ import type {
   AppActionRow,
 } from '../../../types/automations';
 import { DestinationPicker } from './DestinationPicker';
+import { JsonSchemaForm } from './JsonSchemaForm';
+import { VariableMenu } from './VariableMenu';
 
 interface Props {
   value: AutomationActionIn;
@@ -101,6 +103,7 @@ function AgentRunFields({
 }) {
   const [agents, setAgents] = useState<AgentRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,11 +170,32 @@ function AgentRunFields({
         )}
       </label>
 
-      <label className="block">
-        <span className="block text-xs font-medium text-[var(--text)] mb-1">
-          Tell the agent what to do
-        </span>
+      <div className="block">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs font-medium text-[var(--text)]">Tell the agent what to do</span>
+          <VariableMenu
+            targetRef={promptRef}
+            onInsert={(next) => updateConfig({ prompt: next })}
+            groups={[
+              {
+                label: 'From the trigger event',
+                variables: [
+                  { token: '{{event.payload}}', help: 'The whole event payload as JSON' },
+                  {
+                    token: '{{event.payload.field}}',
+                    help: 'A specific field — replace "field"',
+                  },
+                  {
+                    token: '{{event.received_at}}',
+                    help: 'When the trigger fired (ISO timestamp)',
+                  },
+                ],
+              },
+            ]}
+          />
+        </div>
         <textarea
+          ref={promptRef}
           rows={5}
           value={String(value.config.prompt ?? '')}
           onChange={(e) => updateConfig({ prompt: e.target.value })}
@@ -179,10 +203,9 @@ function AgentRunFields({
           className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
         />
         <span className="mt-1 block text-[10px] text-[var(--text-subtle)]">
-          Use <code className="font-mono">{'{{event.payload.field}}'}</code> to insert data from the
-          trigger event.
+          Click <em>Insert variable</em> to drop trigger-event data into the prompt.
         </span>
-      </label>
+      </div>
     </div>
   );
 }
@@ -201,6 +224,7 @@ function AppInvokeFields({
   const [actions, setActions] = useState<AppActionRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const instanceId = String(value.config.app_instance_id ?? '');
+  const selectedAction = actions?.find((a) => a.id === value.app_action_id) ?? null;
 
   useEffect(() => {
     if (!instanceId) {
@@ -284,31 +308,16 @@ function AppInvokeFields({
         )}
       </label>
 
-      <label className="block">
-        <span className="block text-xs font-medium text-[var(--text)] mb-1">
-          Action input (JSON)
-        </span>
-        <textarea
-          rows={4}
-          value={
-            typeof value.config.input === 'string'
-              ? (value.config.input as string)
-              : JSON.stringify(value.config.input ?? {}, null, 2)
+      <div>
+        <span className="block text-xs font-medium text-[var(--text)] mb-1">Action input</span>
+        <JsonSchemaForm
+          schema={selectedAction?.input_schema ?? null}
+          value={(value.config.input as Record<string, unknown> | string | undefined) ?? {}}
+          onChange={(next) =>
+            onChange({ ...value, config: { ...(value.config || {}), input: next } })
           }
-          onChange={(e) => {
-            try {
-              const parsed = JSON.parse(e.target.value);
-              onChange({ ...value, config: { ...(value.config || {}), input: parsed } });
-            } catch {
-              // Keep the raw string so the user can keep typing — the
-              // create-page validator catches bad JSON before submit.
-              onChange({ ...value, config: { ...(value.config || {}), input: e.target.value } });
-            }
-          }}
-          placeholder='{"key": "value"}'
-          className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
         />
-      </label>
+      </div>
     </div>
   );
 }
@@ -324,6 +333,7 @@ function GatewaySendFields({
   value: AutomationActionIn;
   updateConfig: (patch: Record<string, unknown>) => void;
 }) {
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   return (
     <div className="space-y-3">
       <div>
@@ -336,9 +346,13 @@ function GatewaySendFields({
         />
       </div>
 
-      <label className="block">
-        <span className="block text-xs font-medium text-[var(--text)] mb-1">Message to send</span>
+      <div className="block">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs font-medium text-[var(--text)]">Message to send</span>
+          <VariableMenu targetRef={bodyRef} onInsert={(next) => updateConfig({ body: next })} />
+        </div>
         <textarea
+          ref={bodyRef}
           rows={5}
           value={String(value.config.body ?? '')}
           onChange={(e) => updateConfig({ body: e.target.value })}
@@ -346,10 +360,9 @@ function GatewaySendFields({
           className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
         />
         <span className="mt-1 block text-[10px] text-[var(--text-subtle)]">
-          Use <code className="font-mono">{'{{run.output.*}}'}</code> to insert values produced by
-          the previous step.
+          Click <em>Insert variable</em> to pull values from the previous step or the trigger event.
         </span>
-      </label>
+      </div>
     </div>
   );
 }
