@@ -397,42 +397,40 @@ _BUILDERS: dict[str, Any] = {
 
 
 @pytest.mark.parametrize("table_name", SLUGGABLE_CATALOG_TABLES)
-async def test_legacy_global_slug_uniqueness_blocks_cross_source_dup(
+async def test_same_slug_two_sources_coexists_post_wave5(
     db_session: AsyncSession,
     table_name: str,
 ) -> None:
-    """Two rows with the same global slug across **different** sources
-    must still violate the legacy column-level slug uniqueness.
+    """Wave 5 drops the legacy global slug uniqueness — two sources
+    can now legitimately ship the same slug.
 
-    This is the load-bearing Wave-1 invariant: if a future change
-    accidentally drops the legacy global ``slug unique=True``, this
-    test fires before the change lands. Per-source uniqueness alone is
-    NOT sufficient until Wave 5.
+    Pre-Wave-5 invariant: the legacy column-level ``unique=True`` blocked
+    same-slug-different-source pairs. Wave 5 alembic 0091 drops that
+    constraint; ``(source_id, slug)`` is now the sole uniqueness
+    invariant. This test locks in the *post-Wave-5* behavior: inserting
+    a tesslate-official ``coder`` agent AND a local ``coder`` agent both
+    succeed.
+
+    Replaces the pre-Wave-5 ``test_legacy_global_slug_uniqueness_blocks_cross_source_dup``
+    test that asserted the opposite — keeping that test would lock in
+    the very invariant Wave 5 is removing.
     """
     builder = _BUILDERS[table_name]
-    # Slug must be globally unique across the whole test session because
-    # the engine is module-scoped and earlier tests (or the per-source
-    # test below) may have inserted rows.
-    slug = f"legacy-{table_name}-{uuid.uuid4().hex[:8]}"
+    slug = f"wave5-{table_name}-{uuid.uuid4().hex[:8]}"
 
     # First insert: tesslate-official source. Should succeed.
     db_session.add(builder(source_id=TESSLATE_OFFICIAL_ID, slug=slug))
     await db_session.flush()
     await db_session.commit()
 
-    # Second insert: same slug, **different** source (local). The new
-    # ``(source_id, slug)`` composite uniqueness alone would let this
-    # through; the legacy global slug uniqueness must still block it.
+    # Second insert: same slug, **different** source (local). Pre-Wave-5
+    # this would have failed on the legacy global slug uniqueness; post-
+    # Wave-5 it must succeed because ``(source_id, slug)`` is now the
+    # sole uniqueness invariant and the two rows have different
+    # source_ids.
     db_session.add(builder(source_id=LOCAL_SOURCE_ID, slug=slug))
-    with pytest.raises(IntegrityError) as excinfo:
-        await db_session.flush()
-    msg = str(excinfo.value)
-    expected = LEGACY_SLUG_CONSTRAINT_NAME[table_name]
-    assert expected in msg, (
-        f"For {table_name}, expected legacy global slug uniqueness "
-        f"({expected!r}) to fire, but IntegrityError was: {msg}"
-    )
-    await db_session.rollback()
+    await db_session.flush()
+    await db_session.commit()
 
 
 @pytest.mark.parametrize("table_name", SLUGGABLE_CATALOG_TABLES)

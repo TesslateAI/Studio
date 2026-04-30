@@ -115,14 +115,59 @@ def setup_database(test_db_container):
     yield
 
 
+def _rebind_database_engine() -> None:
+    """Drop + recreate the module-level ``app.database.engine`` so a new
+    TestClient gets a fresh asyncpg connection pool bound to its own loop.
+
+    ``app.database.engine`` is a module-level singleton. Each TestClient
+    session-scope fixture (``tests/integration/conftest.py`` and
+    ``tests/routers/conftest.py``) creates a new asyncio loop. After
+    the first conftest's TestClient closes, the engine pool still
+    holds asyncpg connections bound to the now-closed loop. Calling
+    ``engine.dispose()`` releases the connections but leaves the engine
+    object — which still has internal state from the dead loop. Building
+    a brand-new engine via ``create_async_engine`` and rebinding the
+    module-level globals is the only way to get a clean state.
+
+    Idempotent: safe to call from any conftest's session fixture.
+    """
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app import database as _db
+
+    try:
+        asyncio.new_event_loop().run_until_complete(_db.engine.dispose())
+    except Exception:
+        pass
+
+    settings = _db.settings
+    new_engine = create_async_engine(
+        settings.database_url,
+        echo=False,
+        future=True,
+        **_db._build_engine_kwargs(settings.database_url),
+    )
+    _db.engine = new_engine
+    _db.AsyncSessionLocal = async_sessionmaker(
+        new_engine, class_=_db.AsyncSession, expire_on_commit=False
+    )
+
+
 @pytest.fixture(scope="session")
 def api_client_session():
     """
     Unauthenticated TestClient for FastAPI (session-scoped).
 
-    Session scope creates one client for all tests, avoiding event loop conflicts.
+    See ``_rebind_database_engine`` docstring for why we recreate the
+    engine before every TestClient session — the short version is
+    cross-conftest session-scoped fixtures share a process but not a
+    loop, and asyncpg's connection pool can't tolerate that.
     """
     from app.main import app
+
+    _rebind_database_engine()
 
     with TestClient(app, base_url="http://test") as client:
         yield client

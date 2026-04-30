@@ -66,6 +66,7 @@ from .routers import (
     marketplace,
     marketplace_apps,
     marketplace_local,
+    marketplace_sources,
     mcp,
     mcp_oauth,
     mcp_server,
@@ -101,6 +102,35 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="AI Application Builder API")
 
 
+def _jsonify_validation_errors(errors: list[dict]) -> list[dict]:
+    """Convert pydantic ValidationError errors into JSON-serializable form.
+
+    Pydantic v2 puts the underlying ``ValueError`` instance into ``ctx['error']``
+    when a custom ``field_validator`` raises ``ValueError(msg)``. That object
+    is not JSON-serializable and trips ``JSONResponse``'s default encoder
+    when our exception handler echoes ``exc.errors()`` back to the client.
+    Replace any non-string error in ``ctx`` with its ``str()`` representation
+    so the 422 response surfaces cleanly.
+    """
+    safe = []
+    for err in errors:
+        new_err = dict(err)
+        ctx = new_err.get("ctx")
+        if isinstance(ctx, dict):
+            safe_ctx = {}
+            for k, v in ctx.items():
+                if isinstance(v, BaseException):
+                    safe_ctx[k] = str(v)
+                else:
+                    safe_ctx[k] = v
+            new_err["ctx"] = safe_ctx
+        # ``loc`` is a tuple in pydantic v2 — turn it into a list for JSON.
+        if isinstance(new_err.get("loc"), tuple):
+            new_err["loc"] = list(new_err["loc"])
+        safe.append(new_err)
+    return safe
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
     """Log request validation failures with enough detail to debug 422s in production."""
@@ -110,17 +140,19 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     if "body_preview" not in locals():
         body_preview = "<unavailable>"
 
+    safe_errors = _jsonify_validation_errors(list(exc.errors()))
+
     logger.warning(
         "[VALIDATION] %s %s failed validation: errors=%s body=%s",
         request.method,
         request.url.path,
-        exc.errors(),
+        safe_errors,
         body_preview,
     )
 
     return JSONResponse(
         status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors()},
+        content={"detail": safe_errors},
     )
 
 
@@ -668,6 +700,23 @@ async def startup():
         except Exception:
             logger.exception("Failed to register desktop marketplace_sync (non-fatal)")
 
+        # Local-source filesystem sync (Wave 6): desktop scans
+        # $OPENSAIL_HOME/{kind}s/ every 15 minutes and emits virtual
+        # changes-feed events that populate the Local source's catalog
+        # cache. Independent of the HTTP federation sync above so a hung
+        # community hub never blocks local items from appearing.
+        try:
+            from .database import AsyncSessionLocal
+            from .services.marketplace_local import sync_local_loop
+
+            asyncio.create_task(
+                sync_local_loop(AsyncSessionLocal),
+                name="marketplace_local_sync_loop",
+            )
+            logger.info("Local marketplace sync registered (desktop, 15-min cadence)")
+        except Exception:
+            logger.exception("Failed to register desktop marketplace_local sync (non-fatal)")
+
     # Eagerly build btrfs templates for featured bases on startup (K8s only)
     if (
         settings.is_kubernetes_mode
@@ -1186,6 +1235,10 @@ app.include_router(sidebar.router)  # prefix set on the router itself (/api/side
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
+# Federated marketplace source CRUD (Wave 5). Mounted before the wildcard
+# /api/marketplace router so /api/marketplace/sources resolves to this
+# router rather than the legacy bare-slug fall-through.
+app.include_router(marketplace_sources.router)  # /api/marketplace/sources
 app.include_router(creators.router)  # /api/creators - already prefixed in router
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(admin_spend.router, tags=["admin-spend"])  # /api/admin/spend

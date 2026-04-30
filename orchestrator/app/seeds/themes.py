@@ -109,8 +109,10 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
             # Wave 1.5: themes.id is now a GUID PK. The ``id`` field in the
             # JSON file (e.g. ``"midnight-dark"``) becomes the row's slug,
             # and the PK is auto-generated for new rows. Existing rows are
-            # matched on ``slug`` (the ON CONFLICT key) so reseeding stays
-            # idempotent across the PK migration.
+            # matched on ``(source_id, slug)`` (the ON CONFLICT key) so
+            # reseeding stays idempotent — Wave 5 dropped the legacy
+            # global slug uniqueness, so the per-source composite is now
+            # the only conflict surface.
             await db.execute(
                 text("""
                     INSERT INTO themes (
@@ -126,7 +128,7 @@ async def seed_themes(db: AsyncSession, themes_dir: Path | None = None) -> int:
                         0, 5.0, :is_featured, true, :category, :tags, 'open',
                         :source_id
                     )
-                    ON CONFLICT (slug) DO UPDATE SET
+                    ON CONFLICT (source_id, slug) DO UPDATE SET
                         name = EXCLUDED.name,
                         mode = EXCLUDED.mode,
                         author = EXCLUDED.author,

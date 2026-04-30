@@ -1171,6 +1171,11 @@ class MarketplaceSource(Base):
     pinned_hub_id = Column(String(128), nullable=True)
     capabilities_cache = Column(JSON, nullable=True)
     policies_cache = Column(JSON, nullable=True)
+    # Ed25519 public key (base64-encoded) for verifying bundle attestations
+    # from this source. Captured on first successful verification (or set
+    # via admin endpoint). NULL when the source does not advertise the
+    # ``attestations`` capability or has not yet been pinned. Wave 6.
+    attestation_pubkey = Column(Text, nullable=True)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     sync_etag = Column(String(128), nullable=True)
     last_sync_error = Column(Text, nullable=True)
@@ -1228,7 +1233,11 @@ class MarketplaceAgent(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
-    slug = Column(String, unique=True, nullable=False, index=True)
+    # Wave 5: per-source uniqueness via ``uq_marketplace_agents_source_slug``.
+    # Global ``unique=True`` was dropped in alembic 0090 so two sources can
+    # legitimately ship the same slug (e.g. "coder" agent on Tesslate
+    # Official and on a community hub).
+    slug = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=False)
     long_description = Column(Text, nullable=True)
     category = Column(String, nullable=False)  # builder, frontend, fullstack, data, etc
@@ -1464,7 +1473,9 @@ class MarketplaceBase(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
-    slug = Column(String, unique=True, nullable=False, index=True)
+    # Wave 5: per-source uniqueness via ``uq_marketplace_bases_source_slug``;
+    # see MarketplaceAgent.slug for the migration rationale.
+    slug = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=False)
     long_description = Column(Text, nullable=True)
 
@@ -1601,7 +1612,9 @@ class WorkflowTemplate(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String, nullable=False)
-    slug = Column(String, unique=True, nullable=False, index=True)
+    # Wave 5: per-source uniqueness via ``uq_workflow_templates_source_slug``;
+    # see MarketplaceAgent.slug for the migration rationale.
+    slug = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=False)
     long_description = Column(Text, nullable=True)
 
@@ -2026,7 +2039,11 @@ class MarketplaceApp(Base):
     __tablename__ = "marketplace_apps"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
-    slug = Column(Text, unique=True, nullable=False)
+    # Wave 5: per-source uniqueness via ``uq_marketplace_apps_source_slug``;
+    # see MarketplaceAgent.slug for the migration rationale. The non-unique
+    # ``ix_marketplace_apps_slug`` index added in alembic 0090 keeps slug
+    # lookups fast.
+    slug = Column(Text, nullable=False, index=True)
     name = Column(Text, nullable=False)
     creator_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     description = Column(Text, nullable=True)
@@ -2092,7 +2109,12 @@ class MarketplaceApp(Base):
     deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("creator_user_id", "handle", name="uq_marketplace_apps_creator_handle"),
+        # Wave 5 dropped the legacy ``(creator_user_id, handle)`` global
+        # unique constraint via alembic 0090. The Wave-1
+        # ``uq_marketplace_apps_source_creator_handle`` (source_id +
+        # creator_user_id + handle) is now the sole invariant for handle
+        # uniqueness — same creator can ship the same handle to two
+        # different sources, but never twice within one source.
         UniqueConstraint("source_id", "slug", name="uq_marketplace_apps_source_slug"),
         UniqueConstraint(
             "source_id",
@@ -2588,7 +2610,9 @@ class Theme(Base):
     # human-readable identifier.
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String(100), nullable=False)  # Display name: "Midnight"
-    slug = Column(String(200), unique=True, index=True, nullable=True)  # URL-safe identifier
+    # Wave 5: per-source uniqueness via ``uq_themes_source_slug``; see
+    # MarketplaceAgent.slug for the migration rationale.
+    slug = Column(String(200), index=True, nullable=True)  # URL-safe identifier
     mode = Column(String(10), nullable=False)  # "dark" or "light"
     author = Column(String(100), default="Tesslate")
     version = Column(String(20), default="1.0.0")

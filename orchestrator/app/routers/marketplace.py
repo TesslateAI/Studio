@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 from typing import cast as type_cast
+import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
@@ -996,6 +997,15 @@ async def get_marketplace_agents(
 @router.get("/agents/{slug}")
 async def get_agent_details(
     slug: str,
+    source: str | None = Query(
+        default=None,
+        description=(
+            "Wave 5: source handle disambiguates same-slug-different-source "
+            "rows (e.g. tesslate-official's 'coder' vs a community hub's). "
+            "Omitted slug requests resolve to Tesslate Official by default "
+            "for backwards compatibility with pre-Wave-5 bare-slug URLs."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
@@ -1003,14 +1013,50 @@ async def get_agent_details(
     Get detailed information about a specific agent.
 
     Public endpoint - authentication is optional.
+
+    Wave 5 — same-slug-different-source resolution:
+      - If ``?source=<handle>`` is supplied, the lookup is restricted to
+        that source.
+      - If omitted, the lookup defaults to Tesslate Official to preserve
+        legacy bare-slug URL semantics. If no Tesslate Official row
+        exists for the slug, we fall back to the first row found by
+        ``(slug, is_active=true)`` so legacy community-only slugs still
+        resolve.
     """
-    # Get agent with forked_by_user relationship
-    result = await db.execute(
+    source_id_filter = await _resolve_source_filter(db, source)
+
+    # Wave 5 lookup priority: explicit source filter > Tesslate Official
+    # > any matching row. The legacy global slug uniqueness was dropped
+    # in alembic 0091, so an unfiltered lookup that returned multiple
+    # rows would non-deterministically pick one. Resolving via the
+    # default-source fallback is the documented Wave-5 behavior.
+    base_query = (
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(MarketplaceAgent.slug == slug)
     )
-    agent = result.scalar_one_or_none()
+    if source_id_filter is not None:
+        result = await db.execute(
+            base_query.where(MarketplaceAgent.source_id == source_id_filter)
+        )
+        agent = result.scalar_one_or_none()
+    else:
+        # Default to Tesslate Official (the well-known seeded UUID).
+        TESSLATE_OFFICIAL_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        result = await db.execute(
+            base_query.where(MarketplaceAgent.source_id == TESSLATE_OFFICIAL_ID)
+        )
+        agent = result.scalar_one_or_none()
+        if agent is None:
+            # Legacy fallback: bare-slug URLs that don't exist on
+            # Tesslate Official may still resolve to a community row
+            # (especially for forks the user authored locally pre-Wave-5).
+            # Order by source_id so the same row wins on every request
+            # rather than relying on PG's unspecified row order.
+            result = await db.execute(
+                base_query.order_by(MarketplaceAgent.source_id).limit(1)
+            )
+            agent = result.scalar_one_or_none()
 
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
