@@ -153,6 +153,20 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
         body_preview,
     )
 
+    # Pydantic puts the original Python exception object in ctx.error for
+    # value_error entries, which JSONResponse can't serialize. Stringify any
+    # non-JSON-friendly ctx values so validators raising ValueError surface as
+    # clean 422s instead of 500s.
+    safe_errors = []
+    for err in exc.errors():
+        ctx = err.get("ctx")
+        if isinstance(ctx, dict):
+            err = {
+                **err,
+                "ctx": {k: str(v) if isinstance(v, BaseException) else v for k, v in ctx.items()},
+            }
+        safe_errors.append(err)
+
     return JSONResponse(
         status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"detail": safe_errors},
