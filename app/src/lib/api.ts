@@ -2282,6 +2282,184 @@ export const marketplaceApi = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Federated Marketplace Sources (Wave 5)
+// ---------------------------------------------------------------------------
+// Mirrors the Pydantic schemas in
+// orchestrator/app/routers/marketplace_sources.py — keep these in sync when
+// the backend contract changes.
+
+/** Trust classification for a federated source row. */
+export type MarketplaceSourceTrustLevel =
+  | 'official'       // tesslate-official seed; never user-editable
+  | 'admin_trusted'  // promoted by superuser via /promote
+  | 'local'          // local:// system source (filesystem-backed)
+  | 'private'        // user/team source with bearer token
+  | 'untrusted';     // user/team source with no token (installs blocked)
+
+/** Visibility scope for a marketplace source. */
+export type MarketplaceSourceScope = 'system' | 'user' | 'team';
+
+/** Public projection of a MarketplaceSource row. Encrypted token is never returned. */
+export interface MarketplaceSourceResponse {
+  id: string;
+  handle: string;
+  display_name: string;
+  base_url: string;
+  scope: MarketplaceSourceScope;
+  user_id: string | null;
+  team_id: string | null;
+  trust_level: MarketplaceSourceTrustLevel;
+  is_system: boolean;
+  is_active: boolean;
+  has_token: boolean;
+  pinned_hub_id: string | null;
+  capabilities: string[];
+  policies: Record<string, unknown>;
+  last_synced_at: string | null;
+  last_sync_error: string | null;
+  sync_etag: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Body for POST /api/marketplace/sources. */
+export interface MarketplaceSourceCreate {
+  handle: string;
+  display_name: string;
+  base_url: string;
+  /**
+   * Plaintext bearer token. Despite the field name, the server encrypts it
+   * before persistence — naming matches the existing token endpoints for
+   * API symmetry. Omit or leave blank for an anonymous (untrusted) source.
+   */
+  encrypted_token?: string | null;
+  scope: 'user' | 'team';
+}
+
+/** Body for PATCH /api/marketplace/sources/{id}. All fields optional. */
+export interface MarketplaceSourceUpdate {
+  display_name?: string;
+  encrypted_token?: string | null;
+  is_active?: boolean;
+  /** Explicitly remove the stored token (encrypted_token=null means "leave unchanged"). */
+  clear_token?: boolean;
+}
+
+/** Result of POST /api/marketplace/sources/{id}/test. */
+export interface SourceTestResponse {
+  hub_id: string;
+  api_version: string | null;
+  display_name: string | null;
+  capabilities: string[];
+  policies: Record<string, unknown>;
+  auto_trust_level: MarketplaceSourceTrustLevel;
+  pinned_hub_id_changed: boolean;
+}
+
+/** Result of POST /api/marketplace/sources/{id}/sync. */
+export interface SourceSyncResponse {
+  source_id: string;
+  source_handle: string;
+  events_processed: number;
+  items_upserted: number;
+  items_deleted: number;
+  items_deactivated: number;
+  versions_yanked: number;
+  versions_removed: number;
+  pricing_changes: number;
+  etag_advanced_to: string | null;
+  error: string | null;
+  skipped_reason: string | null;
+  last_sync_error: string | null;
+  last_synced_at: string | null;
+}
+
+/** Body for POST /api/marketplace/sources/{id}/promote (superuser-only). */
+export interface SourcePromotePayload {
+  trust_level: 'admin_trusted' | 'private' | 'untrusted';
+}
+
+export const marketplaceSourcesApi = {
+  /**
+   * List the marketplace sources visible to the requester. Always includes
+   * system rows (tesslate-official, local) plus user and team scoped rows
+   * for the requester's active memberships. Inactive non-system rows are
+   * hidden by default.
+   */
+  list: async (
+    options?: { include_inactive?: boolean; signal?: AbortSignal }
+  ): Promise<MarketplaceSourceResponse[]> => {
+    const params = new URLSearchParams();
+    if (options?.include_inactive) params.append('include_inactive', 'true');
+    const query = params.toString();
+    const response = await api.get(
+      `/api/marketplace/sources${query ? `?${query}` : ''}`,
+      { signal: options?.signal }
+    );
+    return response.data;
+  },
+
+  /** Create a new federated marketplace source (user or team scope). */
+  create: async (data: MarketplaceSourceCreate): Promise<MarketplaceSourceResponse> => {
+    const response = await api.post('/api/marketplace/sources', data);
+    return response.data;
+  },
+
+  /** Update display name, token, or active flag. System rows return 403. */
+  update: async (
+    sourceId: string,
+    data: MarketplaceSourceUpdate
+  ): Promise<MarketplaceSourceResponse> => {
+    const response = await api.patch(`/api/marketplace/sources/${sourceId}`, data);
+    return response.data;
+  },
+
+  /**
+   * Soft-delete (default) sets is_active=false. Passing hard=true requests
+   * a cascade delete of catalog rows but only succeeds when no user-state
+   * rows reference them.
+   */
+  delete: async (sourceId: string, options?: { hard?: boolean }): Promise<void> => {
+    const params = new URLSearchParams();
+    if (options?.hard) params.append('hard', 'true');
+    const query = params.toString();
+    await api.delete(
+      `/api/marketplace/sources/${sourceId}${query ? `?${query}` : ''}`
+    );
+  },
+
+  /**
+   * Hit the source's /v1/manifest endpoint, pin its hub_id, and snapshot
+   * advertised capabilities + policies. Auto-classifies trust based on
+   * whether a token is stored.
+   */
+  test: async (sourceId: string): Promise<SourceTestResponse> => {
+    const response = await api.post(`/api/marketplace/sources/${sourceId}/test`);
+    return response.data;
+  },
+
+  /** Run a one-shot sync against this source and return the result envelope. */
+  sync: async (sourceId: string): Promise<SourceSyncResponse> => {
+    const response = await api.post(`/api/marketplace/sources/${sourceId}/sync`);
+    return response.data;
+  },
+
+  /**
+   * Superuser-only trust promotion/demotion. Only valid on non-system rows.
+   * UI must hide the affordance unless the current user has is_superuser=true.
+   */
+  promote: async (
+    sourceId: string,
+    trustLevel: SourcePromotePayload['trust_level']
+  ): Promise<MarketplaceSourceResponse> => {
+    const response = await api.post(`/api/marketplace/sources/${sourceId}/promote`, {
+      trust_level: trustLevel,
+    });
+    return response.data;
+  },
+};
+
 // Creator/Author profile API
 export const creatorsApi = {
   // Get creator public profile
