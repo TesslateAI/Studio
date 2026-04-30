@@ -21,7 +21,10 @@ from ..schemas import (
     CheckoutResponse,
     PricingDetail,
     PricingPayload,
+    PricingUpdate,
 )
+from ..services import changes_emitter
+from ..services.auth import Principal, get_principal
 from ..services.capability_router import requires_capability
 from ..services.stripe_client import get_stripe_client
 from .items import _load_item_or_404, _pricing_from_item
@@ -101,6 +104,98 @@ async def create_checkout(
         session_id=result.session_id,
         mode=result.mode,
         expires_at=None,
+    )
+
+
+@router.patch("/items/{kind}/{slug}/pricing", response_model=PricingDetail)
+@requires_capability("pricing.write")
+async def update_pricing(
+    kind: str,
+    slug: str,
+    payload: PricingUpdate,
+    db: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+) -> PricingDetail:
+    """Admin update for an item's pricing snapshot.
+
+    Mutates `item.pricing_type`, `item.price_cents`, `item.stripe_price_id`,
+    and the cached `pricing_payload` in place, then emits a `pricing_change`
+    tombstone with `from`/`to` deltas so federated orchestrators can apply
+    their own stripping rules per source trust level.
+    """
+    principal.require_scope("pricing.write")
+    item = await _load_item_or_404(db, kind, slug)
+
+    before = {
+        "pricing_type": item.pricing_type,
+        "price_cents": item.price_cents,
+        "stripe_price_id": item.stripe_price_id,
+        "currency": (item.pricing_payload or {}).get("currency", "usd"),
+        "interval": (item.pricing_payload or {}).get("interval"),
+    }
+
+    new_pricing_type = payload.pricing_type or item.pricing_type
+    if payload.pricing_type == "free":
+        new_price_cents = 0
+        new_stripe_price_id = None
+    else:
+        new_price_cents = payload.price_cents if payload.price_cents is not None else item.price_cents
+        new_stripe_price_id = (
+            payload.stripe_price_id
+            if payload.stripe_price_id is not None
+            else item.stripe_price_id
+        )
+    new_currency = payload.currency or before["currency"]
+    new_interval = payload.interval if payload.interval is not None else before["interval"]
+
+    item.pricing_type = new_pricing_type
+    item.price_cents = new_price_cents
+    item.stripe_price_id = new_stripe_price_id
+    item.pricing_payload = {
+        "pricing_type": new_pricing_type,
+        "price_cents": new_price_cents,
+        "stripe_price_id": new_stripe_price_id,
+        "currency": new_currency,
+        "interval": new_interval,
+    }
+
+    after = {
+        "pricing_type": item.pricing_type,
+        "price_cents": item.price_cents,
+        "stripe_price_id": item.stripe_price_id,
+        "currency": new_currency,
+        "interval": new_interval,
+    }
+
+    await db.flush()
+    if before != after:
+        await changes_emitter.emit(
+            db,
+            op="pricing_change",
+            kind=kind,
+            slug=slug,
+            payload={"from": before, "to": after, "actor": principal.handle},
+        )
+    await db.commit()
+
+    listings = (
+        await db.execute(
+            select(PriceListing).where(PriceListing.item_id == item.id, PriceListing.is_active.is_(True))
+        )
+    ).scalars().all()
+    return PricingDetail(
+        pricing=_pricing_from_item(item),
+        listings=[
+            {
+                "pricing_type": listing.pricing_type,
+                "interval": listing.interval,
+                "currency": listing.currency,
+                "amount_cents": listing.amount_cents,
+                "stripe_price_id": listing.stripe_price_id,
+                "is_active": listing.is_active,
+            }
+            for listing in listings
+        ],
     )
 
 

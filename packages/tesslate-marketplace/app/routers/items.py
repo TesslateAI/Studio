@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,8 @@ from ..schemas import (
     ItemVersionOut,
     PricingPayload,
 )
+from ..services import changes_emitter
+from ..services.auth import Principal, get_principal
 from ..services.capability_router import requires_capability
 from ..services.cas import LocalBundleStorage, get_bundle_storage
 from ..services.install_check import validate_archive_format, validate_bundle_size
@@ -169,25 +171,76 @@ async def list_items(
             term = f"%{q.lower()}%"
             stmt = stmt.where(func.lower(Item.name).like(term))
 
+    # Resolve the (primary_sort_column, direction) for keyset pagination.
+    # Every sort path tiebreaks on `id` (the immutable PK) so the cursor
+    # encodes (sort_value, id) and we apply a tuple comparison against both
+    # columns. This guarantees stable, gap-free, no-repeat pagination even
+    # when many rows share the same primary sort value.
     sort_key = (sort or "featured").lower()
     if sort_key == "newest":
-        stmt = stmt.order_by(desc(Item.created_at), desc(Item.id))
+        primary_col = Item.created_at
+        primary_desc = True
     elif sort_key == "popular":
-        stmt = stmt.order_by(desc(Item.downloads), desc(Item.id))
+        primary_col = Item.downloads
+        primary_desc = True
     elif sort_key == "name":
-        stmt = stmt.order_by(asc(Item.name), asc(Item.id))
+        primary_col = Item.name
+        primary_desc = False
     elif sort_key == "rating":
-        stmt = stmt.order_by(desc(Item.rating), desc(Item.id))
+        primary_col = Item.rating
+        primary_desc = True
     else:
-        # featured-first then newest
-        stmt = stmt.order_by(desc(Item.is_featured), desc(Item.created_at), desc(Item.id))
+        # featured-first then newest. We treat created_at as the primary sort
+        # for cursor purposes and let `is_featured` ride along as a stable
+        # secondary on the order_by — featured rows still cluster at the head.
+        primary_col = Item.created_at
+        primary_desc = True
+
+    if sort_key == "featured":
+        stmt = stmt.order_by(
+            desc(Item.is_featured),
+            desc(primary_col) if primary_desc else asc(primary_col),
+            desc(Item.id) if primary_desc else asc(Item.id),
+        )
+    else:
+        stmt = stmt.order_by(
+            desc(primary_col) if primary_desc else asc(primary_col),
+            desc(Item.id) if primary_desc else asc(Item.id),
+        )
 
     cursor_payload = decode_cursor(cursor)
     after_id = cursor_payload.get("after_id")
+    after_sort = cursor_payload.get("after_sort")
+    # Re-hydrate datetime cursors so SQLAlchemy compares against the bound
+    # parameter as a real datetime rather than an ISO string.
+    if isinstance(after_sort, str) and primary_col.type.python_type is datetime:
+        try:
+            after_sort = datetime.fromisoformat(after_sort)
+        except ValueError:
+            after_sort = None
     if after_id:
-        # Cursor encodes the last-seen id; re-issue the same sort and skip
-        # rows where id <= after_id (works with the secondary id sort key).
-        stmt = stmt.where(Item.id > after_id) if sort_key == "name" else stmt.where(Item.id != after_id)
+        # Cursor carries the last-seen (sort_value, id). For descending sorts
+        # we want strictly-smaller tuples; for ascending, strictly-larger.
+        # Tuple comparison expressed as a disjunction keeps the index usable.
+        if after_sort is not None:
+            if primary_desc:
+                stmt = stmt.where(
+                    or_(
+                        primary_col < after_sort,
+                        (primary_col == after_sort) & (Item.id < after_id),
+                    )
+                )
+            else:
+                stmt = stmt.where(
+                    or_(
+                        primary_col > after_sort,
+                        (primary_col == after_sort) & (Item.id > after_id),
+                    )
+                )
+        else:
+            # Backwards-compat fallback for cursors lacking `after_sort` (older
+            # clients). Falls back to id-only comparison in the same direction.
+            stmt = stmt.where(Item.id < after_id) if primary_desc else stmt.where(Item.id > after_id)
 
     # We paginate one extra row to determine `has_more`.
     rows = (await db.execute(stmt.limit(page_limit + 1))).scalars().all()
@@ -196,7 +249,14 @@ async def list_items(
 
     next_cursor = None
     if has_more and rows:
-        next_cursor = encode_cursor({"after_id": str(rows[-1].id)})
+        last = rows[-1]
+        cursor_value = getattr(last, primary_col.key)
+        next_cursor = encode_cursor(
+            {
+                "after_id": str(last.id),
+                "after_sort": cursor_value.isoformat() if hasattr(cursor_value, "isoformat") else cursor_value,
+            }
+        )
 
     return ItemList(
         items=[_to_summary(r) for r in rows],
@@ -423,6 +483,117 @@ async def download_bundle(
         "X-Tesslate-Bundle-Archive-Format": bundle.archive_format,
     }
     return StreamingResponse(_iter(), media_type=bundle.content_type, headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# Admin mutations — hard-delete an item or remove a single version.
+# Both emit tombstones so the federated changes feed mirrors them downstream.
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/items/{kind}/{slug}", status_code=204)
+@requires_capability("catalog.write")
+async def delete_item(
+    kind: str,
+    slug: str,
+    db: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+) -> Response:
+    """Hard-delete an item (and its versions/bundles via cascade).
+
+    Distinct from yank — yank flips the `is_active` flag and keeps history;
+    delete physically removes the row. Emits the `delete` op so federated
+    orchestrators can apply the matching tombstone.
+    """
+    principal.require_scope("catalog.write")
+    item = await _load_item_or_404(db, kind, slug)
+    await db.delete(item)
+    await db.flush()
+    await changes_emitter.emit(
+        db,
+        op="delete",
+        kind=kind,
+        slug=slug,
+        payload={"actor": principal.handle},
+    )
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/items/{kind}/{slug}/versions/{version}", status_code=204)
+@requires_capability("catalog.write")
+async def delete_version(
+    kind: str,
+    slug: str,
+    version: str,
+    db: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+) -> Response:
+    """Hard-remove a single version row from an item.
+
+    Used by admins to scrub a published version that goes beyond yank semantics.
+    Emits `version_remove` so consumers prune their local cache and refuse to
+    serve the version going forward. Refuses to delete the only remaining
+    version of a published item — callers should hard-delete the parent instead.
+    """
+    principal.require_scope("catalog.write")
+    item = await _load_item_or_404(db, kind, slug)
+    iv = (
+        await db.execute(
+            select(ItemVersion).where(ItemVersion.item_id == item.id, ItemVersion.version == version)
+        )
+    ).scalar_one_or_none()
+    if iv is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "version_not_found", "kind": kind, "slug": slug, "version": version},
+        )
+
+    remaining = (
+        await db.execute(
+            select(func.count(ItemVersion.id))
+            .where(ItemVersion.item_id == item.id, ItemVersion.id != iv.id)
+        )
+    ).scalar_one()
+    if remaining == 0:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "cannot_remove_only_version",
+                "message": "Delete the parent item instead of removing its sole version.",
+            },
+        )
+
+    await db.delete(iv)
+    await db.flush()
+    # If we just removed the row pointed at by `latest_version_id`, advance the
+    # pointer to the newest surviving version so detail pages keep rendering.
+    if item.latest_version_id is None or item.latest_version == version:
+        newest = (
+            await db.execute(
+                select(ItemVersion)
+                .where(ItemVersion.item_id == item.id)
+                .order_by(desc(ItemVersion.created_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if newest is not None:
+            item.latest_version = newest.version
+            item.latest_version_id = newest.id
+        else:
+            item.latest_version = None
+            item.latest_version_id = None
+
+    await changes_emitter.emit(
+        db,
+        op="version_remove",
+        kind=kind,
+        slug=slug,
+        version=version,
+        payload={"actor": principal.handle},
+    )
+    await db.commit()
+    return Response(status_code=204)
 
 
 __all__ = ["router"]

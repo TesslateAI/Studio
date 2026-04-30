@@ -52,7 +52,15 @@ async def env(tmp_path, monkeypatch):
     monkeypatch.setenv("HUB_DISPLAY_NAME", "Tesslate Test Hub")
     monkeypatch.setenv("ATTESTATION_KEY_PATH", str(attestation_file))
     monkeypatch.setenv("OPENSAIL_ENV", "test")
-    monkeypatch.setenv("STATIC_TOKENS", "test-token:publish:submissions.read:yanks.write:yanks.appeal:reviews.write:telemetry.write")
+    monkeypatch.setenv(
+        "STATIC_TOKENS",
+        ",".join(
+            [
+                "test-token:publish:submissions.read:yanks.write:yanks.appeal:reviews.write:telemetry.write:catalog.write:pricing.write",
+                "test-token-admin-2:yanks.write:yanks.appeal:catalog.write:pricing.write",
+            ]
+        ),
+    )
     monkeypatch.delenv("DISABLED_CAPABILITIES", raising=False)
     monkeypatch.delenv("STRIPE_API_KEY", raising=False)
     monkeypatch.delenv("HUB_ID", raising=False)
@@ -292,3 +300,9 @@ async def seeded(env, client):
 @pytest.fixture()
 def auth_headers() -> dict[str, str]:
     return {"Authorization": "Bearer test-token"}
+
+
+@pytest.fixture()
+def auth_headers_admin_2() -> dict[str, str]:
+    """Second admin token — used by tests that exercise the two-admin gate."""
+    return {"Authorization": "Bearer test-token-admin-2"}

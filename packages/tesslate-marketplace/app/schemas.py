@@ -223,6 +223,7 @@ class ReviewOut(BaseModel):
     reviewer_avatar_url: str | None = None
     is_verified_install: bool = False
     created_at: datetime
+    updated_at: datetime | None = None
 
 
 class ReviewList(BaseModel):
@@ -254,6 +255,21 @@ class ReviewCreate(BaseModel):
 class PricingDetail(BaseModel):
     pricing: PricingPayload
     listings: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PricingUpdate(BaseModel):
+    """Admin-only pricing mutation payload.
+
+    All fields optional — unset fields preserve their current value. Setting
+    `pricing_type='free'` zeroes out the price/stripe metadata in one call so
+    the change feed surfaces a clean transition.
+    """
+
+    pricing_type: Literal["free", "paid", "subscription"] | None = None
+    price_cents: int | None = Field(default=None, ge=0)
+    stripe_price_id: str | None = None
+    currency: str | None = None
+    interval: str | None = None
 
 
 class CheckoutRequest(BaseModel):

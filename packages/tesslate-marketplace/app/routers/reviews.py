@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,29 +79,52 @@ async def _recompute_aggregate(db: AsyncSession, item: Item) -> None:
     item.reviews_count = n
 
 
-@router.post("/items/{kind}/{slug}/reviews", response_model=ReviewOut, status_code=201)
+@router.post("/items/{kind}/{slug}/reviews", response_model=ReviewOut)
 @requires_capability("reviews.write")
 async def create_review(
     kind: str,
     slug: str,
     payload: ReviewCreate,
+    response: Response,
     db: AsyncSession = Depends(get_session),
     principal: Principal = Depends(get_principal),
 ) -> ReviewOut:
+    """Create or update the caller's review for `(kind, slug)`.
+
+    Per the plan, reviews are per-user single — a second POST by the same handle
+    must update the existing row in place rather than create a duplicate. Returns
+    201 on first write, 200 on subsequent updates so callers can tell them apart.
+    """
     principal.require_scope("reviews.write")
     item = await _load_item_or_404(db, kind, slug)
     handle = payload.reviewer_handle or principal.handle
     if not handle:
         raise HTTPException(status_code=400, detail={"error": "missing_reviewer_handle"})
 
-    review = Review(
-        item_id=item.id,
-        rating=payload.rating,
-        title=payload.title,
-        body=payload.body,
-        reviewer_handle=handle,
-    )
-    db.add(review)
+    existing = (
+        await db.execute(
+            select(Review).where(Review.item_id == item.id, Review.reviewer_handle == handle)
+        )
+    ).scalar_one_or_none()
+
+    if existing is None:
+        review = Review(
+            item_id=item.id,
+            rating=payload.rating,
+            title=payload.title,
+            body=payload.body,
+            reviewer_handle=handle,
+        )
+        db.add(review)
+        response.status_code = 201
+    else:
+        existing.rating = payload.rating
+        existing.title = payload.title
+        existing.body = payload.body
+        existing.updated_at = datetime.now(timezone.utc)
+        review = existing
+        response.status_code = 200
+
     await db.flush()
     await _recompute_aggregate(db, item)
     await db.commit()

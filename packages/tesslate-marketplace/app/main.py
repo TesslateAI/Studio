@@ -115,8 +115,12 @@ def create_app() -> FastAPI:
     app.include_router(yanks.router)
     app.include_router(telemetry.router)
 
-    # Dev-only checkout simulator (registered always; only hit when STRIPE_API_KEY is unset)
-    app.include_router(pricing.dev_router)
+    # Dev-only checkout simulator — must NEVER be registered when running in
+    # production. The simulator returns a synthetic landing page that bypasses
+    # Stripe entirely, so leaving it reachable in prod would mask payment-flow
+    # misconfiguration.
+    if settings.is_dev_mode():
+        app.include_router(pricing.dev_router)
 
     @app.get("/health", tags=["meta"])
     async def health():

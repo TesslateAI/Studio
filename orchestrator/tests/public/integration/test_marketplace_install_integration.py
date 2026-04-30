@@ -89,6 +89,11 @@ def _agent(**overrides):
     a.item_type = overrides.get("item_type", "agent")
     a.pricing_type = overrides.get("pricing_type", "free")
     a.is_active = True
+    # Wave 4 install_guard runs only when ``source_id`` is set. These legacy
+    # fixtures cover the pre-federation backfill path (no source attached) so
+    # the guard short-circuits to "allow" — keep that behavior unless a test
+    # explicitly opts-in to a source.
+    a.source_id = overrides.get("source_id", None)
     return a
 
 

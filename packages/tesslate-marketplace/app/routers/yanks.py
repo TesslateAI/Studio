@@ -10,6 +10,7 @@ second hand and sets `state=resolved`.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -73,6 +74,12 @@ async def create_yank(
                 detail={"error": "version_not_found", "version": payload.version},
             )
 
+    requester_token_id: uuid.UUID | None = None
+    if principal.token_id:
+        try:
+            requester_token_id = uuid.UUID(principal.token_id)
+        except ValueError:
+            requester_token_id = None
     yank = YankRequest(
         kind=payload.kind,
         slug=payload.slug,
@@ -80,6 +87,7 @@ async def create_yank(
         severity=payload.severity,
         reason=payload.reason,
         requested_by=payload.requested_by or principal.handle,
+        requested_by_token_id=requester_token_id,
         item_version_id=target_version.id if target_version else None,
     )
     db.add(yank)
@@ -124,6 +132,20 @@ async def create_yank(
             "yank_id": str(yank.id),
         },
     )
+    # Item-level yank flips the parent inactive — surface that as a tombstone so
+    # federated orchestrators hide the row from browse without losing references.
+    if target_version is None:
+        await changes_emitter.emit(
+            db,
+            op="deactivate",
+            kind=payload.kind,
+            slug=payload.slug,
+            payload={
+                "reason": payload.reason,
+                "severity": payload.severity,
+                "yank_id": str(yank.id),
+            },
+        )
     await db.commit()
     await db.refresh(yank)
     return _serialize_yank(yank)
@@ -155,6 +177,31 @@ async def appeal_yank(
     ).scalar_one_or_none()
     if yank is None:
         raise HTTPException(status_code=404, detail={"error": "yank_not_found"})
+
+    # Two-admin policy on critical yanks: the requester cannot resolve their
+    # own appeal. Compare both the human handle and the bearer-token identity
+    # so neither bare-handle reuse nor token-id reuse can self-confirm.
+    if yank.severity == "critical" and yank.state == "open":
+        appellant_token_id: uuid.UUID | None = None
+        if principal.token_id:
+            try:
+                appellant_token_id = uuid.UUID(principal.token_id)
+            except ValueError:
+                appellant_token_id = None
+        same_handle = bool(yank.requested_by) and yank.requested_by == principal.handle
+        same_token = (
+            yank.requested_by_token_id is not None
+            and appellant_token_id is not None
+            and yank.requested_by_token_id == appellant_token_id
+        )
+        if same_handle or same_token:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "cannot_self_appeal_critical_yank",
+                    "message": "A second admin must confirm a critical yank.",
+                },
+            )
 
     appeal = YankAppeal(
         yank_id=yank.id,

@@ -405,6 +405,9 @@ class YankRequest(Base):
     severity: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     requested_by: Mapped[str | None] = mapped_column(String(128))
+    requested_by_token_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("api_tokens.id", ondelete="SET NULL")
+    )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolution: Mapped[str | None] = mapped_column(String(32))
@@ -467,9 +470,13 @@ class Review(Base):
     reviewer_avatar_url: Mapped[str | None] = mapped_column(String(500))
     is_verified_install: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
 
     __table_args__ = (
         CheckConstraint("rating >= 1 AND rating <= 5", name="ck_reviews_rating_range"),
+        UniqueConstraint("item_id", "reviewer_handle", name="uq_reviews_item_reviewer"),
         Index("ix_reviews_item", "item_id"),
     )
 

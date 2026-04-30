@@ -19,6 +19,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # the active capability set (settings.capabilities) per request.
 ALL_CAPABILITIES: tuple[str, ...] = (
     "catalog.read",
+    "catalog.write",
     "catalog.search",
     "catalog.changes",
     "catalog.categories",
@@ -35,6 +36,7 @@ ALL_CAPABILITIES: tuple[str, ...] = (
     "reviews.write",
     "reviews.aggregates",
     "pricing.read",
+    "pricing.write",
     "pricing.checkout",
     "attestations",
     "telemetry.opt_in",

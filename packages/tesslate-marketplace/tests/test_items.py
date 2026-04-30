@@ -59,3 +59,58 @@ async def test_featured(client, seeded):
     body = r.json()
     slugs = {entry["item"]["slug"] for entry in body["featured"]}
     assert "tesslate-agent" in slugs
+
+
+async def test_items_cursor_pagination_complete_and_unique(client, env, auth_headers):
+    """Paginate a fixed corpus with limit=2 and assert no repeats / no gaps.
+
+    Regression for the broken `Item.id != after_id` cursor that returned the
+    same set on every page minus one row. Uses a fresh, freshly-seeded skill
+    catalog so the assertion is deterministic.
+    """
+    # Insert 5 items directly so we control timing and slugs.
+    import asyncio
+
+    from app.database import session_scope
+    from app.models import Item
+
+    async with session_scope() as session:
+        for i in range(5):
+            session.add(
+                Item(
+                    kind="skill",
+                    slug=f"page-skill-{i:02d}",
+                    name=f"Page Skill {i}",
+                    description="cursor pagination corpus",
+                    pricing_payload={"pricing_type": "free", "price_cents": 0, "currency": "usd"},
+                )
+            )
+            await session.flush()
+            # Distinct created_at per row so descending order is unambiguous.
+            await asyncio.sleep(0.01)
+
+    seen: list[str] = []
+    cursor: str | None = None
+    pages = 0
+    while True:
+        params: dict[str, str] = {"kind": "skill", "limit": "2", "sort": "newest"}
+        if cursor:
+            params["cursor"] = cursor
+        r = await client.get("/v1/items", params=params)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        page_slugs = [it["slug"] for it in body["items"]]
+        assert all(s not in seen for s in page_slugs), (
+            f"page repeated already-seen slugs: page={page_slugs} seen={seen}"
+        )
+        seen.extend(page_slugs)
+        pages += 1
+        if not body["has_more"]:
+            break
+        cursor = body["next_cursor"]
+        assert cursor, "has_more=true requires next_cursor"
+        assert pages < 10, "pagination loop did not terminate"
+
+    # All 5 corpus items must appear exactly once.
+    corpus = {f"page-skill-{i:02d}" for i in range(5)}
+    assert corpus.issubset(set(seen)), f"missing items from pagination: {corpus - set(seen)}"

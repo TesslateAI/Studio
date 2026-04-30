@@ -26,6 +26,7 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -35,11 +36,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.models import (
     MarketplaceAgent,
+    MarketplaceApp,
     MarketplaceBase,
     MarketplaceSource,
     Theme,
     WorkflowTemplate,
 )
+from app.models_automations import AppInstance
+from app.services.marketplace_client import HubIdMismatchError
 from app.services.marketplace_sync import MarketplaceSyncWorker
 
 
@@ -454,3 +458,319 @@ async def test_sync_source_skips_local_sources(
     result = await worker.sync_source(local.id)
     assert result.skipped_reason == "local_source"
     assert result.error is None
+
+
+# ---------------------------------------------------------------------------
+# Wave 3 fixes — hub-id drift auto-disable, type-aware app tombstone
+# ---------------------------------------------------------------------------
+
+
+class _FakeMarketplaceClient:
+    """In-test stand-in for :class:`MarketplaceClient`.
+
+    Only the few methods :meth:`MarketplaceSyncWorker._sync_one` calls are
+    implemented. ``get_manifest`` raises whatever was passed to the
+    constructor so tests can drive specific failure modes (e.g. hub-id
+    drift) without booting a real upstream service.
+    """
+
+    def __init__(self, manifest_exc: Exception) -> None:
+        self._manifest_exc = manifest_exc
+        self.aclose_calls = 0
+
+    async def get_manifest(self) -> dict:
+        raise self._manifest_exc
+
+    async def aclose(self) -> None:
+        self.aclose_calls += 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_hub_id_mismatch_auto_disables_source(
+    orchestrator_session: AsyncSession,
+) -> None:
+    """Plan §X (hub identity headers): a hub-id pin mismatch must auto-
+    disable the source, persist the typed error, and surface a re-pair
+    hint in the error so the UI can render an actionable banner.
+
+    Today (pre-fix) we only persisted last_sync_error and left the source
+    active — meaning the next sync tick would just retry against the
+    drift-detected hub. This test pins the source, mocks the client to
+    raise HubIdMismatchError on the manifest call, and asserts the source
+    flips inactive AND the error includes the actionable hint.
+    """
+    handle = f"hub-drift-{os.getpid()}-{int(time.time() * 1000) % 10_000_000}"
+    source = MarketplaceSource(
+        handle=handle,
+        display_name="Drifty Hub",
+        base_url="https://example.invalid",
+        scope="system",
+        trust_level="untrusted",
+        is_active=True,
+        pinned_hub_id="original-hub-id",
+    )
+    orchestrator_session.add(source)
+    await orchestrator_session.commit()
+    await orchestrator_session.refresh(source)
+
+    drift_exc = HubIdMismatchError(
+        expected="original-hub-id",
+        actual="hijacked-hub-id",
+        url="https://example.invalid/v1/manifest",
+    )
+
+    def _fake_factory(_source, _token):  # signature: (MarketplaceSource, str|None)
+        return _FakeMarketplaceClient(manifest_exc=drift_exc)
+
+    try:
+        SessionFactory = _orchestrator_session_factory()
+        worker = MarketplaceSyncWorker(
+            db_session_factory=SessionFactory,
+            marketplace_client_factory=_fake_factory,
+        )
+        result = await worker.sync_source(source.id)
+
+        # Sync surfaces the error and the auto-disable hint.
+        assert result.error is not None
+        assert "Hub ID drift" in result.error
+        assert "Test Connection" in result.error
+        assert "auto-disabled" in result.error
+
+        # Re-read source — auto-disable must be persisted.
+        await orchestrator_session.refresh(source)
+        assert source.is_active is False, (
+            "hub-id drift must auto-disable the source per the plan"
+        )
+        assert source.last_sync_error is not None
+        assert "Hub ID drift" in source.last_sync_error
+        assert source.last_synced_at is not None
+        # Pin is left untouched on purpose — the user must explicitly
+        # re-pair via Test Connection to re-pin.
+        assert source.pinned_hub_id == "original-hub-id"
+    finally:
+        await orchestrator_session.delete(source)
+        await orchestrator_session.commit()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_deactivate_app_uses_state_column(
+    orchestrator_session: AsyncSession,
+    federated_source: MarketplaceSource,
+) -> None:
+    """``MarketplaceApp`` has no ``is_active`` boolean — only a ``state`` enum
+    (models.py:2046). The deactivate handler must therefore set
+    ``state='deprecated'`` and ``deactivated_upstream_at`` instead of writing
+    to a non-existent ``is_active`` attribute.
+
+    Pre-fix the handler blindly wrote ``row.is_active = False`` which silently
+    succeeded as an ad-hoc Python attribute set but never persisted, so
+    federated apps stayed in the "approved" state forever.
+    """
+    from uuid import uuid4 as _uuid4
+    slug = f"federated-app-deactivate-{_uuid4().hex[:10]}"
+    app = MarketplaceApp(
+        slug=slug,
+        name="Federated App To Deactivate",
+        creator_user_id=None,
+        state="approved",
+        visibility="public",
+        source_id=federated_source.id,
+        source_etag="v1",
+        source_remote_id=slug,
+        deleted_upstream=False,
+    )
+    orchestrator_session.add(app)
+    await orchestrator_session.commit()
+    await orchestrator_session.refresh(app)
+
+    SessionFactory = _orchestrator_session_factory()
+    worker = MarketplaceSyncWorker(db_session_factory=SessionFactory)
+
+    # Run the handler in its own session (matches sync worker semantics).
+    async with SessionFactory() as sess:
+        # The handler reads source via the row's source_id; refetch so the
+        # session knows about the federated_source.
+        bound_source = await sess.get(MarketplaceSource, federated_source.id)
+        assert bound_source is not None
+        await worker._handle_deactivate(sess, bound_source, "app", slug)
+        await sess.commit()
+
+    await orchestrator_session.refresh(app)
+    assert app.state == "deprecated", (
+        "MarketplaceApp deactivate must flip state column, not non-existent is_active"
+    )
+    assert app.deactivated_upstream_at is not None
+
+    # Cleanup.
+    await orchestrator_session.delete(app)
+    await orchestrator_session.commit()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_delete_app_with_no_user_state_hard_deletes(
+    orchestrator_session: AsyncSession,
+    federated_source: MarketplaceSource,
+) -> None:
+    """``_handle_delete`` on an unreferenced app must hard-delete the row.
+
+    Companion to the stub-keep test below; this one validates the no-user-
+    state branch still works for ``MarketplaceApp`` after the type-aware
+    fix in ``_handle_delete``.
+    """
+    from uuid import uuid4 as _uuid4
+    slug = f"federated-app-delete-{_uuid4().hex[:10]}"
+    app = MarketplaceApp(
+        slug=slug,
+        name="Federated App Delete Me",
+        creator_user_id=None,
+        state="approved",
+        visibility="public",
+        source_id=federated_source.id,
+        source_etag="v1",
+        source_remote_id=slug,
+        deleted_upstream=False,
+    )
+    orchestrator_session.add(app)
+    await orchestrator_session.commit()
+    app_id = app.id
+
+    SessionFactory = _orchestrator_session_factory()
+    worker = MarketplaceSyncWorker(db_session_factory=SessionFactory)
+
+    async with SessionFactory() as sess:
+        bound_source = await sess.get(MarketplaceSource, federated_source.id)
+        assert bound_source is not None
+        ok = await worker._handle_delete(sess, bound_source, "app", slug)
+        assert ok is True
+        await sess.commit()
+
+    remaining = (
+        await orchestrator_session.execute(
+            select(MarketplaceApp).where(MarketplaceApp.id == app_id)
+        )
+    ).scalars().first()
+    assert remaining is None, "no user state references — row should be hard-deleted"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_delete_app_with_user_state_keeps_stub(
+    orchestrator_session: AsyncSession,
+    federated_source: MarketplaceSource,
+) -> None:
+    """When a user-state row (AppInstance) still FKs to the app, the delete
+    handler must keep a stub: ``deleted_upstream=True``,
+    ``deleted_upstream_at`` set, and ``state='deprecated'`` (since
+    MarketplaceApp lacks an ``is_active`` column). The AppInstance row
+    must remain untouched — the stub exists precisely to satisfy the
+    RESTRICT FK constraint without breaking installed users.
+    """
+    from uuid import uuid4
+
+    from app import models
+
+    user_id = uuid4()
+    user = models.User(
+        id=user_id,
+        email=f"stub-{user_id}@example.com",
+        hashed_password="x",
+        is_active=True,
+        is_superuser=False,
+        is_verified=True,
+        name="Stub Owner",
+        username=f"stub-{user_id.hex[:10]}",
+        slug=f"stub-{user_id.hex[:10]}",
+    )
+    orchestrator_session.add(user)
+
+    slug = f"federated-app-stub-{user_id.hex[:10]}"
+    app = MarketplaceApp(
+        slug=slug,
+        name="Federated App With Installs",
+        creator_user_id=user_id,
+        state="approved",
+        visibility="public",
+        source_id=federated_source.id,
+        source_etag="v1",
+        source_remote_id=slug,
+        deleted_upstream=False,
+    )
+    orchestrator_session.add(app)
+    await orchestrator_session.flush()
+
+    version = models.AppVersion(
+        id=uuid4(),
+        app_id=app.id,
+        version="1.0.0",
+        manifest_schema_version="2026-05",
+        manifest_json={"app": {"slug": slug}},
+        manifest_hash="hash1",
+        feature_set_hash="fh1",
+        approval_state="stage1_approved",
+        published_at=datetime.now(UTC),
+        # Migration 0088 made source_id NOT NULL on app_versions; mirror
+        # the parent app's source so the row inserts cleanly.
+        source_id=federated_source.id,
+    )
+    orchestrator_session.add(version)
+    await orchestrator_session.flush()
+
+    instance = AppInstance(
+        id=uuid4(),
+        app_id=app.id,
+        app_version_id=version.id,
+        installer_user_id=user_id,
+        state="installed",
+    )
+    orchestrator_session.add(instance)
+    await orchestrator_session.commit()
+
+    app_id = app.id
+    instance_id = instance.id
+
+    SessionFactory = _orchestrator_session_factory()
+    worker = MarketplaceSyncWorker(db_session_factory=SessionFactory)
+
+    try:
+        async with SessionFactory() as sess:
+            bound_source = await sess.get(MarketplaceSource, federated_source.id)
+            assert bound_source is not None
+            ok = await worker._handle_delete(sess, bound_source, "app", slug)
+            assert ok is True
+            await sess.commit()
+
+        await orchestrator_session.refresh(app)
+        assert app.deleted_upstream is True
+        assert app.deleted_upstream_at is not None
+        assert app.state == "deprecated", (
+            "MarketplaceApp delete-stub must flip state to 'deprecated' since "
+            "the model has no is_active boolean"
+        )
+
+        # The AppInstance MUST be untouched — the stub exists to satisfy
+        # the RESTRICT FK without disrupting installed users.
+        surviving_inst = (
+            await orchestrator_session.execute(
+                select(AppInstance).where(AppInstance.id == instance_id)
+            )
+        ).scalars().first()
+        assert surviving_inst is not None, "AppInstance must not be deleted"
+        assert surviving_inst.state == "installed"
+    finally:
+        # Teardown in FK order: instance → version → app → user.
+        await orchestrator_session.execute(
+            AppInstance.__table__.delete().where(AppInstance.id == instance_id)
+        )
+        await orchestrator_session.execute(
+            models.AppVersion.__table__.delete().where(models.AppVersion.id == version.id)
+        )
+        await orchestrator_session.execute(
+            MarketplaceApp.__table__.delete().where(MarketplaceApp.id == app_id)
+        )
+        await orchestrator_session.execute(
+            models.User.__table__.delete().where(models.User.id == user_id)
+        )
+        await orchestrator_session.commit()

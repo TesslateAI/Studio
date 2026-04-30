@@ -77,8 +77,13 @@ async def _resolve_static(token: str, settings: Settings) -> Principal | None:
     table = settings.static_token_table()
     if token not in table:
         return None
+    # Hash the token into a stable, collision-resistant handle. The previous
+    # `token[:6]` form silently collided whenever two static tokens shared a
+    # prefix (e.g. `test-token` vs `test-token-admin-2`), which broke
+    # identity-based policy checks like the two-admin yank gate.
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
     return Principal(
-        handle=f"static:{token[:6]}",
+        handle=f"static:{digest}",
         scopes=set(table[token]),
         token_id=None,
         source="static",

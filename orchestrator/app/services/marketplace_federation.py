@@ -359,6 +359,7 @@ async def live_resolve(
     *,
     decrypted_token: str | None = None,
     client: MarketplaceClient | None = None,
+    db: AsyncSession | None = None,
 ) -> ResolvedItem:
     """Resolve a single (kind, slug, [version]) live from the source hub.
 
@@ -366,6 +367,15 @@ async def live_resolve(
     ``version`` is None we fetch the item, then ask the hub for the
     declared latest version. If a bundle envelope is advertised we fetch
     it; signed-manifests sources additionally fetch the attestation.
+
+    A source MUST be pinned (``pinned_hub_id`` set) before any install can
+    happen — without a pin the client cannot detect hub-id drift on
+    subsequent calls. If the source is unpinned we fetch ``/v1/manifest``
+    once, snapshot ``pinned_hub_id`` + ``capabilities_cache`` +
+    ``policies_cache``, and commit before doing the install fetch. The
+    caller MUST pass a live ``db`` session for this auto-pin to work; if
+    the source is unpinned and no session is provided we raise so the
+    install path doesn't silently install against an un-verifiable hub.
     """
     if source.base_url.startswith(LOCAL_URL_PREFIX):
         raise ValueError(
@@ -382,6 +392,50 @@ async def live_resolve(
         )
 
     try:
+        # Auto-pin on first contact so HubIdMismatchError can fire on
+        # every subsequent call. Without this, an unpinned source would
+        # silently accept whatever hub_id the URL happened to return at
+        # install time, defeating the whole identity-pin model.
+        if source.pinned_hub_id is None:
+            if db is None:
+                raise ValueError(
+                    "live_resolve: source is unpinned and no db session was "
+                    "provided to auto-pin. Caller should either pin the source "
+                    "via Test Connection in Settings first, or pass db so the "
+                    "install can pin in-line."
+                )
+            manifest = await client.get_manifest()
+            hub_id = manifest.get("hub_id")
+            if not isinstance(hub_id, str) or not hub_id:
+                raise ValueError(
+                    f"live_resolve: source {source.handle!r} returned a "
+                    f"manifest without a usable hub_id; refusing to install."
+                )
+            source.pinned_hub_id = hub_id
+            capabilities = manifest.get("capabilities") or []
+            policies = manifest.get("policies") or {}
+            source.capabilities_cache = (
+                list(capabilities) if isinstance(capabilities, list) else []
+            )
+            source.policies_cache = (
+                dict(policies) if isinstance(policies, dict) else {}
+            )
+            await db.commit()
+            # Re-bind the client to the now-pinned hub id so the rest of
+            # this resolve enforces the pin on every response.
+            await client.aclose()
+            client = MarketplaceClient(
+                base_url=source.base_url,
+                token=decrypted_token,
+                pinned_hub_id=source.pinned_hub_id,
+            )
+            owns_client = True
+            logger.info(
+                "live_resolve: auto-pinned source %s hub_id=%s on first install",
+                source.handle,
+                hub_id,
+            )
+
         if version is None:
             item = await client.get_item(kind, slug)
             latest = item.get("latest_version")

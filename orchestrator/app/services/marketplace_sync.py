@@ -61,6 +61,7 @@ from ..models import (
 from .credential_manager import get_credential_manager
 from .marketplace_client import (
     LOCAL_URL_PREFIX,
+    HubIdMismatchError,
     JsonObject,
     MarketplaceAuthError,
     MarketplaceClient,
@@ -283,7 +284,19 @@ class MarketplaceSyncWorker:
                 return result
             except (MarketplaceClientError, Exception) as exc:  # noqa: BLE001
                 # Persist the error to the source row so the UI can surface it.
-                error_text = str(exc)[:1000]
+                # HubIdMismatchError is a security-significant signal: the
+                # remote hub's identity drifted from the pin we recorded on
+                # first contact. That is either a misconfiguration (user
+                # repointed at a different hub) or an active hijack — either
+                # way we MUST stop syncing and force the user to re-pair.
+                is_hub_id_drift = isinstance(exc, HubIdMismatchError)
+                if is_hub_id_drift:
+                    error_text = (
+                        f"{exc} — Hub ID drift detected; source auto-disabled. "
+                        "Re-pair via Settings → Test Connection."
+                    )[:1000]
+                else:
+                    error_text = str(exc)[:1000]
                 logger.warning(
                     "marketplace_sync: source %s failed: %s", handle, error_text
                 )
@@ -292,6 +305,10 @@ class MarketplaceSyncWorker:
                 # Re-fetch source for a clean update tx.
                 source = await session.get(MarketplaceSource, source_id)
                 if source is not None:
+                    if is_hub_id_drift:
+                        # Auto-disable BEFORE commit so the next sync tick
+                        # short-circuits via the is_active gate.
+                        source.is_active = False
                     source.last_sync_error = error_text
                     source.last_synced_at = _utcnow()
                     await session.commit()
@@ -953,7 +970,19 @@ class MarketplaceSyncWorker:
         if await self._has_user_state_reference(session, kind, row):
             row.deleted_upstream = True
             row.deleted_upstream_at = _utcnow()
-            row.is_active = False
+            # MarketplaceApp uses a `state` enum column instead of a boolean
+            # `is_active`. Apply the type-aware tombstone so federated apps
+            # actually flip out of the browseable set instead of silently
+            # staying live (the previous code wrote to a non-existent
+            # attribute on apps).
+            if hasattr(row, "is_active"):
+                row.is_active = False
+            elif hasattr(row, "state"):
+                # `deprecated` is the catalog-tombstone state per the App
+                # state machine (models.py:2046-2048). `yanked` is reserved
+                # for per-version security-critical pulls; a delete event
+                # from the hub is a soft retirement, so deprecated fits.
+                row.state = "deprecated"
         else:
             await session.delete(row)
         return True
@@ -971,7 +1000,12 @@ class MarketplaceSyncWorker:
         row = await self._existing_row(session, model, source, slug)
         if row is None:
             return
-        row.is_active = False
+        # Same type-aware tombstone as _handle_delete: MarketplaceApp has
+        # no `is_active` boolean — its lifecycle lives on the `state` enum.
+        if hasattr(row, "is_active"):
+            row.is_active = False
+        elif hasattr(row, "state"):
+            row.state = "deprecated"
         row.deactivated_upstream_at = _utcnow()
 
     async def _handle_yank(

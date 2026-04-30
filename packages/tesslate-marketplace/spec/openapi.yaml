@@ -96,6 +96,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ItemDetail"
         "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [items]
+      summary: Hard-delete an item (admin) — emits `delete` op
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
 
   /v1/items/{kind}/{slug}/versions:
     get:
@@ -128,6 +139,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemVersion"
+    delete:
+      tags: [items]
+      summary: Hard-remove a single version (admin) — emits `version_remove` op
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+        - $ref: "#/components/parameters/Version"
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Cannot remove the only remaining version
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
 
   /v1/items/{kind}/{slug}/versions/{version}/bundle:
     get:
@@ -347,6 +372,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PricingDetail"
+    patch:
+      tags: [pricing]
+      summary: Update pricing snapshot (admin) — emits `pricing_change` op
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingUpdate"
+      responses:
+        "200":
+          description: Updated pricing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingDetail"
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
 
   /v1/items/{kind}/{slug}/checkout:
     post:
@@ -751,6 +798,16 @@ components:
         listings:
           type: array
           items: { type: object, additionalProperties: true }
+    PricingUpdate:
+      type: object
+      properties:
+        pricing_type:
+          type: string
+          enum: [free, paid, subscription]
+        price_cents: { type: integer, minimum: 0, nullable: true }
+        stripe_price_id: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        interval: { type: string, nullable: true }
     CheckoutRequest:
       type: object
       properties:

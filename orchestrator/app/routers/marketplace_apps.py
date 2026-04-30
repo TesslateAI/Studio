@@ -128,6 +128,12 @@ async def list_apps(
     if not user.is_superuser:
         filters.append(MarketplaceApp.visibility == "public")
         filters.append(MarketplaceApp.state == "approved")
+    # Federated apps the upstream hub deleted (or asked us to deactivate)
+    # should disappear from browse for everyone — even superusers — to
+    # avoid surfacing tombstoned rows that no longer have a live upstream.
+    # Owner-direct lookups via /{app_id} still resolve since we only filter
+    # the list endpoint here.
+    filters.append(MarketplaceApp.deleted_upstream.is_(False))
     if q:
         pat = f"%{q}%"
         filters.append(or_(MarketplaceApp.name.ilike(pat), MarketplaceApp.slug.ilike(pat)))

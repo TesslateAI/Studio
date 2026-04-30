@@ -374,6 +374,85 @@ def _ensure_install_allowed(
         )
 
 
+async def _void_paid_purchase_for_gate_failure(
+    *,
+    db: AsyncSession,
+    user: User,
+    agent: MarketplaceAgent,
+    gate_exc: HTTPException,
+    stripe_session_id: str,
+) -> None:
+    """Void any active ``UserPurchasedAgent`` row for ``user``+``agent`` and
+    record the source-trust failure.
+
+    Mirrors the subscription-cancel path in
+    ``services/stripe_service.py::_handle_subscription_deleted`` (sets
+    ``is_active=False`` and stamps ``expires_at=now``). When no row exists
+    the function is a no-op — a row may not have been written yet because
+    we re-check the gate BEFORE inserting on the new-purchase path. The
+    audit entry is non-blocking and never raises.
+    """
+    try:
+        existing_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                and_(
+                    UserPurchasedAgent.user_id == user.id,
+                    UserPurchasedAgent.agent_id == agent.id,
+                )
+            )
+        )
+        existing_purchase = existing_result.scalar_one_or_none()
+        if existing_purchase is not None and existing_purchase.is_active:
+            existing_purchase.is_active = False
+            existing_purchase.expires_at = datetime.now(UTC)
+
+        await db.commit()
+    except Exception:
+        logger.exception(
+            "verify_purchase: failed to void existing purchase for user=%s agent=%s",
+            user.id,
+            agent.id,
+        )
+
+    # Non-blocking audit log keyed on the user's default team.
+    try:
+        if user.default_team_id is not None:
+            from ..services.audit_service import log_event
+
+            await log_event(
+                db=db,
+                team_id=user.default_team_id,
+                user_id=user.id,
+                action="marketplace.purchase.voided_trust_failure",
+                resource_type="agent",
+                resource_id=agent.id,
+                details={
+                    "stripe_session_id": stripe_session_id,
+                    "agent_slug": agent.slug,
+                    "source_id": str(agent.source_id) if agent.source_id else None,
+                    "gate_status": gate_exc.status_code,
+                    "gate_detail": gate_exc.detail,
+                },
+            )
+            await db.commit()
+    except Exception:
+        logger.debug(
+            "verify_purchase: audit_log failed for trust-voided purchase user=%s agent=%s",
+            user.id,
+            agent.id,
+            exc_info=True,
+        )
+
+    logger.warning(
+        "verify_purchase: voided paid purchase due to install_guard failure "
+        "user=%s agent=%s source=%s detail=%s",
+        user.id,
+        agent.id,
+        agent.source_id,
+        gate_exc.detail,
+    )
+
+
 # Cache TTL for LiteLLM models (5 minutes - models rarely change)
 _MODELS_CACHE_TTL = 300
 
@@ -1253,6 +1332,43 @@ async def verify_agent_purchase(
 
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Re-check the install gate at fulfillment time. The trust state can
+        # change between checkout-creation and Stripe's redirect (admin marks
+        # the source ``is_active=False``, the source's ``trust_level`` drops,
+        # the hub_id drifts). We treat the user as already-confirmed
+        # because they actually paid; we only need the trust-matrix gate
+        # to still hold. On a deny we void the purchase row (idempotent on
+        # the existing row, never persists a new row), log an audit
+        # entry, and return 200 with a structured failure body so the
+        # client surfaces "your source dropped trust, refund initiated"
+        # without Stripe retrying the redirect.
+        agent_source_for_gate = await _load_source(db, agent.source_id)
+        try:
+            _ensure_install_allowed(
+                agent_source_for_gate,
+                "agent",
+                requester_user_id=current_user.id,
+                confirmed=True,
+            )
+        except HTTPException as gate_exc:
+            await _void_paid_purchase_for_gate_failure(
+                db=db,
+                user=current_user,
+                agent=agent,
+                gate_exc=gate_exc,
+                stripe_session_id=session_id,
+            )
+            return {
+                "success": False,
+                "message": "Source trust check failed at fulfillment",
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "install_blocked": gate_exc.detail
+                if isinstance(gate_exc.detail, dict)
+                else {"error": "install_blocked", "reason": str(gate_exc.detail)},
+                "refund_status": "pending",
+            }
 
         # Check if user already has this agent
         existing_query = select(UserPurchasedAgent).where(
