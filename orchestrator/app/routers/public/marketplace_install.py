@@ -24,7 +24,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ...database import get_db
-from ...models import User, UserPurchasedAgent, UserPurchasedBase
+from ...models import (
+    MarketplaceAgent,
+    MarketplaceBase,
+    MarketplaceSource,
+    User,
+    UserPurchasedAgent,
+    UserPurchasedBase,
+)
 from ...permissions import Permission
 from ...services.public.marketplace_install_service import (
     build_download_urls,
@@ -110,11 +117,36 @@ async def list_installed(
     item_type: Literal["agent", "skill", "mcp_server", "base"] | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=100, ge=1, le=500),
+    source: str | None = Query(
+        default=None,
+        description=(
+            "Filter installed items by the marketplace source they were "
+            "synced from. Joined via MarketplaceAgent.source_id / "
+            "MarketplaceBase.source_id."
+        ),
+    ),
     user: User = Depends(scoped(Permission.MARKETPLACE_INSTALL)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     include_agents = item_type in (None, "agent", "skill", "mcp_server")
     include_bases = item_type in (None, "base")
+
+    # Wave 4: optional source filter on the installed list. We resolve the
+    # handle once and apply the filter as a JOIN+WHERE in each branch so
+    # the ID comparison happens server-side.
+    source_id_filter = None
+    if source:
+        source_row = (
+            await db.execute(
+                select(MarketplaceSource).where(MarketplaceSource.handle == source)
+            )
+        ).scalar_one_or_none()
+        if source_row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown marketplace source handle: {source!r}",
+            )
+        source_id_filter = source_row.id
 
     rows: list = []
 
@@ -127,6 +159,10 @@ async def list_installed(
                 UserPurchasedAgent.is_active.is_(True),
             )
         )
+        if source_id_filter is not None:
+            agent_stmt = agent_stmt.join(
+                MarketplaceAgent, MarketplaceAgent.id == UserPurchasedAgent.agent_id
+            ).where(MarketplaceAgent.source_id == source_id_filter)
         agent_rows = (await db.execute(agent_stmt)).scalars().all()
         if item_type and item_type != "base":
             agent_rows = [r for r in agent_rows if r.agent and r.agent.item_type == item_type]
@@ -137,6 +173,10 @@ async def list_installed(
             UserPurchasedBase.user_id == user.id,
             UserPurchasedBase.is_active.is_(True),
         )
+        if source_id_filter is not None:
+            base_stmt = base_stmt.join(
+                MarketplaceBase, MarketplaceBase.id == UserPurchasedBase.base_id
+            ).where(MarketplaceBase.source_id == source_id_filter)
         base_rows = (await db.execute(base_stmt)).scalars().all()
         rows.extend(base_rows)
 

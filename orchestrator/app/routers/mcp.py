@@ -17,7 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..database import get_db
-from ..models import AgentMcpAssignment, MarketplaceAgent, McpOAuthConnection, UserMcpConfig
+from ..models import (
+    AgentMcpAssignment,
+    MarketplaceAgent,
+    MarketplaceSource,
+    McpOAuthConnection,
+    UserMcpConfig,
+)
 from ..schemas import (
     AgentMcpAssignmentResponse,
     McpConfigResponse,
@@ -27,6 +33,7 @@ from ..schemas import (
     McpTestResponse,
 )
 from ..services.channels.registry import decrypt_credentials, encrypt_credentials
+from ..services.marketplace_federation import install_guard, mcp_install_prompt
 from ..services.mcp.client import connect_mcp
 from ..users import current_active_user
 
@@ -260,6 +267,72 @@ async def install_mcp_server(
             status_code=400,
             detail="Marketplace item is not an MCP server",
         )
+
+    # 1b. Wave 4: trust-level enforcement for MCP installs.
+    #
+    # Per the federated-marketplace plan, ``mcp_server`` installs from
+    # ``untrusted`` sources are blocked outright; ``private`` sources
+    # require explicit per-install confirmation that surfaces the
+    # declared scope/tool list (and any destructive tools) to the user
+    # before the install completes. The orchestrator never trusts the
+    # client to enforce this — install_guard is the authoritative check.
+    if agent.source_id is not None:
+        source_row = (
+            await db.execute(
+                select(MarketplaceSource).where(MarketplaceSource.id == agent.source_id)
+            )
+        ).scalar_one_or_none()
+
+        # The MCP install confirmation prompt is built from the agent's
+        # config dict (which is the canonical place we keep the parsed
+        # manifest fields the marketplace synced down). For apps installed
+        # from a federated hub this gets enriched with tool/scope data;
+        # for legacy installs from Tesslate Official it's typically the
+        # OAuth client config which install_guard tolerates as empty
+        # tools/scopes (the prompt simply renders an empty list).
+        agent_config = agent.config if isinstance(agent.config, dict) else {}
+        manifest: dict[str, Any] = {"manifest": agent_config}
+        decision = install_guard(
+            source_row,
+            "mcp_server",
+            version_meta=manifest,
+            requester_user_id=user.id,
+        )
+        if not decision.allowed:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "install_blocked",
+                    "reason": decision.reason,
+                    "source_handle": source_row.handle if source_row else None,
+                    "kind": "mcp_server",
+                },
+            )
+        if decision.requires_confirmation and not body.confirmed:
+            # Re-derive the structured prompt the UI renders. install_guard
+            # already extracts the scope/tool list, but ``mcp_install_prompt``
+            # also returns transport/command/url/env_keys — useful in the
+            # confirmation modal so the user sees exactly what's being run.
+            prompt = mcp_install_prompt(agent_config)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "install_requires_confirmation",
+                    "reason": decision.reason,
+                    "source_handle": source_row.handle if source_row else None,
+                    "kind": "mcp_server",
+                    "scope_tool_list": decision.scope_tool_list or [],
+                    "destructive_tools": decision.destructive_tools,
+                    "prompt": {
+                        "transport": prompt.transport,
+                        "command": prompt.command,
+                        "url": prompt.url,
+                        "args": prompt.args,
+                        "env_keys": prompt.env_keys,
+                        "scope_list": prompt.scope_list,
+                    },
+                },
+            )
 
     # 2. Scope validation + RBAC.
     if body.scope_level not in ("user", "project"):

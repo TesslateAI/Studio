@@ -20,6 +20,7 @@ from ..models import (
     Container,
     ContainerConnection,
     MarketplaceApp,
+    MarketplaceSource,
     Project,
     User,
 )
@@ -210,9 +211,33 @@ async def install_endpoint(
 async def list_my_installs(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    source: str | None = Query(
+        default=None,
+        description=(
+            "Filter installs by the marketplace source the underlying app was "
+            "synced from. Joined via MarketplaceApp.source_id."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_active_user),
 ) -> InstallListEnvelope:
+    # Wave 4: support ``?source=<handle>`` for the federation dropdown.
+    # Apps install plumbing itself stays on the legacy code path until
+    # Wave 7 — this just filters the read/list view by joined source.
+    source_id_filter: Any = None
+    if source:
+        source_row = (
+            await db.execute(
+                select(MarketplaceSource).where(MarketplaceSource.handle == source)
+            )
+        ).scalar_one_or_none()
+        if source_row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown marketplace source handle: {source!r}",
+            )
+        source_id_filter = source_row.id
+
     base = (
         select(
             AppInstance,
@@ -230,11 +255,16 @@ async def list_my_installs(
     count_stmt = (
         select(func.count())
         .select_from(AppInstance)
+        .join(MarketplaceApp, MarketplaceApp.id == AppInstance.app_id)
         .where(
             AppInstance.installer_user_id == user.id,
             AppInstance.state != "uninstalled",
         )
     )
+    if source_id_filter is not None:
+        base = base.where(MarketplaceApp.source_id == source_id_filter)
+        count_stmt = count_stmt.where(MarketplaceApp.source_id == source_id_filter)
+
     total = (await db.execute(count_stmt)).scalar_one()
 
     stmt = base.order_by(AppInstance.created_at.desc()).limit(limit).offset(offset)

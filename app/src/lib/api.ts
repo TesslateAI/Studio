@@ -1531,7 +1531,9 @@ export const externalApi = {
 };
 
 export const marketplaceApi = {
-  // Get all marketplace agents with optional filtering and request cancellation
+  // Get all marketplace agents with optional filtering and request cancellation.
+  // Wave 4: ``source`` filters results to a single federated marketplace
+  // source (handle, e.g. "tesslate-official"). Omit for "all sources" mode.
   getAllAgents: async (
     params?: {
       category?: string;
@@ -1540,6 +1542,7 @@ export const marketplaceApi = {
       sort?: string;
       page?: number;
       limit?: number;
+      source?: string;
     },
     options?: { signal?: AbortSignal }
   ) => {
@@ -1550,6 +1553,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
 
     const queryString = queryParams.toString();
     const response = await api.get(
@@ -1571,9 +1575,18 @@ export const marketplaceApi = {
     return response.data.agents || [];
   },
 
-  // Purchase/add agent to account
-  purchaseAgent: async (agentId: string) => {
-    const response = await api.post(`/api/marketplace/agents/${agentId}/purchase`);
+  // Purchase/add agent to account. ``confirmed`` carries through the
+  // Wave-4 install_guard confirmation flow when the source's trust level
+  // requires the per-install scope/tool prompt (mostly mcp_server/app —
+  // agents from `private` sources install without confirmation, but the
+  // flag is wired through here so future kinds can re-use the same UX).
+  purchaseAgent: async (agentId: string, opts?: { confirmed?: boolean }) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/agents/${agentId}/purchase${query ? `?${query}` : ''}`
+    );
     return response.data;
   },
 
@@ -1591,7 +1604,8 @@ export const marketplaceApi = {
     return response.data.related_agents || [];
   },
 
-  // Fork an open source agent
+  // Fork an open source agent. ``confirmed`` mirrors purchase semantics —
+  // forks are copies-into-library, so the install gate applies.
   forkAgent: async (
     agentId: string,
     customizations?: {
@@ -1599,10 +1613,14 @@ export const marketplaceApi = {
       description?: string;
       system_prompt?: string;
       model?: string;
-    }
+    },
+    opts?: { confirmed?: boolean }
   ) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
     const response = await api.post(
-      `/api/marketplace/agents/${agentId}/fork`,
+      `/api/marketplace/agents/${agentId}/fork${query ? `?${query}` : ''}`,
       customizations || {}
     );
     return response.data;
@@ -1717,6 +1735,7 @@ export const marketplaceApi = {
       sort?: string;
       page?: number;
       limit?: number;
+      source?: string;
     },
     options?: { signal?: AbortSignal }
   ) => {
@@ -1727,6 +1746,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
 
     const response = await api.get(`/api/marketplace/bases?${queryParams}`, {
       signal: options?.signal,
@@ -1744,8 +1764,13 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  purchaseBase: async (baseId: string) => {
-    const response = await api.post(`/api/marketplace/bases/${baseId}/purchase`);
+  purchaseBase: async (baseId: string, opts?: { confirmed?: boolean }) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/bases/${baseId}/purchase${query ? `?${query}` : ''}`
+    );
     return response.data;
   },
 
@@ -1909,6 +1934,7 @@ export const marketplaceApi = {
     sort?: string;
     page?: number;
     limit?: number;
+    source?: string;
   }) => {
     const queryParams = new URLSearchParams();
     if (params?.category) queryParams.append('category', params.category);
@@ -1918,6 +1944,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
     const response = await api.get(`/api/marketplace/themes?${queryParams}`);
     return response.data;
   },
@@ -1932,8 +1959,13 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  addThemeToLibrary: async (themeId: string) => {
-    const response = await api.post(`/api/marketplace/themes/${themeId}/add`);
+  addThemeToLibrary: async (themeId: string, opts?: { confirmed?: boolean }) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/themes/${themeId}/add${query ? `?${query}` : ''}`
+    );
     return response.data;
   },
 
@@ -1980,8 +2012,18 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  forkTheme: async (themeId: string, data?: Record<string, unknown>) => {
-    const response = await api.post(`/api/marketplace/themes/${themeId}/fork`, data || {});
+  forkTheme: async (
+    themeId: string,
+    data?: Record<string, unknown>,
+    opts?: { confirmed?: boolean }
+  ) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/themes/${themeId}/fork${query ? `?${query}` : ''}`,
+      data || {}
+    );
     return response.data;
   },
 
@@ -1994,6 +2036,7 @@ export const marketplaceApi = {
       sort?: string;
       page?: number;
       limit?: number;
+      source?: string;
     },
     options?: { signal?: AbortSignal }
   ) => {
@@ -2004,6 +2047,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
 
     const queryString = queryParams.toString();
     const response = await api.get(
@@ -2022,6 +2066,7 @@ export const marketplaceApi = {
       sort?: string;
       page?: number;
       limit?: number;
+      source?: string;
     },
     options?: { signal?: AbortSignal }
   ) => {
@@ -2032,6 +2077,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
     const query = queryParams.toString();
     const response = await api.get(`/api/marketplace/mcp-servers${query ? `?${query}` : ''}`, {
       signal: options?.signal,
@@ -2044,17 +2090,27 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  // MCP install/manage (separate from marketplace browse)
+  // MCP install/manage (separate from marketplace browse).
+  //
+  // Wave 4: ``confirmed`` carries the per-install confirmation flag for
+  // MCP installs from `private` sources (the install_guard returns 409
+  // with a scope/tool prompt when this is false; UI re-submits with
+  // ``confirmed=true`` after the user accepts the prompt).
   installMcpServer: async (
     marketplaceAgentId: string,
     credentials?: Record<string, string>,
-    opts?: { scope_level?: 'user' | 'project'; project_id?: string }
+    opts?: {
+      scope_level?: 'user' | 'project';
+      project_id?: string;
+      confirmed?: boolean;
+    }
   ) => {
     const response = await api.post('/api/mcp/install', {
       marketplace_agent_id: marketplaceAgentId,
       credentials: credentials || {},
       scope_level: opts?.scope_level ?? 'user',
       project_id: opts?.project_id,
+      confirmed: opts?.confirmed ?? false,
     });
     return response.data;
   },
@@ -2190,15 +2246,28 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  purchaseSkill: async (skillId: string) => {
-    const response = await api.post(`/api/marketplace/skills/${skillId}/purchase`);
+  purchaseSkill: async (skillId: string, opts?: { confirmed?: boolean }) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/skills/${skillId}/purchase${query ? `?${query}` : ''}`
+    );
     return response.data;
   },
 
-  installSkillOnAgent: async (skillId: string, agentId: string) => {
-    const response = await api.post(`/api/marketplace/skills/${skillId}/install`, {
-      agent_id: agentId,
-    });
+  installSkillOnAgent: async (
+    skillId: string,
+    agentId: string,
+    opts?: { confirmed?: boolean }
+  ) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/skills/${skillId}/install${query ? `?${query}` : ''}`,
+      { agent_id: agentId }
+    );
     return response.data;
   },
 

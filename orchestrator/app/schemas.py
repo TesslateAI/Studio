@@ -1542,12 +1542,19 @@ class McpInstallRequest(BaseModel):
     - ``scope_level="team"`` is **not accepted** — OAuth connectors are bound
       to a single user's identity and cannot be shared. The install endpoint
       rejects this value with 400.
+
+    Wave 4: ``confirmed`` is the per-install confirmation flag for MCP
+    installs from ``private`` marketplace sources. When the source's
+    trust level requires confirmation, the install endpoint returns a
+    409 with ``scope_tool_list`` so the UI can render a permission
+    prompt; the user re-submits with ``confirmed=true`` to proceed.
     """
 
     marketplace_agent_id: UUID
     credentials: dict[str, Any] | None = None  # API keys etc, will be encrypted
     scope_level: Literal["user", "project"] = "user"
     project_id: UUID | None = None
+    confirmed: bool = False
 
 
 class McpConfigUpdate(BaseModel):

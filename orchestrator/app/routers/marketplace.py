@@ -7,6 +7,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from typing import Any
+from typing import cast as type_cast
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
@@ -22,6 +23,7 @@ from ..models import (
     BaseReview,
     MarketplaceAgent,
     MarketplaceBase,
+    MarketplaceSource,
     ProjectAgent,
     Theme,
     User,
@@ -32,6 +34,7 @@ from ..models import (
 from ..schemas import BaseSubmitRequest, BaseUpdateRequest, SkillInstallRequest
 from ..services.cache_service import cache
 from ..services.marketplace_constants import LOCAL_SOURCE_ID
+from ..services.marketplace_federation import install_guard
 from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..username_validation import resolve_display_name
 from ..users import current_active_user, current_optional_user
@@ -102,6 +105,273 @@ async def _resolve_theme_by_identifier(
             return theme
     row = await db.execute(select(Theme).where(Theme.slug == identifier))
     return row.scalar_one_or_none()
+
+
+# =============================================================================
+# Federation helpers (Wave 4)
+# =============================================================================
+#
+# These helpers thread source-awareness through the existing marketplace
+# router without rewriting every endpoint. They implement the Wave-4
+# contract from the federated-marketplace plan:
+#
+#   1. Replace ``created_by_user_id IS NULL`` (the legacy "Tesslate-owned"
+#      check) with a join on ``MarketplaceSource.trust_level == 'official'``
+#      via the row's ``source_id`` FK.
+#   2. Replace hardcoded ``"Tesslate"`` strings with the joined source's
+#      ``display_name`` so a self-hosted Tesslate Official rebrand works.
+#   3. Add a ``?source=<handle>`` filter on every list endpoint that
+#      filters cached catalog rows down to a single source.
+#
+# All resolutions are cache-only — they read from the orchestrator's
+# local catalog cache populated by ``services/marketplace_sync.py``.
+
+# In-process cache for ``handle -> (source_id, display_name)`` lookups.
+# The source registry is small (a handful of rows per cluster) and changes
+# rarely, but ``GET /api/marketplace/agents`` runs on every browse refresh.
+# We cache for the lifetime of the process and let admin/Restart cycles
+# pick up new sources — same pattern the rest of the orchestrator uses
+# for slow-changing catalogs (cf. ``services.cache_service`` TTL caches).
+_SOURCE_HANDLE_CACHE: dict[str, tuple[UUID, str, str]] = {}
+_SOURCE_ID_CACHE: dict[UUID, MarketplaceSource] = {}
+
+
+async def _resolve_source_filter(
+    db: AsyncSession, source_handle: str | None
+) -> UUID | None:
+    """Resolve a ``?source=<handle>`` query param to a ``source_id``.
+
+    Returns ``None`` when the caller did not supply ``source_handle``
+    (cross-source mode — the dropdown's "All sources"). Raises 404 when
+    the handle is unknown so the UI can surface a typed error rather than
+    silently returning an empty result set.
+    """
+    if not source_handle:
+        return None
+
+    cached = _SOURCE_HANDLE_CACHE.get(source_handle)
+    if cached is not None:
+        return cached[0]
+
+    result = await db.execute(
+        select(MarketplaceSource).where(MarketplaceSource.handle == source_handle)
+    )
+    source = result.scalar_one_or_none()
+    if source is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown marketplace source handle: {source_handle!r}",
+        )
+    src_id = type_cast(UUID, source.id)
+    _SOURCE_HANDLE_CACHE[source_handle] = (
+        src_id,
+        type_cast(str, source.display_name),
+        type_cast(str, source.trust_level),
+    )
+    _SOURCE_ID_CACHE[src_id] = source
+    return src_id
+
+
+async def _load_source(db: AsyncSession, source_id: Any) -> MarketplaceSource | None:
+    """Cache-friendly load of a ``MarketplaceSource`` row.
+
+    Returns ``None`` when ``source_id`` is ``None`` (a row that wasn't
+    backfilled — should not happen post-Wave-1 but we tolerate it).
+    Accepts ``Any`` to swallow SQLAlchemy 1.x ORM typing — at runtime
+    we always have either ``None`` or a UUID-equivalent.
+    """
+    if source_id is None:
+        return None
+    sid = type_cast(UUID, source_id)
+    cached = _SOURCE_ID_CACHE.get(sid)
+    if cached is not None:
+        return cached
+    result = await db.execute(
+        select(MarketplaceSource).where(MarketplaceSource.id == sid)
+    )
+    source = result.scalar_one_or_none()
+    if source is not None:
+        src_id = type_cast(UUID, source.id)
+        _SOURCE_ID_CACHE[src_id] = source
+        _SOURCE_HANDLE_CACHE[type_cast(str, source.handle)] = (
+            src_id,
+            type_cast(str, source.display_name),
+            type_cast(str, source.trust_level),
+        )
+    return source
+
+
+def _lookup_source(
+    sources: dict[UUID, MarketplaceSource], source_id: Any
+) -> MarketplaceSource | None:
+    """Type-erasing dict lookup for a per-row source.
+
+    Pyright reads SQLAlchemy 1.x ORM attributes as ``Column[Unknown]``;
+    threading those through ``dict.get`` directly produces a forest of
+    spurious ``Argument of type Column[Unknown]`` errors. This helper
+    casts in one spot so callers stay readable.
+    """
+    if source_id is None:
+        return None
+    return sources.get(type_cast(UUID, source_id))
+
+
+async def _bulk_load_sources(
+    db: AsyncSession, source_ids: set[Any]
+) -> dict[UUID, MarketplaceSource]:
+    """One-shot load of every distinct source referenced by a list result.
+
+    List endpoints serialize many rows; each needs the source's
+    ``display_name`` and ``trust_level``. This bulk-fetches missing rows
+    so we never N+1 the source registry.
+    """
+    out: dict[UUID, MarketplaceSource] = {}
+    missing: set[UUID] = set()
+    for sid in source_ids:
+        if sid is None:
+            continue
+        cached = _SOURCE_ID_CACHE.get(sid)
+        if cached is not None:
+            out[sid] = cached
+        else:
+            missing.add(sid)
+    if missing:
+        result = await db.execute(
+            select(MarketplaceSource).where(MarketplaceSource.id.in_(missing))
+        )
+        for src in result.scalars().all():
+            src_id = type_cast(UUID, src.id)
+            _SOURCE_ID_CACHE[src_id] = src
+            _SOURCE_HANDLE_CACHE[type_cast(str, src.handle)] = (
+                src_id,
+                type_cast(str, src.display_name),
+                type_cast(str, src.trust_level),
+            )
+            out[src_id] = src
+    return out
+
+
+def _is_official_source(source: MarketplaceSource | None) -> bool:
+    """True iff the row was synced from a hub with ``trust_level='official'``.
+
+    This replaces the legacy ``created_by_user_id IS NULL`` check that the
+    pre-federation seed code used to mean "Tesslate-owned". Backfilled
+    rows in Wave 1 with ``created_by_user_id IS NULL`` were assigned to
+    Tesslate Official, so the two predicates are equivalent on existing
+    data; new federated rows from community hubs deviate, which is the
+    whole point of federation.
+    """
+    return bool(source and source.trust_level == "official")
+
+
+def _source_display_name(source: MarketplaceSource | None) -> str:
+    """Display label for the source's hub.
+
+    Defaults to ``"Community"`` when no source is attached — that maps
+    to legacy user-authored rows that haven't been backfilled to a hub.
+    Tesslate Official's seeded ``display_name`` is ``"Tesslate Official"``;
+    a self-hosted rebrand picks up the new name without code changes.
+    """
+    if source is None:
+        return "Community"
+    name = type_cast(str | None, source.display_name)
+    if name:
+        return name
+    return type_cast(str, source.handle)
+
+
+def _resolve_creator_meta(
+    *,
+    forked_by_user: User | None,
+    source: MarketplaceSource | None,
+) -> tuple[str, str, str | None, str | None]:
+    """Compute (creator_type, creator_name, creator_username, creator_avatar_url).
+
+    Wave 4 source-aware logic:
+      - When the row has a ``forked_by_user``, the creator is community.
+      - Otherwise the creator is the *source* — we use its ``display_name``
+        instead of a hardcoded ``"Tesslate"``.
+    """
+    if forked_by_user is not None:
+        return (
+            "community",
+            resolve_display_name(
+                forked_by_user.name, forked_by_user.username, forked_by_user.email
+            ),
+            forked_by_user.username,
+            forked_by_user.avatar_url,
+        )
+    if _is_official_source(source):
+        return ("official", _source_display_name(source), None, None)
+    is_community_source = source is not None and source.trust_level != "official"
+    return (
+        "community" if is_community_source else "official",
+        _source_display_name(source),
+        None,
+        None,
+    )
+
+
+def _ensure_install_allowed(
+    source: MarketplaceSource | None,
+    kind: str,
+    *,
+    requester_user_id: UUID,
+    confirmed: bool = False,
+    version_meta: dict[str, Any] | None = None,
+) -> None:
+    """Server-enforced install gate.
+
+    Calls ``install_guard`` for the (source, kind) cell; raises a typed
+    HTTP error when the install is blocked or requires confirmation.
+
+    Routers MUST call this BEFORE mutating any state (creating purchase
+    rows, assignments, library entries, etc). The guard surfaces:
+
+      - 403 ``install_blocked`` — trust level + kind matrix says no.
+      - 409 ``install_requires_confirmation`` — private hub, mcp/app
+        install requires the per-install scope/tool prompt; the response
+        body carries ``scope_tool_list`` so the UI can render the modal,
+        and the caller re-submits with ``confirmed=true``.
+
+    When ``source`` is ``None`` (a row never backfilled to any source),
+    we treat it as the local sentinel — these are user-authored rows
+    pre-federation and were always installable by their creator. The
+    install is allowed; the caller's own ownership checks are the
+    relevant authorization.
+    """
+    if source is None:
+        # Pre-Wave-1 backfill safety: treat as local-system installable.
+        return
+
+    decision = install_guard(
+        source,
+        kind,
+        version_meta=version_meta,
+        requester_user_id=requester_user_id,
+    )
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "install_blocked",
+                "reason": decision.reason,
+                "source_handle": source.handle,
+                "kind": kind,
+            },
+        )
+    if decision.requires_confirmation and not confirmed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "install_requires_confirmation",
+                "reason": decision.reason,
+                "source_handle": source.handle,
+                "kind": kind,
+                "scope_tool_list": decision.scope_tool_list or [],
+                "destructive_tools": decision.destructive_tools,
+            },
+        )
 
 
 # Cache TTL for LiteLLM models (5 minutes - models rarely change)
@@ -474,17 +744,29 @@ async def get_marketplace_agents(
     ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle (e.g. tesslate-official).",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
     """
     Browse marketplace agents with filtering and sorting.
-    Shows official Tesslate agents and published community agents.
+    Shows official agents from any active source plus published community agents.
+
+    When ``?source=<handle>`` is supplied, results are restricted to that
+    source. Without ``source``, every active source contributes rows
+    (the federation dropdown's "All sources" mode); the frontend handles
+    UI-level grouping. Hub-id pinning and trust enforcement happen at
+    sync/install time, not on browse.
 
     Public endpoint - authentication is optional:
     - Authenticated: Shows purchase status (is_purchased) for each item
     - Unauthenticated: Shows catalog without purchase status
     """
+    source_id_filter = await _resolve_source_filter(db, source)
+
     # Base query - show official agents AND published community agents (exclude skills/subagents)
     query = (
         select(MarketplaceAgent)
@@ -492,6 +774,7 @@ async def get_marketplace_agents(
         .where(
             MarketplaceAgent.is_active.is_(True),
             MarketplaceAgent.is_system.isnot(True),
+            MarketplaceAgent.deleted_upstream.is_(False),
             MarketplaceAgent.item_type.notin_(
                 ["skill", "subagent", "mcp_server", "deployment_target"]
             ),
@@ -499,6 +782,9 @@ async def get_marketplace_agents(
             | (MarketplaceAgent.is_published.is_(True)),
         )
     )
+
+    if source_id_filter is not None:
+        query = query.where(MarketplaceAgent.source_id == source_id_filter)
 
     # Apply filters
     if category:
@@ -564,24 +850,20 @@ async def get_marketplace_agents(
         )
         purchased_agent_ids = [row[0] for row in purchased_result.fetchall()]
 
+    # Bulk-load every distinct source row referenced by the result set so the
+    # response serializer can include the source's display name + handle
+    # without N+1 selects.
+    source_rows = await _bulk_load_sources(
+        db, {a.source_id for a in agents if a.source_id is not None}
+    )
+
     # Format response
     response = []
     for agent in agents:
-        # Determine creator info
-        creator_type = "official"  # Tesslate
-        creator_name = "Tesslate"
-
-        creator_username = None
-        if agent.forked_by_user_id:
-            creator_type = "community"
-            if agent.forked_by_user:
-                creator_name = _resolve_display_name(agent.forked_by_user)
-                creator_username = agent.forked_by_user.username
-
-        # Get creator avatar URL
-        creator_avatar_url = None
-        if agent.forked_by_user:
-            creator_avatar_url = agent.forked_by_user.avatar_url
+        agent_source = _lookup_source(source_rows, agent.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=agent.forked_by_user, source=agent_source
+        )
 
         agent_dict = {
             "id": agent.id,
@@ -610,13 +892,15 @@ async def get_marketplace_agents(
             "is_featured": agent.is_featured,
             "is_purchased": agent.id in purchased_agent_ids,
             "creator_type": creator_type,  # "official" or "community"
-            "creator_name": creator_name,  # "Tesslate" or display name
+            "creator_name": creator_name,  # source.display_name or community user
             "creator_username": creator_username,
             "created_by_user_id": str(agent.created_by_user_id)
             if agent.created_by_user_id
             else None,
             "forked_by_user_id": str(agent.forked_by_user_id) if agent.forked_by_user_id else None,
             "creator_avatar_url": creator_avatar_url,
+            "source_handle": agent_source.handle if agent_source else None,
+            "source_trust_level": agent_source.trust_level if agent_source else None,
         }
         response.append(agent_dict)
 
@@ -687,17 +971,11 @@ async def get_agent_details(
     )
     reviews = reviews_result.scalars().all()
 
-    # Determine creator info
-    creator_type = "official"
-    creator_name = "Tesslate"
-    creator_avatar_url = None
-    creator_username = None
-    if agent.forked_by_user_id:
-        creator_type = "community"
-        if agent.forked_by_user:
-            creator_name = _resolve_display_name(agent.forked_by_user)
-            creator_avatar_url = agent.forked_by_user.avatar_url
-            creator_username = agent.forked_by_user.username
+    # Determine creator info from joined source row.
+    agent_source = await _load_source(db, agent.source_id)
+    creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+        forked_by_user=agent.forked_by_user, source=agent_source
+    )
 
     # Format response
     return {
@@ -735,6 +1013,8 @@ async def get_agent_details(
         "creator_name": creator_name,
         "creator_username": creator_username,
         "creator_avatar_url": creator_avatar_url,
+        "source_handle": agent_source.handle if agent_source else None,
+        "source_trust_level": agent_source.trust_level if agent_source else None,
         "reviews": [
             {
                 "id": review.id,
@@ -794,6 +1074,7 @@ async def purchase_agent(
     agent_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -807,6 +1088,15 @@ async def purchase_agent(
 
     if not agent or not agent.is_active:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Trust-level enforcement (Wave 4 federation guard).
+    agent_source = await _load_source(db, agent.source_id)
+    _ensure_install_allowed(
+        agent_source,
+        "agent",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
@@ -1284,6 +1574,7 @@ async def fork_agent(
     description: str | None = None,
     system_prompt: str | None = None,
     model: str | None = None,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -1299,6 +1590,17 @@ async def fork_agent(
 
     if not parent_agent.is_forkable:
         raise HTTPException(status_code=403, detail="This agent cannot be forked")
+
+    # Forking is an install of the parent into the user's library; the
+    # trust gate applies (e.g. an untrusted source that lets agents fork
+    # would still be allowed; mcp_server / app remain blocked elsewhere).
+    parent_source = await _load_source(db, parent_agent.source_id)
+    _ensure_install_allowed(
+        parent_source,
+        "agent",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Create a forked agent
     forked_slug = f"{parent_agent.slug}-fork-{current_user.id}-{datetime.now(UTC).timestamp()}"
@@ -1718,19 +2020,16 @@ async def get_user_agents(
 
     agents_data = result.fetchall()
 
+    source_rows = await _bulk_load_sources(
+        db, {a.source_id for a, _ in agents_data if a.source_id is not None}
+    )
+
     response = []
     for agent, purchase in agents_data:
-        # Resolve creator info
-        creator_type = "official"
-        creator_name = "Tesslate"
-        creator_username = None
-        creator_avatar_url = None
-        if agent.forked_by_user_id:
-            creator_type = "community"
-            if agent.forked_by_user:
-                creator_name = _resolve_display_name(agent.forked_by_user)
-                creator_username = agent.forked_by_user.username
-                creator_avatar_url = agent.forked_by_user.avatar_url
+        agent_source = _lookup_source(source_rows, agent.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=agent.forked_by_user, source=agent_source
+        )
 
         response.append(
             {
@@ -2700,23 +2999,45 @@ async def get_marketplace_bases(
     ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
     """
     Browse marketplace bases with filtering and sorting.
 
+    When ``?source=<handle>`` is supplied, results are restricted to a
+    single source. Without it, every active source contributes rows.
+
     Public endpoint - authentication is optional:
     - Authenticated: Shows purchase status (is_purchased) for each item
     - Unauthenticated: Shows catalog without purchase status
     """
+    source_id_filter = await _resolve_source_filter(db, source)
+
+    # Wave 4: a base is browseable when its source is `official`/`admin_trusted`
+    # (always visible; the cache is the source of truth) OR it's a user-authored
+    # row marked `public`. The legacy `created_by_user_id IS NULL` check meant
+    # the same thing pre-federation — official rows were always seeded with
+    # `created_by_user_id=NULL`. We replace it with a source-aware test joined
+    # via ``MarketplaceSource.trust_level``.
+    official_subq = select(MarketplaceSource.id).where(
+        MarketplaceSource.trust_level.in_(("official", "admin_trusted"))
+    )
     query = select(MarketplaceBase).where(
         MarketplaceBase.is_active.is_(True),
+        MarketplaceBase.deleted_upstream.is_(False),
         or_(
-            MarketplaceBase.created_by_user_id.is_(None),  # seeded bases always visible
-            MarketplaceBase.visibility == "public",  # user bases only when public
+            MarketplaceBase.source_id.in_(official_subq),  # synced from a trusted hub
+            MarketplaceBase.visibility == "public",  # community bases when public
         ),
     )
+
+    if source_id_filter is not None:
+        query = query.where(MarketplaceBase.source_id == source_id_filter)
 
     # Apply filters
     if category:
@@ -2782,19 +3103,33 @@ async def get_marketplace_bases(
         creator_result = await db.execute(select(User).where(User.id.in_(creator_ids)))
         creator_info = {u.id: u for u in creator_result.scalars().all()}
 
+    # Bulk-load source rows for the result set so we can attach
+    # display_name + handle + trust_level without N+1 selects.
+    base_source_rows = await _bulk_load_sources(
+        db, {b.source_id for b in bases if b.source_id is not None}
+    )
+
     # Format response
     response = []
     for base in bases:
-        # Resolve creator info
-        is_community = base.created_by_user_id is not None
-        creator_user = creator_info.get(base.created_by_user_id) if is_community else None
-        creator_name = (
-            _resolve_display_name(creator_user)
-            if creator_user
-            else ("Tesslate" if not is_community else "Community")
+        # Resolve creator info: a base authored by a user wins over the
+        # source's display_name (community-creator branding); otherwise
+        # fall back to the source's display_name (no more "Tesslate"
+        # hardcode).
+        creator_user = (
+            creator_info.get(base.created_by_user_id) if base.created_by_user_id else None
         )
-        creator_username = creator_user.username if creator_user else None
-        creator_avatar_url = creator_user.avatar_url if creator_user else None
+        base_source = _lookup_source(base_source_rows, base.source_id)
+        if creator_user is not None:
+            creator_type = "community"
+            creator_name = _resolve_display_name(creator_user)
+            creator_username = creator_user.username
+            creator_avatar_url = creator_user.avatar_url
+        else:
+            creator_type = "official" if _is_official_source(base_source) else "community"
+            creator_name = _source_display_name(base_source)
+            creator_username = None
+            creator_avatar_url = None
 
         response.append(
             {
@@ -2822,7 +3157,7 @@ async def get_marketplace_bases(
                 "source_type": base.source_type or "git",
                 "is_forkable": False,  # Bases can't be forked
                 "usage_count": base.downloads,
-                "creator_type": "community" if is_community else "official",
+                "creator_type": creator_type,
                 "creator_name": creator_name,
                 "creator_username": creator_username,
                 "creator_avatar_url": creator_avatar_url,
@@ -2830,6 +3165,8 @@ async def get_marketplace_bases(
                 if base.created_by_user_id
                 else None,
                 "visibility": base.visibility or "private",
+                "source_handle": base_source.handle if base_source else None,
+                "source_trust_level": base_source.trust_level if base_source else None,
             }
         )
 
@@ -2895,19 +3232,22 @@ async def get_base_details(
     reviews = reviews_result.scalars().all()
 
     # Resolve creator info
-    is_community = base.created_by_user_id is not None
     creator_user = None
-    if is_community:
+    if base.created_by_user_id is not None:
         creator_result = await db.execute(select(User).where(User.id == base.created_by_user_id))
         creator_user = creator_result.scalar_one_or_none()
 
-    creator_name = (
-        _resolve_display_name(creator_user)
-        if creator_user
-        else ("Tesslate" if not is_community else "Community")
-    )
-    creator_username = creator_user.username if creator_user else None
-    creator_avatar_url = creator_user.avatar_url if creator_user else None
+    base_source = await _load_source(db, base.source_id)
+    if creator_user is not None:
+        creator_type = "community"
+        creator_name = _resolve_display_name(creator_user)
+        creator_username = creator_user.username
+        creator_avatar_url = creator_user.avatar_url
+    else:
+        creator_type = "official" if _is_official_source(base_source) else "community"
+        creator_name = _source_display_name(base_source)
+        creator_username = None
+        creator_avatar_url = None
 
     return {
         "id": base.id,
@@ -2935,12 +3275,14 @@ async def get_base_details(
         "is_forkable": False,
         "usage_count": base.downloads,
         "archive_size_bytes": base.archive_size_bytes,
-        "creator_type": "community" if is_community else "official",
+        "creator_type": creator_type,
         "creator_name": creator_name,
         "creator_username": creator_username,
         "creator_avatar_url": creator_avatar_url,
         "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
         "visibility": base.visibility or "private",
+        "source_handle": base_source.handle if base_source else None,
+        "source_trust_level": base_source.trust_level if base_source else None,
         "reviews": [
             {
                 "id": review.id,
@@ -3051,6 +3393,7 @@ async def get_base_versions(
 @router.post("/bases/{base_id}/purchase")
 async def purchase_base(
     base_id: str,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -3064,6 +3407,15 @@ async def purchase_base(
 
     if not base or not base.is_active:
         raise HTTPException(status_code=404, detail="Base not found")
+
+    # Wave 4 install gate.
+    base_source = await _load_source(db, base.source_id)
+    _ensure_install_allowed(
+        base_source,
+        "base",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Check if already purchased (scoped to team when available)
     ownership_filter = (
@@ -3804,13 +4156,24 @@ async def list_workflows(
     category: str | None = None,
     is_featured: bool | None = None,
     search: str | None = None,
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """List all workflow templates with optional filtering."""
     from ..models import WorkflowTemplate
 
-    query = select(WorkflowTemplate).where(WorkflowTemplate.is_active)
+    source_id_filter = await _resolve_source_filter(db, source)
 
+    query = select(WorkflowTemplate).where(
+        WorkflowTemplate.is_active,
+        WorkflowTemplate.deleted_upstream.is_(False),
+    )
+
+    if source_id_filter is not None:
+        query = query.where(WorkflowTemplate.source_id == source_id_filter)
     if category:
         query = query.where(WorkflowTemplate.category == category)
     if is_featured is not None:
@@ -3826,8 +4189,14 @@ async def list_workflows(
     result = await db.execute(query)
     workflows = result.scalars().all()
 
-    return {
-        "workflows": [
+    workflow_source_rows = await _bulk_load_sources(
+        db, {w.source_id for w in workflows if w.source_id is not None}
+    )
+
+    workflow_dicts = []
+    for w in workflows:
+        w_source = _lookup_source(workflow_source_rows, w.source_id)
+        workflow_dicts.append(
             {
                 "id": str(w.id),
                 "name": w.name,
@@ -3843,10 +4212,12 @@ async def list_workflows(
                 "downloads": w.downloads,
                 "rating": w.rating,
                 "is_featured": w.is_featured,
+                "source_handle": w_source.handle if w_source else None,
+                "source_trust_level": w_source.trust_level if w_source else None,
             }
-            for w in workflows
-        ]
-    }
+        )
+
+    return {"workflows": workflow_dicts}
 
 
 @router.get("/workflows/{slug}")
@@ -3926,8 +4297,15 @@ def _theme_to_dict(
     theme: Theme,
     is_in_library: bool = False,
     creator_avatar_url: str | None = None,
+    source: MarketplaceSource | None = None,
 ) -> dict:
-    """Convert a Theme model to a marketplace-compatible dict."""
+    """Convert a Theme model to a marketplace-compatible dict.
+
+    Wave 4: ``source`` is the joined ``MarketplaceSource`` row (or
+    ``None`` for unbackfilled themes). When the row was synced from a
+    federated hub, the source's ``display_name`` overrides the legacy
+    ``"Tesslate"`` author fallback.
+    """
     colors = {}
     if theme.theme_json and isinstance(theme.theme_json, dict):
         raw_colors = theme.theme_json.get("colors", {})
@@ -3945,7 +4323,10 @@ def _theme_to_dict(
         resolved_username = creator_user.username
         resolved_avatar = creator_avatar_url or creator_user.avatar_url
     else:
-        resolved_name = theme.author or "Tesslate"
+        # Source's display_name is the federation-aware fallback; the
+        # row's own ``theme.author`` field still wins when set (so a
+        # creator who set a custom author label is honored).
+        resolved_name = theme.author or _source_display_name(source)
         resolved_username = None
         resolved_avatar = creator_avatar_url
 
@@ -3983,7 +4364,14 @@ def _theme_to_dict(
         "is_purchased": is_in_library,
         "is_in_library": is_in_library,
         "is_published": theme.is_published if theme.is_published is not None else True,
-        "creator_type": "community" if theme.created_by_user_id else "official",
+        # creator_type prefers an explicit user creator, then falls back
+        # to the source's trust level so a community-hub theme reads as
+        # "community" even without a created_by_user_id.
+        "creator_type": (
+            "community"
+            if theme.created_by_user_id
+            else ("official" if _is_official_source(source) else "community")
+        ),
         "creator_name": resolved_name,
         "creator_username": resolved_username,
         "creator_avatar_url": resolved_avatar,
@@ -3996,6 +4384,8 @@ def _theme_to_dict(
         "author": resolved_name,
         "version": theme.version or "1.0.0",
         "sort_order": theme.sort_order or 0,
+        "source_handle": source.handle if source else None,
+        "source_trust_level": source.trust_level if source else None,
     }
 
 
@@ -4008,19 +4398,42 @@ async def browse_themes(
     sort: str = Query("featured"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     current_user: User | None = Depends(current_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Browse marketplace themes with filtering, search, and pagination."""
-    query = select(Theme).where(Theme.is_active.is_(True))
+    """Browse marketplace themes with filtering, search, and pagination.
 
-    # Only show official themes + published community themes
+    When ``?source=<handle>`` is supplied, results are restricted to a
+    single source. Otherwise, every active source contributes themes.
+    """
+    source_id_filter = await _resolve_source_filter(db, source)
+
+    query = select(Theme).where(
+        Theme.is_active.is_(True),
+        Theme.deleted_upstream.is_(False),
+    )
+
+    # Wave 4: visible themes are those synced from a trusted hub OR
+    # community-authored themes that have been published. The trusted-source
+    # subquery replaces the legacy ``created_by_user_id IS NULL`` predicate
+    # which meant the same thing pre-federation (Wave 1 backfilled all
+    # NULL-creator rows to Tesslate Official).
+    trusted_source_subq = select(MarketplaceSource.id).where(
+        MarketplaceSource.trust_level.in_(("official", "admin_trusted"))
+    )
     query = query.where(
         or_(
-            Theme.created_by_user_id.is_(None),
+            Theme.source_id.in_(trusted_source_subq),
             Theme.is_published.is_(True),
         )
     )
+
+    if source_id_filter is not None:
+        query = query.where(Theme.source_id == source_id_filter)
 
     if category and category != "all":
         query = query.where(Theme.category == category)
@@ -4092,6 +4505,10 @@ async def browse_themes(
         creator_result = await db.execute(select(User).where(User.id.in_(creator_ids)))
         creator_info = {u.id: u for u in creator_result.scalars().all()}
 
+    theme_source_rows = await _bulk_load_sources(
+        db, {t.source_id for t in themes if t.source_id is not None}
+    )
+
     items = []
     for theme in themes:
         # Attach creator user object so _theme_to_dict can resolve name dynamically
@@ -4102,8 +4519,14 @@ async def browse_themes(
             if theme.created_by_user_id and theme.created_by_user_id in creator_info
             else None
         )
+        theme_source = (
+            _lookup_source(theme_source_rows, theme.source_id)
+        )
         item = _theme_to_dict(
-            theme, is_in_library=theme.id in user_theme_ids, creator_avatar_url=avatar
+            theme,
+            is_in_library=theme.id in user_theme_ids,
+            creator_avatar_url=avatar,
+            source=theme_source,
         )
         items.append(item)
 
@@ -4203,7 +4626,8 @@ async def get_theme_detail(
         if creator_user:
             theme.creator = creator_user
 
-    item = _theme_to_dict(theme, is_in_library=is_in_library)
+    theme_source = await _load_source(db, theme.source_id)
+    item = _theme_to_dict(theme, is_in_library=is_in_library, source=theme_source)
     # Include full theme_json for detail view
     item["theme_json"] = theme.theme_json
 
@@ -4242,9 +4666,16 @@ async def get_user_library_themes(
             if theme.created_by_user_id and theme.created_by_user_id in creator_map:
                 theme.creator = creator_map[theme.created_by_user_id]
 
+    theme_source_rows = await _bulk_load_sources(
+        db, {t.source_id for t in theme_list if t.source_id is not None}
+    )
+
     themes = []
     for theme, lib_entry in rows:
-        item = _theme_to_dict(theme, is_in_library=True)
+        theme_source = (
+            _lookup_source(theme_source_rows, theme.source_id)
+        )
+        item = _theme_to_dict(theme, is_in_library=True, source=theme_source)
         item["theme_json"] = theme.theme_json
         item["is_enabled"] = lib_entry.is_active
         item["is_custom"] = theme.created_by_user_id is not None
@@ -4257,6 +4688,7 @@ async def get_user_library_themes(
 @router.post("/themes/{theme_id}/add")
 async def add_theme_to_library(
     theme_id: str,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -4270,6 +4702,15 @@ async def add_theme_to_library(
 
     if not theme or not theme.is_active:
         raise HTTPException(status_code=404, detail="Theme not found")
+
+    # Wave 4 install gate.
+    theme_source = await _load_source(db, theme.source_id)
+    _ensure_install_allowed(
+        theme_source,
+        "theme",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
@@ -4625,6 +5066,7 @@ async def fork_theme(
     icon: str | None = None,
     category: str | None = None,
     tags: list[str] | None = None,
+    confirmed: bool = Query(default=False),
 ):
     """Fork an open-source theme. Creates a copy owned by the current user."""
     import time
@@ -4636,6 +5078,15 @@ async def fork_theme(
 
     if original.source_type != "open":
         raise HTTPException(status_code=400, detail="Cannot fork a closed-source theme")
+
+    # Forking copies the theme into the user's library; install gate applies.
+    original_source = await _load_source(db, original.source_id)
+    _ensure_install_allowed(
+        original_source,
+        "theme",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     fork_name = name or f"{original.name} (Fork)"
     slug_base = re.sub(r"[^a-z0-9]+", "-", fork_name.lower()).strip("-")
@@ -4677,7 +5128,8 @@ async def fork_theme(
     await db.refresh(forked)
     forked.creator = current_user
 
-    item = _theme_to_dict(forked, is_in_library=True)
+    forked_source = await _load_source(db, forked.source_id)
+    item = _theme_to_dict(forked, is_in_library=True, source=forked_source)
     item["theme_json"] = forked.theme_json
 
     return {"message": "Theme forked successfully", "theme": item, "success": True}
@@ -4698,6 +5150,10 @@ async def get_marketplace_skills(
     ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
@@ -4708,17 +5164,23 @@ async def get_marketplace_skills(
     - Authenticated: Shows purchase status (is_purchased) for each skill
     - Unauthenticated: Shows catalog without purchase status
     """
+    source_id_filter = await _resolve_source_filter(db, source)
+
     # Base query – only active, published skills
     query = (
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.deleted_upstream.is_(False),
             MarketplaceAgent.item_type == "skill",
             (MarketplaceAgent.forked_by_user_id.is_(None))
             | (MarketplaceAgent.is_published.is_(True)),
         )
     )
+
+    if source_id_filter is not None:
+        query = query.where(MarketplaceAgent.source_id == source_id_filter)
 
     # Apply filters
     if category:
@@ -4786,18 +5248,16 @@ async def get_marketplace_skills(
         )
         purchased_skill_ids = [row[0] for row in purchased_result.fetchall()]
 
+    skill_source_rows = await _bulk_load_sources(
+        db, {s.source_id for s in skills if s.source_id is not None}
+    )
+
     response = []
     for skill in skills:
-        creator_type = "official"
-        creator_name = "Tesslate"
-        creator_username = None
-        creator_avatar_url = None
-        if skill.forked_by_user_id:
-            creator_type = "community"
-            if skill.forked_by_user:
-                creator_name = _resolve_display_name(skill.forked_by_user)
-                creator_username = skill.forked_by_user.username
-                creator_avatar_url = skill.forked_by_user.avatar_url
+        skill_source = _lookup_source(skill_source_rows, skill.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=skill.forked_by_user, source=skill_source
+        )
 
         response.append(
             {
@@ -4837,6 +5297,8 @@ async def get_marketplace_skills(
                 if skill.forked_by_user_id
                 else None,
                 "creator_avatar_url": creator_avatar_url,
+                "source_handle": skill_source.handle if skill_source else None,
+                "source_trust_level": skill_source.trust_level if skill_source else None,
             }
         )
 
@@ -4892,16 +5354,10 @@ async def get_skill_details(
         )
         is_purchased = purchased_result.scalar_one_or_none() is not None
 
-    creator_type = "official"
-    creator_name = "Tesslate"
-    creator_username = None
-    creator_avatar_url = None
-    if skill.forked_by_user_id:
-        creator_type = "community"
-        if skill.forked_by_user:
-            creator_name = _resolve_display_name(skill.forked_by_user)
-            creator_username = skill.forked_by_user.username
-            creator_avatar_url = skill.forked_by_user.avatar_url
+    skill_source = await _load_source(db, skill.source_id)
+    creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+        forked_by_user=skill.forked_by_user, source=skill_source
+    )
 
     return {
         "id": skill.id,
@@ -4936,6 +5392,8 @@ async def get_skill_details(
         "created_by_user_id": str(skill.created_by_user_id) if skill.created_by_user_id else None,
         "forked_by_user_id": str(skill.forked_by_user_id) if skill.forked_by_user_id else None,
         "creator_avatar_url": creator_avatar_url,
+        "source_handle": skill_source.handle if skill_source else None,
+        "source_trust_level": skill_source.trust_level if skill_source else None,
     }
 
 
@@ -4944,6 +5402,7 @@ async def purchase_skill(
     skill_id: UUID,
     request: Request,
     background_tasks: BackgroundTasks,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -4961,6 +5420,15 @@ async def purchase_skill(
 
     if not skill or not skill.is_active:
         raise HTTPException(status_code=404, detail="Skill not found")
+
+    # Wave 4 install gate.
+    skill_source = await _load_source(db, skill.source_id)
+    _ensure_install_allowed(
+        skill_source,
+        "skill",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
@@ -5045,6 +5513,7 @@ async def purchase_skill(
 async def install_skill_on_agent(
     skill_id: UUID,
     body: SkillInstallRequest,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -5063,6 +5532,15 @@ async def install_skill_on_agent(
     skill = skill_result.scalar_one_or_none()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
+
+    # Wave 4: server-enforced install gate (per source trust level).
+    skill_source = await _load_source(db, skill.source_id)
+    _ensure_install_allowed(
+        skill_source,
+        "skill",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
@@ -5205,22 +5683,19 @@ async def get_agent_skills(
     )
     assignments = result.scalars().all()
 
+    skill_ids = [a.skill.source_id for a in assignments if a.skill and a.skill.source_id]
+    assigned_source_rows = await _bulk_load_sources(db, set(skill_ids))
+
     skills = []
     for assignment in assignments:
         skill = assignment.skill
         if not skill or not skill.is_active:
             continue
 
-        creator_type = "official"
-        creator_name = "Tesslate"
-        creator_username = None
-        creator_avatar_url = None
-        if skill.forked_by_user_id:
-            creator_type = "community"
-            if skill.forked_by_user:
-                creator_name = _resolve_display_name(skill.forked_by_user)
-                creator_username = skill.forked_by_user.username
-                creator_avatar_url = skill.forked_by_user.avatar_url
+        skill_source = _lookup_source(assigned_source_rows, skill.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=skill.forked_by_user, source=skill_source
+        )
 
         skills.append(
             {
@@ -5281,6 +5756,10 @@ async def get_marketplace_mcp_servers(
     ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
@@ -5291,10 +5770,12 @@ async def get_marketplace_mcp_servers(
     - Authenticated: Shows purchase status (is_purchased) for each MCP server
     - Unauthenticated: Shows catalog without purchase status
     """
+    source_id_filter = await _resolve_source_filter(db, source)
+
     # Base query – only active, published MCP servers.
     # NOTE: unlike other marketplace item types (which keep the
     # "official-or-published" OR for backward compat), Connectors require
-    # is_published=True even for Tesslate-owned rows. This is what lets us
+    # is_published=True even for trusted-source rows. This is what lets us
     # unpublish the pre-OAuth MCPs (Brave / Slack stdio / Postgres / …) in
     # #307 without deleting them.
     query = (
@@ -5302,10 +5783,14 @@ async def get_marketplace_mcp_servers(
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.deleted_upstream.is_(False),
             MarketplaceAgent.item_type == "mcp_server",
             MarketplaceAgent.is_published.is_(True),
         )
     )
+
+    if source_id_filter is not None:
+        query = query.where(MarketplaceAgent.source_id == source_id_filter)
 
     # Apply filters
     if category:
@@ -5383,18 +5868,16 @@ async def get_marketplace_mcp_servers(
         )
         purchased_mcp_server_ids = [row[0] for row in installed_result.fetchall()]
 
+    mcp_source_rows = await _bulk_load_sources(
+        db, {m.source_id for m in mcp_servers if m.source_id is not None}
+    )
+
     response = []
     for mcp_server in mcp_servers:
-        creator_type = "official"
-        creator_name = "Tesslate"
-        creator_username = None
-        creator_avatar_url = None
-        if mcp_server.forked_by_user_id:
-            creator_type = "community"
-            if mcp_server.forked_by_user:
-                creator_name = _resolve_display_name(mcp_server.forked_by_user)
-                creator_username = mcp_server.forked_by_user.username
-                creator_avatar_url = mcp_server.forked_by_user.avatar_url
+        mcp_source = _lookup_source(mcp_source_rows, mcp_server.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=mcp_server.forked_by_user, source=mcp_source
+        )
 
         response.append(
             {
@@ -5440,6 +5923,8 @@ async def get_marketplace_mcp_servers(
                 if mcp_server.forked_by_user_id
                 else None,
                 "creator_avatar_url": creator_avatar_url,
+                "source_handle": mcp_source.handle if mcp_source else None,
+                "source_trust_level": mcp_source.trust_level if mcp_source else None,
             }
         )
 
@@ -5502,16 +5987,10 @@ async def get_mcp_server_details(
         )
         is_purchased = installed_result.scalar_one_or_none() is not None
 
-    creator_type = "official"
-    creator_name = "Tesslate"
-    creator_username = None
-    creator_avatar_url = None
-    if mcp_server.forked_by_user_id:
-        creator_type = "community"
-        if mcp_server.forked_by_user:
-            creator_name = _resolve_display_name(mcp_server.forked_by_user)
-            creator_username = mcp_server.forked_by_user.username
-            creator_avatar_url = mcp_server.forked_by_user.avatar_url
+    mcp_source = await _load_source(db, mcp_server.source_id)
+    creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+        forked_by_user=mcp_server.forked_by_user, source=mcp_source
+    )
 
     return {
         "id": mcp_server.id,
@@ -5550,4 +6029,7 @@ async def get_mcp_server_details(
         if mcp_server.forked_by_user_id
         else None,
         "creator_avatar_url": creator_avatar_url,
+        "config": mcp_server.config or {},
+        "source_handle": mcp_source.handle if mcp_source else None,
+        "source_trust_level": mcp_source.trust_level if mcp_source else None,
     }
