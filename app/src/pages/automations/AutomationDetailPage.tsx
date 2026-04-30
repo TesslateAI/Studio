@@ -11,30 +11,39 @@ import {
   Info,
   MagnifyingGlass,
 } from '@phosphor-icons/react';
-import { automationsApi } from '../../lib/api';
+import { automationsApi, communicationDestinationsApi, marketplaceApi } from '../../lib/api';
 import type {
   AutomationDefinitionOut,
   AutomationRunStatus,
   AutomationRunSummary,
+  CommunicationDestination,
 } from '../../types/automations';
 import { ConfirmDialog } from '../../components/modals/ConfirmDialog';
 import { RunStatusBadge } from './components/RunStatusBadge';
 import { ContractEditor } from './components/ContractEditor';
 import { DestinationPicker } from './components/DestinationPicker';
 import type { AutomationDeliveryTargetIn } from '../../types/automations';
+import {
+  humanizeActionType,
+  humanizeCron,
+  humanizeDestinationKind,
+  humanizeRunStatus,
+  humanizeTriggerKind,
+  humanizeWorkspaceScope,
+} from './utils/humanize';
 
 const PAGE_SIZE = 25;
 
 /** Status filter options surfaced in the run-history dropdown. */
 const STATUS_FILTERS: Array<{ value: 'all' | AutomationRunStatus; label: string }> = [
   { value: 'all', label: 'All statuses' },
-  { value: 'queued', label: 'Queued' },
-  { value: 'running', label: 'Running' },
-  { value: 'succeeded', label: 'Succeeded' },
-  { value: 'failed', label: 'Failed' },
-  { value: 'expired', label: 'Expired' },
-  { value: 'awaiting_approval', label: 'Waiting approval' },
-  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'queued', label: humanizeRunStatus('queued') },
+  { value: 'running', label: humanizeRunStatus('running') },
+  { value: 'succeeded', label: humanizeRunStatus('succeeded') },
+  { value: 'failed', label: humanizeRunStatus('failed') },
+  { value: 'expired', label: humanizeRunStatus('expired') },
+  { value: 'awaiting_approval', label: humanizeRunStatus('awaiting_approval') },
+  { value: 'cancelled', label: humanizeRunStatus('cancelled') },
 ];
 
 /** Date range presets for cost rollups + filter bar. */
@@ -82,9 +91,8 @@ function sumSpendInWindow(runs: AutomationRunSummary[], window: DateWindow): num
  * /automations/:id — view + light edit + run history.
  *
  * "Edit" mode toggles a flat form for name + contract + active flag.
- * For trigger / action editing we send the user back to a fresh create
- * (Phase 1 keeps the patch surface minimal — Phase 5 builds a full
- * inline editor).
+ * Trigger / action edits go through a fresh create until the inline
+ * editor lands.
  */
 export default function AutomationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -112,12 +120,17 @@ export default function AutomationDetailPage() {
   const [editContract, setEditContract] = useState('');
   const [editActive, setEditActive] = useState(true);
   /**
-   * Phase 4: edit a single delivery destination via the picker. The
-   * form only supports one delivery target per automation today (matches
-   * the create flow). Empty string = "no delivery target".
+   * The form only supports one delivery target per automation today
+   * (matches the create flow). Empty string = "no delivery target".
    */
   const [editDeliveryDestinationId, setEditDeliveryDestinationId] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Resolve agent_id and destination_id to human names so the read view
+  // can render "Run 'News Brief' agent · Send to #standup" instead of UUIDs.
+  const [agentNames, setAgentNames] = useState<Record<string, string>>({});
+  const [destinations, setDestinations] = useState<CommunicationDestination[]>([]);
+  const [showRawContract, setShowRawContract] = useState(false);
 
   const reload = useCallback(async () => {
     if (!id) return;
@@ -163,6 +176,35 @@ export default function AutomationDetailPage() {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Fetch agent + destination directories once so the read view can show
+  // names instead of UUIDs. Failures degrade silently to the generic label.
+  useEffect(() => {
+    let cancelled = false;
+    marketplaceApi
+      .getMyAgents()
+      .then((data) => {
+        if (cancelled) return;
+        const list = (data?.agents ?? data?.items ?? data ?? []) as Array<{
+          id: string;
+          name?: string;
+          slug?: string;
+        }>;
+        const map: Record<string, string> = {};
+        for (const a of list) map[String(a.id)] = a.name ?? a.slug ?? String(a.id);
+        setAgentNames(map);
+      })
+      .catch(() => {});
+    communicationDestinationsApi
+      .list()
+      .then((data) => {
+        if (!cancelled) setDestinations(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Refetch from offset 0 whenever the server-side filter (status) changes
   // OR the automation id changes. Date-range and search are applied
@@ -388,9 +430,12 @@ export default function AutomationDetailPage() {
           {/* Definition summary / edit */}
           <section className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
             <header className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-[var(--text)]">Definition</h3>
-              <span className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                ID {definition.id.slice(0, 8)}…
+              <h3 className="text-xs font-semibold text-[var(--text)]">How this works</h3>
+              <span
+                className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)] font-mono"
+                title={definition.id}
+              >
+                {definition.id.slice(0, 8)}
               </span>
             </header>
 
@@ -428,99 +473,106 @@ export default function AutomationDetailPage() {
                   />
                 </div>
                 <p className="text-[10px] text-[var(--text-subtle)]">
-                  Edits cover name + contract + active flag + delivery destination.
-                  To change the trigger or action, recreate the automation.
+                  You can change the name, permissions, active flag, and where results are sent. To
+                  change the schedule or what it does, build a new automation.
                 </p>
               </div>
             ) : (
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                <div>
-                  <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                    Status
-                  </dt>
-                  <dd>
-                    <span
-                      className={`inline-flex items-center rounded-[var(--radius-small)] px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${
-                        definition.is_active
-                          ? 'bg-emerald-500/15 text-emerald-400'
-                          : 'bg-[var(--surface-hover)] text-[var(--text-subtle)]'
-                      }`}
-                    >
-                      {definition.is_active ? 'Active' : 'Paused'}
-                    </span>
-                    {definition.paused_reason && (
-                      <span className="ml-2 text-[10px] text-[var(--text-subtle)]">
-                        {definition.paused_reason}
+              <div className="space-y-3 text-xs">
+                {/* Plain-English story line */}
+                <p
+                  className="text-[var(--text-muted)] leading-relaxed"
+                  data-testid="automation-story"
+                >
+                  <span className="text-[var(--text)] font-medium">
+                    {trig ? describeTrigger(trig.kind, trig.config) : 'No schedule set'}
+                  </span>{' '}
+                  <span className="text-[var(--text-subtle)]">→</span>{' '}
+                  <span className="text-[var(--text)] font-medium">
+                    {action
+                      ? describeAction(action.action_type, action.config, agentNames)
+                      : 'No action configured'}
+                  </span>
+                  {definition.delivery_targets.length > 0 && (
+                    <>
+                      {' '}
+                      <span className="text-[var(--text-subtle)]">→</span>{' '}
+                      <span className="text-[var(--text)] font-medium">
+                        {describeDeliveryTargets(definition.delivery_targets, destinations)}
                       </span>
+                    </>
+                  )}
+                </p>
+
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <div>
+                    <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
+                      Status
+                    </dt>
+                    <dd>
+                      <span
+                        className={`inline-flex items-center rounded-[var(--radius-small)] px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${
+                          definition.is_active
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : 'bg-[var(--surface-hover)] text-[var(--text-subtle)]'
+                        }`}
+                      >
+                        {definition.is_active ? 'Active' : 'Paused'}
+                      </span>
+                      {definition.paused_reason && (
+                        <span className="ml-2 text-[10px] text-[var(--text-subtle)]">
+                          {definition.paused_reason}
+                        </span>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
+                      Where it runs
+                    </dt>
+                    <dd className="text-[var(--text)]">
+                      {humanizeWorkspaceScope(definition.workspace_scope)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
+                      Power level
+                    </dt>
+                    <dd className="text-[var(--text)] tabular-nums">
+                      {describePowerLevel(definition.max_compute_tier)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
+                      Spend caps
+                    </dt>
+                    <dd className="text-[var(--text)] tabular-nums">
+                      {fmtCap(definition.max_spend_per_run_usd)} per run ·{' '}
+                      {fmtCap(definition.max_spend_per_day_usd)} per day
+                    </dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
+                      Permissions
+                    </dt>
+                    <dd className="text-[var(--text)]">
+                      {summarizeContract(definition.contract)}
+                      <button
+                        type="button"
+                        onClick={() => setShowRawContract((v) => !v)}
+                        className="ml-2 text-[10px] text-[var(--text-subtle)] hover:text-[var(--text)] underline"
+                      >
+                        {showRawContract ? 'Hide raw JSON' : 'Show raw JSON'}
+                      </button>
+                    </dd>
+                    {showRawContract && (
+                      <pre className="mt-2 max-h-48 overflow-auto rounded-[var(--radius-small)] border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[11px] font-mono text-[var(--text-muted)]">
+                        {JSON.stringify(definition.contract, null, 2)}
+                      </pre>
                     )}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                    Workspace scope
-                  </dt>
-                  <dd className="text-[var(--text)]">{definition.workspace_scope}</dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                    Trigger
-                  </dt>
-                  <dd className="text-[var(--text)]">
-                    {trig
-                      ? `${trig.kind}${
-                          trig.kind === 'cron' && trig.config.expression
-                            ? ` · ${String(trig.config.expression)}`
-                            : ''
-                        }`
-                      : '—'}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                    Action
-                  </dt>
-                  <dd className="text-[var(--text)]">{action ? action.action_type : '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                    Compute tier
-                  </dt>
-                  <dd className="text-[var(--text)] tabular-nums">
-                    {definition.max_compute_tier}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                    Spend caps
-                  </dt>
-                  <dd className="text-[var(--text)] tabular-nums">
-                    {fmtCap(definition.max_spend_per_run_usd)} / run ·{' '}
-                    {fmtCap(definition.max_spend_per_day_usd)} / day
-                  </dd>
-                </div>
-                <div className="col-span-2">
-                  <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                    Delivery targets
-                  </dt>
-                  <dd className="text-[var(--text-muted)] text-[11px]">
-                    {definition.delivery_targets.length === 0
-                      ? '— (none configured)'
-                      : definition.delivery_targets
-                          .map((t) => t.destination_id.slice(0, 8) + '…')
-                          .join(', ')}
-                  </dd>
-                </div>
-                <div className="col-span-2">
-                  <dt className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">
-                    Contract
-                  </dt>
-                  <dd>
-                    <pre className="mt-1 max-h-48 overflow-auto rounded-[var(--radius-small)] border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[11px] font-mono text-[var(--text-muted)]">
-                      {JSON.stringify(definition.contract, null, 2)}
-                    </pre>
-                  </dd>
-                </div>
-              </dl>
+                  </div>
+                </dl>
+              </div>
             )}
           </section>
 
@@ -542,11 +594,7 @@ export default function AutomationDetailPage() {
               )}
             </header>
             <div className="grid grid-cols-3 gap-3">
-              <RollupStat
-                label="24h"
-                value={rollups.h24}
-                testId="rollup-24h"
-              />
+              <RollupStat label="24h" value={rollups.h24} testId="rollup-24h" />
               <RollupStat label="7d" value={rollups.d7} testId="rollup-7d" />
               <RollupStat label="30d" value={rollups.d30} testId="rollup-30d" />
             </div>
@@ -562,9 +610,7 @@ export default function AutomationDetailPage() {
                 </span>
                 <select
                   value={statusFilter}
-                  onChange={(e) =>
-                    setStatusFilter(e.target.value as 'all' | AutomationRunStatus)
-                  }
+                  onChange={(e) => setStatusFilter(e.target.value as 'all' | AutomationRunStatus)}
                   data-testid="status-filter"
                   className="px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
                 >
@@ -639,9 +685,7 @@ export default function AutomationDetailPage() {
               </span>
             </header>
             {filteredRuns === null ? (
-              <div className="px-4 py-6 text-xs text-[var(--text-muted)]">
-                Loading runs…
-              </div>
+              <div className="px-4 py-6 text-xs text-[var(--text-muted)]">Loading runs…</div>
             ) : filteredRuns.length === 0 ? (
               <div className="px-4 py-6 text-xs text-[var(--text-muted)]">
                 {runs && runs.length > 0
@@ -712,8 +756,8 @@ export default function AutomationDetailPage() {
         title="Delete automation?"
         message={
           <span>
-            Soft-delete <strong>{definition.name}</strong>? The definition will be
-            paused and hidden from new runs. Existing run history is preserved.
+            Pause and archive <strong>{definition.name}</strong>? It will stop running, but its run
+            history stays so you can review past results.
           </span>
         }
         confirmText="Delete"
@@ -725,8 +769,72 @@ export default function AutomationDetailPage() {
 }
 
 function fmtCap(value: string | null): string {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return 'No cap';
   return `$${value}`;
+}
+
+function describeTrigger(kind: string, config: Record<string, unknown>): string {
+  if (kind === 'cron') {
+    const expression = String(config.expression ?? '');
+    const tz = config.timezone ? String(config.timezone) : null;
+    if (!expression) return humanizeTriggerKind(kind);
+    return humanizeCron(expression, tz);
+  }
+  return humanizeTriggerKind(kind);
+}
+
+function describeAction(
+  type: string,
+  config: Record<string, unknown>,
+  agentNames: Record<string, string>
+): string {
+  if (type === 'agent.run') {
+    const agentId = String(config.agent_id ?? '');
+    const name = agentId ? agentNames[agentId] : null;
+    if (name) return `Run "${name}" agent`;
+    return humanizeActionType(type);
+  }
+  return humanizeActionType(type);
+}
+
+function describeDeliveryTargets(
+  targets: Array<{ destination_id: string }>,
+  destinations: CommunicationDestination[]
+): string {
+  const byId = new Map(destinations.map((d) => [d.id, d]));
+  const names = targets.map((t) => {
+    const d = byId.get(t.destination_id);
+    if (!d) return 'a saved destination';
+    return `${d.name} (${humanizeDestinationKind(d.kind)})`;
+  });
+  if (names.length === 0) return '';
+  if (names.length === 1) return `Send to ${names[0]}`;
+  return `Send to ${names.join(', ')}`;
+}
+
+const POWER_LEVELS: Record<number, string> = {
+  0: 'Light (no sandbox)',
+  1: 'Standard',
+  2: 'Heavy',
+};
+
+function describePowerLevel(tier: number): string {
+  return POWER_LEVELS[tier] ?? `Tier ${tier}`;
+}
+
+function summarizeContract(contract: Record<string, unknown> | null | undefined): string {
+  if (!contract || typeof contract !== 'object') return '—';
+  const parts: string[] = [];
+  const allowedTools = (contract as { allowed_tools?: unknown }).allowed_tools;
+  if (Array.isArray(allowedTools) && allowedTools.length > 0) {
+    parts.push(`Allowed: ${allowedTools.map(String).join(', ')}`);
+  }
+  const maxIters = (contract as { max_iterations?: unknown }).max_iterations;
+  if (typeof maxIters === 'number') {
+    parts.push(`up to ${maxIters} steps per run`);
+  }
+  if (parts.length === 0) return 'Custom permissions set';
+  return parts.join(' · ');
 }
 
 function fmtUsd(n: number): string {
@@ -736,15 +844,7 @@ function fmtUsd(n: number): string {
   return `$${n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '.00')}`;
 }
 
-function RollupStat({
-  label,
-  value,
-  testId,
-}: {
-  label: string;
-  value: number;
-  testId?: string;
-}) {
+function RollupStat({ label, value, testId }: { label: string; value: number; testId?: string }) {
   return (
     <div data-testid={testId} className="flex flex-col">
       <span className="text-[10px] uppercase tracking-wider text-[var(--text-subtle)]">

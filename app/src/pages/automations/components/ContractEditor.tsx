@@ -13,13 +13,10 @@ const DEFAULT_CONTRACT = {
 };
 
 /**
- * Phase 1 contract editor — a JSON textarea with two helper buttons:
- * "Use defaults" (writes a sensible starter contract) and "Validate JSON"
- * (parses and reports errors inline).
- *
- * Phase 5 replaces this with a structured editor — for now the goal is
- * just to let the user produce a valid JSON object so the dispatcher
- * stops 400ing.
+ * Permissions editor — JSON textarea with two helper buttons: "Use
+ * defaults" (writes a sensible starter contract) and "Validate JSON"
+ * (parses and reports errors inline). A structured editor will replace
+ * this textarea later; the JSON form remains as the escape hatch.
  */
 export function ContractEditor({ value, onChange }: Props) {
   const [validation, setValidation] = useState<{ ok: boolean; message: string } | null>(null);
@@ -51,7 +48,7 @@ export function ContractEditor({ value, onChange }: Props) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-[var(--text)]">Contract (JSON)</span>
+        <span className="text-xs font-medium text-[var(--text)]">Permissions (JSON)</span>
         <div className="flex gap-1.5">
           <button type="button" onClick={handleUseDefaults} className="btn btn-sm">
             Use defaults
@@ -72,9 +69,9 @@ export function ContractEditor({ value, onChange }: Props) {
         className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
       />
       <p className="text-[10px] text-[var(--text-subtle)]">
-        Required. The dispatcher refuses to run an automation without a contract. At a
-        minimum include <code>allowed_tools</code> and <code>max_compute_tier</code>.
-        Phase 5 replaces this textarea with a structured editor.
+        Required guardrails for what the automation can do. At a minimum, include{' '}
+        <code>allowed_tools</code> and <code>max_compute_tier</code>. Click{' '}
+        <strong>Use defaults</strong> for a sensible starter.
       </p>
       {validation && (
         <p

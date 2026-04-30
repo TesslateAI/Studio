@@ -37,6 +37,15 @@ vi.mock('../lib/api', () => ({
     remove: vi.fn(),
     run: vi.fn(),
   },
+  // Detail page resolves agent_id → name and shows destination names
+  // alongside trigger/action labels. The rollup test doesn't care about
+  // either, so stub them to empty results.
+  marketplaceApi: {
+    getMyAgents: vi.fn().mockResolvedValue({ agents: [] }),
+  },
+  communicationDestinationsApi: {
+    list: vi.fn().mockResolvedValue([]),
+  },
 }));
 
 // DestinationPicker pulls in CommunicationDestination data we don't care

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Plus, Play, Trash, Robot } from '@phosphor-icons/react';
-import { automationsApi } from '../../lib/api';
+import { automationsApi, marketplaceApi } from '../../lib/api';
 import type {
   AutomationDefinitionSummary,
   AutomationDefinitionOut,
@@ -10,19 +10,17 @@ import type {
   AutomationTriggerKind,
 } from '../../types/automations';
 import { ConfirmDialog } from '../../components/modals/ConfirmDialog';
+import { humanizeActionType, humanizeCron, humanizeTriggerKind } from './utils/humanize';
 
 /**
- * /automations — list view.
- *
- * Phase 1 fetches the lightweight summary list, then lazily fetches the
- * full definition for any row whose trigger/action summary the user
- * expects to see (we batch on first paint). Friendly empty state with a
- * single CTA.
+ * /automations — list view. Lightweight summary list + lazy detail
+ * fetches for the trigger/action summaries.
  */
 export default function AutomationsListPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<AutomationDefinitionSummary[] | null>(null);
   const [details, setDetails] = useState<Record<string, AutomationDefinitionOut>>({});
+  const [agentNames, setAgentNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<AutomationDefinitionSummary | null>(null);
@@ -55,6 +53,34 @@ export default function AutomationsListPage() {
   useEffect(() => {
     loadList();
   }, [loadList]);
+
+  // One-shot fetch of the caller's agents so we can resolve agent_id →
+  // human name in the action column. Falls back silently to "Run an AI
+  // agent" if the API errors or the row is missing.
+  useEffect(() => {
+    let cancelled = false;
+    marketplaceApi
+      .getMyAgents()
+      .then((data) => {
+        if (cancelled) return;
+        const list = (data?.agents ?? data?.items ?? data ?? []) as Array<{
+          id: string;
+          name?: string;
+          slug?: string;
+        }>;
+        const map: Record<string, string> = {};
+        for (const a of list) {
+          map[String(a.id)] = a.name ?? a.slug ?? String(a.id);
+        }
+        setAgentNames(map);
+      })
+      .catch(() => {
+        // Silent — the action column gracefully renders the generic label.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleRunNow = async (id: string) => {
     setActioningId(id);
@@ -153,20 +179,17 @@ export default function AutomationsListPage() {
                         className="border-t border-[var(--border)] hover:bg-[var(--surface-hover)] cursor-pointer"
                         onClick={() => navigate(`/automations/${row.id}`)}
                       >
-                        <td className="px-3 py-2 text-[var(--text)] font-medium">
-                          {row.name}
-                        </td>
+                        <td className="px-3 py-2 text-[var(--text)] font-medium">{row.name}</td>
                         <td className="px-3 py-2 text-[var(--text-muted)]">
                           {trig ? summarizeTrigger(trig.kind, trig.config) : '—'}
                         </td>
                         <td className="px-3 py-2 text-[var(--text-muted)]">
-                          {action ? summarizeAction(action.action_type, action.config) : '—'}
+                          {action
+                            ? summarizeAction(action.action_type, action.config, agentNames)
+                            : '—'}
                         </td>
                         <td className="px-3 py-2">
-                          <StatusChip
-                            isActive={row.is_active}
-                            pausedReason={row.paused_reason}
-                          />
+                          <StatusChip isActive={row.is_active} pausedReason={row.paused_reason} />
                         </td>
                         <td className="px-3 py-2 text-[var(--text-subtle)] tabular-nums">
                           {formatDate(lastRun ?? null)}
@@ -218,8 +241,8 @@ export default function AutomationsListPage() {
         title="Delete automation?"
         message={
           <span>
-            Soft-delete <strong>{confirmDelete?.name}</strong>? The definition will be
-            paused. Existing run history is preserved.
+            Pause and archive <strong>{confirmDelete?.name}</strong>? It will stop running, but its
+            run history stays so you can review past results.
           </span>
         }
         confirmText="Delete"
@@ -236,17 +259,16 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       <div className="h-16 w-16 rounded-[var(--radius)] bg-[var(--surface-hover)] border border-[var(--border)] flex items-center justify-center mb-4">
         <Robot className="w-8 h-8 text-[var(--text-subtle)]" />
       </div>
-      <h1 className="text-sm font-semibold text-[var(--text)] mb-2">
-        No automations yet
-      </h1>
+      <h1 className="text-sm font-semibold text-[var(--text)] mb-2">No automations yet</h1>
       <p className="text-xs text-[var(--text-muted)] max-w-md mb-6">
-        Automations run agents, app actions, or gateway sends on a schedule, on a
-        webhook, or on demand.
+        Automations do work for you on a schedule or when something happens — like running an AI
+        agent every morning, or posting to Slack when a webhook fires.
       </p>
       <button onClick={onCreate} className="btn btn-filled">
         <Plus className="w-3 h-3" />
-        Create your first automation
+        Build your first automation
       </button>
+      <p className="text-[10px] text-[var(--text-subtle)] mt-3">Templates coming soon.</p>
     </div>
   );
 }
@@ -276,36 +298,27 @@ function StatusChip({
 }
 
 function summarizeTrigger(kind: AutomationTriggerKind, config: Record<string, unknown>): string {
-  switch (kind) {
-    case 'cron':
-      return `Cron · ${String(config.expression ?? '?')}`;
-    case 'webhook':
-      return 'Webhook';
-    case 'manual':
-      return 'Manual';
-    case 'app_invocation':
-      return 'App invocation';
-    default:
-      return String(kind);
+  if (kind === 'cron') {
+    const expression = String(config.expression ?? '');
+    const tz = config.timezone ? String(config.timezone) : null;
+    if (!expression) return humanizeTriggerKind(kind);
+    return humanizeCron(expression, tz);
   }
+  return humanizeTriggerKind(kind);
 }
 
 function summarizeAction(
   type: AutomationActionType,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
+  agentNames: Record<string, string>
 ): string {
-  switch (type) {
-    case 'agent.run': {
-      const agent = String(config.agent_id ?? '').slice(0, 8);
-      return agent ? `Run agent · ${agent}…` : 'Run agent';
-    }
-    case 'app.invoke':
-      return 'Invoke app action';
-    case 'gateway.send':
-      return 'Gateway send';
-    default:
-      return String(type);
+  if (type === 'agent.run') {
+    const agentId = String(config.agent_id ?? '');
+    const name = agentId ? agentNames[agentId] : null;
+    if (name) return `Run "${name}" agent`;
+    return humanizeActionType(type);
   }
+  return humanizeActionType(type);
 }
 
 function formatDate(value: string | null): string {
