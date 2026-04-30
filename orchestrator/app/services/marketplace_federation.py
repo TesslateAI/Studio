@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Final, Literal
 from uuid import UUID
 
@@ -43,9 +43,10 @@ from ..models import (
 )
 from .feature_flags import get_feature_flags
 from .marketplace_client import (
-    JsonObject,
     LOCAL_URL_PREFIX,
+    JsonObject,
     MarketplaceClient,
+    make_client_from_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,7 +123,7 @@ class ResolvedItem:
     attestation: JsonObject | None
 
 
-class PurchaseRoute(str, Enum):
+class PurchaseRoute(StrEnum):
     """Outcome of :func:`dispatch_purchase` — drives the install endpoints."""
 
     HUB_CHECKOUT = "hub_checkout"
@@ -270,7 +271,11 @@ def install_guard(
     # private confirmation gate ever runs — the executable surface of a
     # marketplace app is too broad to be unlocked by a per-install modal
     # the way mcp_server installs are.
-    if kind in _KINDS_REQUIRING_ADMIN_TRUSTED and trust not in {"official", "admin_trusted", "local"}:
+    if kind in _KINDS_REQUIRING_ADMIN_TRUSTED and trust not in {
+        "official",
+        "admin_trusted",
+        "local",
+    }:
         return InstallGuardResult(
             allowed=False,
             reason=f"requires_admin_trusted_source:{kind}",
@@ -414,11 +419,7 @@ async def live_resolve(
 
     owns_client = client is None
     if client is None:
-        client = MarketplaceClient(
-            base_url=source.base_url,
-            token=decrypted_token,
-            pinned_hub_id=source.pinned_hub_id,
-        )
+        client = make_client_from_source(source, decrypted_token=decrypted_token)
 
     try:
         # Auto-pin on first contact so HubIdMismatchError can fire on
@@ -443,21 +444,13 @@ async def live_resolve(
             source.pinned_hub_id = hub_id
             capabilities = manifest.get("capabilities") or []
             policies = manifest.get("policies") or {}
-            source.capabilities_cache = (
-                list(capabilities) if isinstance(capabilities, list) else []
-            )
-            source.policies_cache = (
-                dict(policies) if isinstance(policies, dict) else {}
-            )
+            source.capabilities_cache = list(capabilities) if isinstance(capabilities, list) else []
+            source.policies_cache = dict(policies) if isinstance(policies, dict) else {}
             await db.commit()
             # Re-bind the client to the now-pinned hub id so the rest of
             # this resolve enforces the pin on every response.
             await client.aclose()
-            client = MarketplaceClient(
-                base_url=source.base_url,
-                token=decrypted_token,
-                pinned_hub_id=source.pinned_hub_id,
-            )
+            client = make_client_from_source(source, decrypted_token=decrypted_token)
             owns_client = True
             logger.info(
                 "live_resolve: auto-pinned source %s hub_id=%s on first install",
@@ -472,9 +465,7 @@ async def live_resolve(
                 # Fall back to scanning the versions list.
                 versions = await client.list_versions(kind, slug)
                 if not versions:
-                    raise ValueError(
-                        f"live_resolve: source has no versions for {kind}/{slug}"
-                    )
+                    raise ValueError(f"live_resolve: source has no versions for {kind}/{slug}")
                 latest = str(versions[0].get("version"))
             version = latest
         else:
@@ -574,7 +565,8 @@ def evaluate_purchase_route(
 
     # Normalize "free" semantics.
     is_free = pricing_type == "free" or (
-        pricing_type in {"paid", "subscription"} and pricing.get("price_cents", 0) == 0
+        pricing_type in {"paid", "subscription"}
+        and pricing.get("price_cents", 0) == 0
         and not pricing.get("stripe_price_id")
     )
 
@@ -583,16 +575,12 @@ def evaluate_purchase_route(
 
     # Determine whether hub-checkout is globally enabled.
     if global_hub_checkout_enabled is None:
-        global_hub_checkout_enabled = (
-            _global_hub_checkout_setting() and hub_checkout_enabled()
-        )
+        global_hub_checkout_enabled = _global_hub_checkout_setting() and hub_checkout_enabled()
 
     # Per-source opt-in. Older test rows may not have the column populated;
     # default to False so we never accidentally enable a source the
     # operator hasn't explicitly flipped on.
-    per_source_enabled = bool(
-        getattr(source, "checkout_via_hub_enabled", False)
-    )
+    per_source_enabled = bool(getattr(source, "checkout_via_hub_enabled", False))
 
     # Rule 1 — hub-owned checkout. ALL conditions must hold; any one
     # being false drops to the orchestrator-Stripe / refuse path.
@@ -632,9 +620,7 @@ def evaluate_purchase_route(
         return PurchaseRouting(route=PurchaseRoute.FREE)
 
     # Rule 4 — refuse with the structured ``pricing_not_supported`` reason.
-    return PurchaseRouting(
-        route=PurchaseRoute.REFUSE, refuse_reason="pricing_not_supported"
-    )
+    return PurchaseRouting(route=PurchaseRoute.REFUSE, refuse_reason="pricing_not_supported")
 
 
 async def dispatch_purchase(
@@ -728,11 +714,7 @@ async def dispatch_purchase(
 
     owns_client = client is None
     if client is None:
-        client = MarketplaceClient(
-            base_url=source.base_url,
-            token=decrypted_token,
-            pinned_hub_id=source.pinned_hub_id,
-        )
+        client = make_client_from_source(source, decrypted_token=decrypted_token)
     try:
         try:
             response = await client.create_checkout(
@@ -871,7 +853,7 @@ def mcp_install_prompt(manifest: dict[str, Any]) -> MCPInstallPrompt:
     raw_env = server.get("env")
     env_keys: list[str] = []
     if isinstance(raw_env, dict):
-        env_keys = [str(k) for k in raw_env.keys()]
+        env_keys = [str(k) for k in raw_env]
 
     raw_tools = server.get("tools") or manifest.get("tools") or []
     tool_list: list[dict[str, Any]] = []

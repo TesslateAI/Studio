@@ -61,13 +61,14 @@ from ..models import (
     WorkflowTemplate,
 )
 from ..models_team import TeamMembership
-from ..services.credential_manager import get_credential_manager
+from ..services.credential_manager import get_credential_manager, safe_decrypt_token
 from ..services.marketplace_client import (
     LOCAL_URL_PREFIX,
     HubIdMismatchError,
-    MarketplaceClient,
     MarketplaceClientError,
+    make_client_from_source,
 )
+from ..services.marketplace_source_cache import invalidate_source_cache
 from ..services.marketplace_sync import MarketplaceSyncWorker
 from ..users import current_active_user, current_superuser
 
@@ -130,9 +131,7 @@ class SourceCreatePayload(BaseModel):
         # Must be URL-safe: lowercase, digits, hyphens, no spaces.
         for ch in v:
             if not (ch.isalnum() or ch in "-_"):
-                raise ValueError(
-                    "handle must contain only alphanumerics, hyphen, or underscore"
-                )
+                raise ValueError("handle must contain only alphanumerics, hyphen, or underscore")
         # Reserve the well-known system handles so users cannot shadow them
         # in their own scope (the partial unique index on system scope
         # already prevents the cross-scope collision, but a clear early
@@ -168,9 +167,7 @@ class SourceCreatePayload(BaseModel):
                 # (no point disallowing it because nothing else can resolve
                 # in prod).
                 lower = v.lower()
-                if lower.startswith("http://localhost") or lower.startswith(
-                    "http://127.0.0.1"
-                ):
+                if lower.startswith("http://localhost") or lower.startswith("http://127.0.0.1"):
                     return v
                 raise ValueError(
                     "base_url must use https:// in production "
@@ -249,9 +246,7 @@ def _serialize(source: MarketplaceSource) -> MarketplaceSourceResponse:
     else:
         capabilities = []
     policies_raw = source.policies_cache
-    policies: dict[str, Any] = (
-        dict(policies_raw) if isinstance(policies_raw, dict) else {}
-    )
+    policies: dict[str, Any] = dict(policies_raw) if isinstance(policies_raw, dict) else {}
     return MarketplaceSourceResponse(
         id=source.id,
         handle=source.handle,
@@ -267,9 +262,7 @@ def _serialize(source: MarketplaceSource) -> MarketplaceSourceResponse:
         pinned_hub_id=source.pinned_hub_id,
         capabilities=capabilities,
         policies=policies,
-        checkout_via_hub_enabled=bool(
-            getattr(source, "checkout_via_hub_enabled", False)
-        ),
+        checkout_via_hub_enabled=bool(getattr(source, "checkout_via_hub_enabled", False)),
         last_synced_at=source.last_synced_at,
         last_sync_error=source.last_sync_error,
         sync_etag=source.sync_etag,
@@ -290,21 +283,10 @@ async def _user_team_ids(db: AsyncSession, user_id: UUID) -> list[UUID]:
 
 
 def _decrypt_token_or_none(encrypted: str | None) -> str | None:
-    if not encrypted:
-        return None
-    try:
-        decrypted = get_credential_manager().decrypt_token(encrypted)
-        return decrypted or None
-    except Exception:  # noqa: BLE001
-        # Fail closed — a token we cannot decrypt is a token we cannot use.
-        # The /test endpoint will surface this via its 400 response.
-        logger.warning("marketplace_sources: failed to decrypt stored token")
-        return None
+    return safe_decrypt_token(encrypted, owner="marketplace_source.test")
 
 
-async def _load_visible_source(
-    db: AsyncSession, source_id: UUID, user: User
-) -> MarketplaceSource:
+async def _load_visible_source(db: AsyncSession, source_id: UUID, user: User) -> MarketplaceSource:
     """Load a source the requester is allowed to see, else 404.
 
     Visibility = system rows OR (scope='user' AND user_id == me) OR
@@ -421,9 +403,7 @@ async def create_source(
     # actual encryption happens here.
     encrypted_token: str | None = None
     if has_token and payload.encrypted_token:
-        encrypted_token = get_credential_manager().encrypt_token(
-            payload.encrypted_token
-        )
+        encrypted_token = get_credential_manager().encrypt_token(payload.encrypted_token)
 
     if payload.scope == "team":
         team_id = user.default_team_id
@@ -480,6 +460,7 @@ async def create_source(
             ),
         ) from exc
     await db.refresh(source)
+    invalidate_source_cache(handle)
     logger.info(
         "marketplace_sources: created handle=%s scope=%s trust=%s by user=%s",
         handle,
@@ -534,10 +515,9 @@ async def update_source(
         changed = True
         token_changed = True
 
-    if payload.is_active is not None:
-        if bool(source.is_active) != bool(payload.is_active):
-            source.is_active = bool(payload.is_active)
-            changed = True
+    if payload.is_active is not None and bool(source.is_active) != bool(payload.is_active):
+        source.is_active = bool(payload.is_active)
+        changed = True
 
     # Token presence flips the auto-trust classification, but only for
     # rows that haven't been admin-promoted to ``admin_trusted``. We
@@ -555,6 +535,7 @@ async def update_source(
                 detail="Update conflicted with an existing source",
             ) from exc
         await db.refresh(source)
+        invalidate_source_cache(source.handle)
     return _serialize(source)
 
 
@@ -604,11 +585,14 @@ async def delete_source(
                     "is cleaned up."
                 ),
             )
+        deleted_handle = source.handle
         await _hard_delete_source(db, source)
+        invalidate_source_cache(deleted_handle)
     else:
         if source.is_active:
             source.is_active = False
             await db.commit()
+            invalidate_source_cache(source.handle)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -719,14 +703,10 @@ async def test_source(
 
     decrypted = _decrypt_token_or_none(source.encrypted_token)
 
-    client = MarketplaceClient(
-        base_url=source.base_url,
-        token=decrypted,
-        # Pass the existing pin so the client enforces it on the manifest
-        # response. If we have no pin yet, the first manifest call simply
-        # records one — see ``HubIdMismatchError`` handling below.
-        pinned_hub_id=source.pinned_hub_id,
-    )
+    # Pass the existing pin so the client enforces it on the manifest
+    # response. If we have no pin yet, the first manifest call records one
+    # via ``HubIdMismatchError`` handling below.
+    client = make_client_from_source(source, decrypted_token=decrypted)
     try:
         try:
             manifest = await client.get_manifest()
@@ -759,9 +739,7 @@ async def test_source(
 
         hub_id = manifest.get("hub_id")
         if not isinstance(hub_id, str) or not hub_id:
-            source.last_sync_error = (
-                "manifest response missing hub_id (protocol violation)"
-            )
+            source.last_sync_error = "manifest response missing hub_id (protocol violation)"
             await db.commit()
             raise HTTPException(
                 status_code=502,
@@ -771,9 +749,7 @@ async def test_source(
                 },
             )
 
-        pinned_changed = (
-            source.pinned_hub_id is None or source.pinned_hub_id != hub_id
-        )
+        pinned_changed = source.pinned_hub_id is None or source.pinned_hub_id != hub_id
         source.pinned_hub_id = hub_id
 
         capabilities_raw = manifest.get("capabilities") or []
@@ -781,26 +757,23 @@ async def test_source(
         source.capabilities_cache = (
             list(capabilities_raw) if isinstance(capabilities_raw, list) else []
         )
-        source.policies_cache = (
-            dict(policies_raw) if isinstance(policies_raw, dict) else {}
-        )
+        source.policies_cache = dict(policies_raw) if isinstance(policies_raw, dict) else {}
         # Successful test clears any previous sync error.
         source.last_sync_error = None
-        # Don't bump last_synced_at — that's strictly the sync worker's
-        # field. The "test connection" UX is about identity verification
-        # and capability discovery, not catalog freshness.
+
+        # Auto-classify trust at the same commit boundary as the manifest
+        # snapshot. Don't bump last_synced_at — that's strictly the sync
+        # worker's field. "Test connection" is identity verification, not
+        # catalog freshness.
+        auto_trust = source.trust_level
+        if source.trust_level not in {"admin_trusted", "official", "local"}:
+            auto_trust = _classify_trust(has_token=bool(source.encrypted_token))
+            source.trust_level = auto_trust
+
         await db.commit()
         await db.refresh(source)
     finally:
         await client.aclose()
-
-    auto_trust = source.trust_level
-    if source.trust_level not in {"admin_trusted", "official", "local"}:
-        auto_trust = _classify_trust(has_token=bool(source.encrypted_token))
-        if auto_trust != source.trust_level:
-            source.trust_level = auto_trust
-            await db.commit()
-            await db.refresh(source)
 
     capabilities_list = source.capabilities_cache or []
     if isinstance(capabilities_list, dict):
@@ -810,8 +783,12 @@ async def test_source(
 
     return SourceTestResponse(
         hub_id=hub_id,
-        api_version=manifest.get("api_version") if isinstance(manifest.get("api_version"), str) else None,
-        display_name=manifest.get("display_name") if isinstance(manifest.get("display_name"), str) else None,
+        api_version=manifest.get("api_version")
+        if isinstance(manifest.get("api_version"), str)
+        else None,
+        display_name=manifest.get("display_name")
+        if isinstance(manifest.get("display_name"), str)
+        else None,
         capabilities=[str(c) for c in capabilities_list],
         policies=policies_dict,
         auto_trust_level=auto_trust,
@@ -1044,32 +1021,35 @@ class EntitlementGrantResponse(BaseModel):
     slug: str
 
 
-def _verify_entitlement_signature(
+def verify_hub_hmac(
     *,
     raw_body: bytes,
     signature_header: str | None,
     secret: str,
     hub_id: str | None,
 ) -> bool:
-    """HMAC-SHA256 verification of an entitlement-grant body.
+    """HMAC-SHA256 verification of a hub-signed webhook body.
 
     Hub computes ``HMAC-SHA256(secret + ":" + hub_id, raw_body)`` and
-    sends the hex digest in ``X-Tesslate-Entitlement-Signature``. We
-    re-compute and ``hmac.compare_digest`` to thwart timing oracles.
-    Returns False on any input mismatch — caller raises 401.
+    sends the hex digest in the appropriate ``X-Tesslate-*-Signature``
+    header. The header may carry a bare hex digest or the
+    ``sha256=<hex>`` framing; both are accepted.
     """
     if not signature_header or not secret or not hub_id:
         return False
     keying = f"{secret}:{hub_id}".encode()
     expected = hmac.new(keying, raw_body, hashlib.sha256).hexdigest()
-    # Accept both ``hex`` and ``sha256=<hex>`` framings.
     received = signature_header.strip()
     if received.startswith("sha256="):
         received = received[len("sha256=") :]
     try:
         return hmac.compare_digest(expected, received)
-    except Exception:  # noqa: BLE001 — defensive, treat any error as mismatch
+    except Exception:  # noqa: BLE001
         return False
+
+
+# Back-compat aliases for the two webhook handlers below.
+_verify_entitlement_signature = verify_hub_hmac
 
 
 @router.post(
@@ -1257,33 +1237,7 @@ async def grant_entitlement(
 # ---------------------------------------------------------------------------
 
 
-def _verify_submission_signature(
-    *,
-    raw_body: bytes,
-    signature_header: str | None,
-    secret: str,
-    hub_id: str | None,
-) -> bool:
-    """HMAC-SHA256 verification of a submission state-change payload.
-
-    Reuses the entitlement-grant pattern: hub computes
-    ``HMAC-SHA256(secret + ':' + hub_id, raw_body)`` and sends the hex
-    digest in ``X-Tesslate-Submission-Signature``. The keying pair
-    (``secret`` is ``MARKETPLACE_SUBMISSION_WEBHOOK_SECRET``,
-    ``hub_id`` is the source's pinned hub_id) is shared out-of-band when
-    the source is paired.
-    """
-    if not signature_header or not secret or not hub_id:
-        return False
-    keying = f"{secret}:{hub_id}".encode()
-    expected = hmac.new(keying, raw_body, hashlib.sha256).hexdigest()
-    received = signature_header.strip()
-    if received.startswith("sha256="):
-        received = received[len("sha256="):]
-    try:
-        return hmac.compare_digest(expected, received)
-    except Exception:  # noqa: BLE001
-        return False
+_verify_submission_signature = verify_hub_hmac
 
 
 class SubmissionStateChangePayload(BaseModel):

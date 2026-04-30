@@ -5,10 +5,10 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 import asyncio
 import logging
 import re
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 from typing import cast as type_cast
-import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
@@ -36,6 +36,18 @@ from ..schemas import BaseSubmitRequest, BaseUpdateRequest, SkillInstallRequest
 from ..services.cache_service import cache
 from ..services.marketplace_constants import LOCAL_SOURCE_ID
 from ..services.marketplace_federation import install_guard
+from ..services.marketplace_source_cache import (
+    bulk_load_sources as _bulk_load_sources,
+)
+from ..services.marketplace_source_cache import (
+    load_source as _load_source,
+)
+from ..services.marketplace_source_cache import (
+    lookup_source as _lookup_source,
+)
+from ..services.marketplace_source_cache import (
+    resolve_source_filter as _resolve_source_filter,
+)
 from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..username_validation import resolve_display_name
 from ..users import current_active_user, current_optional_user
@@ -78,9 +90,7 @@ def _reject_if_builtin(agent: MarketplaceAgent) -> None:
         )
 
 
-async def _resolve_theme_by_identifier(
-    db: AsyncSession, identifier: str
-) -> Theme | None:
+async def _resolve_theme_by_identifier(db: AsyncSession, identifier: str) -> Theme | None:
     """Resolve a Theme row given a path identifier.
 
     Wave 1.5: ``Theme.id`` is now a GUID. Pre-Wave-1.5 the id was the
@@ -108,150 +118,6 @@ async def _resolve_theme_by_identifier(
             return theme
     row = await db.execute(select(Theme).where(Theme.slug == identifier))
     return row.scalar_one_or_none()
-
-
-# =============================================================================
-# Federation helpers (Wave 4)
-# =============================================================================
-#
-# These helpers thread source-awareness through the existing marketplace
-# router without rewriting every endpoint. They implement the Wave-4
-# contract from the federated-marketplace plan:
-#
-#   1. Replace ``created_by_user_id IS NULL`` (the legacy "Tesslate-owned"
-#      check) with a join on ``MarketplaceSource.trust_level == 'official'``
-#      via the row's ``source_id`` FK.
-#   2. Replace hardcoded ``"Tesslate"`` strings with the joined source's
-#      ``display_name`` so a self-hosted Tesslate Official rebrand works.
-#   3. Add a ``?source=<handle>`` filter on every list endpoint that
-#      filters cached catalog rows down to a single source.
-#
-# All resolutions are cache-only — they read from the orchestrator's
-# local catalog cache populated by ``services/marketplace_sync.py``.
-
-# In-process cache for ``handle -> (source_id, display_name)`` lookups.
-# The source registry is small (a handful of rows per cluster) and changes
-# rarely, but ``GET /api/marketplace/agents`` runs on every browse refresh.
-# We cache for the lifetime of the process and let admin/Restart cycles
-# pick up new sources — same pattern the rest of the orchestrator uses
-# for slow-changing catalogs (cf. ``services.cache_service`` TTL caches).
-_SOURCE_HANDLE_CACHE: dict[str, tuple[UUID, str, str]] = {}
-_SOURCE_ID_CACHE: dict[UUID, MarketplaceSource] = {}
-
-
-async def _resolve_source_filter(
-    db: AsyncSession, source_handle: str | None
-) -> UUID | None:
-    """Resolve a ``?source=<handle>`` query param to a ``source_id``.
-
-    Returns ``None`` when the caller did not supply ``source_handle``
-    (cross-source mode — the dropdown's "All sources"). Raises 404 when
-    the handle is unknown so the UI can surface a typed error rather than
-    silently returning an empty result set.
-    """
-    if not source_handle:
-        return None
-
-    cached = _SOURCE_HANDLE_CACHE.get(source_handle)
-    if cached is not None:
-        return cached[0]
-
-    result = await db.execute(
-        select(MarketplaceSource).where(MarketplaceSource.handle == source_handle)
-    )
-    source = result.scalar_one_or_none()
-    if source is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown marketplace source handle: {source_handle!r}",
-        )
-    src_id = type_cast(UUID, source.id)
-    _SOURCE_HANDLE_CACHE[source_handle] = (
-        src_id,
-        type_cast(str, source.display_name),
-        type_cast(str, source.trust_level),
-    )
-    _SOURCE_ID_CACHE[src_id] = source
-    return src_id
-
-
-async def _load_source(db: AsyncSession, source_id: Any) -> MarketplaceSource | None:
-    """Cache-friendly load of a ``MarketplaceSource`` row.
-
-    Returns ``None`` when ``source_id`` is ``None`` (a row that wasn't
-    backfilled — should not happen post-Wave-1 but we tolerate it).
-    Accepts ``Any`` to swallow SQLAlchemy 1.x ORM typing — at runtime
-    we always have either ``None`` or a UUID-equivalent.
-    """
-    if source_id is None:
-        return None
-    sid = type_cast(UUID, source_id)
-    cached = _SOURCE_ID_CACHE.get(sid)
-    if cached is not None:
-        return cached
-    result = await db.execute(
-        select(MarketplaceSource).where(MarketplaceSource.id == sid)
-    )
-    source = result.scalar_one_or_none()
-    if source is not None:
-        src_id = type_cast(UUID, source.id)
-        _SOURCE_ID_CACHE[src_id] = source
-        _SOURCE_HANDLE_CACHE[type_cast(str, source.handle)] = (
-            src_id,
-            type_cast(str, source.display_name),
-            type_cast(str, source.trust_level),
-        )
-    return source
-
-
-def _lookup_source(
-    sources: dict[UUID, MarketplaceSource], source_id: Any
-) -> MarketplaceSource | None:
-    """Type-erasing dict lookup for a per-row source.
-
-    Pyright reads SQLAlchemy 1.x ORM attributes as ``Column[Unknown]``;
-    threading those through ``dict.get`` directly produces a forest of
-    spurious ``Argument of type Column[Unknown]`` errors. This helper
-    casts in one spot so callers stay readable.
-    """
-    if source_id is None:
-        return None
-    return sources.get(type_cast(UUID, source_id))
-
-
-async def _bulk_load_sources(
-    db: AsyncSession, source_ids: set[Any]
-) -> dict[UUID, MarketplaceSource]:
-    """One-shot load of every distinct source referenced by a list result.
-
-    List endpoints serialize many rows; each needs the source's
-    ``display_name`` and ``trust_level``. This bulk-fetches missing rows
-    so we never N+1 the source registry.
-    """
-    out: dict[UUID, MarketplaceSource] = {}
-    missing: set[UUID] = set()
-    for sid in source_ids:
-        if sid is None:
-            continue
-        cached = _SOURCE_ID_CACHE.get(sid)
-        if cached is not None:
-            out[sid] = cached
-        else:
-            missing.add(sid)
-    if missing:
-        result = await db.execute(
-            select(MarketplaceSource).where(MarketplaceSource.id.in_(missing))
-        )
-        for src in result.scalars().all():
-            src_id = type_cast(UUID, src.id)
-            _SOURCE_ID_CACHE[src_id] = src
-            _SOURCE_HANDLE_CACHE[type_cast(str, src.handle)] = (
-                src_id,
-                type_cast(str, src.display_name),
-                type_cast(str, src.trust_level),
-            )
-            out[src_id] = src
-    return out
 
 
 def _is_official_source(source: MarketplaceSource | None) -> bool:
@@ -1038,9 +904,7 @@ async def get_agent_details(
         .where(MarketplaceAgent.slug == slug)
     )
     if source_id_filter is not None:
-        result = await db.execute(
-            base_query.where(MarketplaceAgent.source_id == source_id_filter)
-        )
+        result = await db.execute(base_query.where(MarketplaceAgent.source_id == source_id_filter))
         agent = result.scalar_one_or_none()
     else:
         # Default to Tesslate Official (the well-known seeded UUID).
@@ -1055,9 +919,7 @@ async def get_agent_details(
             # (especially for forks the user authored locally pre-Wave-5).
             # Order by source_id so the same row wins on every request
             # rather than relying on PG's unspecified row order.
-            result = await db.execute(
-                base_query.order_by(MarketplaceAgent.source_id).limit(1)
-            )
+            result = await db.execute(base_query.order_by(MarketplaceAgent.source_id).limit(1))
             agent = result.scalar_one_or_none()
 
     if not agent:
@@ -1320,8 +1182,7 @@ async def purchase_agent(
             from ..services.credential_manager import get_credential_manager
 
             decrypted_token = (
-                get_credential_manager().decrypt_token(agent_source.encrypted_token)
-                or None
+                get_credential_manager().decrypt_token(agent_source.encrypted_token) or None
             )
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -1352,9 +1213,7 @@ async def purchase_agent(
             )
         except Exception as e:
             logger.error(f"dispatch_purchase failed for agent={agent.id}: {e}")
-            raise HTTPException(
-                status_code=500, detail="Failed to dispatch purchase"
-            ) from e
+            raise HTTPException(status_code=500, detail="Failed to dispatch purchase") from e
 
     if action["action"] == "refused":
         raise HTTPException(
@@ -4794,9 +4653,7 @@ async def browse_themes(
             if theme.created_by_user_id and theme.created_by_user_id in creator_info
             else None
         )
-        theme_source = (
-            _lookup_source(theme_source_rows, theme.source_id)
-        )
+        theme_source = _lookup_source(theme_source_rows, theme.source_id)
         item = _theme_to_dict(
             theme,
             is_in_library=theme.id in user_theme_ids,
@@ -4856,9 +4713,7 @@ async def get_theme_detail_source_prefixed(
     promotes this into a generic ``/{source_handle}/{kind}/{slug}``
     route. Behaviour is identical to ``GET /marketplace/themes/{slug}``.
     """
-    return await get_theme_detail(
-        slug=slug, current_user=current_user, db=db
-    )
+    return await get_theme_detail(slug=slug, current_user=current_user, db=db)
 
 
 @router.get("/themes/{slug}")
@@ -4947,9 +4802,7 @@ async def get_user_library_themes(
 
     themes = []
     for theme, lib_entry in rows:
-        theme_source = (
-            _lookup_source(theme_source_rows, theme.source_id)
-        )
+        theme_source = _lookup_source(theme_source_rows, theme.source_id)
         item = _theme_to_dict(theme, is_in_library=True, source=theme_source)
         item["theme_json"] = theme.theme_json
         item["is_enabled"] = lib_entry.is_active

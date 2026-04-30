@@ -1,22 +1,12 @@
-"""
-Marketplace governance proxy helpers.
-
-Wave 8: orchestrator's submission / yank / admin routers stop running
-governance logic locally and instead forward writes to the federated
-marketplace service that owns the source. This module is the single
-entry point for "I have a local cache row, I need the marketplace's
-authoritative state, here's the resulting payload to mirror back into
-the cache".
+"""Marketplace governance proxy helpers.
 
 Two cleanly-separated responsibilities live here:
 
   1. **Client construction** — pick the right :class:`MarketplaceClient`
-     for a write. Governance writes against Tesslate Official always
-     use ``MARKETPLACE_ADMIN_TOKEN`` (the static admin token Tesslate
-     Official's orchestrator holds). Writes against other federated
-     hubs use the per-source bearer (decrypted via
-     :mod:`credential_manager`) — the orchestrator just relays the
-     authenticated admin's request.
+     for a write. Writes against Tesslate Official use
+     ``MARKETPLACE_ADMIN_TOKEN`` (the static admin token Tesslate
+     Official's orchestrator holds); writes against other federated hubs
+     use the per-source bearer (decrypted via :mod:`credential_manager`).
 
   2. **Cache mirroring** — turn a marketplace ``Submission`` /
      ``YankRequest`` envelope back into the orchestrator's local
@@ -29,7 +19,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -44,7 +35,7 @@ from ..models import (
     SubmissionCheck,
     YankRequest,
 )
-from .marketplace_client import MarketplaceClient
+from .marketplace_client import MarketplaceClient, make_client_from_source
 from .marketplace_constants import TESSLATE_OFFICIAL_ID
 
 logger = logging.getLogger(__name__)
@@ -91,9 +82,7 @@ async def resolve_source_for_app_version(
         await db.execute(
             select(AppVersion, MarketplaceApp, MarketplaceSource)
             .join(MarketplaceApp, MarketplaceApp.id == AppVersion.app_id)
-            .outerjoin(
-                MarketplaceSource, MarketplaceSource.id == MarketplaceApp.source_id
-            )
+            .outerjoin(MarketplaceSource, MarketplaceSource.id == MarketplaceApp.source_id)
             .where(AppVersion.id == app_version_id)
         )
     ).first()
@@ -117,25 +106,9 @@ def get_admin_token() -> str:
 
 
 def _decrypt_source_token(source: MarketplaceSource) -> str | None:
-    """Decrypt the per-source bearer token, swallowing decrypt failures.
+    from .credential_manager import safe_decrypt_token
 
-    Mirrors the pattern in ``services/apps/yanks.publish_yank_upstream``
-    so a misconfigured key doesn't take down governance writes — the
-    marketplace will respond 401 if the missing token was required.
-    """
-    if not source.encrypted_token:
-        return None
-    try:
-        from .credential_manager import get_credential_manager
-
-        return get_credential_manager().decrypt_token(source.encrypted_token)
-    except Exception:  # noqa: BLE001 — defensive
-        logger.warning(
-            "marketplace_governance: token decrypt failed for source=%s",
-            source.handle,
-            exc_info=True,
-        )
-        return None
+    return safe_decrypt_token(source.encrypted_token, owner=f"marketplace_source[{source.handle}]")
 
 
 def default_client_factory(
@@ -149,11 +122,7 @@ def default_client_factory(
     bearer.
     """
     token = override_token or _decrypt_source_token(source)
-    return MarketplaceClient(
-        base_url=source.base_url,
-        token=token,
-        pinned_hub_id=source.pinned_hub_id,
-    )
+    return make_client_from_source(source, decrypted_token=token)
 
 
 def select_token_for_write(source: MarketplaceSource) -> str | None:
@@ -201,9 +170,7 @@ async def mirror_submission_into_cache(
         await db.execute(select(AppSubmission).where(AppSubmission.id == local_submission_id))
     ).scalar_one_or_none()
     if sub is None:
-        logger.warning(
-            "mirror_submission_into_cache: local row %s not found", local_submission_id
-        )
+        logger.warning("mirror_submission_into_cache: local row %s not found", local_submission_id)
         return None
 
     stage = marketplace_envelope.get("stage")
@@ -232,8 +199,9 @@ async def mirror_submission_into_cache(
     if incoming_checks:
         existing_rows = (
             await db.execute(
-                select(SubmissionCheck.stage, SubmissionCheck.check_name)
-                .where(SubmissionCheck.submission_id == sub.id)
+                select(SubmissionCheck.stage, SubmissionCheck.check_name).where(
+                    SubmissionCheck.submission_id == sub.id
+                )
             )
         ).all()
         existing_pairs = {(r[0], r[1]) for r in existing_rows}
@@ -265,9 +233,7 @@ async def mirror_submission_into_cache(
     state = marketplace_envelope.get("state")
     if isinstance(state, str) and state in _STATE_TO_APPROVAL:
         av = (
-            await db.execute(
-                select(AppVersion).where(AppVersion.id == sub.app_version_id)
-            )
+            await db.execute(select(AppVersion).where(AppVersion.id == sub.app_version_id))
         ).scalar_one_or_none()
         if av is not None:
             av.approval_state = _STATE_TO_APPROVAL[state]
@@ -287,9 +253,7 @@ async def mirror_yank_into_cache(
         await db.execute(select(YankRequest).where(YankRequest.id == local_yank_id))
     ).scalar_one_or_none()
     if yank is None:
-        logger.warning(
-            "mirror_yank_into_cache: local row %s not found", local_yank_id
-        )
+        logger.warning("mirror_yank_into_cache: local row %s not found", local_yank_id)
         return None
 
     state = marketplace_envelope.get("state")
@@ -312,9 +276,7 @@ async def mirror_yank_into_cache(
     # the federated decision (Wave 7 behaviour preserved).
     if yank.status == "approved":
         av = (
-            await db.execute(
-                select(AppVersion).where(AppVersion.id == yank.app_version_id)
-            )
+            await db.execute(select(AppVersion).where(AppVersion.id == yank.app_version_id))
         ).scalar_one_or_none()
         if av is not None and av.approval_state != "yanked":
             av.approval_state = "yanked"
@@ -330,6 +292,20 @@ async def mirror_yank_into_cache(
 # ---------------------------------------------------------------------------
 
 
+@asynccontextmanager
+async def open_proxy_client(
+    source: MarketplaceSource,
+    client_factory: ClientFactory | None,
+) -> AsyncIterator[MarketplaceClient]:
+    factory = client_factory or default_client_factory
+    token = select_token_for_write(source)
+    client = factory(source, token)
+    try:
+        yield client
+    finally:
+        await _safe_close(client)
+
+
 async def proxy_advance_submission(
     db: AsyncSession,
     *,
@@ -339,14 +315,8 @@ async def proxy_advance_submission(
     client_factory: ClientFactory | None = None,
 ) -> dict[str, Any]:
     """Forward an advance request to the marketplace, mirror into cache."""
-    factory = client_factory or default_client_factory
-    token = select_token_for_write(source)
-    client = factory(source, token)
-    try:
+    async with open_proxy_client(source, client_factory) as client:
         envelope = await client.advance_submission(upstream_submission_id)
-    finally:
-        await _safe_close(client)
-
     await mirror_submission_into_cache(
         db, local_submission_id=local_submission_id, marketplace_envelope=envelope
     )
@@ -363,18 +333,12 @@ async def proxy_finalize_submission(
     decision_reason: str | None = None,
     client_factory: ClientFactory | None = None,
 ) -> dict[str, Any]:
-    factory = client_factory or default_client_factory
-    token = select_token_for_write(source)
-    client = factory(source, token)
-    try:
+    async with open_proxy_client(source, client_factory) as client:
         envelope = await client.finalize_submission(
             upstream_submission_id,
             decision=decision,
             decision_reason=decision_reason,
         )
-    finally:
-        await _safe_close(client)
-
     await mirror_submission_into_cache(
         db, local_submission_id=local_submission_id, marketplace_envelope=envelope
     )
@@ -395,10 +359,7 @@ async def proxy_create_yank(
     client_factory: ClientFactory | None = None,
 ) -> dict[str, Any]:
     """Forward a yank to the marketplace and mirror state into the cache."""
-    factory = client_factory or default_client_factory
-    token = select_token_for_write(source)
-    client = factory(source, token)
-    try:
+    async with open_proxy_client(source, client_factory) as client:
         envelope = await client.publish_yank(
             kind=kind,
             slug=slug,
@@ -407,12 +368,7 @@ async def proxy_create_yank(
             severity=severity,
             requested_by=requested_by,
         )
-    finally:
-        await _safe_close(client)
-
-    await mirror_yank_into_cache(
-        db, local_yank_id=local_yank_id, marketplace_envelope=envelope
-    )
+    await mirror_yank_into_cache(db, local_yank_id=local_yank_id, marketplace_envelope=envelope)
     return envelope
 
 
@@ -426,21 +382,16 @@ async def proxy_appeal_yank(
     submitted_by: str | None = None,
     client_factory: ClientFactory | None = None,
 ) -> dict[str, Any]:
-    factory = client_factory or default_client_factory
-    token = select_token_for_write(source)
-    client = factory(source, token)
     payload: dict[str, Any] = {"reason": reason}
     if submitted_by is not None:
         payload["submitted_by"] = submitted_by
-    try:
+    async with open_proxy_client(source, client_factory) as client:
         envelope = await client.appeal_yank(upstream_yank_id, payload)
-    finally:
-        await _safe_close(client)
-    # Re-fetch the yank state so the cache mirrors the post-appeal status.
-    try:
-        yank_envelope = await client.get_yank(upstream_yank_id)
-    except Exception:  # noqa: BLE001
-        yank_envelope = envelope
+        # Re-fetch the yank state so the cache mirrors the post-appeal status.
+        try:
+            yank_envelope = await client.get_yank(upstream_yank_id)
+        except Exception:  # noqa: BLE001
+            yank_envelope = envelope
     await mirror_yank_into_cache(
         db, local_yank_id=local_yank_id, marketplace_envelope=yank_envelope
     )
@@ -456,15 +407,10 @@ async def proxy_admin_force_approve(
     decision_reason: str | None = None,
     client_factory: ClientFactory | None = None,
 ) -> dict[str, Any]:
-    factory = client_factory or default_client_factory
-    token = select_token_for_write(source)
-    client = factory(source, token)
-    try:
+    async with open_proxy_client(source, client_factory) as client:
         envelope = await client.admin_force_approve_submission(
             upstream_submission_id, decision_reason=decision_reason
         )
-    finally:
-        await _safe_close(client)
     await mirror_submission_into_cache(
         db, local_submission_id=local_submission_id, marketplace_envelope=envelope
     )
@@ -480,15 +426,10 @@ async def proxy_admin_force_reject(
     decision_reason: str,
     client_factory: ClientFactory | None = None,
 ) -> dict[str, Any]:
-    factory = client_factory or default_client_factory
-    token = select_token_for_write(source)
-    client = factory(source, token)
-    try:
+    async with open_proxy_client(source, client_factory) as client:
         envelope = await client.admin_force_reject_submission(
             upstream_submission_id, decision_reason=decision_reason
         )
-    finally:
-        await _safe_close(client)
     await mirror_submission_into_cache(
         db, local_submission_id=local_submission_id, marketplace_envelope=envelope
     )

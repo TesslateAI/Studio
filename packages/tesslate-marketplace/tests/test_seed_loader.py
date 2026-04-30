@@ -144,9 +144,14 @@ async def test_load_seeds_is_idempotent(env) -> None:
 
     second = await load_seeds()
 
-    # Second run sees every row already exists — created=0, updated=N.
+    # Second run: every row's manifest is byte-identical to the first run,
+    # so the loader must short-circuit to ``items_unchanged`` instead of
+    # rewriting + emitting a fresh upsert event for every row. This is the
+    # quiet-restart contract — without it every restart would burn one
+    # ``/v1/changes`` event per seed entry.
     assert second.items_created == 0
-    assert second.items_updated == expected_count
+    assert second.items_updated == 0
+    assert second.items_unchanged == expected_count
 
     async with session_scope() as session:
         item_count_2 = (await session.execute(select(func.count()).select_from(Item))).scalar_one()

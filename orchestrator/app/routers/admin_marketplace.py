@@ -35,13 +35,8 @@ from ..models import (
 )
 from ..services import marketplace_governance
 from ..services.apps import monitoring as monitoring_svc
-from ..services.marketplace_client import (
-    MarketplaceAuthError,
-    MarketplaceClientError,
-    MarketplaceNotFoundError,
-    MarketplaceServerError,
-    UnsupportedCapabilityError,
-)
+from ..services.marketplace_client import MarketplaceClientError
+from ..services.marketplace_http_errors import propagate_marketplace_error
 from ..users import current_superuser
 
 logger = logging.getLogger(__name__)
@@ -51,25 +46,7 @@ IN_FLIGHT_STAGES = ("stage0", "stage1", "stage2", "stage3")
 
 
 def _propagate_marketplace_error(exc: MarketplaceClientError) -> HTTPException:
-    if isinstance(exc, MarketplaceAuthError):
-        return HTTPException(status_code=502, detail={
-            "error": "marketplace_auth_failed", "details": str(exc),
-        })
-    if isinstance(exc, MarketplaceNotFoundError):
-        return HTTPException(status_code=404, detail={
-            "error": "marketplace_not_found", "details": str(exc),
-        })
-    if isinstance(exc, UnsupportedCapabilityError):
-        return HTTPException(status_code=501, detail={
-            "error": "marketplace_unsupported_capability", "capability": exc.capability,
-        })
-    if isinstance(exc, MarketplaceServerError):
-        return HTTPException(status_code=502, detail={
-            "error": "marketplace_unavailable", "details": str(exc),
-        })
-    return HTTPException(status_code=502, detail={
-        "error": "marketplace_error", "details": str(exc),
-    })
+    return propagate_marketplace_error(exc)
 
 
 class QueueItemOut(BaseModel):
@@ -363,9 +340,7 @@ async def force_approve(
     ).scalar_one_or_none()
     if sub is None:
         raise HTTPException(status_code=404, detail="submission not found")
-    source = await marketplace_governance.resolve_source_for_app_version(
-        db, sub.app_version_id
-    )
+    source = await marketplace_governance.resolve_source_for_app_version(db, sub.app_version_id)
     if source is None:
         raise HTTPException(status_code=409, detail="no marketplace source")
 
@@ -379,9 +354,13 @@ async def force_approve(
             decision_reason=decision_reason,
         )
     except marketplace_governance.AdminTokenMissingError as exc:
-        raise HTTPException(status_code=503, detail={
-            "error": "marketplace_admin_token_missing", "message": str(exc),
-        }) from exc
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "marketplace_admin_token_missing",
+                "message": str(exc),
+            },
+        ) from exc
     except MarketplaceClientError as exc:
         raise _propagate_marketplace_error(exc) from exc
 
@@ -402,9 +381,7 @@ async def force_reject(
     ).scalar_one_or_none()
     if sub is None:
         raise HTTPException(status_code=404, detail="submission not found")
-    source = await marketplace_governance.resolve_source_for_app_version(
-        db, sub.app_version_id
-    )
+    source = await marketplace_governance.resolve_source_for_app_version(db, sub.app_version_id)
     if source is None:
         raise HTTPException(status_code=409, detail="no marketplace source")
 
@@ -417,9 +394,13 @@ async def force_reject(
             decision_reason=body.decision_reason,
         )
     except marketplace_governance.AdminTokenMissingError as exc:
-        raise HTTPException(status_code=503, detail={
-            "error": "marketplace_admin_token_missing", "message": str(exc),
-        }) from exc
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "marketplace_admin_token_missing",
+                "message": str(exc),
+            },
+        ) from exc
     except MarketplaceClientError as exc:
         raise _propagate_marketplace_error(exc) from exc
 
@@ -440,31 +421,30 @@ async def override_yank(
     ).scalar_one_or_none()
     if yank is None:
         raise HTTPException(status_code=404, detail="yank not found")
-    source = await marketplace_governance.resolve_source_for_app_version(
-        db, yank.app_version_id
-    )
+    source = await marketplace_governance.resolve_source_for_app_version(db, yank.app_version_id)
     if source is None:
         raise HTTPException(status_code=409, detail="no marketplace source")
     if body.new_state not in ("resolved", "open"):
         raise HTTPException(status_code=400, detail="invalid new_state")
 
-    token = marketplace_governance.select_token_for_write(source)
-    client = marketplace_governance.default_client_factory(source, token)
     try:
-        envelope = await client.admin_override_yank(
-            str(yank.id),
-            new_state=body.new_state,
-            resolution=body.resolution,
-            note=body.note or f"override_by_{user.id}",
-        )
+        async with marketplace_governance.open_proxy_client(source, None) as client:
+            envelope = await client.admin_override_yank(
+                str(yank.id),
+                new_state=body.new_state,
+                resolution=body.resolution,
+                note=body.note or f"override_by_{user.id}",
+            )
     except marketplace_governance.AdminTokenMissingError as exc:
-        raise HTTPException(status_code=503, detail={
-            "error": "marketplace_admin_token_missing", "message": str(exc),
-        }) from exc
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "marketplace_admin_token_missing",
+                "message": str(exc),
+            },
+        ) from exc
     except MarketplaceClientError as exc:
         raise _propagate_marketplace_error(exc) from exc
-    finally:
-        await marketplace_governance._safe_close(client)  # noqa: SLF001
 
     await marketplace_governance.mirror_yank_into_cache(
         db, local_yank_id=yank.id, marketplace_envelope=envelope

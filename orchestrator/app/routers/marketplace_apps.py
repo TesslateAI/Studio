@@ -37,6 +37,12 @@ from ..models import (
 from ..services.apps.fork import ForkError, NotForkableError, fork_app
 from ..services.hub_client import HubClient
 from ..services.marketplace_federation import dispatch_purchase, install_guard
+from ..services.marketplace_source_cache import (
+    bulk_load_sources as _bulk_load_sources,
+)
+from ..services.marketplace_source_cache import (
+    resolve_source_filter as _resolve_source_filter,
+)
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -116,61 +122,6 @@ class ForkResponse(MarketplaceAppResponse):
 def _get_hub_client() -> HubClient:
     settings = get_settings()
     return HubClient(settings.volume_hub_address)
-
-
-# ---------------------------------------------------------------------------
-# Wave 7 federation helpers
-# ---------------------------------------------------------------------------
-
-
-async def _resolve_source_filter(
-    db: AsyncSession, source_handle: str | None
-) -> UUID | None:
-    """Resolve a ``?source=<handle>`` query param to a ``source_id``.
-
-    Returns ``None`` when the caller did not supply ``source_handle``
-    (cross-source mode — the dropdown's "All sources"). Raises 404 when
-    the handle is unknown so the UI surfaces a typed error rather than
-    silently returning an empty result set.
-
-    Mirrors the helper in ``routers/marketplace.py`` Wave 4 — apps stayed
-    on the legacy code path until Wave 7, so we lift the same pattern
-    here rather than sharing module state.
-    """
-    if not source_handle:
-        return None
-    result = await db.execute(
-        select(MarketplaceSource).where(MarketplaceSource.handle == source_handle)
-    )
-    source = result.scalar_one_or_none()
-    if source is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown marketplace source handle: {source_handle!r}",
-        )
-    return type_cast(UUID, source.id)
-
-
-async def _bulk_load_sources(
-    db: AsyncSession, source_ids: set[Any]
-) -> dict[UUID, MarketplaceSource]:
-    """One-shot load of every distinct source referenced by a list result.
-
-    Avoids N+1 lookups when serializing list responses with per-row
-    source chips.
-    """
-    cleaned: set[UUID] = {
-        type_cast(UUID, sid) for sid in source_ids if sid is not None
-    }
-    if not cleaned:
-        return {}
-    result = await db.execute(
-        select(MarketplaceSource).where(MarketplaceSource.id.in_(cleaned))
-    )
-    out: dict[UUID, MarketplaceSource] = {}
-    for src in result.scalars().all():
-        out[type_cast(UUID, src.id)] = src
-    return out
 
 
 def _attach_source_meta(
@@ -264,9 +215,7 @@ async def list_apps(
 
     sources = await _bulk_load_sources(db, {r.source_id for r in rows})
     items = [
-        _attach_source_meta(
-            MarketplaceAppResponse.model_validate(r), sources, r.source_id
-        )
+        _attach_source_meta(MarketplaceAppResponse.model_validate(r), sources, r.source_id)
         for r in rows
     ]
     return AppListEnvelope(
@@ -304,9 +253,7 @@ async def get_app(
         raise HTTPException(status_code=404, detail="app not found")
 
     sources = await _bulk_load_sources(db, {row.source_id})
-    return _attach_source_meta(
-        MarketplaceAppResponse.model_validate(row), sources, row.source_id
-    )
+    return _attach_source_meta(MarketplaceAppResponse.model_validate(row), sources, row.source_id)
 
 
 @router.get("/{app_id}/versions", response_model=AppVersionListEnvelope)
@@ -533,9 +480,7 @@ async def purchase_app(
         try:
             from ..services.credential_manager import get_credential_manager
 
-            decrypted_token = (
-                get_credential_manager().decrypt_token(src.encrypted_token) or None
-            )
+            decrypted_token = get_credential_manager().decrypt_token(src.encrypted_token) or None
         except Exception:  # noqa: BLE001
             logger.warning(
                 "purchase_app: failed to decrypt source token for source=%s",

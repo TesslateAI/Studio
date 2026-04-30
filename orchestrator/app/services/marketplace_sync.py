@@ -34,9 +34,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Final
+from typing import Any, Final
 from uuid import UUID
 
 from sqlalchemy import select
@@ -58,21 +60,22 @@ from ..models import (
     UserPurchasedBase,
     WorkflowTemplate,
 )
-from .credential_manager import get_credential_manager
+
+# Try to import AppInstance — it lives in models_automations.py, not models.py.
+from ..models_automations import AppInstance
+from .credential_manager import safe_decrypt_token
 from .marketplace_client import (
     LOCAL_URL_PREFIX,
+    NOT_MODIFIED,
     HubIdMismatchError,
     JsonObject,
     MarketplaceAuthError,
     MarketplaceClient,
     MarketplaceClientError,
     MarketplaceNotFoundError,
-    NOT_MODIFIED,
     UnsupportedCapabilityError,
+    make_client_from_source,
 )
-
-# Try to import AppInstance — it lives in models_automations.py, not models.py.
-from ..models_automations import AppInstance
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +116,17 @@ _TRUSTED_PRICING_LEVELS: Final[set[str]] = {"official", "admin_trusted"}
 # Wave 3 default: paginate /v1/changes by 200 events per call.
 _CHANGES_PAGE_LIMIT: Final[int] = 200
 
+# Per-page parallelism for the live-fetch step that hydrates upsert events.
+# Bounded so a slow hub never saturates the orchestrator's connection pool.
+_UPSERT_PREFETCH_PARALLELISM: Final[int] = 8
+
+# How long to trust a cached /v1/manifest snapshot before refetching. The
+# hub_id pin is verified on EVERY response by the client, so we don't need a
+# manifest hit on every 5-minute sync tick — capabilities/policies change on
+# the order of hours/days, not minutes.
+_MANIFEST_REFRESH_INTERVAL_S: Final[float] = 3600.0  # 1h
+_manifest_refresh_at: dict[UUID, float] = {}
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -133,10 +147,9 @@ def default_client_factory(
     decrypted_token: str | None,
 ) -> MarketplaceClient:
     """Construct a :class:`MarketplaceClient` from a source row + token."""
-    return MarketplaceClient(
-        base_url=source.base_url,
-        token=decrypted_token,
-        pinned_hub_id=source.pinned_hub_id,
+    return make_client_from_source(
+        source,
+        decrypted_token=decrypted_token,
     )
 
 
@@ -182,9 +195,7 @@ class MarketplaceSyncWorker:
         out: list[SyncResult] = []
         for source, result in zip(sources, results, strict=True):
             if isinstance(result, BaseException):
-                logger.exception(
-                    "marketplace_sync: source %s sync_source crashed", source.handle
-                )
+                logger.exception("marketplace_sync: source %s sync_source crashed", source.handle)
                 out.append(
                     SyncResult(
                         source_id=source.id,
@@ -202,28 +213,32 @@ class MarketplaceSyncWorker:
         Yanks reduce availability — they're the highest-priority signal in
         the change feed. This path is identical to :meth:`sync_source`
         except it only consumes ``yank`` / ``version_remove`` events from
-        ``/v1/yanks`` (a focused subset of the changes feed).
+        ``/v1/yanks`` (a focused subset of the changes feed). Sources are
+        polled in parallel so a single slow hub never delays the others.
         """
         async with self._db_session_factory() as listing_session:
             sources = await self._fetch_active_sources(listing_session)
 
-        results: list[SyncResult] = []
-        for source in sources:
-            try:
-                result = await self._sync_one(source.id, yanks_only=True)
-                results.append(result)
-            except Exception as exc:  # noqa: BLE001
-                logger.exception(
-                    "marketplace_sync: yanks fast-path failed for %s", source.handle
-                )
-                results.append(
+        if not sources:
+            return []
+
+        tasks = [self._sync_one(s.id, yanks_only=True) for s in sources]
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
+
+        out: list[SyncResult] = []
+        for source, result in zip(sources, gathered, strict=True):
+            if isinstance(result, BaseException):
+                logger.exception("marketplace_sync: yanks fast-path failed for %s", source.handle)
+                out.append(
                     SyncResult(
                         source_id=source.id,
                         source_handle=source.handle,
-                        error=str(exc)[:1000],
+                        error=str(result)[:1000],
                     )
                 )
-        return results
+            else:
+                out.append(result)
+        return out
 
     async def sync_source(self, source_id: UUID) -> SyncResult:
         """Sync a single source by id. Returns a :class:`SyncResult`.
@@ -263,10 +278,19 @@ class MarketplaceSyncWorker:
             client = self._client_factory(source, decrypted_token)
 
             try:
-                # Step 1 — manifest. This both verifies the hub_id pin and
-                # snapshots capabilities/policies into the source row.
-                if not yanks_only:
+                # Step 1 — manifest. The hub_id pin is verified on every
+                # client response, so we only refetch the manifest when the
+                # cached snapshot is older than ``_MANIFEST_REFRESH_INTERVAL_S``
+                # — capabilities/policies change on the order of hours, not
+                # the 5-minute sync cadence.
+                # Always refresh on a source we've never pinned — the
+                # manifest call is what installs the pin.
+                must_refresh_manifest = source.pinned_hub_id is None or self._manifest_refresh_due(
+                    source.id
+                )
+                if not yanks_only and must_refresh_manifest:
                     await self._refresh_manifest(session, source, client)
+                    _manifest_refresh_at[source.id] = time.monotonic()
 
                 # Step 2 — changes feed (or yanks-only feed).
                 next_etag = await self._drain_changes(
@@ -297,9 +321,7 @@ class MarketplaceSyncWorker:
                     )[:1000]
                 else:
                     error_text = str(exc)[:1000]
-                logger.warning(
-                    "marketplace_sync: source %s failed: %s", handle, error_text
-                )
+                logger.warning("marketplace_sync: source %s failed: %s", handle, error_text)
                 # Roll back any partial changes from this batch.
                 await session.rollback()
                 # Re-fetch source for a clean update tx.
@@ -332,17 +354,13 @@ class MarketplaceSyncWorker:
         return [s for s in result.scalars().all() if not s.base_url.startswith(LOCAL_URL_PREFIX)]
 
     def _decrypt_source_token(self, source: MarketplaceSource) -> str | None:
-        if not source.encrypted_token:
-            return None
-        try:
-            return get_credential_manager().decrypt_token(source.encrypted_token)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "marketplace_sync: token decrypt failed for %s: %s",
-                source.handle,
-                exc,
-            )
-            return None
+        return safe_decrypt_token(
+            source.encrypted_token, owner=f"marketplace_sync[{source.handle}]"
+        )
+
+    def _manifest_refresh_due(self, source_id: UUID) -> bool:
+        last = _manifest_refresh_at.get(source_id)
+        return last is None or (time.monotonic() - last) >= _MANIFEST_REFRESH_INTERVAL_S
 
     async def _refresh_manifest(
         self,
@@ -370,8 +388,7 @@ class MarketplaceSyncWorker:
             # Should be impossible — the client's hub-id check fires first —
             # but defense-in-depth here.
             raise MarketplaceClientError(
-                f"hub_id mismatch in manifest: pinned={source.pinned_hub_id} "
-                f"got={hub_id}",
+                f"hub_id mismatch in manifest: pinned={source.pinned_hub_id} got={hub_id}",
                 url=source.base_url,
             )
 
@@ -434,9 +451,13 @@ class MarketplaceSyncWorker:
             has_more = bool(feed.get("has_more"))
 
             if not isinstance(events, list):
-                raise MarketplaceClientError(
-                    f"feed events is not a list: {type(events).__name__}"
-                )
+                raise MarketplaceClientError(f"feed events is not a list: {type(events).__name__}")
+
+            # Pre-fetch every upsert item in this page in parallel so a
+            # 200-event page on a slow hub doesn't sequentially burn the
+            # whole sync window. SAVEPOINT-isolated DB writes still happen
+            # one-by-one below, preserving per-event poison-row isolation.
+            prefetched_items = await self._prefetch_upsert_items(client, source, events)
 
             for event in events:
                 if not isinstance(event, dict):
@@ -449,7 +470,7 @@ class MarketplaceSyncWorker:
                 try:
                     async with session.begin_nested():
                         bump_counter = await self._apply_event(
-                            session, source, client, event
+                            session, source, client, event, prefetched_items
                         )
                     # Only bump counters AFTER the nested transaction commits
                     # cleanly — IntegrityError inside the nested block rolls
@@ -487,12 +508,51 @@ class MarketplaceSyncWorker:
     # Event application
     # ------------------------------------------------------------------
 
+    async def _prefetch_upsert_items(
+        self,
+        client: MarketplaceClient,
+        source: MarketplaceSource,
+        events: list[Any],
+    ) -> dict[tuple[str, str], JsonObject | BaseException]:
+        """Live-fetch every distinct ``(kind, slug)`` referenced by an upsert event.
+
+        Bounded concurrency (``_UPSERT_PREFETCH_PARALLELISM``) keeps a slow
+        hub from saturating the orchestrator's connection pool while still
+        cutting wall-clock from O(n) to O(n / parallelism). Failures are
+        surfaced as the value in the result dict so the per-event handler
+        can downgrade to a tombstone or skip without re-fetching.
+        """
+        wanted: set[tuple[str, str]] = set()
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            if event.get("op") != "upsert":
+                continue
+            kind = event.get("kind")
+            slug = event.get("slug")
+            if isinstance(kind, str) and isinstance(slug, str) and slug != "__startup__":
+                wanted.add((kind, slug))
+
+        if not wanted:
+            return {}
+
+        sem = asyncio.Semaphore(_UPSERT_PREFETCH_PARALLELISM)
+
+        async def _fetch_one(kind: str, slug: str) -> JsonObject:
+            async with sem:
+                return await client.get_item(kind, slug)
+
+        keys = list(wanted)
+        results = await asyncio.gather(*[_fetch_one(k, s) for k, s in keys], return_exceptions=True)
+        return dict(zip(keys, results, strict=True))
+
     async def _apply_event(
         self,
         session: AsyncSession,
         source: MarketplaceSource,
         client: MarketplaceClient,
         event: JsonObject,
+        prefetched_items: dict[tuple[str, str], JsonObject | BaseException] | None = None,
     ) -> str | None:
         """Apply one event. Returns a counter name to bump on success, or None.
 
@@ -516,7 +576,10 @@ class MarketplaceSyncWorker:
             return None
 
         if op == "upsert":
-            await self._handle_upsert(session, source, client, kind, slug, payload, etag)
+            prefetched = (prefetched_items or {}).get((kind, slug))
+            await self._handle_upsert(
+                session, source, client, kind, slug, payload, etag, prefetched
+            )
             return "items_upserted"
 
         if op == "delete":
@@ -528,21 +591,15 @@ class MarketplaceSyncWorker:
             return "items_deactivated"
 
         if op == "yank":
-            yanked = await self._handle_yank(
-                session, source, kind, slug, version, payload
-            )
+            yanked = await self._handle_yank(session, source, kind, slug, version, payload)
             return "versions_yanked" if yanked else None
 
         if op == "version_remove":
-            removed = await self._handle_version_remove(
-                session, source, kind, slug, version
-            )
+            removed = await self._handle_version_remove(session, source, kind, slug, version)
             return "versions_removed" if removed else None
 
         if op == "pricing_change":
-            changed = await self._handle_pricing_change(
-                session, source, kind, slug, payload
-            )
+            changed = await self._handle_pricing_change(session, source, kind, slug, payload)
             return "pricing_changes" if changed else None
 
         logger.warning("marketplace_sync: unknown op=%r in event for %s/%s", op, kind, slug)
@@ -561,24 +618,25 @@ class MarketplaceSyncWorker:
         slug: str,
         payload: JsonObject,
         etag: Any,
+        prefetched: JsonObject | BaseException | None = None,
     ) -> None:
         """Insert or update a catalog row keyed on ``(source_id, slug)``.
 
         The ``payload`` from /v1/changes is intentionally minimal — it only
-        carries enough to identify the item. To upsert real catalog data
-        we live-fetch ``/v1/items/{kind}/{slug}`` so the row reflects
-        current upstream state. This is acceptable load: catalog is small,
-        sync runs every 5–15 minutes, and only changed items hit the feed.
+        carries enough to identify the item. The full item record is
+        live-fetched from ``/v1/items/{kind}/{slug}`` so the row reflects
+        current upstream state. ``prefetched`` is the result of the
+        page-level parallel fetch above; if absent we fall back to a per-
+        event fetch (e.g. when the worker is invoked outside the page
+        loop, in tests).
         """
-        # Live-fetch the full item record. If the upstream hub returned 404
-        # treat as a delete tombstone.
-        try:
-            item = await client.get_item(kind, slug)
-        except MarketplaceNotFoundError:
+        item: JsonObject
+        if isinstance(prefetched, dict):
+            item = prefetched
+        elif isinstance(prefetched, MarketplaceNotFoundError):
             await self._handle_delete(session, source, kind, slug)
             return
-        except MarketplaceAuthError:
-            # Auth-protected source we can't read — log and skip.
+        elif isinstance(prefetched, MarketplaceAuthError):
             logger.info(
                 "marketplace_sync: source %s: 401/403 for %s/%s; skipping upsert",
                 source.handle,
@@ -586,6 +644,24 @@ class MarketplaceSyncWorker:
                 slug,
             )
             return
+        elif isinstance(prefetched, BaseException):
+            # Unknown error from prefetch — re-raise to land in the per-event
+            # SAVEPOINT's exception handler (logged and skipped).
+            raise prefetched
+        else:
+            try:
+                item = await client.get_item(kind, slug)
+            except MarketplaceNotFoundError:
+                await self._handle_delete(session, source, kind, slug)
+                return
+            except MarketplaceAuthError:
+                logger.info(
+                    "marketplace_sync: source %s: 401/403 for %s/%s; skipping upsert",
+                    source.handle,
+                    kind,
+                    slug,
+                )
+                return
 
         await self._upsert_row(session, source, kind, slug, item, etag=etag)
 
@@ -838,12 +914,11 @@ class MarketplaceSyncWorker:
         effective = self._derive_effective_pricing(pricing, is_trusted)
         manifest = self._extract_version_manifest(item)
         theme_json = (
-            manifest.get("theme_json")
-            if isinstance(manifest, dict)
+            (manifest.get("theme_json") if isinstance(manifest, dict) else None)
+            or item.get("extra_metadata", {}).get("theme_json")
+            if isinstance(item.get("extra_metadata"), dict)
             else None
-        ) or item.get("extra_metadata", {}).get("theme_json") if isinstance(
-            item.get("extra_metadata"), dict
-        ) else None
+        )
 
         if not theme_json:
             # Themes require non-null theme_json. If upstream omitted, store
@@ -904,9 +979,7 @@ class MarketplaceSyncWorker:
         effective = self._derive_effective_pricing(pricing, is_trusted)
         manifest = self._extract_version_manifest(item)
         template_definition = (
-            (manifest or {}).get("template_definition")
-            if isinstance(manifest, dict)
-            else None
+            (manifest or {}).get("template_definition") if isinstance(manifest, dict) else None
         )
         if template_definition is None:
             template_definition = {"nodes": [], "edges": []}
@@ -1113,9 +1186,7 @@ class MarketplaceSyncWorker:
         # Always preserve provenance — even on trusted sources we record the
         # raw payload so audits can reconstruct upstream history.
         row.source_pricing_payload_original = payload or {}
-        row.source_pricing_type_original = (
-            payload.get("to") if isinstance(payload, dict) else None
-        )
+        row.source_pricing_type_original = payload.get("to") if isinstance(payload, dict) else None
         row.source_pricing_ignored = effective["stripped"]
         row.source_pricing_stripped_at = _utcnow() if effective["stripped"] else None
 
@@ -1143,7 +1214,9 @@ class MarketplaceSyncWorker:
             # MarketplaceAgent FKs: UserPurchasedAgent.agent_id,
             # AgentSkillAssignment.{agent_id,skill_id}, UserMcpConfig.marketplace_agent_id.
             # AgentMcpAssignment FKs UserMcpConfig (not the catalog row directly).
-            stmt = select(UserPurchasedAgent.id).where(UserPurchasedAgent.agent_id == row.id).limit(1)
+            stmt = (
+                select(UserPurchasedAgent.id).where(UserPurchasedAgent.agent_id == row.id).limit(1)
+            )
             if (await session.execute(stmt)).scalars().first() is not None:
                 return True
             stmt = (
@@ -1178,11 +1251,7 @@ class MarketplaceSyncWorker:
             return False
 
         if kind == "base":
-            stmt = (
-                select(UserPurchasedBase.id)
-                .where(UserPurchasedBase.base_id == row.id)
-                .limit(1)
-            )
+            stmt = select(UserPurchasedBase.id).where(UserPurchasedBase.base_id == row.id).limit(1)
             return (await session.execute(stmt)).scalars().first() is not None
 
         if kind == "theme":
@@ -1204,9 +1273,7 @@ class MarketplaceSyncWorker:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _derive_effective_pricing(
-        upstream: JsonObject, is_trusted: bool
-    ) -> dict[str, Any]:
+    def _derive_effective_pricing(upstream: JsonObject, is_trusted: bool) -> dict[str, Any]:
         """Return the effective pricing fields to write on the catalog row.
 
         Trusted sources pass through unchanged. Untrusted/private sources are
@@ -1305,11 +1372,7 @@ async def marketplace_sync_periodic_cron(ctx: dict) -> dict[str, Any]:
             "versions_removed": sum(r.versions_removed for r in results),
             "pricing_changes": sum(r.pricing_changes for r in results),
         },
-        "errors": [
-            {"source": r.source_handle, "error": r.error}
-            for r in results
-            if r.error
-        ],
+        "errors": [{"source": r.source_handle, "error": r.error} for r in results if r.error],
     }
     if summary["errors"]:
         logger.warning("marketplace_sync_periodic_cron: %s", summary)
@@ -1358,7 +1421,7 @@ async def _desktop_periodic_loop(stop_event: asyncio.Event) -> None:
             logger.exception("desktop marketplace_sync loop iteration failed")
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=_DESKTOP_INTERVAL_SECONDS)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
 
 

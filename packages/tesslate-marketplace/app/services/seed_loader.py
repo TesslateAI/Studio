@@ -87,6 +87,7 @@ class SeedLoadResult:
 
     items_created: int = 0
     items_updated: int = 0
+    items_unchanged: int = 0
     items_failed: int = 0
     bundles_attached: int = 0
     categories_seeded: int = 0
@@ -97,7 +98,24 @@ class SeedLoadResult:
     last_etag: str | None = None
 
     def total_processed(self) -> int:
+        return self.items_created + self.items_updated + self.items_unchanged
+
+    def total_changed(self) -> int:
         return self.items_created + self.items_updated
+
+
+def _manifest_signature(entry: dict[str, Any]) -> str:
+    """Stable hash of a seed entry for unchanged-row detection.
+
+    ``json.dumps(sort_keys=True)`` gives us a deterministic byte stream
+    even when the source dict iteration order shifts between Python
+    versions. We hash the canonical bytes rather than comparing dicts
+    directly so the signature can be stored in the row's manifest blob.
+    """
+    import hashlib
+
+    canonical = json.dumps(entry, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _seeds_dir() -> Path:
@@ -176,32 +194,38 @@ async def _ensure_capabilities_recorded(session: AsyncSession, settings: Setting
 async def _seed_categories(session: AsyncSession, items: list[dict[str, Any]]) -> int:
     """Backfill ``categories`` rows from the unique (kind, category) pairs
     referenced in the seed entries. Idempotent."""
-    seen: set[tuple[str, str]] = set()
-    seeded = 0
+    wanted: set[tuple[str, str]] = set()
     for entry in items:
         kind = entry.get("kind")
         cat = entry.get("category")
-        if not kind or not cat:
-            continue
-        key = (kind, cat)
-        if key in seen:
-            continue
-        seen.add(key)
-        existing = (
-            await session.execute(
-                select(Category).where(Category.kind == kind, Category.slug == cat)
+        if kind and cat:
+            wanted.add((kind, cat))
+    if not wanted:
+        return 0
+
+    rows = (
+        await session.execute(
+            select(Category.kind, Category.slug).where(
+                Category.kind.in_({k for k, _ in wanted}),
+                Category.slug.in_({c for _, c in wanted}),
             )
-        ).scalar_one_or_none()
-        if existing is None:
-            session.add(
-                Category(
-                    kind=kind,
-                    slug=cat,
-                    name=cat.replace("-", " ").title(),
-                    sort_order=100,
-                )
+        )
+    ).all()
+    existing = {(r[0], r[1]) for r in rows}
+
+    seeded = 0
+    for kind, cat in wanted:
+        if (kind, cat) in existing:
+            continue
+        session.add(
+            Category(
+                kind=kind,
+                slug=cat,
+                name=cat.replace("-", " ").title(),
+                sort_order=100,
             )
-            seeded += 1
+        )
+        seeded += 1
     return seeded
 
 
@@ -211,38 +235,64 @@ async def _seed_featured(session: AsyncSession, entries: list[dict[str, Any]]) -
     Rank is a monotonic counter so the manifest order survives between runs;
     the loader does not re-rank previously-pinned items.
     """
-    rank = 100
-    seeded = 0
+    wanted_keys: list[tuple[str, str]] = []
     for entry in entries:
         if not entry.get("is_featured"):
             continue
         kind = entry.get("kind")
         slug = entry.get("slug")
-        if not kind or not slug:
-            continue
-        item = (
-            await session.execute(select(Item).where(Item.kind == kind, Item.slug == slug))
-        ).scalar_one_or_none()
-        if item is None:
-            continue
-        existing = (
+        if kind and slug:
+            wanted_keys.append((kind, slug))
+    if not wanted_keys:
+        return 0
+
+    items = (
+        await session.execute(
+            select(Item).where(
+                Item.kind.in_({k for k, _ in wanted_keys}),
+                Item.slug.in_({s for _, s in wanted_keys}),
+            )
+        )
+    ).scalars().all()
+    items_by_key: dict[tuple[str, str], Item] = {(i.kind, i.slug): i for i in items}
+
+    item_ids = [i.id for i in items]
+    existing_listings: set[tuple[str, Any]] = set()
+    if item_ids:
+        rows = (
             await session.execute(
-                select(FeaturedListing).where(
-                    FeaturedListing.kind == item.kind, FeaturedListing.item_id == item.id
+                select(FeaturedListing.kind, FeaturedListing.item_id).where(
+                    FeaturedListing.item_id.in_(item_ids)
                 )
             )
-        ).scalar_one_or_none()
-        if existing is None:
-            session.add(FeaturedListing(kind=item.kind, item_id=item.id, rank=rank))
-            seeded += 1
+        ).all()
+        existing_listings = {(r[0], r[1]) for r in rows}
+
+    rank = 100
+    seeded = 0
+    for kind, slug in wanted_keys:
+        item = items_by_key.get((kind, slug))
+        if item is None:
+            continue
+        if (item.kind, item.id) in existing_listings:
+            rank += 10
+            continue
+        session.add(FeaturedListing(kind=item.kind, item_id=item.id, rank=rank))
+        seeded += 1
         rank += 10
     return seeded
 
 
 async def _upsert_item(
     session: AsyncSession, entry: dict[str, Any], settings: Settings
-) -> tuple[Item, ItemVersion, Bundle | None, bool]:
-    """Idempotent UPSERT of one ``(kind, slug)`` pair plus its version + bundle."""
+) -> tuple[Item, ItemVersion, Bundle | None, bool, bool]:
+    """Idempotent UPSERT of one ``(kind, slug)`` pair plus its version + bundle.
+
+    Returns ``(item, version, bundle, created, changed)`` where ``changed``
+    is False when the seed entry is byte-identical to the previously
+    stored manifest — callers skip the changes-emitter event in that case
+    to keep the WAL quiet across restarts.
+    """
     kind = entry["kind"]
     slug = entry["slug"]
     version = entry.get("version") or DEFAULT_VERSION
@@ -321,6 +371,7 @@ async def _upsert_item(
             )
         )
     ).scalar_one_or_none()
+    changed = created
     if iv is None:
         iv = ItemVersion(
             item_id=item.id,
@@ -330,14 +381,20 @@ async def _upsert_item(
         )
         session.add(iv)
         await session.flush()
+        changed = True
     else:
-        iv.manifest = entry
+        # Only rewrite the manifest blob (and emit a downstream change
+        # event) when the seed entry actually shifted. ``json.dumps`` with
+        # ``sort_keys`` gives a stable canonical form for the comparison.
+        if _manifest_signature(iv.manifest or {}) != _manifest_signature(entry):
+            iv.manifest = entry
+            changed = True
 
     item.latest_version = version
     item.latest_version_id = iv.id
 
     bundle = await _attach_bundle_if_present(session, item, iv, settings)
-    return item, iv, bundle, created
+    return item, iv, bundle, created, changed
 
 
 async def _attach_bundle_if_present(
@@ -467,24 +524,6 @@ async def load_seeds(
             await session.rollback()
 
     async with session_factory() as session:
-        if emit_startup_tick and emit_changes_events:
-            try:
-                tick = await changes_emitter.emit(
-                    session,
-                    op="upsert",
-                    kind="agent",
-                    slug="__startup__",
-                    payload={
-                        "reason": "marketplace seed_loader boot tick",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                )
-                result.first_etag = tick.etag
-                result.last_etag = tick.etag
-            except Exception:  # noqa: BLE001
-                logger.exception("seed_loader: failed to emit startup tick")
-                await session.rollback()
-
         for entry in entries:
             kind = entry.get("kind")
             slug = entry.get("slug")
@@ -498,8 +537,10 @@ async def load_seeds(
             # transactions through `session.begin_nested()`.
             try:
                 async with session.begin_nested():
-                    item, iv, bundle, created = await _upsert_item(session, entry, resolved_settings)
-                    if emit_changes_events:
+                    item, iv, bundle, created, changed = await _upsert_item(
+                        session, entry, resolved_settings
+                    )
+                    if emit_changes_events and changed:
                         event = await changes_emitter.emit(
                             session,
                             op="upsert",
@@ -525,8 +566,10 @@ async def load_seeds(
 
             if created:
                 result.items_created += 1
-            else:
+            elif changed:
                 result.items_updated += 1
+            else:
+                result.items_unchanged += 1
             if bundle is not None:
                 result.bundles_attached += 1
 
@@ -538,14 +581,46 @@ async def load_seeds(
             logger.exception("seed_loader: failed to commit featured listings")
             await session.rollback()
 
+    # The startup heartbeat used to fire unconditionally so the changes
+    # feed always advertised a tip etag. After Wave 10 the per-row events
+    # above already serve that role on any boot that produced changes —
+    # we only need a synthetic tick when literally nothing was emitted
+    # (e.g. a no-change repeat boot whose feed table is empty). Keeping
+    # it conditional avoids generating one synthetic event per restart.
+    if (
+        emit_startup_tick
+        and emit_changes_events
+        and result.last_etag is None
+        and result.items_created > 0
+    ):
+        async with session_factory() as session:
+            try:
+                tick = await changes_emitter.emit(
+                    session,
+                    op="upsert",
+                    kind="agent",
+                    slug="__startup__",
+                    payload={
+                        "reason": "marketplace seed_loader boot tick",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                result.first_etag = tick.etag
+                result.last_etag = tick.etag
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception("seed_loader: failed to emit startup tick")
+                await session.rollback()
+
     seed_root = seeds_dir or _seeds_dir()
     result.files_loaded = sum(1 for f in SEED_FILES if (seed_root / f).exists())
     result.files_skipped = [f for f in SEED_FILES if not (seed_root / f).exists()]
     logger.info(
-        "seed_loader: complete — created=%d updated=%d failed=%d bundles=%d "
-        "categories=%d featured=%d first_etag=%s last_etag=%s",
+        "seed_loader: complete — created=%d updated=%d unchanged=%d failed=%d "
+        "bundles=%d categories=%d featured=%d first_etag=%s last_etag=%s",
         result.items_created,
         result.items_updated,
+        result.items_unchanged,
         result.items_failed,
         result.bundles_attached,
         result.categories_seeded,

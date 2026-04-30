@@ -21,7 +21,7 @@ populate the row, and the next call to this function will pick it up).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,19 @@ from ..models_auth import User
 logger = logging.getLogger(__name__)
 
 
-async def _add_agent_to_users_by_slug(
+# Canonical agents that ship with every user's library. Order matters:
+# the chat default-agent pick uses ``library[0]`` (most recent purchase_date),
+# so Tesslate Agent is auto-added LAST via its dedicated function and pins
+# to the top on every restart.
+CANONICAL_AGENTS: list[tuple[str, str]] = [
+    ("librarian", "Librarian"),
+    ("agent-builder", "Agent Builder"),
+    ("automation-builder", "Automation Builder"),
+    ("service-integrator", "Service Integrator"),
+]
+
+
+async def add_agent_to_users_by_slug(
     db: AsyncSession,
     *,
     slug: str,
@@ -93,30 +105,6 @@ async def _add_agent_to_users_by_slug(
     return added
 
 
-async def auto_add_librarian_agent_to_users(db: AsyncSession) -> int:
-    """Add the Librarian agent to all users who don't have it yet."""
-    return await _add_agent_to_users_by_slug(db, slug="librarian", display_name="Librarian")
-
-
-async def auto_add_agent_builder_to_users(db: AsyncSession) -> int:
-    """Add the Agent Builder to all users who don't have it yet."""
-    return await _add_agent_to_users_by_slug(db, slug="agent-builder", display_name="Agent Builder")
-
-
-async def auto_add_automation_builder_to_users(db: AsyncSession) -> int:
-    """Add the Automation Builder to all users who don't have it yet."""
-    return await _add_agent_to_users_by_slug(
-        db, slug="automation-builder", display_name="Automation Builder"
-    )
-
-
-async def auto_add_service_integrator_to_users(db: AsyncSession) -> int:
-    """Add the Service Integrator agent to all users who don't have it yet."""
-    return await _add_agent_to_users_by_slug(
-        db, slug="service-integrator", display_name="Service Integrator"
-    )
-
-
 async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
     """Add the Tesslate Agent to all users and pin it to the top of every
     library.
@@ -174,7 +162,7 @@ async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
     await db.execute(
         update(UserPurchasedAgent)
         .where(UserPurchasedAgent.agent_id == tesslate_agent.id)
-        .values(purchase_date=datetime.now(timezone.utc), selected_model=None)
+        .values(purchase_date=datetime.now(UTC), selected_model=None)
     )
 
     await db.commit()
@@ -187,9 +175,7 @@ async def auto_add_tesslate_agent_to_users(db: AsyncSession) -> int:
 
 
 __all__ = [
-    "auto_add_agent_builder_to_users",
-    "auto_add_automation_builder_to_users",
-    "auto_add_librarian_agent_to_users",
-    "auto_add_service_integrator_to_users",
+    "CANONICAL_AGENTS",
+    "add_agent_to_users_by_slug",
     "auto_add_tesslate_agent_to_users",
 ]

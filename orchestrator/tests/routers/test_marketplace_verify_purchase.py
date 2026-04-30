@@ -12,11 +12,12 @@ retry the redirect.
 These tests stub Stripe and the ``current_active_user`` dependency so we
 can exercise the gate in isolation; the focus is the void/return shape.
 """
+
 from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -143,12 +144,11 @@ class TestVerifyPurchaseTrustReCheck:
         * return 200 with ``install_blocked.reason='source_inactive'`` so the
           client surfaces the trust failure and Stripe stops retrying.
         """
-        from app.routers import marketplace as marketplace_router
+        from app.services.marketplace_source_cache import invalidate_source_cache
 
         # Wipe the in-memory source cache so our fresh "inactive" row wins
         # over anything a sibling test may have populated.
-        marketplace_router._SOURCE_ID_CACHE.clear()
-        marketplace_router._SOURCE_HANDLE_CACHE.clear()
+        invalidate_source_cache()
 
         user = _user()
         source = _source_inactive()
@@ -177,9 +177,7 @@ class TestVerifyPurchaseTrustReCheck:
             ]
         )
 
-        stripe_session = _stripe_session(
-            customer=user.stripe_customer_id, agent_id=agent.id
-        )
+        stripe_session = _stripe_session(customer=user.stripe_customer_id, agent_id=agent.id)
 
         # Patch Stripe SDK + service singleton so we don't hit the network.
         stripe_service_mock = MagicMock()
@@ -223,5 +221,4 @@ class TestVerifyPurchaseTrustReCheck:
         # And NO new purchase row was inserted.
         mock_db.add.assert_not_called()
         # Cleanup the source cache so we don't pollute later tests.
-        marketplace_router._SOURCE_ID_CACHE.clear()
-        marketplace_router._SOURCE_HANDLE_CACHE.clear()
+        invalidate_source_cache()

@@ -28,13 +28,8 @@ from ..database import get_db
 from ..models import AppVersion, MarketplaceApp, User, YankRequest
 from ..services import marketplace_governance
 from ..services.apps import yanks as yanks_svc
-from ..services.marketplace_client import (
-    MarketplaceAuthError,
-    MarketplaceClientError,
-    MarketplaceNotFoundError,
-    MarketplaceServerError,
-    UnsupportedCapabilityError,
-)
+from ..services.marketplace_client import MarketplaceClientError
+from ..services.marketplace_http_errors import propagate_marketplace_error
 from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
@@ -105,25 +100,7 @@ class YankListOut(BaseModel):
 
 
 def _propagate_marketplace_error(exc: MarketplaceClientError) -> HTTPException:
-    if isinstance(exc, MarketplaceAuthError):
-        return HTTPException(status_code=502, detail={
-            "error": "marketplace_auth_failed", "details": str(exc),
-        })
-    if isinstance(exc, MarketplaceNotFoundError):
-        return HTTPException(status_code=404, detail={
-            "error": "marketplace_yank_not_found", "details": str(exc),
-        })
-    if isinstance(exc, UnsupportedCapabilityError):
-        return HTTPException(status_code=501, detail={
-            "error": "marketplace_unsupported_capability", "capability": exc.capability,
-        })
-    if isinstance(exc, MarketplaceServerError):
-        return HTTPException(status_code=502, detail={
-            "error": "marketplace_unavailable", "details": str(exc),
-        })
-    return HTTPException(status_code=502, detail={
-        "error": "marketplace_error", "details": str(exc),
-    })
+    return propagate_marketplace_error(exc, not_found_tag="marketplace_yank_not_found")
 
 
 # ---------------------------------------------------------------------------
@@ -154,12 +131,12 @@ async def create_yank(
     await db.commit()
 
     # Forward to marketplace if the underlying app is federated.
-    source = await marketplace_governance.resolve_source_for_app_version(
-        db, body.app_version_id
-    )
-    if source is None or source.trust_level == "local" or (
-        source.base_url or ""
-    ).startswith("local://"):
+    source = await marketplace_governance.resolve_source_for_app_version(db, body.app_version_id)
+    if (
+        source is None
+        or source.trust_level == "local"
+        or (source.base_url or "").startswith("local://")
+    ):
         return YankRequestCreatedOut(yank_request_id=yid)
 
     av_row = (
@@ -198,9 +175,7 @@ async def create_yank(
         # Don't roll back the local yank — propagation can be retried later
         # from the admin queue. Surface a soft warning via the response
         # body so the caller knows.
-        logger.warning(
-            "create_yank: upstream forward failed for yank=%s: %s", yid, exc
-        )
+        logger.warning("create_yank: upstream forward failed for yank=%s: %s", yid, exc)
 
     return YankRequestCreatedOut(yank_request_id=yid)
 
@@ -255,8 +230,8 @@ async def approve(
         await yanks_svc.publish_yank_upstream(db, yank_request_id=yank_request_id)
     except Exception:
         logger.exception(
-            "approve: publish_yank_upstream failed yank=%s; local yank "
-            "already authoritative", yank_request_id
+            "approve: publish_yank_upstream failed yank=%s; local yank already authoritative",
+            yank_request_id,
         )
 
     return YankApproveOut(
@@ -330,9 +305,11 @@ async def appeal(
     source = await marketplace_governance.resolve_source_for_app_version(
         db, yank_row.app_version_id
     )
-    if source is not None and source.trust_level != "local" and not (
-        source.base_url or ""
-    ).startswith("local://"):
+    if (
+        source is not None
+        and source.trust_level != "local"
+        and not (source.base_url or "").startswith("local://")
+    ):
         try:
             await marketplace_governance.proxy_appeal_yank(
                 db,

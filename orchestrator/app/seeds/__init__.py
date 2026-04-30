@@ -55,10 +55,8 @@ async def run_all_seeds():
     """
     from ..database import AsyncSessionLocal
     from ..services.library_seeder import (
-        auto_add_agent_builder_to_users,
-        auto_add_automation_builder_to_users,
-        auto_add_librarian_agent_to_users,
-        auto_add_service_integrator_to_users,
+        CANONICAL_AGENTS,
+        add_agent_to_users_by_slug,
         auto_add_tesslate_agent_to_users,
     )
 
@@ -95,18 +93,18 @@ async def run_all_seeds():
         # sync poll lands. After that, every restart picks them up.
         # Order matters for the chat default-agent pick: Tesslate Agent
         # is added LAST so its purchase_date is the most recent.
-        for func, label in (
-            (auto_add_librarian_agent_to_users, "Librarian"),
-            (auto_add_agent_builder_to_users, "Agent Builder"),
-            (auto_add_automation_builder_to_users, "Automation Builder"),
-            (auto_add_service_integrator_to_users, "Service Integrator"),
-            (auto_add_tesslate_agent_to_users, "Tesslate Agent"),
-        ):
+        for slug, label in CANONICAL_AGENTS:
             try:
-                count = await func(db)
+                count = await add_agent_to_users_by_slug(db, slug=slug, display_name=label)
                 logger.info("Auto-add %s: %d users updated", label, count)
             except Exception:
                 logger.exception("Failed to auto-add %s to users", label)
                 await db.rollback()
+        try:
+            count = await auto_add_tesslate_agent_to_users(db)
+            logger.info("Auto-add Tesslate Agent: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Tesslate Agent to users")
+            await db.rollback()
 
     logger.info("All database seeds completed")

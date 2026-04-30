@@ -37,13 +37,7 @@ import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ShieldCheck } from '@phosphor-icons/react';
 
-type ItemType =
-  | 'app'
-  | 'agent'
-  | 'base'
-  | 'theme'
-  | 'skill'
-  | 'mcp_server';
+type ItemType = 'app' | 'agent' | 'base' | 'theme' | 'skill' | 'mcp_server';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -504,13 +498,12 @@ export default function Marketplace() {
 
     // Update URL params (category is handled by dedicated category pages).
     // ``source`` is owned by MarketplaceLayout / setSelectedSource so we
-    // preserve whatever it set on the URL rather than rebuild it here.
+    // preserve it rather than rewriting it here.
     const params = new URLSearchParams();
     if (selectedItemType !== 'app') params.set('type', selectedItemType);
     if (searchQuery) params.set('search', searchQuery);
     if (sortBy !== 'featured') params.set('sort', sortBy);
     if (pricingFilter !== 'all') params.set('pricing', pricingFilter);
-    if (selectedSource) params.set('source', selectedSource);
     setSearchParams(params, { replace: true });
 
     // Debounce search, immediate for others
@@ -718,8 +711,8 @@ export default function Marketplace() {
                     <Cloud size={14} />
                     <span className="hidden sm:inline text-xs">
                       {selectedSource
-                        ? federatedSources.find((s) => s.handle === selectedSource)?.display_name ??
-                          selectedSource
+                        ? (federatedSources.find((s) => s.handle === selectedSource)
+                            ?.display_name ?? selectedSource)
                         : 'All sources'}
                     </span>
                     <CaretDown className="w-3 h-3 opacity-50" />
@@ -785,11 +778,7 @@ export default function Marketplace() {
                                 {source.handle}
                               </span>
                               {selectedSource === source.handle && (
-                                <svg
-                                  className="w-3 h-3"
-                                  fill="currentColor"
-                                  viewBox="0 0 16 16"
-                                >
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
                                   <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
                                 </svg>
                               )}

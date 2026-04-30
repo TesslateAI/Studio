@@ -26,15 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..models import AppSubmission, AppVersion, MarketplaceApp, MarketplaceSource, User
+from ..models import AppSubmission, MarketplaceSource, User
 from ..services import marketplace_governance
-from ..services.marketplace_client import (
-    MarketplaceAuthError,
-    MarketplaceClientError,
-    MarketplaceNotFoundError,
-    MarketplaceServerError,
-    UnsupportedCapabilityError,
-)
+from ..services.marketplace_client import MarketplaceClientError
+from ..services.marketplace_http_errors import propagate_marketplace_error
 from ..users import current_active_user, current_superuser
 
 logger = logging.getLogger(__name__)
@@ -117,15 +112,11 @@ async def _resolve_source_for_submission(
 ) -> tuple[AppSubmission, MarketplaceSource | None]:
     """Resolve the cache row + marketplace source backing a submission."""
     sub = (
-        await db.execute(
-            select(AppSubmission).where(AppSubmission.id == submission_id)
-        )
+        await db.execute(select(AppSubmission).where(AppSubmission.id == submission_id))
     ).scalar_one_or_none()
     if sub is None:
         raise HTTPException(status_code=404, detail="submission not found")
-    source = await marketplace_governance.resolve_source_for_app_version(
-        db, sub.app_version_id
-    )
+    source = await marketplace_governance.resolve_source_for_app_version(db, sub.app_version_id)
     return sub, source
 
 
@@ -143,32 +134,7 @@ def _upstream_id_for(sub: AppSubmission) -> str:
 
 
 def _propagate_marketplace_error(exc: MarketplaceClientError) -> HTTPException:
-    """Translate a typed MarketplaceClientError into a clean HTTPException."""
-    if isinstance(exc, MarketplaceAuthError):
-        return HTTPException(status_code=502, detail={
-            "error": "marketplace_auth_failed",
-            "details": str(exc),
-        })
-    if isinstance(exc, MarketplaceNotFoundError):
-        # Cache and upstream out of sync — surface 404 so admin sees it.
-        return HTTPException(status_code=404, detail={
-            "error": "marketplace_submission_not_found",
-            "details": str(exc),
-        })
-    if isinstance(exc, UnsupportedCapabilityError):
-        return HTTPException(status_code=501, detail={
-            "error": "marketplace_unsupported_capability",
-            "capability": exc.capability,
-        })
-    if isinstance(exc, MarketplaceServerError):
-        return HTTPException(status_code=502, detail={
-            "error": "marketplace_unavailable",
-            "details": str(exc),
-        })
-    return HTTPException(status_code=502, detail={
-        "error": "marketplace_error",
-        "details": str(exc),
-    })
+    return propagate_marketplace_error(exc, not_found_tag="marketplace_submission_not_found")
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +203,7 @@ async def get_submission(
 # ---------------------------------------------------------------------------
 
 
-async def _load_detail_after_mutation(
-    db: AsyncSession, submission_id: UUID
-) -> SubmissionDetailOut:
+async def _load_detail_after_mutation(db: AsyncSession, submission_id: UUID) -> SubmissionDetailOut:
     row = (
         await db.execute(
             select(AppSubmission)
@@ -290,10 +254,13 @@ async def advance_submission(
             source=source,
         )
     except marketplace_governance.AdminTokenMissingError as exc:
-        raise HTTPException(status_code=503, detail={
-            "error": "marketplace_admin_token_missing",
-            "message": str(exc),
-        }) from exc
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "marketplace_admin_token_missing",
+                "message": str(exc),
+            },
+        ) from exc
     except MarketplaceClientError as exc:
         raise _propagate_marketplace_error(exc) from exc
 
@@ -336,10 +303,13 @@ async def finalize_submission(
             decision_reason=body.decision_reason,
         )
     except marketplace_governance.AdminTokenMissingError as exc:
-        raise HTTPException(status_code=503, detail={
-            "error": "marketplace_admin_token_missing",
-            "message": str(exc),
-        }) from exc
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "marketplace_admin_token_missing",
+                "message": str(exc),
+            },
+        ) from exc
     except MarketplaceClientError as exc:
         raise _propagate_marketplace_error(exc) from exc
 
@@ -385,10 +355,13 @@ async def run_stage1_scan_endpoint(
     sub.reviewer_user_id = user.id
     await db.commit()
     detail = await _load_detail_after_mutation(db, submission_id)
-    return ScanRunOut(submission=detail, result={
-        "advanced_to": envelope.get("stage"),
-        "checks": envelope.get("checks", []),
-    })
+    return ScanRunOut(
+        submission=detail,
+        result={
+            "advanced_to": envelope.get("stage"),
+            "checks": envelope.get("checks", []),
+        },
+    )
 
 
 @router.post("/{submission_id}/scan/stage2", response_model=ScanRunOut)
@@ -420,7 +393,10 @@ async def run_stage2_eval_endpoint(
     sub.reviewer_user_id = user.id
     await db.commit()
     detail = await _load_detail_after_mutation(db, submission_id)
-    return ScanRunOut(submission=detail, result={
-        "advanced_to": envelope.get("stage"),
-        "checks": envelope.get("checks", []),
-    })
+    return ScanRunOut(
+        submission=detail,
+        result={
+            "advanced_to": envelope.get("stage"),
+            "checks": envelope.get("checks", []),
+        },
+    )

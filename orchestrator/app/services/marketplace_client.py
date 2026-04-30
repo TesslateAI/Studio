@@ -653,9 +653,7 @@ class MarketplaceClient:
         return await self._request_json("GET", f"/v1/items/{kind}/{slug}/versions/{version}")
 
     async def get_bundle(self, kind: str, slug: str, version: str) -> JsonObject:
-        return await self._request_json(
-            "GET", f"/v1/items/{kind}/{slug}/versions/{version}/bundle"
-        )
+        return await self._request_json("GET", f"/v1/items/{kind}/{slug}/versions/{version}/bundle")
 
     async def get_attestation(self, kind: str, slug: str, version: str) -> JsonObject:
         return await self._request_json(
@@ -698,9 +696,7 @@ class MarketplaceClient:
             "GET", "/v1/changes", params=params or None, if_none_match=if_none_match
         )
 
-    async def get_yanks(
-        self, *, since: str | None = None, limit: int | None = None
-    ) -> JsonObject:
+    async def get_yanks(self, *, since: str | None = None, limit: int | None = None) -> JsonObject:
         params: dict[str, Any] = {}
         if since is not None:
             params["since"] = since
@@ -834,9 +830,7 @@ class MarketplaceClient:
         current stage, records every check, and updates the stage
         column. Idempotent on terminal rows.
         """
-        return await self._request_json(
-            "POST", f"/v1/submissions/{submission_id}/advance"
-        )
+        return await self._request_json("POST", f"/v1/submissions/{submission_id}/advance")
 
     async def finalize_submission(
         self,
@@ -860,9 +854,7 @@ class MarketplaceClient:
         )
 
     async def withdraw_submission(self, submission_id: str) -> JsonObject:
-        return await self._request_json(
-            "POST", f"/v1/submissions/{submission_id}/withdraw"
-        )
+        return await self._request_json("POST", f"/v1/submissions/{submission_id}/withdraw")
 
     # ---------- Admin overrides (Wave 8, requires admin.write scope) ----------
 
@@ -956,9 +948,7 @@ class MarketplaceClient:
         return await self._request_json("POST", "/v1/yanks", json_body=payload)
 
     async def appeal_yank(self, yank_id: str, payload: JsonObject) -> JsonObject:
-        return await self._request_json(
-            "POST", f"/v1/yanks/{yank_id}/appeal", json_body=payload
-        )
+        return await self._request_json("POST", f"/v1/yanks/{yank_id}/appeal", json_body=payload)
 
     async def get_yank(self, yank_id: str) -> JsonObject:
         return await self._request_json("GET", f"/v1/yanks/{yank_id}")
@@ -985,13 +975,15 @@ class MarketplaceClient:
         """
         self._refuse_local("stream_bundle")
         # Bare client (no auth header, no breaker — the URL is one-shot).
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(60.0, connect=10.0),
-            limits=_POOL_LIMITS,
-        ) as raw:
-            async with raw.stream("GET", signed_url) as response:
-                response.raise_for_status()
-                yield response
+        async with (
+            httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0, connect=10.0),
+                limits=_POOL_LIMITS,
+            ) as raw,
+            raw.stream("GET", signed_url) as response,
+        ):
+            response.raise_for_status()
+            yield response
 
 
 # ---------------------------------------------------------------------------
@@ -1000,19 +992,29 @@ class MarketplaceClient:
 
 
 def make_client_from_source(
+    source: Any | None = None,
     *,
-    base_url: str,
-    decrypted_token: str | None,
-    pinned_hub_id: str | None,
+    decrypted_token: str | None = None,
+    base_url: str | None = None,
+    pinned_hub_id: str | None = None,
     timeout_seconds: int = 10,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> MarketplaceClient:
-    """Construct a :class:`MarketplaceClient` from already-decrypted source state.
+    """Construct a :class:`MarketplaceClient` from a :class:`MarketplaceSource` row.
 
-    The sync worker calls this once per source per tick. The token MUST
-    already be decrypted by ``services/credential_manager.py`` — this
-    function never touches the DB or crypto.
+    The token MUST already be decrypted by the caller (e.g. via
+    ``credential_manager.safe_decrypt_token``) — this function never touches
+    the DB or crypto. ``source`` is duck-typed (anything exposing ``base_url``
+    and ``pinned_hub_id``) so callers can pass a row, a mock, or omit it and
+    use the explicit ``base_url`` / ``pinned_hub_id`` kwargs.
     """
+    if source is not None:
+        if base_url is None:
+            base_url = source.base_url
+        if pinned_hub_id is None:
+            pinned_hub_id = getattr(source, "pinned_hub_id", None)
+    if base_url is None:
+        raise TypeError("make_client_from_source requires source or base_url")
     return MarketplaceClient(
         base_url=base_url,
         token=decrypted_token,

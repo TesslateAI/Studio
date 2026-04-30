@@ -50,12 +50,13 @@ import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, Optional
+from typing import Any, Final
 
 import httpx
 from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 
+from . import marketplace_local
 from .cloud_client import (
     CircuitOpenError,
     CloudClient,
@@ -68,7 +69,6 @@ from .install_extract import (
     UnsafeArchiveError,
     safe_extract,
 )
-from . import marketplace_local
 
 logger = logging.getLogger(__name__)
 
@@ -244,8 +244,10 @@ def _parse_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     archive_format = envelope.get("archive_format")
     if not isinstance(url, str) or not url:
         raise BundleEnvelopeError("envelope.url missing or not a string")
-    if not isinstance(sha256, str) or len(sha256) != 64 or not all(
-        c in "0123456789abcdefABCDEF" for c in sha256
+    if (
+        not isinstance(sha256, str)
+        or len(sha256) != 64
+        or not all(c in "0123456789abcdefABCDEF" for c in sha256)
     ):
         raise BundleEnvelopeError("envelope.sha256 missing or malformed")
     if not isinstance(size_bytes, int) or size_bytes < 0:
@@ -286,9 +288,7 @@ def _check_expiry(envelope: dict[str, Any]) -> None:
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=UTC)
     if datetime.now(UTC) >= deadline:
-        raise BundleExpiredError(
-            f"bundle URL already expired at {deadline.isoformat()}"
-        )
+        raise BundleExpiredError(f"bundle URL already expired at {deadline.isoformat()}")
 
 
 def _resolve_size_cap(source: Any, kind: str, envelope: dict[str, Any]) -> int:
@@ -345,9 +345,7 @@ def _b64decode_strict(s: str) -> bytes:
         try:
             return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
         except (ValueError, base64.binascii.Error) as exc:
-            raise AttestationError(
-                f"attestation field is not valid base64: {s[:32]}..."
-            ) from exc
+            raise AttestationError(f"attestation field is not valid base64: {s[:32]}...") from exc
 
 
 def verify_attestation(
@@ -400,9 +398,7 @@ def verify_attestation(
     signature_b64 = attestation.get("signature")
     algorithm = attestation.get("algorithm", "ed25519")
     if algorithm.lower() != "ed25519":
-        raise AttestationError(
-            f"unsupported attestation algorithm: {algorithm!r}"
-        )
+        raise AttestationError(f"unsupported attestation algorithm: {algorithm!r}")
     if not isinstance(signature_b64, str) or not signature_b64:
         raise AttestationError("attestation.signature missing or not a string")
 
@@ -412,9 +408,7 @@ def verify_attestation(
     except AttestationError:
         raise
     if len(pubkey_bytes) != 32:
-        raise AttestationError(
-            f"ed25519 public key must be 32 bytes; got {len(pubkey_bytes)}"
-        )
+        raise AttestationError(f"ed25519 public key must be 32 bytes; got {len(pubkey_bytes)}")
     verify_key = VerifyKey(pubkey_bytes)
 
     # Sign the lowercase hex sha256 (most hubs do it this way; matches the
@@ -609,7 +603,7 @@ async def install_from_source(
     slug: str,
     version: str | None = None,
     decrypted_token: str | None = None,
-    client: Optional["MarketplaceClient"] = None,  # noqa: F821
+    client: MarketplaceClient | None = None,  # noqa: F821
     dest_root_override: Path | None = None,
 ) -> InstallResult:
     """Install ``{kind, slug, version}`` from ``source``.
@@ -637,7 +631,7 @@ async def install_from_source(
 
     # HTTP path — fetch the envelope via the source's client.
     # Imported lazily to avoid a circular import (federation → installer).
-    from .marketplace_client import MarketplaceClient
+    from .marketplace_client import make_client_from_source
 
     target = dest_root_override or _default_install_dir(kind, slug)
     if target.exists():
@@ -645,10 +639,10 @@ async def install_from_source(
 
     owns_client = client is None
     if client is None:
-        client = MarketplaceClient(
+        client = make_client_from_source(
+            source,
+            decrypted_token=decrypted_token,
             base_url=base_url,
-            token=decrypted_token,
-            pinned_hub_id=getattr(source, "pinned_hub_id", None),
         )
 
     try:
@@ -764,9 +758,7 @@ async def install_from_source(
 # ---------------------------------------------------------------------------
 
 
-async def _initiate_cloud_install(
-    cloud: CloudClient, kind: str, slug: str
-) -> dict[str, Any]:
+async def _initiate_cloud_install(cloud: CloudClient, kind: str, slug: str) -> dict[str, Any]:
     try:
         resp = await cloud.post(
             "/api/v1/marketplace/install",
@@ -821,9 +813,7 @@ async def _ack_cloud_install(cloud: CloudClient, install_id: str) -> None:
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 — ack is non-blocking
-        logger.warning(
-            "marketplace_installer: ack failed for %s: %s", install_id, exc
-        )
+        logger.warning("marketplace_installer: ack failed for %s: %s", install_id, exc)
 
 
 async def _install_via_cloud(kind: str, slug: str) -> InstallResult:
@@ -869,7 +859,11 @@ async def _install_via_cloud(kind: str, slug: str) -> InstallResult:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 tmp = dest.with_suffix(dest.suffix + ".part")
                 _, written = await _download_and_verify(
-                    url, sha256, _GLOBAL_HARD_CAP_BYTES, tmp, http=http,
+                    url,
+                    sha256,
+                    _GLOBAL_HARD_CAP_BYTES,
+                    tmp,
+                    http=http,
                 )
                 tmp.replace(dest)
                 total_bytes += written
