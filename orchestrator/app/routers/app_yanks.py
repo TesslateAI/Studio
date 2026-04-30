@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,6 +19,8 @@ from ..database import get_db
 from ..models import AppVersion, MarketplaceApp, User, YankRequest
 from ..services.apps import yanks as yanks_svc
 from ..users import current_active_user, current_superuser
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -134,6 +137,22 @@ async def approve(
             primary_admin_id=primary,
             secondary_admin_id=secondary,
         )
+
+    # Wave 7: propagate the finalised yank decision to the source hub so
+    # other orchestrators consuming the same /v1/yanks feed pick it up.
+    # Non-blocking — propagation failures log + return None; the local
+    # catalog already reflects the yank for this orchestrator's runtime
+    # gate (services/apps/runtime.py refuses to start yanked instances).
+    try:
+        await yanks_svc.publish_yank_upstream(
+            db, yank_request_id=yank_request_id
+        )
+    except Exception:
+        logger.exception(
+            "approve: publish_yank_upstream failed yank=%s; local yank "
+            "already authoritative", yank_request_id
+        )
+
     return YankApproveOut(
         status=result.get("status", "approved"),
         needs_second_admin=False,

@@ -27,9 +27,11 @@ from ..models import (
 from ..models_automations import AutomationDefinition, AutomationTrigger
 from ..services.apps.installer import (
     AlreadyInstalledError,
+    BlockedBySourceTrustError,
     ConsentRejectedError,
     IncompatibleAppError,
     InstallError,
+    SourceMismatchError,
     delete_per_pod_signing_key,
     install_app,
     propagate_user_secrets_post_install,
@@ -155,6 +157,30 @@ async def install_endpoint(
         except AlreadyInstalledError as e:
             await db.rollback()
             raise HTTPException(status_code=409, detail=str(e)) from e
+        except BlockedBySourceTrustError as e:
+            # Wave 7: surface install_guard denials with the same envelope
+            # the agent / mcp_server install paths use so the frontend can
+            # share its block-modal renderer.
+            await db.rollback()
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "install_blocked",
+                    "reason": e.reason,
+                    "source_handle": e.source_handle,
+                    "kind": "app",
+                },
+            ) from e
+        except SourceMismatchError as e:
+            # Wave 7: provenance drift is a data-integrity error, not a
+            # user-facing condition. 422 mirrors how the publisher /
+            # compatibility checker surface manifest validation errors so
+            # the UI can render the existing "manifest invalid" toast.
+            await db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail={"error": e.reason, "message": str(e)},
+            ) from e
         except IncompatibleAppError as e:
             await db.rollback()
             raise HTTPException(status_code=422, detail=str(e)) from e

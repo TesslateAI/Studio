@@ -59,11 +59,22 @@ Kind = Literal["agent", "skill", "mcp_server", "base", "app", "theme", "workflow
 TrustLevel = Literal["official", "admin_trusted", "local", "private", "untrusted"]
 
 # Kinds whose installation requires the user to confirm declared scope/tool
-# lists when the source is `private` (per the plan).
-_KINDS_REQUIRING_PRIVATE_CONFIRMATION: Final[set[str]] = {"mcp_server", "app"}
+# lists when the source is `private` (per the plan). Apps were promoted to
+# the stricter "admin_trusted only" gate in Wave 7 — they no longer surface
+# a confirmation modal on private hubs because they can't install at all.
+_KINDS_REQUIRING_PRIVATE_CONFIRMATION: Final[set[str]] = {"mcp_server"}
 
 # Kinds the `untrusted` trust level may NOT install (server-enforced).
 _KINDS_BLOCKED_FOR_UNTRUSTED: Final[set[str]] = {"mcp_server", "app"}
+
+# Wave 7: kinds that require trust level >= ``admin_trusted`` to install
+# from any source. Apps carry arbitrary executable surface (containers,
+# automations, MCP fan-out) so the install gate is the strictest cell of
+# the matrix — only ``official`` and ``admin_trusted`` hubs may serve them.
+# Community-hub apps (``private`` / ``untrusted``) are blocked outright;
+# the user must promote the source to ``admin_trusted`` in Settings before
+# the install endpoint will accept the request.
+_KINDS_REQUIRING_ADMIN_TRUSTED: Final[set[str]] = {"app"}
 
 # Every kind we know about, used for input validation in install_guard.
 _KNOWN_KINDS: Final[set[str]] = {
@@ -216,7 +227,7 @@ def install_guard(
 ) -> InstallGuardResult:
     """Server-enforced install-allowed check.
 
-    Mirrors the plan's "Source trust model" matrix:
+    Mirrors the plan's "Source trust model" matrix (Wave 7):
 
     +-----------------+-----------+----------+-----------+----------+
     | trust_level     | a/s/t/b/w | mcp_serv | app       | scope    |
@@ -224,12 +235,19 @@ def install_guard(
     | official        | allow     | allow    | allow     | n/a      |
     | admin_trusted   | allow     | allow    | allow     | n/a      |
     | local           | allow     | allow    | allow     | owner    |
-    | private         | allow     | confirm  | confirm   | n/a      |
+    | private         | allow     | confirm  | block     | n/a      |
     | untrusted       | allow     | block    | block     | n/a      |
     +-----------------+-----------+----------+-----------+----------+
 
     Where ``confirm`` means ``requires_confirmation=True`` and the UI must
     surface ``scope_tool_list`` / ``destructive_tools`` from the manifest.
+
+    Wave 7 promoted ``app`` to the strictest cell: only ``official`` and
+    ``admin_trusted`` (and ``local`` user-owned drafts) may install. The
+    rationale is that an app carries arbitrary executable surface
+    (containers, automations, MCP fan-out) whose risk cannot be summarised
+    on a per-install confirmation modal the way an MCP server's tool
+    surface can.
     """
     if kind not in _KNOWN_KINDS:
         return InstallGuardResult(
@@ -246,6 +264,17 @@ def install_guard(
     trust = source.trust_level
     if trust == "official" or trust == "admin_trusted":
         return InstallGuardResult(allowed=True, reason="trusted_source")
+
+    # Wave 7: app installs require trust >= admin_trusted on every non-local
+    # source. Community-hub apps (private/untrusted) are refused before the
+    # private confirmation gate ever runs — the executable surface of a
+    # marketplace app is too broad to be unlocked by a per-install modal
+    # the way mcp_server installs are.
+    if kind in _KINDS_REQUIRING_ADMIN_TRUSTED and trust not in {"official", "admin_trusted", "local"}:
+        return InstallGuardResult(
+            allowed=False,
+            reason=f"requires_admin_trusted_source:{kind}",
+        )
 
     if trust == "local":
         # Owner-scoped: cloud-mode `local` rows are user/team drafts and the
@@ -509,24 +538,36 @@ async def live_resolve(
 # ---------------------------------------------------------------------------
 
 
-def dispatch_purchase(
+def evaluate_purchase_route(
     source: MarketplaceSource,
     item: dict[str, Any],
+    *,
+    global_hub_checkout_enabled: bool | None = None,
 ) -> PurchaseRouting:
-    """Pick the checkout path per Wave 9 fallback rules.
+    """Pure-function rule evaluator for :func:`dispatch_purchase`.
+
+    Picks the checkout route per Wave 9 fallback rules WITHOUT making
+    any HTTP calls. Splitting evaluation from execution lets us unit-
+    test the trust matrix exhaustively while keeping the live HTTP
+    dispatch in :func:`dispatch_purchase`.
 
     The rules are evaluated in priority order:
 
-      1. Hub advertises ``pricing.checkout`` AND trust >= ``admin_trusted``
-         AND the feature flag for hub-checkout is on → ``HUB_CHECKOUT``.
+      1. Source advertises ``pricing.checkout``,
+         trust >= ``admin_trusted``,
+         AND ``MARKETPLACE_HUB_CHECKOUT_GLOBAL_ENABLED=true`` (env),
+         AND the feature flag
+            ``marketplace_federation_checkout_use_hub_checkout`` is on,
+         AND the source row's ``checkout_via_hub_enabled=True``
+         → ``HUB_CHECKOUT``.
       2. Source is ``official`` AND item has a non-null
-         ``stripe_price_id`` → ``ORCHESTRATOR_STRIPE`` (existing path).
+         ``stripe_price_id`` → ``ORCHESTRATOR_STRIPE`` (existing path —
+         the safety fallback for the entire Wave 9).
       3. Item is free → ``FREE``.
       4. Otherwise → ``REFUSE`` with ``pricing_not_supported``.
 
-    Wave 9 will flip the feature flag (and possibly add per-source
-    overrides) — Wave 3's job is to wire the dispatcher correctly so
-    Wave 9 is just a flag flip.
+    ``global_hub_checkout_enabled`` exists primarily for tests — when
+    None we look it up from settings + feature flag.
     """
     pricing = _extract_pricing(item)
     pricing_type = pricing.get("pricing_type", "free")
@@ -539,13 +580,27 @@ def dispatch_purchase(
 
     capabilities = _capabilities(source)
     advertises_hub_checkout = "pricing.checkout" in capabilities
-    advertises_pricing_read = "pricing.read" in capabilities
 
-    # Rule 1 — hub-owned checkout
+    # Determine whether hub-checkout is globally enabled.
+    if global_hub_checkout_enabled is None:
+        global_hub_checkout_enabled = (
+            _global_hub_checkout_setting() and hub_checkout_enabled()
+        )
+
+    # Per-source opt-in. Older test rows may not have the column populated;
+    # default to False so we never accidentally enable a source the
+    # operator hasn't explicitly flipped on.
+    per_source_enabled = bool(
+        getattr(source, "checkout_via_hub_enabled", False)
+    )
+
+    # Rule 1 — hub-owned checkout. ALL conditions must hold; any one
+    # being false drops to the orchestrator-Stripe / refuse path.
     if (
         advertises_hub_checkout
         and source.trust_level in {"official", "admin_trusted"}
-        and hub_checkout_enabled()
+        and global_hub_checkout_enabled
+        and per_source_enabled
     ):
         kind = item.get("kind")
         slug = item.get("slug")
@@ -558,10 +613,12 @@ def dispatch_purchase(
                     "pricing": pricing,
                     "source_id": str(source.id),
                     "source_handle": source.handle,
+                    "version": item.get("version") or item.get("latest_version"),
                 },
             )
 
     # Rule 2 — orchestrator-owned Stripe (Tesslate Official paid items).
+    # MUST stay enabled throughout Wave 9 as the safety fallback.
     if source.trust_level == "official":
         stripe_price_id = pricing.get("stripe_price_id") or item.get("stripe_price_id")
         if isinstance(stripe_price_id, str) and stripe_price_id:
@@ -574,14 +631,176 @@ def dispatch_purchase(
     if is_free:
         return PurchaseRouting(route=PurchaseRoute.FREE)
 
-    # Rule 4 — refuse, with a typed reason the UI can surface.
-    if not advertises_pricing_read:
-        reason = "pricing_not_supported"
-    elif source.trust_level not in {"official", "admin_trusted"}:
-        reason = "pricing_not_supported"
-    else:
-        reason = "pricing_not_supported"
-    return PurchaseRouting(route=PurchaseRoute.REFUSE, refuse_reason=reason)
+    # Rule 4 — refuse with the structured ``pricing_not_supported`` reason.
+    return PurchaseRouting(
+        route=PurchaseRoute.REFUSE, refuse_reason="pricing_not_supported"
+    )
+
+
+async def dispatch_purchase(
+    source: MarketplaceSource,
+    kind: str,
+    slug: str,
+    version: str | None = None,
+    requester: Any | None = None,
+    *,
+    item: dict[str, Any] | None = None,
+    success_url: str | None = None,
+    cancel_url: str | None = None,
+    decrypted_token: str | None = None,
+    client: MarketplaceClient | None = None,
+    global_hub_checkout_enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Pick a checkout path for ``(source, kind, slug, version, requester)``.
+
+    Returns a structured action dict per the Wave-9 contract:
+
+      - ``{action: "hub_checkout",         checkout_url, session_id, mode, expires_at}``
+      - ``{action: "orchestrator_stripe",  stripe_price_id, ...}``
+      - ``{action: "free_install"}``
+      - ``{action: "refused", reason: "pricing_not_supported"}``
+
+    ``item`` is the cached catalog row's pricing-relevant payload
+    (``pricing_type``, ``price_cents``, ``stripe_price_id``, ``currency``,
+    plus ``kind`` / ``slug`` / ``version`` for HUB_CHECKOUT). When
+    ``item`` is None we synthesize the minimal pricing dict from
+    ``kind``/``slug``/``version``; that is sufficient for the FREE /
+    REFUSE branches but the caller MUST pass ``item`` for paid routing
+    to fire correctly.
+
+    ``requester`` is the orchestrator-side ``User`` (or any object with
+    ``email`` / ``id`` attrs) — we forward ``email`` to the hub so the
+    Stripe Connect customer matches the eventual webhook reconciliation.
+    Pass ``None`` for unauthenticated callers (the hub will surface a
+    400 in that case).
+    """
+    if kind not in _KNOWN_KINDS:
+        return {
+            "action": "refused",
+            "reason": f"unknown_kind:{kind}",
+        }
+
+    payload = dict(item) if isinstance(item, dict) else {}
+    payload.setdefault("kind", kind)
+    payload.setdefault("slug", slug)
+    if version is not None:
+        payload.setdefault("version", version)
+
+    routing = evaluate_purchase_route(
+        source, payload, global_hub_checkout_enabled=global_hub_checkout_enabled
+    )
+
+    if routing.route is PurchaseRoute.FREE:
+        return {"action": "free_install"}
+
+    if routing.route is PurchaseRoute.REFUSE:
+        return {
+            "action": "refused",
+            "reason": routing.refuse_reason or "pricing_not_supported",
+        }
+
+    if routing.route is PurchaseRoute.ORCHESTRATOR_STRIPE:
+        # Routers that own the Stripe SDK call ``StripeService`` directly
+        # using ``stripe_price_id``. We surface the existing-path inputs
+        # here verbatim so the marketplace router doesn't have to
+        # re-extract pricing.
+        return {
+            "action": "orchestrator_stripe",
+            "stripe_price_id": routing.stripe_price_id,
+            "stripe_session": None,  # router will create the session
+            "kind": kind,
+            "slug": slug,
+            "version": version,
+        }
+
+    # HUB_CHECKOUT — call the hub to mint a checkout session.
+    requester_email = getattr(requester, "email", None) if requester else None
+    metadata: dict[str, str] = {
+        "orchestrator_source_id": str(source.id),
+        "orchestrator_source_handle": str(source.handle),
+        "orchestrator_kind": kind,
+        "orchestrator_slug": slug,
+    }
+    if version:
+        metadata["orchestrator_version"] = version
+    if requester is not None and getattr(requester, "id", None) is not None:
+        metadata["orchestrator_user_id"] = str(requester.id)
+
+    owns_client = client is None
+    if client is None:
+        client = MarketplaceClient(
+            base_url=source.base_url,
+            token=decrypted_token,
+            pinned_hub_id=source.pinned_hub_id,
+        )
+    try:
+        try:
+            response = await client.create_checkout(
+                kind,
+                slug,
+                version=version,
+                requester_email=requester_email,
+                success_url=success_url,
+                cancel_url=cancel_url,
+                metadata=metadata,
+            )
+        except Exception as exc:  # noqa: BLE001 — surfaced as "refused"
+            logger.warning(
+                "dispatch_purchase: hub_checkout failed for %s/%s on %s: %s",
+                kind,
+                slug,
+                getattr(source, "handle", "?"),
+                exc,
+            )
+            return {
+                "action": "refused",
+                "reason": "hub_checkout_failed",
+                "error": str(exc),
+            }
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    checkout_url = response.get("checkout_url")
+    session_id = response.get("session_id")
+    if not isinstance(checkout_url, str) or not isinstance(session_id, str):
+        logger.warning(
+            "dispatch_purchase: hub %s returned malformed checkout response: %r",
+            getattr(source, "handle", "?"),
+            response,
+        )
+        return {
+            "action": "refused",
+            "reason": "hub_checkout_failed",
+            "error": "malformed_checkout_response",
+        }
+
+    return {
+        "action": "hub_checkout",
+        "checkout_url": checkout_url,
+        "session_id": session_id,
+        "mode": response.get("mode") or "live",
+        "expires_at": response.get("expires_at"),
+        "source_id": str(source.id),
+        "source_handle": str(source.handle),
+        "kind": kind,
+        "slug": slug,
+        "version": version,
+    }
+
+
+def _global_hub_checkout_setting() -> bool:
+    """Return whether the global Wave-9 kill-switch is on.
+
+    Defaults to False if the setting is missing or the import fails so
+    the safe path (orchestrator-Stripe / refuse) wins.
+    """
+    try:
+        from ..config import get_settings
+
+        return bool(getattr(get_settings(), "marketplace_hub_checkout_global_enabled", False))
+    except Exception:  # noqa: BLE001 — settings missing → default off
+        return False
 
 
 def _capabilities(source: MarketplaceSource) -> set[str]:
@@ -791,6 +1010,7 @@ __all__ = [
     "TrustLevel",
     "capability_enabled",
     "dispatch_purchase",
+    "evaluate_purchase_route",
     "get_cached_item",
     "hub_checkout_enabled",
     "install_guard",

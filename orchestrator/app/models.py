@@ -1176,6 +1176,15 @@ class MarketplaceSource(Base):
     # via admin endpoint). NULL when the source does not advertise the
     # ``attestations`` capability or has not yet been pinned. Wave 6.
     attestation_pubkey = Column(Text, nullable=True)
+    # Wave 9 — per-source hub-checkout opt-in. Operators flip this to True
+    # once Stripe parity tests have passed for the source. Combined with the
+    # global ``MARKETPLACE_HUB_CHECKOUT_GLOBAL_ENABLED`` setting and the
+    # ``marketplace_federation_checkout_use_hub_checkout`` feature flag in
+    # ``services/marketplace_federation.dispatch_purchase``. False by
+    # default so Wave-9 code is dormant until per-source enablement.
+    checkout_via_hub_enabled = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     sync_etag = Column(String(128), nullable=True)
     last_sync_error = Column(Text, nullable=True)

@@ -735,6 +735,63 @@ class MarketplaceClient:
             json_body=payload or {},
         )
 
+    async def create_checkout(
+        self,
+        kind: str,
+        slug: str,
+        *,
+        version: str | None = None,
+        requester_email: str | None = None,
+        success_url: str | None = None,
+        cancel_url: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> JsonObject:
+        """Convenience wrapper for the Wave-9 hub-checkout dispatch path.
+
+        Mirrors the marketplace service's
+        ``packages/tesslate-marketplace/app/routers/pricing.py::create_checkout``
+        request envelope (see ``CheckoutRequest`` in the marketplace
+        package's ``schemas.py``):
+
+            {
+              "customer_email": "<requester_email>",
+              "success_url":   "<orchestrator success URL>",
+              "cancel_url":    "<orchestrator cancel URL>",
+              "metadata":      { ... }
+            }
+
+        And returns the hub's response envelope verbatim
+        (``CheckoutResponse``):
+
+            {
+              "checkout_url": "https://...",
+              "session_id":   "cs_test_...",
+              "mode":         "live" | "dev_simulator",
+              "expires_at":   "..." | null
+            }
+
+        ``version`` is forwarded as metadata so the hub can pin the
+        purchase to a specific catalog version (some hubs price per
+        version — the Tesslate marketplace doesn't currently, but the
+        protocol allows it). Failures bubble up as the same typed
+        :class:`MarketplaceClientError` subclasses every other verb
+        raises (``MarketplaceAuthError``, ``MarketplaceNotFoundError``,
+        ``UnsupportedCapabilityError``, ``HubIdMismatchError``, etc).
+        """
+        payload: dict[str, Any] = {}
+        if requester_email:
+            payload["customer_email"] = requester_email
+        if success_url:
+            payload["success_url"] = success_url
+        if cancel_url:
+            payload["cancel_url"] = cancel_url
+        meta = dict(metadata or {})
+        if version is not None:
+            meta.setdefault("version", version)
+        if meta:
+            payload["metadata"] = meta
+        return await self.post_checkout(kind, slug, payload=payload)
+
     # ---------- Publish / submissions ----------
 
     async def publish(self, kind: str, payload: JsonObject) -> JsonObject:
@@ -760,6 +817,45 @@ class MarketplaceClient:
     # ---------- Yanks + appeals ----------
 
     async def request_yank(self, payload: JsonObject) -> JsonObject:
+        return await self._request_json("POST", "/v1/yanks", json_body=payload)
+
+    async def publish_yank(
+        self,
+        *,
+        kind: str,
+        slug: str,
+        version: str | None,
+        reason: str,
+        severity: str,
+        requested_by: str | None = None,
+    ) -> JsonObject:
+        """Publish an orchestrator-side yank decision back to the hub.
+
+        Wave 7: when the orchestrator approves a :class:`YankRequest` for a
+        federated app version (via ``services/apps/yanks.py``), it must
+        propagate the decision to the source hub so other orchestrators
+        consuming the same hub's ``/v1/yanks`` feed pick up the yank on
+        their next sync tick.
+
+        The hub's ``POST /v1/yanks`` endpoint requires the ``yanks.write``
+        scope on the bearer token used by this client. The caller is
+        responsible for ensuring the source row's stored token carries that
+        scope; tokens that don't will surface as :class:`MarketplaceAuthError`
+        (401/403) which the caller should log and surface to the operator
+        without aborting the local yank — the local catalog already
+        reflects the yank, and a missing upstream propagation is a
+        recoverable condition the operator can retry.
+        """
+        payload: JsonObject = {
+            "kind": kind,
+            "slug": slug,
+            "severity": severity,
+            "reason": reason,
+        }
+        if version is not None:
+            payload["version"] = version
+        if requested_by is not None:
+            payload["requested_by"] = requested_by
         return await self._request_json("POST", "/v1/yanks", json_body=payload)
 
     async def appeal_yank(self, yank_id: str, payload: JsonObject) -> JsonObject:

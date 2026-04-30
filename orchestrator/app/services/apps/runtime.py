@@ -26,7 +26,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...models import AppInstance, LiteLLMKeyLedger, MarketplaceApp
+from ...models import AppInstance, AppVersion, LiteLLMKeyLedger, MarketplaceApp
 from .. import litellm_keys
 from .key_lifecycle import KeyState, KeyTier
 
@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 
 
 _UNRUNNABLE_APP_STATES = frozenset({"yanked", "deprecated"})
+# Wave 7: AppVersion.approval_state values that mean the version itself
+# is yanked even when the parent MarketplaceApp.state is still ``approved``.
+# Federated yanks land on the per-version row first (the parent app keeps
+# other versions live); the runtime gate must refuse to start an installed
+# instance whose pinned version is in any of these states.
+_UNRUNNABLE_VERSION_STATES = frozenset({"yanked", "rejected"})
 _RUNNABLE_INSTANCE_STATE = "installed"
 
 
@@ -72,20 +78,33 @@ async def _load_runnable_instance(
 ) -> tuple[AppInstance, MarketplaceApp]:
     row = (
         await db.execute(
-            select(AppInstance, MarketplaceApp)
+            select(AppInstance, MarketplaceApp, AppVersion)
             .join(MarketplaceApp, MarketplaceApp.id == AppInstance.app_id)
+            .join(AppVersion, AppVersion.id == AppInstance.app_version_id)
             .where(AppInstance.id == app_instance_id)
         )
     ).one_or_none()
     if row is None:
         raise AppNotRunnableError(f"app_instance {app_instance_id} not found")
-    instance, app = row
+    instance, app, version = row
     if instance.state != _RUNNABLE_INSTANCE_STATE:
         raise AppNotRunnableError(
             f"app_instance {app_instance_id} state={instance.state!r}, expected 'installed'"
         )
     if app.state in _UNRUNNABLE_APP_STATES:
-        raise AppNotRunnableError(f"app {app.id} state={app.state!r} is not runnable")
+        raise AppNotRunnableError(
+            f"app {app.id} state={app.state!r} is not runnable"
+        )
+    # Wave 7: a federated yank lands on the AppVersion row even when the
+    # parent app state stays 'approved' (the hub can yank one version
+    # while other versions remain live). The runtime gate refuses to
+    # mint a session for an instance pinned at a yanked version so a
+    # stale-but-installed AppInstance cannot side-step the propagation.
+    if version.approval_state in _UNRUNNABLE_VERSION_STATES:
+        raise AppNotRunnableError(
+            f"app_version {version.id} approval_state="
+            f"{version.approval_state!r} is not runnable"
+        )
     return instance, app
 
 

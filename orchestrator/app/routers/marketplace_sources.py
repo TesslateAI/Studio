@@ -30,12 +30,14 @@ cross-team access returns 404.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -99,6 +101,9 @@ class MarketplaceSourceResponse(BaseModel):
     pinned_hub_id: str | None
     capabilities: list[str]
     policies: dict[str, Any]
+    # Wave 9 — per-source hub-checkout opt-in. The UI surfaces this as
+    # an admin-only toggle on the sources settings row.
+    checkout_via_hub_enabled: bool = False
     last_synced_at: datetime | None
     last_sync_error: str | None
     sync_etag: str | None
@@ -262,6 +267,9 @@ def _serialize(source: MarketplaceSource) -> MarketplaceSourceResponse:
         pinned_hub_id=source.pinned_hub_id,
         capabilities=capabilities,
         policies=policies,
+        checkout_via_hub_enabled=bool(
+            getattr(source, "checkout_via_hub_enabled", False)
+        ),
         last_synced_at=source.last_synced_at,
         last_sync_error=source.last_sync_error,
         sync_etag=source.sync_etag,
@@ -940,3 +948,305 @@ async def promote_source(
         payload.trust_level,
     )
     return _serialize(source)
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — per-source hub-checkout opt-in
+# ---------------------------------------------------------------------------
+
+
+class CheckoutFlagPayload(BaseModel):
+    enabled: bool
+
+
+@router.post(
+    "/{source_id}/checkout-flag",
+    response_model=MarketplaceSourceResponse,
+)
+async def set_checkout_flag(
+    source_id: UUID,
+    payload: CheckoutFlagPayload,
+    db: AsyncSession = Depends(get_db),
+    superuser: User = Depends(current_superuser),
+) -> MarketplaceSourceResponse:
+    """Flip the per-source ``checkout_via_hub_enabled`` dial. Superuser only.
+
+    The Wave-9 cutover happens item-by-item via this endpoint plus the
+    runtime feature flag and the global setting. All three must be on
+    before ``dispatch_purchase`` routes a purchase through the hub-owned
+    Stripe Connect path.
+
+    Operators flip this true after parity tests pass for the source
+    (Stripe checkout session creation, webhook reconciliation,
+    subscription cancel, refund, customer-portal access). Setting it
+    false instantly reverts the source to the orchestrator-owned Stripe
+    safety fallback.
+
+    System rows (``official``, ``local``) are allowed because Tesslate
+    Official IS the canonical hub that owns the rollout.
+    """
+    source = await db.get(MarketplaceSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Marketplace source not found")
+    # Per-source dial only meaningful for sources that can host paid checkout.
+    if source.trust_level not in {"official", "admin_trusted"}:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "checkout_via_hub_enabled requires trust_level >= admin_trusted; "
+                f"source has trust_level={source.trust_level!r}"
+            ),
+        )
+    source.checkout_via_hub_enabled = bool(payload.enabled)
+    await db.commit()
+    await db.refresh(source)
+    logger.info(
+        "marketplace_sources: superuser %s set checkout_via_hub_enabled=%s on source=%s",
+        superuser.id,
+        payload.enabled,
+        source.handle,
+    )
+    return _serialize(source)
+
+
+# ---------------------------------------------------------------------------
+# Wave 9 — entitlements grant (hub → orchestrator webhook reconciliation)
+# ---------------------------------------------------------------------------
+
+
+class EntitlementGrantPayload(BaseModel):
+    """Shape the hub POSTs to /entitlements/grant after Stripe Connect succeeds.
+
+    The hub owns its own Stripe webhook; once the checkout completes the
+    hub signs this payload with HMAC-SHA256 (using
+    ``MARKETPLACE_HUB_ENTITLEMENT_SECRET`` + the source's pinned hub_id)
+    and POSTs it to the orchestrator. The orchestrator verifies the
+    signature, looks up the cached catalog row, and inserts the
+    appropriate entitlement (``UserPurchasedAgent`` for agents).
+    """
+
+    kind: str = Field(..., description="agent | app | base | etc — the catalog kind")
+    slug: str = Field(..., description="The item slug within (source, kind)")
+    user_id: UUID = Field(..., description="Orchestrator user receiving the entitlement")
+    purchase_type: str = Field(default="purchased", description="free | purchased | subscription")
+    stripe_session_id: str | None = None
+    stripe_subscription_id: str | None = None
+    stripe_payment_intent: str | None = None
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class EntitlementGrantResponse(BaseModel):
+    granted: bool
+    entitlement_id: UUID | None = None
+    already_granted: bool = False
+    kind: str
+    slug: str
+
+
+def _verify_entitlement_signature(
+    *,
+    raw_body: bytes,
+    signature_header: str | None,
+    secret: str,
+    hub_id: str | None,
+) -> bool:
+    """HMAC-SHA256 verification of an entitlement-grant body.
+
+    Hub computes ``HMAC-SHA256(secret + ":" + hub_id, raw_body)`` and
+    sends the hex digest in ``X-Tesslate-Entitlement-Signature``. We
+    re-compute and ``hmac.compare_digest`` to thwart timing oracles.
+    Returns False on any input mismatch — caller raises 401.
+    """
+    if not signature_header or not secret or not hub_id:
+        return False
+    keying = f"{secret}:{hub_id}".encode()
+    expected = hmac.new(keying, raw_body, hashlib.sha256).hexdigest()
+    # Accept both ``hex`` and ``sha256=<hex>`` framings.
+    received = signature_header.strip()
+    if received.startswith("sha256="):
+        received = received[len("sha256=") :]
+    try:
+        return hmac.compare_digest(expected, received)
+    except Exception:  # noqa: BLE001 — defensive, treat any error as mismatch
+        return False
+
+
+@router.post(
+    "/{source_id}/entitlements/grant",
+    response_model=EntitlementGrantResponse,
+)
+async def grant_entitlement(
+    source_id: UUID,
+    payload: EntitlementGrantPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> EntitlementGrantResponse:
+    """Wave-9 webhook: federated hub reports a successful Stripe Connect grant.
+
+    Authentication: HMAC-SHA256 signature in
+    ``X-Tesslate-Entitlement-Signature`` over the raw request body, keyed
+    on ``MARKETPLACE_HUB_ENTITLEMENT_SECRET`` + the source's pinned
+    ``hub_id``. Sources without a pinned hub_id are refused (the pin is
+    the orchestrator's identity anchor — without it any third party
+    could impersonate the hub).
+
+    Idempotency: if a ``UserPurchasedAgent`` row for ``(user_id,
+    agent_id)`` already exists and is active, we return
+    ``already_granted=true`` without inserting. This matches the
+    orchestrator-Stripe path's idempotency in
+    ``stripe_service._handle_agent_purchase_checkout``.
+
+    Note: per the Wave-9 plan we use this push-from-hub pattern (rather
+    than forwarding webhooks blindly) so source-of-truth boundaries
+    are preserved — the hub owns its Stripe events, the orchestrator
+    only learns about granted entitlements.
+    """
+    source = await db.get(MarketplaceSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Marketplace source not found")
+    if not source.is_active:
+        raise HTTPException(status_code=409, detail="source_inactive")
+    if source.trust_level not in {"official", "admin_trusted"}:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "trust_level_too_low",
+                "trust_level": source.trust_level,
+                "required": "admin_trusted",
+            },
+        )
+    if not source.pinned_hub_id:
+        # Without a pinned hub_id the signature key is not anchored, and
+        # any URL hijack could mint entitlements at will.
+        raise HTTPException(status_code=409, detail="source_unpinned")
+
+    settings = get_settings()
+    secret = (settings.marketplace_hub_entitlement_secret or "").strip()
+    if not secret:
+        # Never accept an unsigned grant — fail closed.
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "entitlement_secret_unconfigured",
+                "message": (
+                    "MARKETPLACE_HUB_ENTITLEMENT_SECRET is empty; orchestrator "
+                    "cannot verify hub-issued entitlement grants."
+                ),
+            },
+        )
+
+    raw_body = await request.body()
+    signature = request.headers.get("X-Tesslate-Entitlement-Signature")
+    if not _verify_entitlement_signature(
+        raw_body=raw_body,
+        signature_header=signature,
+        secret=secret,
+        hub_id=source.pinned_hub_id,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": "invalid_signature",
+                "source_handle": source.handle,
+            },
+        )
+
+    # The user MUST exist locally; pairing is the orchestrator's job, not
+    # the hub's. If the hub references a user the orchestrator doesn't
+    # know we 404 so a misconfigured hub can't insert orphan rows.
+    user = await db.get(User, payload.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    if payload.kind == "agent":
+        agent = (
+            await db.execute(
+                select(MarketplaceAgent).where(
+                    MarketplaceAgent.source_id == source.id,
+                    MarketplaceAgent.slug == payload.slug,
+                )
+            )
+        ).scalar_one_or_none()
+        if agent is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "agent_not_found",
+                    "source_handle": source.handle,
+                    "slug": payload.slug,
+                },
+            )
+
+        existing = (
+            await db.execute(
+                select(UserPurchasedAgent).where(
+                    and_(
+                        UserPurchasedAgent.user_id == user.id,
+                        UserPurchasedAgent.agent_id == agent.id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None and existing.is_active:
+            return EntitlementGrantResponse(
+                granted=True,
+                entitlement_id=existing.id,
+                already_granted=True,
+                kind="agent",
+                slug=agent.slug,
+            )
+
+        if existing is not None:
+            # Re-activate stale row instead of inserting a duplicate.
+            existing.is_active = True
+            existing.purchase_date = datetime.now(UTC)
+            existing.purchase_type = payload.purchase_type
+            existing.stripe_payment_intent = payload.stripe_payment_intent
+            existing.stripe_subscription_id = payload.stripe_subscription_id
+            existing.expires_at = payload.expires_at
+            await db.commit()
+            await db.refresh(existing)
+            entitlement_id = existing.id
+        else:
+            row = UserPurchasedAgent(
+                user_id=user.id,
+                team_id=getattr(user, "default_team_id", None),
+                agent_id=agent.id,
+                purchase_type=payload.purchase_type,
+                stripe_payment_intent=payload.stripe_payment_intent,
+                stripe_subscription_id=payload.stripe_subscription_id,
+                expires_at=payload.expires_at,
+                is_active=True,
+            )
+            db.add(row)
+            agent.downloads += 1
+            await db.commit()
+            await db.refresh(row)
+            entitlement_id = row.id
+
+        logger.info(
+            "marketplace_sources: hub %s granted agent entitlement user=%s agent=%s",
+            source.handle,
+            user.id,
+            agent.id,
+        )
+        return EntitlementGrantResponse(
+            granted=True,
+            entitlement_id=entitlement_id,
+            already_granted=False,
+            kind="agent",
+            slug=agent.slug,
+        )
+
+    # Other kinds (app, base, theme, ...) follow when their respective
+    # entitlement tables get the source_id linkage. For Wave 9 only the
+    # agent kind has a Stripe-driven entitlement table.
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "error": "kind_not_implemented",
+            "kind": payload.kind,
+            "supported": ["agent"],
+        },
+    )

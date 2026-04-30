@@ -774,3 +774,159 @@ async def test_handle_delete_app_with_user_state_keeps_stub(
             models.User.__table__.delete().where(models.User.id == user_id)
         )
         await orchestrator_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Wave 7 — federated yank consumer
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_apply_yank_event_marks_app_version_yanked_upstream(
+    orchestrator_session: AsyncSession,
+    federated_source: MarketplaceSource,
+) -> None:
+    """Wave 7: a ``yank`` op for kind=``app`` from a non-Tesslate-Official
+    source must (a) flip ``app_versions.state='yanked'`` (the column the
+    runtime gate inspects), (b) populate
+    ``app_versions.yanked_upstream_at``, and (c) preserve any installed
+    AppInstance row so the runtime gate refuses to start it on the next
+    ``begin_session`` call.
+    """
+    from uuid import uuid4
+
+    from app import models
+    from app.services.marketplace_client import JsonObject
+
+    user_id = uuid4()
+    user = models.User(
+        id=user_id,
+        email=f"yank-{user_id}@example.com",
+        hashed_password="x",
+        is_active=True,
+        is_superuser=False,
+        is_verified=True,
+        name="Yank Owner",
+        username=f"yank-{user_id.hex[:10]}",
+        slug=f"yank-{user_id.hex[:10]}",
+    )
+    orchestrator_session.add(user)
+
+    slug = f"federated-yank-target-{user_id.hex[:10]}"
+    app = MarketplaceApp(
+        slug=slug,
+        name="Federated Yank Target",
+        creator_user_id=user_id,
+        state="approved",
+        visibility="public",
+        source_id=federated_source.id,
+        source_etag="v1",
+        source_remote_id=slug,
+        deleted_upstream=False,
+    )
+    orchestrator_session.add(app)
+    await orchestrator_session.flush()
+
+    version = models.AppVersion(
+        id=uuid4(),
+        app_id=app.id,
+        version="1.0.0",
+        manifest_schema_version="2026-05",
+        manifest_json={"app": {"slug": slug}},
+        manifest_hash="hash-yank",
+        feature_set_hash="fh-yank",
+        approval_state="stage1_approved",
+        published_at=datetime.now(UTC),
+        source_id=federated_source.id,
+    )
+    orchestrator_session.add(version)
+    await orchestrator_session.flush()
+
+    instance = AppInstance(
+        id=uuid4(),
+        app_id=app.id,
+        app_version_id=version.id,
+        installer_user_id=user_id,
+        state="installed",
+    )
+    orchestrator_session.add(instance)
+    await orchestrator_session.commit()
+
+    app_id = app.id
+    version_id = version.id
+    instance_id = instance.id
+
+    SessionFactory = _orchestrator_session_factory()
+    worker = MarketplaceSyncWorker(db_session_factory=SessionFactory)
+
+    yank_event: JsonObject = {
+        "op": "yank",
+        "kind": "app",
+        "slug": slug,
+        "version": "1.0.0",
+        "etag": "v2",
+        "payload": {"reason": "security incident", "severity": "critical"},
+    }
+
+    try:
+        async with SessionFactory() as sess:
+            bound_source = await sess.get(MarketplaceSource, federated_source.id)
+            assert bound_source is not None
+            counter = await worker._apply_event(
+                sess,
+                bound_source,
+                client=None,  # yank handler does not call the client
+                event=yank_event,
+            )
+            await sess.commit()
+        assert counter == "versions_yanked", (
+            f"Wave 7 yank consumer expected to bump versions_yanked counter, "
+            f"got {counter!r}"
+        )
+
+        await orchestrator_session.refresh(version)
+        assert version.approval_state == "yanked"
+        assert version.yanked_upstream_at is not None
+        assert version.yanked_at is not None
+        assert "security incident" in (version.yanked_reason or "")
+
+        # Installed AppInstance is untouched — runtime gate is the
+        # authoritative refuse-to-start barrier.
+        surviving_inst = (
+            await orchestrator_session.execute(
+                select(AppInstance).where(AppInstance.id == instance_id)
+            )
+        ).scalars().first()
+        assert surviving_inst is not None
+        assert surviving_inst.state == "installed"
+
+        # The runtime gate (services/apps/runtime.py::_load_runnable_instance)
+        # MUST refuse to mint a session for an instance pinned at a yanked
+        # version. We import + invoke the loader here so the test pins the
+        # actual gate behaviour rather than just asserting on column state.
+        from app.services.apps.runtime import (
+            AppNotRunnableError,
+            _load_runnable_instance,
+        )
+
+        with pytest.raises(AppNotRunnableError) as exc_info:
+            await _load_runnable_instance(orchestrator_session, instance_id)
+        assert "yanked" in str(exc_info.value)
+
+    finally:
+        await orchestrator_session.execute(
+            AppInstance.__table__.delete().where(AppInstance.id == instance_id)
+        )
+        await orchestrator_session.execute(
+            models.AppVersion.__table__.delete().where(
+                models.AppVersion.id == version_id
+            )
+        )
+        await orchestrator_session.execute(
+            MarketplaceApp.__table__.delete().where(MarketplaceApp.id == app_id)
+        )
+        await orchestrator_session.execute(
+            models.User.__table__.delete().where(models.User.id == user_id)
+        )
+        await orchestrator_session.commit()

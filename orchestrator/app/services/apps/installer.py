@@ -55,6 +55,8 @@ __all__ = [
     "IncompatibleAppError",
     "ConsentRejectedError",
     "ManifestInvalid",
+    "BlockedBySourceTrustError",
+    "SourceMismatchError",
     "InstallResult",
     "create_per_pod_signing_key",
     "delete_per_pod_signing_key",
@@ -97,6 +99,38 @@ class ManifestInvalid(InstallError):
     violations the publish-time checker should already have rejected, but
     that we re-validate at install time as a defense-in-depth gate.
     """
+
+
+class BlockedBySourceTrustError(InstallError):
+    """Wave 7: install gate refused because the source's trust level is
+    below the per-kind minimum.
+
+    For ``app`` kind the minimum is ``admin_trusted`` — community-hub
+    apps (``private`` / ``untrusted``) cannot install regardless of
+    user confirmation. The router that catches this exception MUST
+    surface a 403 with a stable ``install_blocked`` envelope so the
+    UI can render the same error path it uses for the agent / mcp_server
+    install gates.
+    """
+
+    def __init__(self, reason: str, source_handle: str | None = None) -> None:
+        super().__init__(f"install blocked: {reason}")
+        self.reason = reason
+        self.source_handle = source_handle
+
+
+class SourceMismatchError(InstallError):
+    """The catalog row's source_id and the AppVersion's source_id disagree.
+
+    Wave 7 enforces ``app_versions.source_id`` ALWAYS equals the parent
+    ``marketplace_apps.source_id``. If a row drifts out of that invariant
+    (a bad write upstream, a migration race) the installer aborts with
+    this error rather than installing under an inconsistent provenance.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.reason = "source_mismatch"
 
 
 @dataclass(frozen=True)
@@ -618,6 +652,49 @@ async def install_app(
         )
     if app_row.state in {"yanked", "deprecated"}:
         raise IncompatibleAppError(f"MarketplaceApp {app_row.id} is {app_row.state}")
+
+    # Wave 7: AppVersion.source_id MUST equal the parent MarketplaceApp's
+    # source_id. The publisher and sync worker maintain this invariant on
+    # write; this is the install-time defense-in-depth check. A drift
+    # means either a bad write got past the service layer or a migration
+    # race left the row inconsistent — refuse the install under
+    # inconsistent provenance because the trust gate below depends on
+    # agreement between the two source ids.
+    if av.source_id != app_row.source_id:
+        raise SourceMismatchError(
+            f"AppVersion {app_version_id} source_id={av.source_id!r} "
+            f"differs from parent MarketplaceApp {app_row.id} source_id="
+            f"{app_row.source_id!r}; refusing install"
+        )
+
+    # Wave 7: per-source install_guard for federated apps. Tesslate
+    # Official (LOCAL_SOURCE_ID-tagged drafts and ``trust_level='official'``
+    # rows) installs unchanged. Community-hub apps (private / untrusted)
+    # are blocked regardless of user confirmation — the executable
+    # surface of an app cannot be summarised on a per-install modal.
+    if app_row.source_id is not None:
+        from ...models import MarketplaceSource
+        from .. import marketplace_federation
+
+        source_row = (
+            await db.execute(
+                select(MarketplaceSource).where(
+                    MarketplaceSource.id == app_row.source_id
+                )
+            )
+        ).scalar_one_or_none()
+        if source_row is not None:
+            decision = marketplace_federation.install_guard(
+                source_row,
+                "app",
+                version_meta={"manifest": av.manifest_json or {}},
+                requester_user_id=installer_user_id,
+            )
+            if not decision.allowed:
+                raise BlockedBySourceTrustError(
+                    decision.reason,
+                    source_handle=source_row.handle,
+                )
 
     # 2) Compat re-check against the current server feature set.
     manifest_json = av.manifest_json or {}

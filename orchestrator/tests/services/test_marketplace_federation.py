@@ -35,6 +35,7 @@ from app.services.marketplace_federation import (
     PurchaseRoute,
     ResolvedItem,
     dispatch_purchase,
+    evaluate_purchase_route,
     get_cached_item,
     install_guard,
     list_cached_items,
@@ -56,6 +57,7 @@ def _make_source(
     team_id=None,
     is_active: bool = True,
     capabilities: list[str] | None = None,
+    checkout_via_hub_enabled: bool = False,
 ):
     """Build a duck-typed source row that matches the attribute access in
     install_guard / dispatch_purchase. We avoid SQLAlchemy here to keep
@@ -71,6 +73,7 @@ def _make_source(
         is_active=is_active,
         capabilities_cache=capabilities or [],
         pinned_hub_id="hub-test",
+        checkout_via_hub_enabled=checkout_via_hub_enabled,
     )
 
 
@@ -101,7 +104,14 @@ def test_install_guard_untrusted_blocks_restricted_kinds(kind: str) -> None:
     source = _make_source(trust_level="untrusted")
     result = install_guard(source, kind)
     assert result.allowed is False
-    assert result.reason == f"untrusted_blocks_{kind}"
+    # Wave 7 promoted ``app`` to the stricter
+    # ``requires_admin_trusted_source`` gate; mcp_server stays on the
+    # original ``untrusted_blocks_*`` reason. Either reason is a valid
+    # block — they only differ in which cell of the trust matrix fired.
+    assert result.reason in {
+        f"untrusted_blocks_{kind}",
+        f"requires_admin_trusted_source:{kind}",
+    }
 
 
 @pytest.mark.parametrize("kind", _NON_APP_NON_MCP_KINDS)
@@ -136,7 +146,11 @@ def test_install_guard_private_mcp_server_requires_confirmation_and_extracts_too
     assert "delete_file" in result.destructive_tools
 
 
-def test_install_guard_private_app_requires_confirmation_with_action_surface() -> None:
+def test_install_guard_private_app_blocked_by_admin_trusted_gate() -> None:
+    """Wave 7 promoted ``app`` to the strictest gate — even ``private``
+    sources cannot install apps; the user must first promote the source
+    to ``admin_trusted`` in Settings. The pre-Wave-7 confirmation modal
+    no longer surfaces."""
     source = _make_source(trust_level="private")
     manifest = {
         "manifest": {
@@ -147,13 +161,8 @@ def test_install_guard_private_app_requires_confirmation_with_action_surface() -
         }
     }
     result = install_guard(source, "app", version_meta=manifest)
-    assert result.allowed is True
-    assert result.requires_confirmation is True
-    assert result.reason == "private_requires_confirmation:app"
-    assert result.scope_tool_list is not None
-    names = {a["name"] for a in result.scope_tool_list}
-    assert names == {"send_email", "drop_table"}
-    assert "drop_table" in result.destructive_tools
+    assert result.allowed is False
+    assert result.reason == "requires_admin_trusted_source:app"
 
 
 @pytest.mark.parametrize("kind", _NON_APP_NON_MCP_KINDS + _RESTRICTED_KINDS)
@@ -212,18 +221,18 @@ def test_install_guard_unknown_trust_level_fails_closed() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dispatch_purchase_free_item_routes_free() -> None:
+def test_evaluate_route_free_item_routes_free() -> None:
     source = _make_source(trust_level="official")
     item = {
         "kind": "agent",
         "slug": "free-agent",
         "pricing": {"pricing_type": "free", "price_cents": 0},
     }
-    routing = dispatch_purchase(source, item)
+    routing = evaluate_purchase_route(source, item)
     assert routing.route is PurchaseRoute.FREE
 
 
-def test_dispatch_purchase_official_paid_routes_orchestrator_stripe() -> None:
+def test_evaluate_route_official_paid_routes_orchestrator_stripe() -> None:
     source = _make_source(trust_level="official")
     item = {
         "kind": "agent",
@@ -234,41 +243,41 @@ def test_dispatch_purchase_official_paid_routes_orchestrator_stripe() -> None:
             "stripe_price_id": "price_OFFICIAL_123",
         },
     }
-    routing = dispatch_purchase(source, item)
+    routing = evaluate_purchase_route(source, item)
     assert routing.route is PurchaseRoute.ORCHESTRATOR_STRIPE
     assert routing.stripe_price_id == "price_OFFICIAL_123"
 
 
-def test_dispatch_purchase_untrusted_paid_refuses() -> None:
+def test_evaluate_route_untrusted_paid_refuses() -> None:
     source = _make_source(trust_level="untrusted", capabilities=["catalog.read"])
     item = {
         "kind": "agent",
         "slug": "rogue-paid",
         "pricing": {"pricing_type": "paid", "price_cents": 999, "stripe_price_id": "x"},
     }
-    routing = dispatch_purchase(source, item)
+    routing = evaluate_purchase_route(source, item)
     assert routing.route is PurchaseRoute.REFUSE
     assert routing.refuse_reason == "pricing_not_supported"
 
 
-def test_dispatch_purchase_private_paid_refuses() -> None:
+def test_evaluate_route_private_paid_refuses() -> None:
     source = _make_source(trust_level="private", capabilities=["catalog.read"])
     item = {
         "kind": "agent",
         "slug": "p1",
         "pricing": {"pricing_type": "paid", "price_cents": 500, "stripe_price_id": "x"},
     }
-    routing = dispatch_purchase(source, item)
+    routing = evaluate_purchase_route(source, item)
     assert routing.route is PurchaseRoute.REFUSE
     assert routing.refuse_reason == "pricing_not_supported"
 
 
-def test_dispatch_purchase_admin_trusted_with_hub_checkout_capability_but_flag_off() -> None:
-    """Wave-3 default: feature flag is OFF, so even an admin_trusted hub
+def test_evaluate_route_admin_trusted_with_hub_checkout_capability_but_flag_off() -> None:
+    """Wave-9 default: global flag is OFF, so even an admin_trusted hub
     that advertises pricing.checkout still routes via Stripe / refuse.
 
-    Wave 9 will flip the flag — Wave 3 must *not* leak the route while the
-    flag is off."""
+    Wave 9 ships the code path; the operator flips the flag once parity
+    tests pass — Wave 9 must *not* leak the route while the flag is off."""
     source = _make_source(
         trust_level="admin_trusted",
         capabilities=["catalog.read", "pricing.read", "pricing.checkout"],
@@ -278,39 +287,67 @@ def test_dispatch_purchase_admin_trusted_with_hub_checkout_capability_but_flag_o
         "slug": "p2",
         "pricing": {"pricing_type": "paid", "price_cents": 500},
     }
-    routing = dispatch_purchase(source, item)
+    routing = evaluate_purchase_route(source, item)
     # admin_trusted has no orchestrator-Stripe path, no flag → refuse.
     assert routing.route is PurchaseRoute.REFUSE
 
 
-def test_dispatch_purchase_admin_trusted_hub_checkout_when_flag_on(monkeypatch) -> None:
-    # Force the flag on for this test.
+def test_evaluate_route_admin_trusted_hub_checkout_when_flags_on(monkeypatch) -> None:
+    """Both the global setting AND the per-source flag must be ON to route
+    HUB_CHECKOUT — either being False drops to the safety fallback."""
     from app.services import marketplace_federation as facade
 
     monkeypatch.setattr(facade, "hub_checkout_enabled", lambda: True)
+    monkeypatch.setattr(facade, "_global_hub_checkout_setting", lambda: True)
 
     source = _make_source(
         trust_level="admin_trusted",
         capabilities=["catalog.read", "pricing.read", "pricing.checkout"],
+        checkout_via_hub_enabled=True,
     )
     item = {
         "kind": "agent",
         "slug": "p3",
         "pricing": {"pricing_type": "paid", "price_cents": 500},
     }
-    routing = dispatch_purchase(source, item)
+    routing = evaluate_purchase_route(source, item)
     assert routing.route is PurchaseRoute.HUB_CHECKOUT
     assert routing.hub_kind == "agent"
     assert routing.hub_slug == "p3"
 
 
-def test_dispatch_purchase_official_with_hub_checkout_flag_on_prefers_hub(monkeypatch) -> None:
+def test_evaluate_route_per_source_flag_off_prevents_hub_checkout(monkeypatch) -> None:
+    """When the global setting is on but the per-source flag is off,
+    Wave 9 MUST stay on the orchestrator-Stripe / refuse path."""
     from app.services import marketplace_federation as facade
 
     monkeypatch.setattr(facade, "hub_checkout_enabled", lambda: True)
+    monkeypatch.setattr(facade, "_global_hub_checkout_setting", lambda: True)
+
+    source = _make_source(
+        trust_level="admin_trusted",
+        capabilities=["catalog.read", "pricing.read", "pricing.checkout"],
+        checkout_via_hub_enabled=False,  # per-source dial off
+    )
+    item = {
+        "kind": "agent",
+        "slug": "p3-half-on",
+        "pricing": {"pricing_type": "paid", "price_cents": 500},
+    }
+    routing = evaluate_purchase_route(source, item)
+    # admin_trusted has no orchestrator-Stripe path, so refuse.
+    assert routing.route is PurchaseRoute.REFUSE
+
+
+def test_evaluate_route_official_with_hub_checkout_flag_on_prefers_hub(monkeypatch) -> None:
+    from app.services import marketplace_federation as facade
+
+    monkeypatch.setattr(facade, "hub_checkout_enabled", lambda: True)
+    monkeypatch.setattr(facade, "_global_hub_checkout_setting", lambda: True)
     source = _make_source(
         trust_level="official",
         capabilities=["catalog.read", "pricing.read", "pricing.checkout"],
+        checkout_via_hub_enabled=True,
     )
     item = {
         "kind": "agent",
@@ -321,9 +358,268 @@ def test_dispatch_purchase_official_with_hub_checkout_flag_on_prefers_hub(monkey
             "stripe_price_id": "price_FALLBACK",
         },
     }
-    routing = dispatch_purchase(source, item)
+    routing = evaluate_purchase_route(source, item)
     # Hub checkout wins per priority rules.
     assert routing.route is PurchaseRoute.HUB_CHECKOUT
+
+
+def test_evaluate_route_official_keeps_stripe_when_global_flag_off() -> None:
+    """Wave-9 safety: even with per-source enabled and capability advertised,
+    the official-Stripe path remains the fallback when the global setting is
+    off. Rule 2 stays enabled throughout Wave 9."""
+    source = _make_source(
+        trust_level="official",
+        capabilities=["catalog.read", "pricing.read", "pricing.checkout"],
+        checkout_via_hub_enabled=True,
+    )
+    item = {
+        "kind": "agent",
+        "slug": "p5",
+        "pricing": {
+            "pricing_type": "paid",
+            "price_cents": 500,
+            "stripe_price_id": "price_FALLBACK",
+        },
+    }
+    # global_hub_checkout_enabled left at default (None → False from settings)
+    routing = evaluate_purchase_route(source, item, global_hub_checkout_enabled=False)
+    assert routing.route is PurchaseRoute.ORCHESTRATOR_STRIPE
+    assert routing.stripe_price_id == "price_FALLBACK"
+
+
+# ---------------------------------------------------------------------------
+# dispatch_purchase async dispatcher
+# ---------------------------------------------------------------------------
+
+
+class _FakeCheckoutClient:
+    """Stub for ``MarketplaceClient`` that captures create_checkout call args."""
+
+    def __init__(self, response: dict | None = None, raise_exc: Exception | None = None) -> None:
+        self._response = response or {
+            "checkout_url": "https://hub.example/checkout/abc",
+            "session_id": "cs_test_abc",
+            "mode": "live",
+            "expires_at": None,
+        }
+        self._raise = raise_exc
+        self.calls: list[dict] = []
+        self.aclose_calls = 0
+
+    async def create_checkout(
+        self,
+        kind,
+        slug,
+        *,
+        version=None,
+        requester_email=None,
+        success_url=None,
+        cancel_url=None,
+        metadata=None,
+    ):
+        if self._raise is not None:
+            raise self._raise
+        self.calls.append(
+            {
+                "kind": kind,
+                "slug": slug,
+                "version": version,
+                "requester_email": requester_email,
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "metadata": dict(metadata or {}),
+            }
+        )
+        return self._response
+
+    async def aclose(self):
+        self.aclose_calls += 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_purchase_refuses_paid_for_untrusted_and_private() -> None:
+    """Trust-matrix safety: ``private`` and ``untrusted`` sources must
+    NEVER route a paid purchase, regardless of advertised capabilities or
+    flag state. Rule 3 of the Wave-9 fallback rules."""
+    paid_pricing = {
+        "pricing_type": "paid",
+        "price_cents": 1000,
+        "stripe_price_id": "price_x",
+    }
+
+    untrusted = _make_source(
+        trust_level="untrusted",
+        capabilities=["catalog.read", "pricing.read", "pricing.checkout"],
+        checkout_via_hub_enabled=True,
+    )
+    out = await dispatch_purchase(
+        untrusted,
+        kind="agent",
+        slug="rogue",
+        version="1.0.0",
+        item={"kind": "agent", "slug": "rogue", "pricing": paid_pricing},
+    )
+    assert out["action"] == "refused"
+    assert out["reason"] == "pricing_not_supported"
+
+    private = _make_source(
+        trust_level="private",
+        capabilities=["catalog.read", "pricing.read", "pricing.checkout"],
+        checkout_via_hub_enabled=True,
+    )
+    out2 = await dispatch_purchase(
+        private,
+        kind="agent",
+        slug="forbidden",
+        version="1.0.0",
+        item={"kind": "agent", "slug": "forbidden", "pricing": paid_pricing},
+    )
+    assert out2["action"] == "refused"
+    assert out2["reason"] == "pricing_not_supported"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_purchase_free_returns_free_install() -> None:
+    src = _make_source(trust_level="official")
+    out = await dispatch_purchase(
+        src,
+        kind="agent",
+        slug="free-thing",
+        version=None,
+        item={"kind": "agent", "slug": "free-thing", "pricing": {"pricing_type": "free"}},
+    )
+    assert out == {"action": "free_install"}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_purchase_official_paid_returns_orchestrator_stripe() -> None:
+    src = _make_source(trust_level="official")
+    out = await dispatch_purchase(
+        src,
+        kind="agent",
+        slug="paid-thing",
+        version="2.1.0",
+        item={
+            "kind": "agent",
+            "slug": "paid-thing",
+            "pricing": {
+                "pricing_type": "paid",
+                "price_cents": 1000,
+                "stripe_price_id": "price_official_123",
+            },
+        },
+    )
+    assert out["action"] == "orchestrator_stripe"
+    assert out["stripe_price_id"] == "price_official_123"
+    assert out["kind"] == "agent"
+    assert out["slug"] == "paid-thing"
+    assert out["version"] == "2.1.0"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_purchase_hub_checkout_calls_create_checkout(monkeypatch) -> None:
+    """Happy path: all flags on, trust=admin_trusted, capability advertised
+    → dispatch_purchase calls ``MarketplaceClient.create_checkout`` and
+    returns the hub's response shape."""
+    from app.services import marketplace_federation as facade
+
+    monkeypatch.setattr(facade, "hub_checkout_enabled", lambda: True)
+    monkeypatch.setattr(facade, "_global_hub_checkout_setting", lambda: True)
+
+    src = _make_source(
+        trust_level="admin_trusted",
+        capabilities=["pricing.read", "pricing.checkout"],
+        checkout_via_hub_enabled=True,
+    )
+    fake = _FakeCheckoutClient()
+    requester = SimpleNamespace(id=uuid4(), email="alice@example.com")
+
+    out = await dispatch_purchase(
+        src,
+        kind="agent",
+        slug="paid-hub",
+        version="1.2.3",
+        requester=requester,
+        item={
+            "kind": "agent",
+            "slug": "paid-hub",
+            "pricing": {"pricing_type": "paid", "price_cents": 2000},
+        },
+        success_url="https://orch.test/success",
+        cancel_url="https://orch.test/cancel",
+        client=fake,
+    )
+
+    assert out["action"] == "hub_checkout"
+    assert out["checkout_url"] == "https://hub.example/checkout/abc"
+    assert out["session_id"] == "cs_test_abc"
+    assert out["source_handle"] == src.handle
+    assert out["kind"] == "agent"
+    assert out["slug"] == "paid-hub"
+    assert out["version"] == "1.2.3"
+
+    # Caller-provided client is NOT closed by dispatch — caller owns it.
+    assert fake.aclose_calls == 0
+    assert len(fake.calls) == 1
+    call = fake.calls[0]
+    assert call["kind"] == "agent"
+    assert call["slug"] == "paid-hub"
+    assert call["version"] == "1.2.3"
+    assert call["requester_email"] == "alice@example.com"
+    assert call["success_url"] == "https://orch.test/success"
+    assert call["cancel_url"] == "https://orch.test/cancel"
+    # Metadata threads orchestrator identity for reconciliation.
+    assert call["metadata"]["orchestrator_source_handle"] == src.handle
+    assert call["metadata"]["orchestrator_kind"] == "agent"
+    assert call["metadata"]["orchestrator_slug"] == "paid-hub"
+    assert call["metadata"]["orchestrator_version"] == "1.2.3"
+    assert call["metadata"]["orchestrator_user_id"] == str(requester.id)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_purchase_hub_failure_returns_refused(monkeypatch) -> None:
+    """If the hub raises, dispatch_purchase returns a structured refused/
+    hub_checkout_failed action — never propagates the exception so the
+    router can render a clean error to the user."""
+    from app.services import marketplace_federation as facade
+
+    monkeypatch.setattr(facade, "hub_checkout_enabled", lambda: True)
+    monkeypatch.setattr(facade, "_global_hub_checkout_setting", lambda: True)
+
+    src = _make_source(
+        trust_level="admin_trusted",
+        capabilities=["pricing.read", "pricing.checkout"],
+        checkout_via_hub_enabled=True,
+    )
+    fake = _FakeCheckoutClient(raise_exc=RuntimeError("upstream timeout"))
+    out = await dispatch_purchase(
+        src,
+        kind="agent",
+        slug="boom",
+        version="1.0.0",
+        item={
+            "kind": "agent",
+            "slug": "boom",
+            "pricing": {"pricing_type": "paid", "price_cents": 999},
+        },
+        client=fake,
+    )
+    assert out["action"] == "refused"
+    assert out["reason"] == "hub_checkout_failed"
+    assert "upstream timeout" in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_purchase_unknown_kind_refused() -> None:
+    src = _make_source(trust_level="official")
+    out = await dispatch_purchase(
+        src,
+        kind="not_a_real_kind",
+        slug="x",
+        version=None,
+    )
+    assert out["action"] == "refused"
+    assert "unknown_kind" in out["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -840,3 +1136,119 @@ async def test_get_cached_item_unknown_kind_raises() -> None:
             kind="not-a-real-kind",
             slug="x",
         )
+
+
+# ---------------------------------------------------------------------------
+# Wave 7 — MarketplaceClient.publish_yank
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_marketplace_client_publish_yank_posts_correct_payload() -> None:
+    """Wave 7: ``MarketplaceClient.publish_yank`` POSTs to ``/v1/yanks``
+    with the canonical payload shape (kind, slug, version, severity,
+    reason). The response envelope is returned verbatim so the caller
+    can record the yank id."""
+    import httpx
+
+    from app.services.marketplace_client import HUB_ID_HEADER, MarketplaceClient
+
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["body"] = json_module.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            201,
+            json={
+                "id": "yank-abc",
+                "kind": "app",
+                "slug": "demo-app",
+                "version": "1.2.3",
+                "severity": "critical",
+                "state": "open",
+            },
+            headers={HUB_ID_HEADER: "hub-X"},
+        )
+
+    import json as json_module
+
+    transport = httpx.MockTransport(handler)
+    async with MarketplaceClient(
+        "https://hub.example.com",
+        token="t-yank-write",
+        transport=transport,
+    ) as client:
+        envelope = await client.publish_yank(
+            kind="app",
+            slug="demo-app",
+            version="1.2.3",
+            reason="security_incident",
+            severity="critical",
+            requested_by="admin-user-1",
+        )
+
+    assert envelope["id"] == "yank-abc"
+    assert captured["method"] == "POST"
+    assert captured["url"].endswith("/v1/yanks")
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["kind"] == "app"
+    assert body["slug"] == "demo-app"
+    assert body["version"] == "1.2.3"
+    assert body["reason"] == "security_incident"
+    assert body["severity"] == "critical"
+    assert body["requested_by"] == "admin-user-1"
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    # Bearer token MUST be sent for the yanks.write scope.
+    assert headers.get("authorization", "").endswith("t-yank-write")
+
+
+@pytest.mark.asyncio
+async def test_marketplace_client_publish_yank_omits_optional_fields() -> None:
+    """Item-level yanks (no version) must not send a ``version`` key.
+
+    Mirrors the marketplace service's ``YankCreate`` schema where
+    ``version`` is optional and defaults to None — sending an explicit
+    null would shape the upstream's "every published version" branch
+    differently in some hubs, so we just leave the key out entirely.
+    """
+    import json as json_module
+
+    import httpx
+
+    from app.services.marketplace_client import HUB_ID_HEADER, MarketplaceClient
+
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json_module.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            201,
+            json={"id": "yank-y", "state": "resolved"},
+            headers={HUB_ID_HEADER: "hub-Z"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with MarketplaceClient(
+        "https://hub.example.com",
+        token=None,
+        transport=transport,
+    ) as client:
+        await client.publish_yank(
+            kind="app",
+            slug="item-yank",
+            version=None,
+            reason="creator deprecated",
+            severity="medium",
+        )
+
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert "version" not in body
+    assert "requested_by" not in body
+    assert body["kind"] == "app"
+    assert body["slug"] == "item-yank"

@@ -602,6 +602,17 @@ async def startup():
     except Exception:
         logger.exception("Failed to register db_event_bus listeners (non-fatal)")
 
+    # Wave 7: register the AppVersion source_id consistency listener so any
+    # ORM write that would violate the (source_id == parent.source_id)
+    # invariant raises AppVersionSourceMismatch on flush. Auto-registers on
+    # import — explicit import here pins the wire-up to startup.
+    try:
+        from .services.apps import app_version_source_consistency  # noqa: F401
+    except Exception:
+        logger.exception(
+            "Failed to wire AppVersion source_id consistency listener (non-fatal)"
+        )
+
     # Seed database (bases, agents, themes, workflows) — non-blocking background task
     from .seeds import run_all_seeds
 

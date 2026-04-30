@@ -1278,7 +1278,11 @@ async def purchase_agent(
             "success": True,
         }
 
-    # For paid agents, create Stripe checkout session
+    # For paid agents, route through the federation dispatch_purchase facade
+    # so Wave 9 hub-checkout / orchestrator-Stripe / refused branches all
+    # share the same code path. The orchestrator-Stripe branch (rule 2)
+    # remains the safety fallback for the entire wave.
+    from ..services.marketplace_federation import dispatch_purchase
     from ..services.stripe_service import stripe_service
 
     # Create checkout session with origin-based URLs to preserve user's domain
@@ -1293,6 +1297,112 @@ async def purchase_agent(
     )
     cancel_url = f"{origin}/marketplace/agent/{agent.slug}"
 
+    # Project the cached row's pricing into the dispatch_purchase shape.
+    item_payload: dict[str, Any] = {
+        "kind": "agent",
+        "slug": agent.slug,
+        "pricing": {
+            "pricing_type": agent.pricing_type,
+            "price_cents": agent.price or 0,
+            "stripe_price_id": agent.stripe_price_id,
+            "currency": "usd",
+        },
+    }
+
+    # Decrypt the source token so the federation client can call the hub
+    # if the dispatcher picks the HUB_CHECKOUT branch. The orchestrator-
+    # Stripe branch never needs it.
+    decrypted_token: str | None = None
+    if agent_source is not None and agent_source.encrypted_token:
+        try:
+            from ..services.credential_manager import get_credential_manager
+
+            decrypted_token = (
+                get_credential_manager().decrypt_token(agent_source.encrypted_token)
+                or None
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "purchase_agent: failed to decrypt source token for source=%s",
+                agent_source.handle,
+            )
+
+    if agent_source is None:
+        # Pre-Wave-1 backfill safety: pre-federation rows with no source
+        # cannot route through dispatch_purchase (no source object). Fall
+        # back to the orchestrator-Stripe path directly.
+        action: dict[str, Any] = {
+            "action": "orchestrator_stripe",
+            "stripe_price_id": agent.stripe_price_id,
+        }
+    else:
+        try:
+            action = await dispatch_purchase(
+                agent_source,
+                kind="agent",
+                slug=agent.slug,
+                version=None,
+                requester=current_user,
+                item=item_payload,
+                success_url=success_url,
+                cancel_url=cancel_url,
+                decrypted_token=decrypted_token,
+            )
+        except Exception as e:
+            logger.error(f"dispatch_purchase failed for agent={agent.id}: {e}")
+            raise HTTPException(
+                status_code=500, detail="Failed to dispatch purchase"
+            ) from e
+
+    if action["action"] == "refused":
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "pricing_not_supported",
+                "reason": action.get("reason", "pricing_not_supported"),
+                "source_handle": agent_source.handle if agent_source else None,
+                "kind": "agent",
+                "slug": agent.slug,
+            },
+        )
+
+    if action["action"] == "free_install":
+        # Should be unreachable — free items branched above — but defend
+        # against pricing-payload drift between cache and live state.
+        if existing_purchase:
+            existing_purchase.is_active = True
+            existing_purchase.purchase_date = datetime.now(UTC)
+        else:
+            db.add(
+                UserPurchasedAgent(
+                    user_id=current_user.id,
+                    team_id=team_id,
+                    agent_id=agent_id,
+                    purchase_type="free",
+                    is_active=True,
+                )
+            )
+        agent.downloads += 1
+        await db.commit()
+        return {
+            "message": "Agent added to your library",
+            "agent_id": agent_id,
+            "success": True,
+        }
+
+    if action["action"] == "hub_checkout":
+        # Hub Connect-Stripe owns the session; orchestrator just relays
+        # the URL. Webhook reconciliation lands later on the per-source
+        # entitlements/grant endpoint.
+        return {
+            "checkout_url": action["checkout_url"],
+            "session_id": action["session_id"],
+            "agent_id": agent_id,
+            "via": "hub_checkout",
+            "source_handle": action.get("source_handle"),
+        }
+
+    # action["action"] == "orchestrator_stripe" — Wave 9 safety fallback
     try:
         session = await stripe_service.create_agent_purchase_checkout(
             user=current_user, agent=agent, success_url=success_url, cancel_url=cancel_url, db=db
@@ -1307,6 +1417,7 @@ async def purchase_agent(
             "checkout_url": session["url"] if isinstance(session, dict) else session.url,
             "session_id": session["id"] if isinstance(session, dict) else session.id,
             "agent_id": agent_id,
+            "via": "orchestrator_stripe",
         }
     except HTTPException:
         raise
