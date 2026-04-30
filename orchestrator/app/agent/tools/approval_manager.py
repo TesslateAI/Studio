@@ -133,9 +133,7 @@ class PendingUserInputManager:
             )
             try:
                 while True:
-                    msg = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                     if msg and msg["type"] == "message":
                         try:
                             data = json.loads(msg["data"])
@@ -186,9 +184,7 @@ class PendingUserInputManager:
 
     def approve_tool_for_session(self, session_id: str, tool_name: str) -> None:
         self._approved_tools.setdefault(session_id, set()).add(tool_name)
-        logger.info(
-            "[PendingUserInputManager] approved %s for session %s", tool_name, session_id
-        )
+        logger.info("[PendingUserInputManager] approved %s for session %s", tool_name, session_id)
 
     def clear_session_approvals(self, session_id: str) -> None:
         if session_id in self._approved_tools:
@@ -202,9 +198,7 @@ class PendingUserInputManager:
         request = ApprovalRequest(approval_id, tool_name, parameters, session_id)
         self._pending[approval_id] = request
         self._ensure_subscriber()
-        logger.info(
-            "[PendingUserInputManager] created approval %s for %s", approval_id, tool_name
-        )
+        logger.info("[PendingUserInputManager] created approval %s for %s", approval_id, tool_name)
 
         if approval_id in self._cached_responses:
             cached = self._cached_responses.pop(approval_id)
@@ -230,28 +224,55 @@ class PendingUserInputManager:
         self,
         *,
         input_id: str,
-        project_id: str,
-        chat_id: str,
-        container_id: str,
-        schema_json: dict,
-        mode: str,
-        ttl: int,
+        kind: str = "node_config",
+        session_id: str | None = None,
+        schema_json: dict | None = None,
+        metadata: dict | None = None,
+        ttl: int = 1800,
+        # ---------- Back-compat shim (node_config call sites) ----------
+        # Older callers passed ``project_id``, ``chat_id``, ``container_id``,
+        # ``mode`` as top-level kwargs. Fold those into ``metadata`` so the
+        # call site at agent/tools/node_config/request_node_config.py keeps
+        # working without changes.
+        project_id: str | None = None,
+        chat_id: str | None = None,
+        container_id: str | None = None,
+        mode: str | None = None,
     ) -> PendingInputRequest:
-        """Register a node-config pending input. ``ttl`` is advisory (used by
-        the wait loop); no Redis key is written here — the in-memory future
-        is the truth, and the subscriber relays responses across pods."""
+        """Register a pending input for any kind of agent pause.
+
+        ``kind`` discriminates the surface: ``"node_config"`` is the
+        original form-fill flow; ``"workspace_attach"`` is the on-demand
+        workspace-attach prompt added by the standalone-chat upload work.
+        Future kinds can be plumbed without touching this signature.
+
+        ``ttl`` is advisory (used by the wait loop); no Redis key is
+        written here — the in-memory future is the truth, and the
+        subscriber relays responses across pods.
+        """
+        merged_metadata: dict[str, Any] = dict(metadata or {})
+        # Fold legacy positional args into metadata so existing node_config
+        # call sites keep working without churn.
+        if project_id is not None and "project_id" not in merged_metadata:
+            merged_metadata["project_id"] = project_id
+        if chat_id is not None and "chat_id" not in merged_metadata:
+            merged_metadata["chat_id"] = chat_id
+        if container_id is not None and "container_id" not in merged_metadata:
+            merged_metadata["container_id"] = container_id
+        if mode is not None and "mode" not in merged_metadata:
+            merged_metadata["mode"] = mode
+        merged_metadata.setdefault("ttl", ttl)
+
+        resolved_session = (
+            session_id or merged_metadata.get("chat_id") or merged_metadata.get("session_id") or ""
+        )
+
         request = PendingInputRequest(
             input_id=input_id,
-            kind="node_config",
-            session_id=chat_id,
-            schema=schema_json,
-            metadata={
-                "project_id": project_id,
-                "chat_id": chat_id,
-                "container_id": container_id,
-                "mode": mode,
-                "ttl": ttl,
-            },
+            kind=kind,
+            session_id=str(resolved_session),
+            schema=schema_json or {},
+            metadata=merged_metadata,
         )
         self._pending[input_id] = request
         self._ensure_subscriber()
@@ -263,16 +284,14 @@ class PendingUserInputManager:
             self._pending.pop(input_id, None)
 
         logger.info(
-            "[PendingUserInputManager] created node_config request %s for container=%s mode=%s",
+            "[PendingUserInputManager] created %s request %s session=%s",
+            kind,
             input_id,
-            container_id,
-            mode,
+            resolved_session,
         )
         return request
 
-    async def await_input(
-        self, input_id: str, timeout: float
-    ) -> dict | str | None:
+    async def await_input(self, input_id: str, timeout: float) -> dict | str | None:
         """Wait for the user's response.
 
         Returns the dict of submitted values, the sentinel string
@@ -283,16 +302,12 @@ class PendingUserInputManager:
             # Was already delivered (raced with create) — check cached + exit.
             if input_id in self._cached_responses:
                 return self._cached_responses.pop(input_id)
-            logger.warning(
-                "[PendingUserInputManager] await_input for unknown %s", input_id
-            )
+            logger.warning("[PendingUserInputManager] await_input for unknown %s", input_id)
             return None
         try:
             await asyncio.wait_for(request.event.wait(), timeout=timeout)
         except TimeoutError:
-            logger.warning(
-                "[PendingUserInputManager] node_config timeout for %s", input_id
-            )
+            logger.warning("[PendingUserInputManager] node_config timeout for %s", input_id)
             self._pending.pop(input_id, None)
             return None
         return request.response
@@ -345,9 +360,7 @@ class PendingUserInputManager:
             send_with_fallback,
         )
 
-        result = await send_with_fallback(
-            approval_request_id, db, gateway_client
-        )
+        result = await send_with_fallback(approval_request_id, db, gateway_client)
         logger.info(
             "[PendingUserInputManager] send_to_gateway approval=%s -> kind=%s "
             "surface=%s attempts=%d",
@@ -385,9 +398,7 @@ async def publish_pending_input_response(
     await _publish_response(input_id, response, channel=PENDING_INPUT_CHANNEL, kind=kind)
 
 
-async def _publish_response(
-    input_id: str, response: Any, *, channel: str, kind: str
-) -> None:
+async def _publish_response(input_id: str, response: Any, *, channel: str, kind: str) -> None:
     from ...services.cache_service import get_redis_client
 
     redis = await get_redis_client()
@@ -414,9 +425,7 @@ async def _publish_response(
             channel,
         )
     except Exception as e:
-        logger.error(
-            "[PendingUserInputManager] failed to publish to redis: %s", e
-        )
+        logger.error("[PendingUserInputManager] failed to publish to redis: %s", e)
 
 
 async def wait_for_approval_or_cancel(
@@ -445,14 +454,10 @@ async def wait_for_approval_or_cancel(
             elapsed += poll_interval
 
         if pubsub and task_id and await pubsub.is_cancelled(task_id):
-            logger.info(
-                "[PendingUserInputManager] wait cancelled for %s", request.input_id
-            )
+            logger.info("[PendingUserInputManager] wait cancelled for %s", request.input_id)
             return "cancel"
 
-    logger.warning(
-        "[PendingUserInputManager] approval timeout for %s", request.input_id
-    )
+    logger.warning("[PendingUserInputManager] approval timeout for %s", request.input_id)
     return None
 
 

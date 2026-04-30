@@ -48,10 +48,7 @@ function dispatchNodeConfigEvent(type: string, data: Record<string, unknown> | u
       nodeConfigEvents.emit('secret-rotated', data as unknown as SecretRotatedEvent);
       return true;
     case 'containers_restarting':
-      nodeConfigEvents.emit(
-        'containers-restarting',
-        data as unknown as ContainersRestartingEvent
-      );
+      nodeConfigEvents.emit('containers-restarting', data as unknown as ContainersRestartingEvent);
       return true;
     default:
       return false;
@@ -84,7 +81,7 @@ export interface BuilderReviewSummary {
 
 export interface ChatMessage {
   id: string;
-  type: 'user' | 'ai' | 'approval_request' | 'builder_review_request';
+  type: 'user' | 'ai' | 'approval_request' | 'builder_review_request' | 'workspace_attach_request';
   content: string;
   attachments?: SerializedAttachment[];
   agentData?: AgentMessageData;
@@ -99,6 +96,18 @@ export interface ChatMessage {
   // BuilderReviewCard render. The summary shape mirrors the dict the
   // `request_review` agent tool emits.
   builderReviewSummary?: BuilderReviewSummary;
+  // Set on `workspace_attach_request` messages — driven by the
+  // `workspace_attach_required` SSE event. Surfaces the
+  // WorkspaceAttachCard in agent-prompt mode.
+  workspaceAttachInputId?: string;
+  workspaceAttachReason?: string;
+  workspaceAttachCandidates?: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    compute_tier: string;
+    created_via?: string | null;
+  }>;
 }
 
 interface UseAgentChatOptions {
@@ -411,6 +420,49 @@ export function useAgentChat({
               )
             ) {
               // handled via nodeConfigEvents bus
+            } else if (data.type === 'workspace_attach_required') {
+              const wa = (data.data || {}) as {
+                input_id?: string;
+                reason?: string;
+                candidate_workspaces?: Array<{
+                  id: string;
+                  name: string;
+                  slug: string;
+                  compute_tier: string;
+                  created_via?: string | null;
+                }>;
+              };
+              if (wa.input_id) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `wa-${crypto.randomUUID()}`,
+                    type: 'workspace_attach_request',
+                    content: '',
+                    workspaceAttachInputId: wa.input_id,
+                    workspaceAttachReason: wa.reason,
+                    workspaceAttachCandidates: wa.candidate_workspaces || [],
+                  },
+                ]);
+              }
+            } else if (
+              data.type === 'workspace_attach_resumed' ||
+              data.type === 'workspace_attach_cancelled'
+            ) {
+              // After the user submits/cancels the card, retire it from the
+              // message list so the conversation flow stays clean.
+              const inputId = (data.data as { input_id?: string } | undefined)?.input_id;
+              if (inputId) {
+                setMessages((prev) =>
+                  prev.filter(
+                    (m) =>
+                      !(
+                        m.type === 'workspace_attach_request' &&
+                        m.workspaceAttachInputId === inputId
+                      )
+                  )
+                );
+              }
             } else if (data.type === 'approval_required') {
               const approvalData = data.data || data;
               // The `agent-builder` flow surfaces a richer review card
@@ -833,8 +885,9 @@ export function useAgentChat({
                   type: 'builder_review_request',
                   content: '',
                   approvalId: event.data.approval_id as string,
-                  builderReviewSummary:
-                    (event.data.summary as BuilderReviewSummary | undefined) ?? { name: '' },
+                  builderReviewSummary: (event.data.summary as
+                    | BuilderReviewSummary
+                    | undefined) ?? { name: '' },
                 };
                 setMessages((prev) => [...prev, reviewMessage]);
               } else if (editModeRef.current === 'allow') {

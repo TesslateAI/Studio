@@ -527,7 +527,7 @@ export const projectsApi = {
   create: async (
     name: string,
     description?: string,
-    sourceType?: 'template' | 'github' | 'gitlab' | 'bitbucket' | 'base',
+    sourceType?: 'template' | 'github' | 'gitlab' | 'bitbucket' | 'base' | 'empty',
     repoUrl?: string,
     branch?: string,
     baseId?: string,
@@ -1493,6 +1493,50 @@ export const nodeConfigApi = {
       )}/reveal`
     );
     return response.data;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Standalone-chat file uploads + on-demand workspace attach
+// ---------------------------------------------------------------------------
+
+export interface ChatAttachmentUploadResult {
+  attachment_id: string;
+  file_path: string;
+  filename: string;
+  mime_type: string | null;
+  size_bytes: number;
+  sha256: string;
+}
+
+export const chatAttachmentsApi = {
+  /** Upload a single file into the chat's attached workspace. Server enforces
+   * a 25 MiB hard cap and accepts any mime type. */
+  upload: async (chatId: string, file: File): Promise<ChatAttachmentUploadResult> => {
+    const form = new FormData();
+    form.append('file', file);
+    const response = await api.post(`/api/chats/${chatId}/attachments`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+  cancel: async (chatId: string, attachmentId: string): Promise<void> => {
+    await api.delete(`/api/chats/${chatId}/attachments/${attachmentId}`);
+  },
+};
+
+export interface WorkspaceAttachSubmit {
+  action: 'attach' | 'create_empty' | 'cancel';
+  project_id?: string;
+  name?: string;
+}
+
+export const workspaceAttachApi = {
+  submit: async (inputId: string, body: WorkspaceAttachSubmit): Promise<void> => {
+    await api.post(`/api/chat/workspace-attach/${inputId}/submit`, body);
+  },
+  cancel: async (inputId: string): Promise<void> => {
+    await api.post(`/api/chat/workspace-attach/${inputId}/cancel`);
   },
 };
 

@@ -88,6 +88,7 @@ from .routers import (
     users,
     version,
     webhooks,
+    workspace_attach,
 )
 from .schemas_auth import UserCreate, UserRead, UserUpdate
 from .services.volume_manager import VolumeRestoringError, VolumeUnavailableError
@@ -1294,6 +1295,7 @@ app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(node_config.router, prefix="/api", tags=["node-config"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(chat_attachments.router, prefix="/api", tags=["chat-attachments"])
+app.include_router(workspace_attach.router, prefix="/api", tags=["workspace-attach"])
 app.include_router(sidebar.router)  # prefix set on the router itself (/api/sidebar)
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])

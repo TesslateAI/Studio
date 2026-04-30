@@ -517,7 +517,11 @@ async def _increment_contract_breaches(automation_run_id: Any) -> None:
     from ...models_automations import AutomationRun
 
     try:
-        run_uuid = automation_run_id if isinstance(automation_run_id, UUID) else UUID(str(automation_run_id))
+        run_uuid = (
+            automation_run_id
+            if isinstance(automation_run_id, UUID)
+            else UUID(str(automation_run_id))
+        )
     except (TypeError, ValueError):
         logger.debug(
             "[ContractGate] cannot parse automation_run_id=%r as UUID; skipping increment",
@@ -562,6 +566,7 @@ def _register_all_tools(registry: ToolRegistry):
     from .shell_ops import register_all_shell_tools
     from .skill_ops import register_all_skill_tools
     from .web_ops import register_all_web_tools
+    from .workspace_ops import register_all_workspace_tools
 
     # File ops: read_file, write_file, read_many_files, patch_file, multi_edit,
     # apply_patch, file_undo, view_image
@@ -587,6 +592,9 @@ def _register_all_tools(registry: ToolRegistry):
     register_all_skill_tools(registry)
     # Node config ops: request_node_config, run_with_secrets
     register_all_node_config_tools(registry)
+    # Workspace ops: request_workspace — pause and prompt the user to attach
+    # a workspace to a standalone chat. Mutates context in place on success.
+    register_all_workspace_tools(registry)
     # App ops: invoke_app_action — call typed actions on installed Tesslate Apps
     register_all_app_ops_tools(registry)
     # Marketplace ops (Phase 5 agent-builder skill): create_agent, update_agent,
@@ -594,6 +602,7 @@ def _register_all_tools(registry: ToolRegistry):
     # marketplace.author / automations.write scopes; depth-1 cap enforced
     # inside the tool implementations.
     from .marketplace_ops import register_all_marketplace_ops_tools
+
     register_all_marketplace_ops_tools(registry)
 
     logger.info(f"Registered {len(registry._tools)} tools total")
