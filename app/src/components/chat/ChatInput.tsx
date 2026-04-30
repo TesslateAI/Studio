@@ -98,6 +98,18 @@ interface ChatInputProps {
   onOpenDebugTools?: () => void;
   currentModelSupportsVision?: boolean;
   onCompact?: () => void;
+  /** Active chat id — required for the "Upload file" PlusMenu entry to call
+   * `chatAttachmentsApi.upload`. When null the entry is hidden. */
+  chatId?: string | null;
+  /** When set, files upload directly. When null + chatId set, the upload
+   * triggers a workspace-attach prompt first. */
+  chatProjectId?: string | null;
+  /** Workspace name to render in the active-chat chip beside PlusMenu. */
+  chatProjectName?: string | null;
+  /** Callback used by the upload-prompt local resolution path: caller is
+   * responsible for surfacing the WorkspaceAttachCard and resolving with the
+   * picked / created project id. */
+  onResolveWorkspaceForUpload?: () => Promise<string | null>;
 }
 
 export function ChatInput({
@@ -130,6 +142,10 @@ export function ChatInput({
   onOpenDebugTools,
   currentModelSupportsVision,
   onCompact,
+  chatId = null,
+  chatProjectId = null,
+  chatProjectName = null,
+  onResolveWorkspaceForUpload,
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [showCommands, setShowCommands] = useState(false);
@@ -448,9 +464,7 @@ export function ChatInput({
     // Pull every ``@<slug>`` occurrence; slugs are kebab-case + dots
     // for app reverse-DNS ids. Word boundary at the end keeps us from
     // greedily matching across whitespace.
-    const matches = Array.from(
-      message.matchAll(/(?:^|\s)@([a-zA-Z0-9_.\-]+)/g)
-    );
+    const matches = Array.from(message.matchAll(/(?:^|\s)@([a-zA-Z0-9_.-]+)/g));
     if (!matches.length && !mentions.length) return;
 
     let changed = false;
@@ -468,8 +482,7 @@ export function ChatInput({
       // so a future renderer can highlight the exact substring; the
       // ``@`` itself is one char before the slug.
       const baseIdx = m.index ?? 0;
-      const offset =
-        baseIdx + (m[0].startsWith('@') ? 0 : m[0].indexOf('@'));
+      const offset = baseIdx + (m[0].startsWith('@') ? 0 : m[0].indexOf('@'));
       next.push({ kind: item.kind, ref_id: item.ref_id, display, offset });
       seenRefs.add(item.ref_id);
       changed = true;
@@ -505,19 +518,17 @@ export function ChatInput({
   // color it would override that and produce visible "ghost" glyphs
   // behind the textarea's real text (the "double text" bug).
   const MENTION_KIND_PILL: Record<string, string> = {
-    agent:
-      'bg-[var(--primary)]/20 ring-1 ring-inset ring-[var(--primary)]/40',
-    app:
-      'bg-[var(--status-purple)]/20 ring-1 ring-inset ring-[var(--status-purple)]/40',
-    mcp:
-      'bg-[var(--accent)]/20 ring-1 ring-inset ring-[var(--accent)]/40',
+    agent: 'bg-[var(--primary)]/20 ring-1 ring-inset ring-[var(--primary)]/40',
+    app: 'bg-[var(--status-purple)]/20 ring-1 ring-inset ring-[var(--status-purple)]/40',
+    mcp: 'bg-[var(--accent)]/20 ring-1 ring-inset ring-[var(--accent)]/40',
   };
 
   const messageParts = useMemo(() => {
-    if (!mentions.length) return [{ text: message }] as Array<{
-      text: string;
-      kind?: ChatMention['kind'];
-    }>;
+    if (!mentions.length)
+      return [{ text: message }] as Array<{
+        text: string;
+        kind?: ChatMention['kind'];
+      }>;
 
     // Map display token -> kind. If two mentions reuse the same display
     // (rare; user @-mentioned the same handle twice), the latest entry
@@ -525,12 +536,8 @@ export function ChatInput({
     const tokenMap = new Map<string, ChatMention['kind']>();
     for (const m of mentions) tokenMap.set(m.display, m.kind);
 
-    const tokens = Array.from(tokenMap.keys()).sort(
-      (a, b) => b.length - a.length
-    );
-    const escaped = tokens.map((t) =>
-      t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    );
+    const tokens = Array.from(tokenMap.keys()).sort((a, b) => b.length - a.length);
+    const escaped = tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     const re = new RegExp(`(${escaped.join('|')})`, 'g');
 
     const parts: Array<{ text: string; kind?: ChatMention['kind'] }> = [];
@@ -623,10 +630,8 @@ export function ChatInput({
   // is still empty. Re-scanning here makes resolution deterministic.
   // Async because if the eager library fetch hasn't completed yet, we
   // await it (or do a one-shot fetch as a fallback) before scanning.
-  const resolveMentionsAtSend = async (
-    trimmed: string
-  ): Promise<ChatMention[]> => {
-    const hasAtToken = /(?:^|\s)@([a-zA-Z0-9_.\-]+)/.test(trimmed);
+  const resolveMentionsAtSend = async (trimmed: string): Promise<ChatMention[]> => {
+    const hasAtToken = /(?:^|\s)@([a-zA-Z0-9_.-]+)/.test(trimmed);
     let library = mentionLibrary;
     if (hasAtToken && library.size === 0) {
       // Eager fetch may still be in flight; wait for it, then build a
@@ -673,7 +678,7 @@ export function ChatInput({
         seenRefs.add(m.ref_id);
       }
     }
-    const matches = trimmed.matchAll(/(?:^|\s)@([a-zA-Z0-9_.\-]+)/g);
+    const matches = trimmed.matchAll(/(?:^|\s)@([a-zA-Z0-9_.-]+)/g);
     for (const m of matches) {
       const slug = m[1];
       const item = library.get(slug);
@@ -699,9 +704,7 @@ export function ChatInput({
       // Check if it's a built-in slash command
       if (trimmed.startsWith('/')) {
         const baseCmd = trimmed.split(' ')[0];
-        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry', '/help', '/new'].includes(
-          baseCmd
-        );
+        const isBuiltIn = ['/clear', '/plan', '/undo', '/retry', '/help', '/new'].includes(baseCmd);
         if (isBuiltIn) {
           executeCommand(baseCmd);
         } else if (baseCmd === '/effort') {
@@ -1029,11 +1032,7 @@ export function ChatInput({
           }}
           className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--surface-hover)] cursor-pointer transition-colors w-full text-left"
         >
-          <span
-            className={
-              toolCallsCollapsed ? 'text-[var(--primary)]' : 'text-[var(--text)]/60'
-            }
-          >
+          <span className={toolCallsCollapsed ? 'text-[var(--primary)]' : 'text-[var(--text)]/60'}>
             {toolCallsCollapsed ? (
               <ArrowsOutSimple size={16} weight="bold" />
             ) : (
@@ -1346,10 +1345,7 @@ export function ChatInput({
                   >
                     {messageParts.map((p, i) =>
                       p.kind ? (
-                        <span
-                          key={i}
-                          className={`rounded-md ${MENTION_KIND_PILL[p.kind] ?? ''}`}
-                        >
+                        <span key={i} className={`rounded-md ${MENTION_KIND_PILL[p.kind] ?? ''}`}>
                           {p.text}
                         </span>
                       ) : (
@@ -1402,9 +1398,56 @@ export function ChatInput({
           <div className="flex-shrink-0">
             <PlusMenu
               onAddImages={(files) => files.forEach((f) => addImage(f))}
+              onAddFiles={
+                chatId
+                  ? async (files) => {
+                      let workspaceId = chatProjectId;
+                      if (!workspaceId && onResolveWorkspaceForUpload) {
+                        workspaceId = await onResolveWorkspaceForUpload();
+                      }
+                      if (!workspaceId) return;
+                      for (const f of files) {
+                        try {
+                          const { chatAttachmentsApi } = await import('@/lib/api');
+                          const result = await chatAttachmentsApi.upload(chatId, f);
+                          addFileReference(result.file_path, result.filename, {
+                            attachmentId: result.attachment_id,
+                            mimeType: result.mime_type ?? undefined,
+                            sizeBytes: result.size_bytes,
+                          });
+                        } catch (err) {
+                          const detail =
+                            (err as { response?: { data?: { code?: string } } })?.response?.data
+                              ?.code || 'upload_failed';
+                          window.dispatchEvent(
+                            new CustomEvent('toast', {
+                              detail: {
+                                kind: 'error',
+                                message: `Upload failed (${detail}): ${f.name}`,
+                              },
+                            })
+                          );
+                        }
+                      }
+                    }
+                  : undefined
+              }
               disabled={disabled || viewerMode}
             />
           </div>
+
+          {/* Active-chat workspace chip — surfaces the linked workspace
+              name beside the PlusMenu so the user can see which workspace
+              their uploads land in. */}
+          {chatProjectId && chatProjectName && (
+            <div
+              className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-[11px] font-medium text-blue-500"
+              title={`Linked workspace: ${chatProjectName}`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+              <span className="max-w-[110px] truncate">{chatProjectName}</span>
+            </div>
+          )}
 
           {/* Edit Mode Status — icon-only when narrow */}
           {onModeChange && (

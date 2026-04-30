@@ -191,6 +191,12 @@ export interface ChatAttachment {
   lineCount?: number;
   filePath?: string;
   fileName?: string;
+  // Set when this attachment was produced by a `chatAttachmentsApi.upload`
+  // call. Round-trips through `serializeForSend` into
+  // `SerializedAttachment.attachment_id` so the orchestrator's chat-send
+  // handler can bind the ChatAttachment row to the saved message.
+  attachmentId?: string;
+  sizeBytes?: number;
 }
 
 export interface SerializedAttachment {
