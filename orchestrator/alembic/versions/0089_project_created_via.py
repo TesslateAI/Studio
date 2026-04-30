@@ -1,7 +1,7 @@
 """Add Project.created_via provenance column.
 
-Revision ID: 0088_project_created_via
-Revises: 0087_automation_app_inst
+Revision ID: 0089_project_created_via
+Revises: 0088
 Create Date: 2026-04-29
 
 Distinguishes the origin of a Project row so future cleanup decisions
@@ -19,8 +19,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0088_project_created_via"
-down_revision: str | Sequence[str] | None = "0087_automation_app_inst"
+revision: str = "0089_project_created_via"
+down_revision: str | Sequence[str] | None = "0088"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -1,7 +1,7 @@
 """Add chat_attachments table for standalone-chat file uploads.
 
-Revision ID: 0089_chat_attachments
-Revises: 0088_project_created_via
+Revision ID: 0090_chat_attachments
+Revises: 0089_project_created_via
 Create Date: 2026-04-29
 
 Standalone chats (``Chat.origin='standalone'`` with NULL ``project_id``)
@@ -27,8 +27,8 @@ from alembic import op
 
 from app.types.guid import GUID
 
-revision: str = "0089_chat_attachments"
-down_revision: str | Sequence[str] | None = "0088_project_created_via"
+revision: str = "0090_chat_attachments"
+down_revision: str | Sequence[str] | None = "0089_project_created_via"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
