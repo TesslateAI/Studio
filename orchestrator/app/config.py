@@ -322,6 +322,22 @@ class Settings(BaseSettings):
     # before inserting the entitlement row. NEVER expose to the frontend.
     marketplace_hub_entitlement_secret: str = ""
 
+    # Wave 8 — bearer token Tesslate Official's orchestrator presents to the
+    # marketplace service for governance writes (force-approve / force-reject /
+    # override-yank). The marketplace's static-token table maps this token
+    # to the ``admin.write`` scope. Only set on Tesslate Official's
+    # orchestrator deployment; self-hosted orchestrators with their own hub
+    # configure the equivalent admin token in the hub's static-token table.
+    # NEVER expose to the frontend.
+    marketplace_admin_token: str = ""
+
+    # Wave 8 — shared secret used to verify the marketplace's
+    # state-change webhook (POST /api/marketplace/sources/{id}/submissions/{id}/state-change).
+    # The hub signs the body with HMAC-SHA256 using this secret + the
+    # source's hub_id; the orchestrator verifies the signature before
+    # mirroring the state into the local cache. NEVER expose to the frontend.
+    marketplace_submission_webhook_secret: str = ""
+
     # ==========================================================================
     # Subscription Tier Configuration
     # ==========================================================================

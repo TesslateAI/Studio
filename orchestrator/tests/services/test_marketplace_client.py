@@ -350,6 +350,147 @@ async def test_bearer_token_attached_to_requests() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Wave 8 — governance verbs (create_submission / advance / finalize / appeal)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_submission_calls_publish_endpoint() -> None:
+    """create_submission is the orchestrator-side alias for POST /v1/publish/{kind}."""
+    seen_paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_paths.append(request.url.path)
+        return _ok({"id": "abc", "state": "stage0_received"}, hub_id="hub-A")
+
+    transport = httpx.MockTransport(handler)
+    async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
+        body = await client.create_submission(
+            kind="agent",
+            payload={"item": {"slug": "x", "name": "X"}, "version": {"version": "0.1.0"}},
+        )
+        assert body["id"] == "abc"
+    assert seen_paths == ["/v1/publish/agent"]
+
+
+@pytest.mark.asyncio
+async def test_advance_submission_routes_to_advance_endpoint() -> None:
+    seen: list[tuple[str, str]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        return _ok({"id": "sub-1", "stage": "stage2"}, hub_id="hub-A")
+
+    transport = httpx.MockTransport(handler)
+    async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
+        body = await client.advance_submission("sub-1")
+        assert body["stage"] == "stage2"
+    assert seen == [("POST", "/v1/submissions/sub-1/advance")]
+
+
+@pytest.mark.asyncio
+async def test_finalize_submission_sends_decision_payload() -> None:
+    captured: list[dict] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured.append(_json.loads(request.content.decode("utf-8")))
+        return _ok({"id": "sub-1", "stage": "approved"}, hub_id="hub-A")
+
+    transport = httpx.MockTransport(handler)
+    async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
+        await client.finalize_submission(
+            "sub-1", decision="approved", decision_reason="manual override"
+        )
+    assert captured == [{"decision": "approved", "decision_reason": "manual override"}]
+
+
+@pytest.mark.asyncio
+async def test_appeal_yank_routes_to_appeal_endpoint() -> None:
+    seen: list[tuple[str, str, dict]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        body = _json.loads(request.content.decode("utf-8")) if request.content else {}
+        seen.append((request.method, request.url.path, body))
+        return _ok(
+            {"id": "appeal-1", "yank_id": "y-1", "state": "resolved", "decision": "second_admin_confirmed"},
+            hub_id="hub-A",
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
+        body = await client.appeal_yank("y-1", {"reason": "second admin confirms"})
+    assert seen[0][0] == "POST"
+    assert seen[0][1] == "/v1/yanks/y-1/appeal"
+    assert seen[0][2] == {"reason": "second admin confirms"}
+    assert body["state"] == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_admin_force_approve_routes_to_admin_endpoint() -> None:
+    seen: list[tuple[str, dict]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        body = _json.loads(request.content.decode("utf-8")) if request.content else {}
+        seen.append((request.url.path, body))
+        return _ok({"id": "sub-1", "stage": "approved"}, hub_id="hub-A")
+
+    transport = httpx.MockTransport(handler)
+    async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
+        await client.admin_force_approve_submission(
+            "sub-1", decision_reason="ops emergency"
+        )
+    assert seen == [
+        (
+            "/v1/admin/submissions/sub-1/force-approve",
+            {"skip_remaining_stages": True, "decision_reason": "ops emergency"},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_admin_force_reject_requires_reason() -> None:
+    seen: list[tuple[str, dict]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        body = _json.loads(request.content.decode("utf-8")) if request.content else {}
+        seen.append((request.url.path, body))
+        return _ok({"id": "sub-1", "stage": "rejected"}, hub_id="hub-A")
+
+    transport = httpx.MockTransport(handler)
+    async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
+        await client.admin_force_reject_submission("sub-1", decision_reason="policy")
+    assert seen == [
+        ("/v1/admin/submissions/sub-1/force-reject", {"decision_reason": "policy"})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_admin_override_yank_strips_none_values() -> None:
+    seen: list[tuple[str, dict]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        body = _json.loads(request.content.decode("utf-8")) if request.content else {}
+        seen.append((request.url.path, body))
+        return _ok({"id": "y-1", "state": "resolved"}, hub_id="hub-A")
+
+    transport = httpx.MockTransport(handler)
+    async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
+        await client.admin_override_yank("y-1", new_state="resolved", note="hot patch")
+    # The note is forwarded; resolution stays out because it was None.
+    assert seen[0][1] == {"new_state": "resolved", "note": "hot patch"}
+
+
+# ---------------------------------------------------------------------------
 # Integration test: real Wave-2 marketplace service
 # ---------------------------------------------------------------------------
 

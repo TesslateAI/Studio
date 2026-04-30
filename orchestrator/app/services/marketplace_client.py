@@ -806,12 +806,109 @@ class MarketplaceClient:
             json_body=payload,
         )
 
+    async def create_submission(
+        self,
+        *,
+        kind: str,
+        payload: JsonObject,
+    ) -> JsonObject:
+        """Wave 8: orchestrator-side wrapper for ``POST /v1/publish/{kind}``.
+
+        Named ``create_submission`` to match the orchestrator's
+        proxy-router vocabulary (``app_submissions.py`` calls
+        ``create_submission`` to mean "open a new submission row in the
+        marketplace's authoritative DB"). The hub treats this as the
+        same publish endpoint — the verb name is local to the
+        orchestrator.
+        """
+        return await self.publish(kind=kind, payload=payload)
+
     async def get_submission(self, submission_id: str) -> JsonObject:
         return await self._request_json("GET", f"/v1/submissions/{submission_id}")
+
+    async def advance_submission(self, submission_id: str) -> JsonObject:
+        """Wave 8: drive a submission through the next stage.
+
+        Maps to ``POST /v1/submissions/{id}/advance`` — the marketplace
+        runs the appropriate scanner (stage1 / stage2) for the row's
+        current stage, records every check, and updates the stage
+        column. Idempotent on terminal rows.
+        """
+        return await self._request_json(
+            "POST", f"/v1/submissions/{submission_id}/advance"
+        )
+
+    async def finalize_submission(
+        self,
+        submission_id: str,
+        *,
+        decision: str,
+        decision_reason: str | None = None,
+    ) -> JsonObject:
+        """Wave 8: terminal-decision write for a submission.
+
+        Maps to ``POST /v1/submissions/{id}/finalize``. Approval requires
+        the row to be at ``stage3``; rejection is allowed from any
+        non-terminal stage. The marketplace enforces both rules
+        server-side; the orchestrator just forwards.
+        """
+        body: JsonObject = {"decision": decision}
+        if decision_reason is not None:
+            body["decision_reason"] = decision_reason
+        return await self._request_json(
+            "POST", f"/v1/submissions/{submission_id}/finalize", json_body=body
+        )
 
     async def withdraw_submission(self, submission_id: str) -> JsonObject:
         return await self._request_json(
             "POST", f"/v1/submissions/{submission_id}/withdraw"
+        )
+
+    # ---------- Admin overrides (Wave 8, requires admin.write scope) ----------
+
+    async def admin_force_approve_submission(
+        self,
+        submission_id: str,
+        *,
+        decision_reason: str | None = None,
+        skip_remaining_stages: bool = True,
+    ) -> JsonObject:
+        body: JsonObject = {"skip_remaining_stages": skip_remaining_stages}
+        if decision_reason is not None:
+            body["decision_reason"] = decision_reason
+        return await self._request_json(
+            "POST",
+            f"/v1/admin/submissions/{submission_id}/force-approve",
+            json_body=body,
+        )
+
+    async def admin_force_reject_submission(
+        self,
+        submission_id: str,
+        *,
+        decision_reason: str,
+    ) -> JsonObject:
+        return await self._request_json(
+            "POST",
+            f"/v1/admin/submissions/{submission_id}/force-reject",
+            json_body={"decision_reason": decision_reason},
+        )
+
+    async def admin_override_yank(
+        self,
+        yank_id: str,
+        *,
+        new_state: str,
+        resolution: str | None = None,
+        note: str | None = None,
+    ) -> JsonObject:
+        body: JsonObject = {"new_state": new_state}
+        if resolution is not None:
+            body["resolution"] = resolution
+        if note is not None:
+            body["note"] = note
+        return await self._request_json(
+            "POST", f"/v1/admin/yanks/{yank_id}/override", json_body=body
         )
 
     # ---------- Yanks + appeals ----------

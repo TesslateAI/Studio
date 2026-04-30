@@ -56,8 +56,9 @@ async def env(tmp_path, monkeypatch):
         "STATIC_TOKENS",
         ",".join(
             [
-                "test-token:publish:submissions.read:yanks.write:yanks.appeal:reviews.write:telemetry.write:catalog.write:pricing.write",
-                "test-token-admin-2:yanks.write:yanks.appeal:catalog.write:pricing.write",
+                "test-token:publish:submissions.read:submissions.write:yanks.write:yanks.appeal:reviews.write:telemetry.write:catalog.write:pricing.write",
+                "test-token-admin-2:yanks.write:yanks.appeal:catalog.write:pricing.write:submissions.write",
+                "test-token-superadmin:admin.write:submissions.write:submissions.read:yanks.write:yanks.appeal",
             ]
         ),
     )
@@ -306,3 +307,14 @@ def auth_headers() -> dict[str, str]:
 def auth_headers_admin_2() -> dict[str, str]:
     """Second admin token — used by tests that exercise the two-admin gate."""
     return {"Authorization": "Bearer test-token-admin-2"}
+
+
+@pytest.fixture()
+def auth_headers_superadmin() -> dict[str, str]:
+    """Superuser admin token (carries ``admin.write``).
+
+    Used by Wave-8 tests that exercise the marketplace admin endpoints
+    (force-approve / force-reject / override-yank) — the orchestrator's
+    ``MARKETPLACE_ADMIN_TOKEN`` plays the same role in production.
+    """
+    return {"Authorization": "Bearer test-token-superadmin"}

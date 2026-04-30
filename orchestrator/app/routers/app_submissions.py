@@ -1,12 +1,21 @@
-"""Wave 3: App submissions approval-pipeline router.
+"""Wave 8: thin-proxy app submissions router.
 
-Admin-gated endpoints for advancing submissions through stages and
-recording per-stage checks. Listing + detail are scoped: admins see all,
-creators see only their own submissions.
+Reads continue to serve the local cache (so the existing UI doesn't need
+to change). Mutating endpoints forward to the federated marketplace
+service via :mod:`services.marketplace_governance` and mirror the
+marketplace's authoritative state into the local cache row.
+
+Stage advancement and finalisation rules are now enforced server-side
+on the marketplace; the orchestrator just relays the admin's request.
+The marketplace returns the standardized ``submissions.staged`` envelope
+which we mirror into ``app_submissions`` + ``submission_checks`` so
+existing readers (admin queue, app detail page) keep rendering
+identically.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -17,10 +26,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..models import AppSubmission, User
-from ..services.apps import stage1_scanner, stage2_sandbox
-from ..services.apps import submissions as submissions_svc
+from ..models import AppSubmission, AppVersion, MarketplaceApp, MarketplaceSource, User
+from ..services import marketplace_governance
+from ..services.marketplace_client import (
+    MarketplaceAuthError,
+    MarketplaceClientError,
+    MarketplaceNotFoundError,
+    MarketplaceServerError,
+    UnsupportedCapabilityError,
+)
 from ..users import current_active_user, current_superuser
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -63,15 +80,22 @@ class SubmissionListOut(BaseModel):
 
 
 class AdvanceStageIn(BaseModel):
-    to_stage: str
+    """Wave 8 input — `to_stage` is now optional.
+
+    The marketplace decides which stage to advance to next based on the
+    submission's current stage, so callers don't need to specify a target.
+    Kept around for backwards-compat with existing UI calls; if the value
+    differs from the marketplace's chosen stage the marketplace's
+    decision wins.
+    """
+
+    to_stage: str | None = None
     decision_notes: str | None = None
 
 
-class RecordCheckIn(BaseModel):
-    stage: str
-    check_name: str
-    status: str
-    details: dict[str, Any] | None = None
+class FinalizeIn(BaseModel):
+    decision: str  # approved | rejected | withdrawn
+    decision_reason: str | None = None
 
 
 class CheckCreatedOut(BaseModel):
@@ -79,19 +103,77 @@ class CheckCreatedOut(BaseModel):
 
 
 class ScanRunOut(BaseModel):
-    """Result of a synchronous scanner run.
-
-    ``submission`` carries the post-scan stage so the UI can refresh without a
-    second round-trip. ``result`` is the scanner's own return dict (check
-    counts, failure list, score, etc.) — opaque to the router.
-    """
-
     submission: SubmissionDetailOut
     result: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_source_for_submission(
+    db: AsyncSession, submission_id: UUID
+) -> tuple[AppSubmission, MarketplaceSource | None]:
+    """Resolve the cache row + marketplace source backing a submission."""
+    sub = (
+        await db.execute(
+            select(AppSubmission).where(AppSubmission.id == submission_id)
+        )
+    ).scalar_one_or_none()
+    if sub is None:
+        raise HTTPException(status_code=404, detail="submission not found")
+    source = await marketplace_governance.resolve_source_for_app_version(
+        db, sub.app_version_id
+    )
+    return sub, source
+
+
+def _upstream_id_for(sub: AppSubmission) -> str:
+    """Map the local submission row to the upstream marketplace id.
+
+    Pre-Wave-8 submissions used the same UUID on both sides (the local
+    insert mirrored the marketplace's create response). Wave 8 keeps
+    the same convention — the row's id IS the upstream id when the
+    marketplace creates it. For legacy rows that pre-date the proxy we
+    still pass the local id; the marketplace will return 404, which
+    surfaces clearly to the operator.
+    """
+    return str(sub.id)
+
+
+def _propagate_marketplace_error(exc: MarketplaceClientError) -> HTTPException:
+    """Translate a typed MarketplaceClientError into a clean HTTPException."""
+    if isinstance(exc, MarketplaceAuthError):
+        return HTTPException(status_code=502, detail={
+            "error": "marketplace_auth_failed",
+            "details": str(exc),
+        })
+    if isinstance(exc, MarketplaceNotFoundError):
+        # Cache and upstream out of sync — surface 404 so admin sees it.
+        return HTTPException(status_code=404, detail={
+            "error": "marketplace_submission_not_found",
+            "details": str(exc),
+        })
+    if isinstance(exc, UnsupportedCapabilityError):
+        return HTTPException(status_code=501, detail={
+            "error": "marketplace_unsupported_capability",
+            "capability": exc.capability,
+        })
+    if isinstance(exc, MarketplaceServerError):
+        return HTTPException(status_code=502, detail={
+            "error": "marketplace_unavailable",
+            "details": str(exc),
+        })
+    return HTTPException(status_code=502, detail={
+        "error": "marketplace_error",
+        "details": str(exc),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Read endpoints — local cache fall-through (mirror is kept fresh by the
+# changes-feed sync worker + the proxy mirror calls below).
 # ---------------------------------------------------------------------------
 
 
@@ -104,7 +186,7 @@ async def list_submissions(
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> SubmissionListOut:
-    """Admins see all; non-admin sees only their submissions."""
+    """Admins see all; non-admin sees only their submissions. Local-cache read."""
     stmt = select(AppSubmission)
     if stage is not None:
         stmt = stmt.where(AppSubmission.stage == stage)
@@ -150,67 +232,14 @@ async def get_submission(
     )
 
 
-@router.post("/{submission_id}/advance", response_model=SubmissionOut)
-async def advance_submission(
-    submission_id: UUID,
-    body: AdvanceStageIn,
-    user: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db),
-) -> SubmissionOut:
-    try:
-        await submissions_svc.advance_stage(
-            db,
-            submission_id=submission_id,
-            to_stage=body.to_stage,  # type: ignore[arg-type]
-            reviewer_user_id=user.id,
-            decision_notes=body.decision_notes,
-        )
-    except submissions_svc.SubmissionNotFoundError:
-        raise HTTPException(status_code=404, detail="submission not found") from None
-    except submissions_svc.InvalidTransitionError as e:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    # advance_stage only flushes; without an explicit commit the transaction
-    # rolls back on session close and the stage change is silently lost.
-    await db.commit()
-
-    row = (
-        await db.execute(select(AppSubmission).where(AppSubmission.id == submission_id))
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail="submission not found")
-    return SubmissionOut.model_validate(row)
+# ---------------------------------------------------------------------------
+# Write endpoints — proxy to marketplace, mirror state into cache
+# ---------------------------------------------------------------------------
 
 
-@router.post("/{submission_id}/checks", response_model=CheckCreatedOut)
-async def add_check(
-    submission_id: UUID,
-    body: RecordCheckIn,
-    user: User = Depends(current_superuser),
-    db: AsyncSession = Depends(get_db),
-) -> CheckCreatedOut:
-    # Ensure submission exists for a clean 404.
-    exists = (
-        await db.execute(select(AppSubmission.id).where(AppSubmission.id == submission_id))
-    ).scalar_one_or_none()
-    if exists is None:
-        raise HTTPException(status_code=404, detail="submission not found")
-
-    check_id = await submissions_svc.record_check(
-        db,
-        submission_id=submission_id,
-        stage=body.stage,  # type: ignore[arg-type]
-        check_name=body.check_name,
-        status=body.status,  # type: ignore[arg-type]
-        details=body.details,
-    )
-    # record_check only flushes; same persistence pitfall as advance.
-    await db.commit()
-    return CheckCreatedOut(check_id=check_id)
-
-
-async def _load_submission_detail(db: AsyncSession, submission_id: UUID) -> SubmissionDetailOut:
-    """Re-read a submission + checks after a mutating action, fresh from the DB."""
+async def _load_detail_after_mutation(
+    db: AsyncSession, submission_id: UUID
+) -> SubmissionDetailOut:
     row = (
         await db.execute(
             select(AppSubmission)
@@ -220,84 +249,178 @@ async def _load_submission_detail(db: AsyncSession, submission_id: UUID) -> Subm
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="submission not found")
-    return SubmissionDetailOut.model_validate(row)
+    return SubmissionDetailOut(
+        id=row.id,
+        app_version_id=row.app_version_id,
+        submitter_user_id=row.submitter_user_id,
+        stage=row.stage,
+        decision=row.decision,
+        reviewer_user_id=row.reviewer_user_id,
+        decision_notes=row.decision_notes,
+        checks=[CheckOut.model_validate(c) for c in (row.checks or [])],
+    )
+
+
+@router.post("/{submission_id}/advance", response_model=SubmissionOut)
+async def advance_submission(
+    submission_id: UUID,
+    body: AdvanceStageIn,
+    user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> SubmissionOut:
+    """Forward the advance to the marketplace; mirror the response.
+
+    Wave 8: the marketplace decides what stage to run next based on the
+    submission's current stage. The optional ``to_stage`` body parameter
+    is ignored when the marketplace owns the row — the marketplace's
+    advance endpoint encapsulates the stage logic.
+    """
+    sub, source = await _resolve_source_for_submission(db, submission_id)
+    if source is None:
+        raise HTTPException(
+            status_code=409,
+            detail="submission has no marketplace source — cannot advance",
+        )
+
+    try:
+        await marketplace_governance.proxy_advance_submission(
+            db,
+            local_submission_id=sub.id,
+            upstream_submission_id=_upstream_id_for(sub),
+            source=source,
+        )
+    except marketplace_governance.AdminTokenMissingError as exc:
+        raise HTTPException(status_code=503, detail={
+            "error": "marketplace_admin_token_missing",
+            "message": str(exc),
+        }) from exc
+    except MarketplaceClientError as exc:
+        raise _propagate_marketplace_error(exc) from exc
+
+    # Mirror reviewer for local audit trail.
+    sub.reviewer_user_id = user.id
+    if body.decision_notes is not None:
+        sub.decision_notes = body.decision_notes
+    await db.commit()
+
+    refreshed = (
+        await db.execute(select(AppSubmission).where(AppSubmission.id == submission_id))
+    ).scalar_one()
+    return SubmissionOut.model_validate(refreshed)
+
+
+@router.post("/{submission_id}/finalize", response_model=SubmissionOut)
+async def finalize_submission(
+    submission_id: UUID,
+    body: FinalizeIn,
+    user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> SubmissionOut:
+    """Forward the terminal decision to the marketplace; mirror the response."""
+    sub, source = await _resolve_source_for_submission(db, submission_id)
+    if source is None:
+        raise HTTPException(
+            status_code=409,
+            detail="submission has no marketplace source — cannot finalise",
+        )
+    if body.decision not in ("approved", "rejected", "withdrawn"):
+        raise HTTPException(status_code=400, detail="invalid decision")
+
+    try:
+        await marketplace_governance.proxy_finalize_submission(
+            db,
+            local_submission_id=sub.id,
+            upstream_submission_id=_upstream_id_for(sub),
+            source=source,
+            decision=body.decision,
+            decision_reason=body.decision_reason,
+        )
+    except marketplace_governance.AdminTokenMissingError as exc:
+        raise HTTPException(status_code=503, detail={
+            "error": "marketplace_admin_token_missing",
+            "message": str(exc),
+        }) from exc
+    except MarketplaceClientError as exc:
+        raise _propagate_marketplace_error(exc) from exc
+
+    sub.reviewer_user_id = user.id
+    await db.commit()
+    refreshed = (
+        await db.execute(select(AppSubmission).where(AppSubmission.id == submission_id))
+    ).scalar_one()
+    return SubmissionOut.model_validate(refreshed)
+
+
+# Backwards-compat scan endpoints — both call ``advance`` so existing
+# admin-UI buttons keep working. The marketplace decides which scanner
+# to run based on the row's stage.
 
 
 @router.post("/{submission_id}/scan/stage1", response_model=ScanRunOut)
 async def run_stage1_scan_endpoint(
     submission_id: UUID,
-    _user: User = Depends(current_superuser),
+    user: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> ScanRunOut:
-    """Run the Stage1 structural scanner on a submission.
-
-    Preconditions: the submission must currently be at ``stage1``. The
-    scanner records per-check rows, then advances stage1 → stage2 on all-pass
-    or stage1 → rejected on any hard failure. Use the manual ``/advance``
-    endpoint to move stage0 → stage1 first.
-    """
-    current = (
-        await db.execute(select(AppSubmission.stage).where(AppSubmission.id == submission_id))
-    ).scalar_one_or_none()
-    if current is None:
-        raise HTTPException(status_code=404, detail="submission not found")
-    if current != "stage1":
+    sub, source = await _resolve_source_for_submission(db, submission_id)
+    if source is None:
+        raise HTTPException(status_code=409, detail="no marketplace source")
+    if sub.stage != "stage1":
         raise HTTPException(
             status_code=409,
-            detail=f"submission is at {current!r}; scan requires 'stage1'",
+            detail=f"submission is at {sub.stage!r}; scan requires 'stage1'",
         )
 
     try:
-        result = await stage1_scanner.run_stage1_scan(db, submission_id=submission_id)
-    except submissions_svc.SubmissionNotFoundError:
-        raise HTTPException(status_code=404, detail="submission not found") from None
-    except submissions_svc.InvalidTransitionError as e:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except Exception:
-        await db.rollback()
-        raise
-
+        envelope = await marketplace_governance.proxy_advance_submission(
+            db,
+            local_submission_id=sub.id,
+            upstream_submission_id=_upstream_id_for(sub),
+            source=source,
+        )
+    except marketplace_governance.AdminTokenMissingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except MarketplaceClientError as exc:
+        raise _propagate_marketplace_error(exc) from exc
+    sub.reviewer_user_id = user.id
     await db.commit()
-    detail = await _load_submission_detail(db, submission_id)
-    return ScanRunOut(submission=detail, result=result)
+    detail = await _load_detail_after_mutation(db, submission_id)
+    return ScanRunOut(submission=detail, result={
+        "advanced_to": envelope.get("stage"),
+        "checks": envelope.get("checks", []),
+    })
 
 
 @router.post("/{submission_id}/scan/stage2", response_model=ScanRunOut)
 async def run_stage2_eval_endpoint(
     submission_id: UUID,
-    _user: User = Depends(current_superuser),
+    user: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> ScanRunOut:
-    """Run the Stage2 sandbox eval on a submission.
-
-    Preconditions: the submission must currently be at ``stage2``. On pass,
-    advances stage2 → stage3. On fail, stage2 → rejected. If no
-    ``AdversarialSuite`` is configured the scanner records a warning and
-    advances to stage3 so the queue doesn't block.
-    """
-    current = (
-        await db.execute(select(AppSubmission.stage).where(AppSubmission.id == submission_id))
-    ).scalar_one_or_none()
-    if current is None:
-        raise HTTPException(status_code=404, detail="submission not found")
-    if current != "stage2":
+    sub, source = await _resolve_source_for_submission(db, submission_id)
+    if source is None:
+        raise HTTPException(status_code=409, detail="no marketplace source")
+    if sub.stage != "stage2":
         raise HTTPException(
             status_code=409,
-            detail=f"submission is at {current!r}; eval requires 'stage2'",
+            detail=f"submission is at {sub.stage!r}; eval requires 'stage2'",
         )
 
     try:
-        result = await stage2_sandbox.run_stage2_eval(db, submission_id=submission_id)
-    except submissions_svc.SubmissionNotFoundError:
-        raise HTTPException(status_code=404, detail="submission not found") from None
-    except submissions_svc.InvalidTransitionError as e:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except Exception:
-        await db.rollback()
-        raise
-
+        envelope = await marketplace_governance.proxy_advance_submission(
+            db,
+            local_submission_id=sub.id,
+            upstream_submission_id=_upstream_id_for(sub),
+            source=source,
+        )
+    except marketplace_governance.AdminTokenMissingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except MarketplaceClientError as exc:
+        raise _propagate_marketplace_error(exc) from exc
+    sub.reviewer_user_id = user.id
     await db.commit()
-    detail = await _load_submission_detail(db, submission_id)
-    return ScanRunOut(submission=detail, result=result)
+    detail = await _load_detail_after_mutation(db, submission_id)
+    return ScanRunOut(submission=detail, result={
+        "advanced_to": envelope.get("stage"),
+        "checks": envelope.get("checks", []),
+    })

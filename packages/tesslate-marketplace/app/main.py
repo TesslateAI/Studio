@@ -20,6 +20,7 @@ from .config import get_settings
 from .database import get_session_factory
 from .models import AttestationKey
 from .routers import (
+    admin,
     categories,
     changes,
     featured,
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(publish.router)
     app.include_router(yanks.router)
     app.include_router(telemetry.router)
+    app.include_router(admin.router)
 
     # Dev-only checkout simulator — must NEVER be registered when running in
     # production. The simulator returns a synthetic landing page that bypasses

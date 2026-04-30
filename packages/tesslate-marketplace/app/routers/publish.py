@@ -1,11 +1,25 @@
 """
 Publish + submission lifecycle.
 
-Submissions move through `stage0_received` → `stage1_static` → `stage2_dynamic`
-→ `stage3_review` → `approved`. The marketplace service runs the static
-checks (sha256, size, archive format, manifest sanity) inline. Manual review
-gates use opaque `decision_reason` strings — orchestrators with the
-`submissions.staged` capability render the per-stage check details.
+Wave 8: the publish endpoint creates a `Submission` row in the canonical
+`stage0_received` state, runs structural intake (`stage0` checks +
+fast-path bundle validation), then drives the staged pipeline through
+`stage1_scanner` and `stage2_sandbox` and the staged advance helpers in
+`services.submissions`. Each stage produces standardized
+`SubmissionCheck` rows so the `submissions.staged` capability response
+shape is the same wherever the protocol is implemented.
+
+Two endpoints are added in Wave 8:
+
+  * ``POST /v1/submissions/{id}/advance`` — run the next stage's checks
+    (`stage1` → `stage2` → `stage3`). Used by the orchestrator's thin
+    proxy when an admin clicks "advance" in the queue UI.
+  * ``POST /v1/submissions/{id}/finalize`` — terminal decision
+    (approved / rejected / withdrawn). Approval is only valid from
+    ``stage3``; rejection is allowed from any non-terminal stage.
+
+These are gated behind the ``submissions`` capability and require the
+``submissions.write`` scope on the bearer.
 """
 
 from __future__ import annotations
@@ -27,6 +41,8 @@ from ..schemas import (
     SubmissionOut,
 )
 from ..services import changes_emitter
+from ..services import stage1_scanner, stage2_sandbox
+from ..services import submissions as submissions_svc
 from ..services.attestations import get_attestor
 from ..services.auth import Principal, get_principal
 from ..services.capability_router import requires_capability
@@ -80,7 +96,7 @@ def _serialize(submission: Submission) -> SubmissionOut:
     )
 
 
-def _record_check(
+def _record_check_inline(
     session: AsyncSession,
     submission: Submission,
     *,
@@ -90,6 +106,12 @@ def _record_check(
     message: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> SubmissionCheck:
+    """Synchronous local helper for stage0 + early stage1 (intake) checks.
+
+    The staged services use the `submissions.record_check` async helper
+    which round-trips a flush, but for intake we want to batch flushes —
+    so we use this lightweight insert that defers the flush to the caller.
+    """
     check = SubmissionCheck(
         submission_id=submission.id,
         stage=stage,
@@ -102,103 +124,120 @@ def _record_check(
     return check
 
 
-async def _run_pipeline(
+async def _run_intake_and_pipeline(
     session: AsyncSession,
     submission: Submission,
     bundle_bytes: bytes | None,
-    settings: Settings,
 ) -> None:
-    """Run stage0..stage3 checks on the submission.
+    """Drive a brand-new submission through stage0 → stage1 → stage2 → stage3 → approved.
 
-    Auto-approves when every static check passes. The user's plan calls for
-    a real working pipeline, not stubs — every `_record_check` here runs an
-    actual check.
+    Stage0 is intake: manifest acceptance + bundle structural checks
+    (size cap, archive format, sha256 reconciliation). Stage1, Stage2 are
+    delegated to the named services so the same checks fire whether
+    publish drives them inline or an admin re-runs them via the explicit
+    `/advance` endpoint. Stage3 is auto-approve in the dev/test default;
+    in production a human reviewer would close the gate via
+    `/finalize` after manual review.
     """
+    # ---- Stage 0: intake ----
     submission.stage = "stage0"
-    submission.state = "stage0_received"
-    _record_check(session, submission, stage="stage0", name="manifest_present", status="passed",
-                  message="Manifest accepted")
-
-    # ---- Stage 1: static integrity ----
-    submission.stage = "stage1"
-    submission.state = "stage1_static"
-
-    # Slug + kind sanity
-    if not submission.slug or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for c in submission.slug):
-        _record_check(session, submission, stage="stage1", name="slug_format", status="failed",
-                      message=f"slug must be lowercase alphanumeric: {submission.slug!r}")
-        submission.state = "rejected"
-        submission.decision = "rejected"
-        submission.decision_reason = "Invalid slug format"
-        return
-    _record_check(session, submission, stage="stage1", name="slug_format", status="passed")
+    submission.state = submissions_svc.STAGE_TO_STATE["stage0"]
+    _record_check_inline(
+        session, submission,
+        stage="stage0", name="manifest_present", status="passed",
+        message="Manifest accepted",
+    )
 
     if bundle_bytes is not None:
         try:
             validate_bundle_size(submission.kind, len(bundle_bytes))
-            _record_check(session, submission, stage="stage1", name="bundle_size", status="passed",
-                          details={"size_bytes": len(bundle_bytes)})
+            _record_check_inline(
+                session, submission,
+                stage="stage0", name="bundle_size", status="passed",
+                details={"size_bytes": len(bundle_bytes)},
+            )
         except BundleValidationError as exc:
-            _record_check(session, submission, stage="stage1", name="bundle_size", status="failed",
-                          message=str(exc))
-            submission.state = "rejected"
-            submission.decision = "rejected"
-            submission.decision_reason = str(exc)
+            _record_check_inline(
+                session, submission,
+                stage="stage0", name="bundle_size", status="failed",
+                message=str(exc),
+            )
+            await submissions_svc.advance_stage(
+                session, submission_id=submission.id,
+                to_stage="rejected", decision_reason=str(exc),
+            )
             return
         try:
             validate_archive_format("tar.zst")
-            _record_check(session, submission, stage="stage1", name="archive_format", status="passed")
+            _record_check_inline(
+                session, submission,
+                stage="stage0", name="archive_format", status="passed",
+            )
         except BundleValidationError as exc:
-            _record_check(session, submission, stage="stage1", name="archive_format", status="failed",
-                          message=str(exc))
-            submission.state = "rejected"
-            submission.decision = "rejected"
-            submission.decision_reason = str(exc)
+            _record_check_inline(
+                session, submission,
+                stage="stage0", name="archive_format", status="failed",
+                message=str(exc),
+            )
+            await submissions_svc.advance_stage(
+                session, submission_id=submission.id,
+                to_stage="rejected", decision_reason=str(exc),
+            )
             return
 
         sha = compute_sha256(bundle_bytes)
         if submission.bundle_sha256 and submission.bundle_sha256 != sha:
-            _record_check(session, submission, stage="stage1", name="sha256_match", status="failed",
-                          message="Declared sha256 did not match computed sha256")
-            submission.state = "rejected"
-            submission.decision = "rejected"
-            submission.decision_reason = "sha256_mismatch"
+            _record_check_inline(
+                session, submission,
+                stage="stage0", name="sha256_match", status="failed",
+                message="Declared sha256 did not match computed sha256",
+            )
+            await submissions_svc.advance_stage(
+                session, submission_id=submission.id,
+                to_stage="rejected", decision_reason="sha256_mismatch",
+            )
             return
         submission.bundle_sha256 = sha
         submission.bundle_size_bytes = len(bundle_bytes)
-        _record_check(session, submission, stage="stage1", name="sha256_match", status="passed",
-                      details={"sha256": sha})
+        _record_check_inline(
+            session, submission,
+            stage="stage0", name="sha256_match", status="passed",
+            details={"sha256": sha},
+        )
     else:
-        _record_check(session, submission, stage="stage1", name="bundle_size", status="warning",
-                      message="No bundle uploaded — manifest-only submission")
+        _record_check_inline(
+            session, submission,
+            stage="stage0", name="bundle_present", status="warning",
+            message="No bundle uploaded — manifest-only submission",
+        )
 
-    # ---- Stage 2: dynamic checks (lightweight) ----
-    submission.stage = "stage2"
-    submission.state = "stage2_dynamic"
-    if submission.manifest is None:
-        _record_check(session, submission, stage="stage2", name="manifest_shape", status="warning",
-                      message="No manifest provided")
-    else:
-        # Spot-check manifest is a dict and has an id-like field.
-        if not isinstance(submission.manifest, dict):
-            _record_check(session, submission, stage="stage2", name="manifest_shape", status="failed",
-                          message="manifest must be a JSON object")
-            submission.state = "rejected"
-            submission.decision = "rejected"
-            submission.decision_reason = "manifest_invalid"
-            return
-        _record_check(session, submission, stage="stage2", name="manifest_shape", status="passed")
+    # Move to stage1 + run static scan (delegated).
+    await submissions_svc.advance_stage(session, submission_id=submission.id, to_stage="stage1")
+    stage1_result = await stage1_scanner.run_stage1_scan(session, submission_id=submission.id)
+    if stage1_result["advanced_to"] == "rejected":
+        return
 
-    # ---- Stage 3: review hand-off ----
-    # In an interactive deployment a human reviewer would close the gate; the
-    # default policy is auto-approve for trusted submitters and dev mode.
-    submission.stage = "stage3"
-    submission.state = "stage3_review"
-    _record_check(session, submission, stage="stage3", name="reviewer_assignment", status="passed",
-                  message="Auto-approved by policy")
-    submission.state = "approved"
-    submission.decision = "approved"
-    submission.decision_reason = "auto_approved"
+    # stage2 sandbox eval.
+    stage2_result = await stage2_sandbox.run_stage2_eval(session, submission_id=submission.id)
+    if stage2_result["advanced_to"] == "rejected":
+        return
+
+    # stage3 → approved (auto-policy in dev / test).
+    submissions_svc_check = await submissions_svc.record_check(
+        session,
+        submission_id=submission.id,
+        stage="stage3",
+        name="reviewer_assignment",
+        status="passed",
+        message="Auto-approved by policy",
+    )
+    _ = submissions_svc_check  # silence unused — recorded for audit
+    await submissions_svc.finalize_submission(
+        session,
+        submission_id=submission.id,
+        decision="approved",
+        decision_reason="auto_approved",
+    )
 
 
 async def _materialise_item(
@@ -364,7 +403,7 @@ async def publish_kind(
     db.add(submission)
     await db.flush()
 
-    await _run_pipeline(db, submission, bundle_bytes, settings)
+    await _run_intake_and_pipeline(db, submission, bundle_bytes)
 
     if submission.state == "approved":
         item, iv, _ = await _materialise_item(db, request, submission, bundle_bytes, settings)
@@ -455,8 +494,172 @@ async def withdraw_submission(
         raise HTTPException(status_code=404, detail={"error": "submission_not_found"})
     if row.state in ("approved", "rejected", "withdrawn"):
         raise HTTPException(status_code=409, detail={"error": "submission_terminal", "state": row.state})
-    row.state = "withdrawn"
-    row.decision = "withdrawn"
-    row.decision_reason = f"Withdrawn by {principal.handle}"
+    try:
+        await submissions_svc.advance_stage(
+            db,
+            submission_id=row.id,
+            to_stage="withdrawn",
+            decision_reason=f"Withdrawn by {principal.handle}",
+        )
+    except submissions_svc.InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail={"error": "invalid_transition", "details": str(exc)}) from exc
     await db.commit()
-    return _serialize(row)
+    refreshed = (
+        await db.execute(
+            select(Submission)
+            .options(selectinload(Submission.checks))
+            .where(Submission.id == row.id)
+        )
+    ).scalar_one()
+    return _serialize(refreshed)
+
+
+# ---------------------------------------------------------------------------
+# Wave 8: explicit advance + finalize endpoints (admin-driven)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/submissions/{submission_id}/advance",
+    response_model=SubmissionOut,
+    status_code=200,
+)
+@requires_capability("submissions.staged")
+async def advance_submission(
+    submission_id: str,
+    db: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+) -> SubmissionOut:
+    """Run the next stage's checks for an in-flight submission.
+
+    The pipeline knows which stage to run from the row's current `stage`:
+
+      * stage0 → just transitions to stage1 (intake already ran on publish)
+      * stage1 → runs `stage1_scanner` (advances to stage2 or rejected)
+      * stage2 → runs `stage2_sandbox` (advances to stage3 or rejected)
+      * stage3 → no-op (admin must call /finalize)
+
+    Idempotent: re-running on a terminal submission returns the current
+    state without recording duplicate checks.
+    """
+    principal.require_scope("submissions.write")
+    row = (
+        await db.execute(
+            select(Submission)
+            .options(selectinload(Submission.checks))
+            .where(Submission.id == submission_id)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail={"error": "submission_not_found"})
+    if row.stage in ("approved", "rejected", "withdrawn"):
+        # Terminal — return the current state, do not re-run checks.
+        return _serialize(row)
+
+    try:
+        if row.stage == "stage0":
+            await submissions_svc.advance_stage(db, submission_id=row.id, to_stage="stage1")
+        elif row.stage == "stage1":
+            await stage1_scanner.run_stage1_scan(db, submission_id=row.id)
+        elif row.stage == "stage2":
+            await stage2_sandbox.run_stage2_eval(db, submission_id=row.id)
+        elif row.stage == "stage3":
+            # stage3 is the manual-review gate; advance is a no-op here.
+            pass
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "unknown_stage", "stage": row.stage},
+            )
+    except submissions_svc.InvalidTransitionError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "invalid_transition", "details": str(exc)},
+        ) from exc
+
+    await db.commit()
+    refreshed = (
+        await db.execute(
+            select(Submission)
+            .options(selectinload(Submission.checks))
+            .where(Submission.id == row.id)
+        )
+    ).scalar_one()
+    return _serialize(refreshed)
+
+
+@router.post(
+    "/submissions/{submission_id}/finalize",
+    response_model=SubmissionOut,
+    status_code=200,
+)
+@requires_capability("submissions.staged")
+async def finalize_submission_endpoint(
+    submission_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(get_principal),
+) -> SubmissionOut:
+    """Force a terminal decision on a submission.
+
+    `payload`:
+      * `decision`: "approved" | "rejected" | "withdrawn" (required)
+      * `decision_reason`: optional human-readable note
+
+    Approval is only valid from `stage3` (no skipping the queue). Rejection
+    is allowed from any non-terminal stage. The submitter's own handle can
+    finalize as `withdrawn`; everyone else needs the `submissions.write`
+    scope.
+    """
+    decision = (payload or {}).get("decision") if isinstance(payload, dict) else None
+    if decision not in ("approved", "rejected", "withdrawn"):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "missing_or_invalid_decision", "expected": ["approved", "rejected", "withdrawn"]},
+        )
+    decision_reason = (payload or {}).get("decision_reason") if isinstance(payload, dict) else None
+
+    row = (
+        await db.execute(
+            select(Submission).where(Submission.id == submission_id)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail={"error": "submission_not_found"})
+
+    # Withdraw is the submitter's own affordance; reject + approve are admin-only.
+    if decision == "withdrawn":
+        if row.submitter_handle and row.submitter_handle != principal.handle:
+            principal.require_scope("submissions.write")
+    else:
+        principal.require_scope("submissions.write")
+
+    try:
+        await submissions_svc.finalize_submission(
+            db,
+            submission_id=row.id,
+            decision=decision,  # type: ignore[arg-type]
+            decision_reason=decision_reason,
+        )
+    except submissions_svc.AlreadyTerminalError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "submission_terminal", "state": row.state, "details": str(exc)},
+        ) from exc
+    except submissions_svc.InvalidTransitionError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "invalid_transition", "details": str(exc)},
+        ) from exc
+
+    await db.commit()
+    refreshed = (
+        await db.execute(
+            select(Submission)
+            .options(selectinload(Submission.checks))
+            .where(Submission.id == row.id)
+        )
+    ).scalar_one()
+    return _serialize(refreshed)

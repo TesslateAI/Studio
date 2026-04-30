@@ -1250,3 +1250,134 @@ async def grant_entitlement(
             "supported": ["agent"],
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Wave 8 — submission state-change webhook (hub → orchestrator)
+# ---------------------------------------------------------------------------
+
+
+def _verify_submission_signature(
+    *,
+    raw_body: bytes,
+    signature_header: str | None,
+    secret: str,
+    hub_id: str | None,
+) -> bool:
+    """HMAC-SHA256 verification of a submission state-change payload.
+
+    Reuses the entitlement-grant pattern: hub computes
+    ``HMAC-SHA256(secret + ':' + hub_id, raw_body)`` and sends the hex
+    digest in ``X-Tesslate-Submission-Signature``. The keying pair
+    (``secret`` is ``MARKETPLACE_SUBMISSION_WEBHOOK_SECRET``,
+    ``hub_id`` is the source's pinned hub_id) is shared out-of-band when
+    the source is paired.
+    """
+    if not signature_header or not secret or not hub_id:
+        return False
+    keying = f"{secret}:{hub_id}".encode()
+    expected = hmac.new(keying, raw_body, hashlib.sha256).hexdigest()
+    received = signature_header.strip()
+    if received.startswith("sha256="):
+        received = received[len("sha256="):]
+    try:
+        return hmac.compare_digest(expected, received)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+class SubmissionStateChangePayload(BaseModel):
+    """Body the marketplace POSTs when a submission state advances.
+
+    Mirrors the ``submissions.staged`` envelope so the orchestrator can
+    push it directly through ``mirror_submission_into_cache`` without
+    re-shaping the data.
+    """
+
+    id: str = Field(..., description="Marketplace submission UUID")
+    kind: str
+    slug: str
+    version: str | None = None
+    state: str
+    stage: str
+    decision: str | None = None
+    decision_reason: str | None = None
+    bundle_sha256: str | None = None
+    bundle_size_bytes: int | None = None
+    item_id: str | None = None
+    item_version_id: str | None = None
+    checks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post(
+    "/{source_id}/submissions/{submission_id}/state-change",
+)
+async def submission_state_change(
+    source_id: UUID,
+    submission_id: UUID,
+    payload: SubmissionStateChangePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Wave 8 webhook: marketplace pushes submission state advancements back.
+
+    The orchestrator's local cache row (``app_submissions``) is mirrored
+    from the marketplace's authoritative state. The HMAC signature is
+    verified against the source's pinned ``hub_id`` so a misconfigured
+    URL can't be used to spoof governance state.
+    """
+    from ..services.marketplace_governance import mirror_submission_into_cache
+
+    source = await db.get(MarketplaceSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    if not source.is_active:
+        raise HTTPException(status_code=409, detail="source_inactive")
+    if not source.pinned_hub_id:
+        raise HTTPException(status_code=409, detail="source_unpinned")
+
+    settings = get_settings()
+    secret = (settings.marketplace_submission_webhook_secret or "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "submission_webhook_secret_unconfigured",
+                "message": (
+                    "MARKETPLACE_SUBMISSION_WEBHOOK_SECRET is empty; orchestrator "
+                    "cannot verify hub-issued submission state changes."
+                ),
+            },
+        )
+
+    raw_body = await request.body()
+    signature = request.headers.get("X-Tesslate-Submission-Signature")
+    if not _verify_submission_signature(
+        raw_body=raw_body,
+        signature_header=signature,
+        secret=secret,
+        hub_id=source.pinned_hub_id,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": "invalid_signature",
+                "source_handle": source.handle,
+            },
+        )
+
+    envelope = payload.model_dump(exclude_none=False)
+    mirrored = await mirror_submission_into_cache(
+        db,
+        local_submission_id=submission_id,
+        marketplace_envelope=envelope,
+    )
+    await db.commit()
+
+    return {
+        "mirrored": mirrored is not None,
+        "submission_id": str(submission_id),
+        "source_handle": source.handle,
+        "state": payload.state,
+        "stage": payload.stage,
+    }

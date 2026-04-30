@@ -492,6 +492,163 @@ paths:
               schema:
                 $ref: "#/components/schemas/Submission"
 
+  /v1/submissions/{id}/advance:
+    post:
+      tags: [publish]
+      summary: Run the next stage's checks (stage1 → stage2 → stage3)
+      description: |
+        Wave 8 staged-pipeline endpoint. The marketplace runs the appropriate
+        scanner for the submission's current stage, records every check as a
+        `SubmissionCheck` row, and advances `submission.stage`. Idempotent on
+        terminal rows.
+
+        Requires `submissions.staged` capability + `submissions.write` scope.
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Submission with updated stage + new check rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Invalid stage transition }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/submissions/{id}/finalize:
+    post:
+      tags: [publish]
+      summary: Force a terminal decision (approved / rejected / withdrawn)
+      description: |
+        Wave 8: terminal-decision write. Approval is only valid from
+        `stage3`. Rejection is allowed from any non-terminal stage.
+        Withdraw is the submitter's own affordance; admins can withdraw
+        on a submitter's behalf with `submissions.write`.
+
+        Requires `submissions.staged` capability. Approve / reject require
+        `submissions.write` scope. Withdraw on behalf of another submitter
+        requires `submissions.write` too.
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmissionFinalize"
+      responses:
+        "200":
+          description: Submission moved to terminal state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "400": { description: Missing or invalid decision }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Invalid transition or already terminal }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/admin/submissions/{id}/force-approve:
+    post:
+      tags: [admin]
+      summary: Skip remaining stages and approve a submission
+      description: |
+        Wave 8 admin override. Walks the submission forward through any
+        remaining stages, records an `admin_override_approve` check on
+        stage 3, then finalises as approved. Requires `admin.write` scope.
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminForceApprove"
+      responses:
+        "200":
+          description: Submission approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "403": { description: admin.write scope required }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Submission already terminal }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/admin/submissions/{id}/force-reject:
+    post:
+      tags: [admin]
+      summary: Reject a submission immediately, skipping remaining stages
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminForceReject"
+      responses:
+        "200":
+          description: Submission rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "403": { description: admin.write scope required }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Submission already terminal }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/admin/yanks/{id}/override:
+    post:
+      tags: [admin]
+      summary: Force a yank to a state without a second-admin appeal
+      description: |
+        Wave 8 admin override. Critical yanks normally need a distinct
+        second admin to flip them to `resolved`; this endpoint lets a
+        superuser admin close the loop unilaterally during incident
+        response. Emits the yank changes-event so federated consumers
+        re-sync. Requires `admin.write` scope.
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminOverrideYank"
+      responses:
+        "200":
+          description: Yank state mutated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Yank"
+        "403": { description: admin.write scope required }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/telemetry/install:
     post:
       tags: [telemetry]
@@ -860,26 +1017,59 @@ components:
         item: { $ref: "#/components/schemas/PublishItem" }
         version: { $ref: "#/components/schemas/PublishVersion" }
     SubmissionCheck:
+      description: |
+        One per-stage check row in the standardized `submissions.staged`
+        schema. The orchestrator's UI groups checks by `stage` to render
+        the rich stage-by-stage timeline.
       type: object
+      required: [stage, name, status, created_at]
       properties:
-        stage: { type: string }
-        name: { type: string }
+        stage:
+          type: string
+          enum: [stage0, stage1, stage2, stage3]
+          description: Pipeline stage that produced this check
+        name:
+          type: string
+          description: Stable check identifier (e.g. `slug_format`, `bundle_size`)
         status:
           type: string
-          enum: [passed, failed, warning, errored]
+          enum: [passed, failed, warning, errored, skipped]
+          description: |
+            * `passed` — check succeeded
+            * `failed` — check failed; submission transitions to rejected
+            * `warning` — informational; does not fail the stage
+            * `errored` — execution itself failed; submission transitions to rejected
+            * `skipped` — check did not run (e.g. dependent check failed)
         message: { type: string, nullable: true }
         details: { type: object, additionalProperties: true, nullable: true }
         created_at: { type: string, format: date-time }
     Submission:
+      description: |
+        Full submission row with the standardized `submissions.staged`
+        check shape. The orchestrator's `routers/app_submissions.py`
+        proxy mirrors this row directly into the local `app_submissions`
+        cache so existing UI rendering keeps working unchanged.
       type: object
+      required: [id, kind, slug, state, stage, created_at, updated_at]
       properties:
-        id: { type: string }
-        kind: { type: string }
+        id: { type: string, description: Submission UUID (string form) }
+        kind:
+          type: string
+          enum: [agent, skill, mcp_server, base, app, theme, workflow_template]
         slug: { type: string }
         version: { type: string, nullable: true }
-        state: { type: string }
-        stage: { type: string }
-        decision: { type: string, nullable: true }
+        state:
+          type: string
+          enum: [stage0_received, stage1_static, stage2_dynamic, stage3_review, approved, rejected, withdrawn]
+          description: Wire-stable state string mirrored from the row
+        stage:
+          type: string
+          enum: [stage0, stage1, stage2, stage3, approved, rejected, withdrawn]
+          description: Current stage; terminal stages mirror the decision
+        decision:
+          type: string
+          nullable: true
+          enum: [approved, rejected, withdrawn]
         decision_reason: { type: string, nullable: true }
         submitter_handle: { type: string, nullable: true }
         bundle_sha256: { type: string, nullable: true }
@@ -888,9 +1078,40 @@ components:
         item_version_id: { type: string, nullable: true }
         checks:
           type: array
+          description: |
+            Append-only per-stage check rows. Clients with the
+            `submissions.staged` capability render these grouped by
+            `stage` to surface the staged pipeline timeline.
           items: { $ref: "#/components/schemas/SubmissionCheck" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    SubmissionFinalize:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected, withdrawn]
+        decision_reason: { type: string, nullable: true }
+    AdminForceApprove:
+      type: object
+      properties:
+        decision_reason: { type: string, nullable: true }
+        skip_remaining_stages: { type: boolean, default: true }
+    AdminForceReject:
+      type: object
+      required: [decision_reason]
+      properties:
+        decision_reason: { type: string }
+    AdminOverrideYank:
+      type: object
+      required: [new_state]
+      properties:
+        new_state:
+          type: string
+          enum: [resolved, open]
+        resolution: { type: string, nullable: true }
+        note: { type: string, nullable: true }
     YankCreate:
       type: object
       required: [kind, slug, reason]
