@@ -20,7 +20,6 @@ import difflib
 import logging
 from typing import Any
 
-from ....services.orchestration import get_orchestrator
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 from ..retry_config import tool_retry
@@ -140,8 +139,10 @@ async def patch_file_tool(params: dict[str, Any], context: dict[str, Any]) -> di
         "cache_node": context.get("cache_node"),
     }
 
-    orchestrator = get_orchestrator()
+    from ....services.orchestration import get_orchestrator
     from ._write_fence import fence_file
+
+    orchestrator = get_orchestrator()
 
     async with fence_file(project_id, file_path):
         try:
@@ -274,6 +275,8 @@ async def multi_edit_tool(params: dict[str, Any], context: dict[str, Any]) -> di
         "volume_id": context.get("volume_id"),
         "cache_node": context.get("cache_node"),
     }
+
+    from ....services.orchestration import get_orchestrator
 
     orchestrator = get_orchestrator()
     try:

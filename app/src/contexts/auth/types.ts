@@ -151,9 +151,6 @@ export interface AuthUser {
   name?: string;
   username?: string;
   avatar_url?: string;
-  subscription_tier?: string;
-  bundled_credits?: number;
-  purchased_credits?: number;
   is_superuser?: boolean;
   slug?: string;
 }

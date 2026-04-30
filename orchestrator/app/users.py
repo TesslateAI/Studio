@@ -85,24 +85,6 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         logger.info(f"User {user.id} has registered: {user.email}")
 
-        # Create Stripe customer
-        try:
-            from .services.stripe_service import stripe_service
-
-            customer = await stripe_service.create_customer(
-                email=user.email,
-                name=user.name,
-                metadata={"user_id": str(user.id), "username": user.username},
-            )
-
-            if customer:
-                user.stripe_customer_id = customer["id"]
-                await self.user_db.session.commit()
-                logger.info(f"Created Stripe customer for user {user.username}: {customer['id']}")
-        except Exception as e:
-            logger.error(f"Failed to create Stripe customer for user {user.username}: {e}")
-            logger.warning(f"User {user.username} registered WITHOUT Stripe customer")
-
         # Initialize LiteLLM user key
         try:
             from .services.litellm_service import litellm_service
@@ -120,28 +102,6 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         except Exception as e:
             logger.error(f"Failed to create LiteLLM key for user {user.username}: {e}")
             logger.warning(f"User {user.username} registered WITHOUT LiteLLM key")
-
-        # Grant signup bonus credits and initialize daily credits
-        try:
-            from datetime import timedelta
-
-            user.signup_bonus_credits = settings.signup_bonus_credits
-            user.signup_bonus_expires_at = datetime.now(UTC) + timedelta(
-                days=settings.signup_bonus_expiry_days
-            )
-            # Initialize daily credits for free tier
-            tier = user.subscription_tier or "free"
-            if tier == "free":
-                user.daily_credits = settings.tier_daily_credits_free
-                user.daily_credits_reset_date = datetime.now(UTC)
-            user.support_tier = settings.get_support_tier(tier)
-            await self.user_db.session.commit()
-            logger.info(
-                f"Granted {settings.signup_bonus_credits} signup bonus credits to {user.username} "
-                f"(expires in {settings.signup_bonus_expiry_days} days)"
-            )
-        except Exception as e:
-            logger.error(f"Failed to grant signup bonus to {user.username}: {e}")
 
         # Create personal team (RBAC) — must happen before agent/theme assignment
         # so that team_id is available for library scoping
@@ -289,6 +249,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             return
         try:
             import uuid as _uuid
+            from datetime import timedelta
 
             from .models_team import Team, TeamMembership
 
@@ -299,10 +260,13 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
                 slug=f"{user.slug}-team",
                 is_personal=True,
                 created_by_id=user.id,
-                subscription_tier=user.subscription_tier or "free",
-                daily_credits=user.daily_credits or 0,
-                signup_bonus_credits=user.signup_bonus_credits or 0,
-                signup_bonus_expires_at=user.signup_bonus_expires_at,
+                subscription_tier="free",
+                daily_credits=settings.tier_daily_credits_free,
+                daily_credits_reset_date=datetime.now(UTC),
+                signup_bonus_credits=settings.signup_bonus_credits,
+                signup_bonus_expires_at=datetime.now(UTC)
+                + timedelta(days=settings.signup_bonus_expiry_days),
+                support_tier=settings.get_support_tier("free"),
             )
             self.user_db.session.add(team)
             await self.user_db.session.flush()
@@ -316,6 +280,22 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             user.default_team_id = team_id
             await self.user_db.session.commit()
             logger.info(f"Created personal team for user {user.username}: {team.slug}")
+
+            # Create Stripe customer for the team (billing is team-scoped)
+            try:
+                from .services.stripe_service import stripe_service
+
+                customer = await stripe_service.create_customer(
+                    email=user.email,
+                    name=team.name,
+                    metadata={"team_id": str(team_id), "user_id": str(user.id)},
+                )
+                if customer:
+                    team.stripe_customer_id = customer["id"]
+                    await self.user_db.session.commit()
+                    logger.info(f"Created Stripe customer for team {team.slug}: {customer['id']}")
+            except Exception as stripe_err:
+                logger.error(f"Failed to create Stripe customer for team {team.slug}: {stripe_err}")
         except Exception as e:
             logger.error(f"Failed to create personal team for {user.username}: {e}")
 

@@ -46,6 +46,7 @@ async def _ensure_personal_team(user: User, db: AsyncSession) -> None:
     if user.default_team_id is not None:
         return
 
+    settings = get_settings()
     team_id = _uuid.uuid4()
     # Use a stable slug derived from the user id so re-runs are idempotent.
     team_slug = f"local-team-{str(user.id)[:8]}"
@@ -56,8 +57,12 @@ async def _ensure_personal_team(user: User, db: AsyncSession) -> None:
         is_personal=True,
         created_by_id=user.id,
         subscription_tier="free",
-        daily_credits=0,
-        signup_bonus_credits=0,
+        daily_credits=settings.tier_daily_credits_free,
+        daily_credits_reset_date=datetime.now(UTC),
+        signup_bonus_credits=settings.signup_bonus_credits,
+        signup_bonus_expires_at=datetime.now(UTC)
+        + timedelta(days=settings.signup_bonus_expiry_days),
+        support_tier=settings.get_support_tier("free"),
     )
     db.add(team)
     await db.flush()
@@ -108,12 +113,6 @@ async def _get_or_create_local_user(db: AsyncSession) -> User:
         is_active=True,
         is_superuser=False,
         is_verified=True,
-        subscription_tier="free",
-        total_spend=0,
-        bundled_credits=0,
-        purchased_credits=0,
-        daily_credits=get_settings().tier_daily_credits_free,
-        daily_credits_reset_date=datetime.now(UTC),
     )
     db.add(user)
     await db.commit()

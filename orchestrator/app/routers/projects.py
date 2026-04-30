@@ -112,10 +112,7 @@ async def _resolve_container_url(
         resolve_app_url_for_container,
     )
 
-    if (
-        container is not None
-        and getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME
-    ):
+    if container is not None and getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME:
         url = await resolve_app_url_for_container(db, container, protocol=protocol)
         if url:
             return url
@@ -2099,9 +2096,7 @@ async def save_project_file(
         # duplicate rows.
         from ..services.project_files import upsert_project_file
 
-        await upsert_project_file(
-            db, project_id=project_id, file_path=file_path, content=content
-        )
+        await upsert_project_file(db, project_id=project_id, file_path=file_path, content=content)
 
         # Update project's updated_at timestamp
         from datetime import datetime
@@ -4484,7 +4479,8 @@ async def deploy_project(
     project.is_deployed = True
     project.deploy_type = "deployed"
     project.deployed_at = datetime.now(UTC)
-    current_user.deployed_projects_count += 1
+    if _team:
+        _team.deployed_projects_count += 1
 
     await db.commit()
 
@@ -4518,7 +4514,17 @@ async def undeploy_project(
     project.is_deployed = False
     project.deploy_type = "development"
     project.deployed_at = None
-    current_user.deployed_projects_count = max(0, current_user.deployed_projects_count - 1)
+    if current_user.default_team_id:
+        from ..models_team import Team as _Team  # noqa: PLC0415
+
+        _undeploy_team_result = await db.execute(
+            select(_Team).where(_Team.id == current_user.default_team_id)
+        )
+        _undeploy_team = _undeploy_team_result.scalar_one_or_none()
+        if _undeploy_team:
+            _undeploy_team.deployed_projects_count = max(
+                0, (_undeploy_team.deployed_projects_count or 0) - 1
+            )
 
     await db.commit()
 

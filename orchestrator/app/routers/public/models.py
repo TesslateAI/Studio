@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...auth_external import require_api_scope
 from ...database import get_db
 from ...models import UsageLog, User, UserAPIKey
+from ...models_team import Team
 from ...permissions import Permission
 from ...services.credit_service import check_credits, deduct_credits
 from ...services.litellm_service import LiteLLMService
@@ -258,12 +259,17 @@ async def get_usage(
     user: User = Depends(require_api_scope(Permission.USAGE_READ)),
     db: AsyncSession = Depends(get_db),
 ):
+    team = None
+    if user.default_team_id:
+        team_result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+        team = team_result.scalar_one_or_none()
+
     credits = {
-        "daily": user.daily_credits or 0,
-        "bundled": user.bundled_credits or 0,
-        "bonus": user.signup_bonus_credits or 0,
-        "purchased": user.purchased_credits or 0,
-        "total": user.total_credits,
+        "daily": (team.daily_credits if team else 0) or 0,
+        "bundled": (team.bundled_credits if team else 0) or 0,
+        "bonus": (team.signup_bonus_credits if team else 0) or 0,
+        "purchased": (team.purchased_credits if team else 0) or 0,
+        "total": team.total_credits if team else 0,
     }
 
     thirty_days_ago = datetime.now(UTC) - timedelta(days=30)

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 
 from fastapi_users.db import SQLAlchemyBaseOAuthAccountTable, SQLAlchemyBaseUserTable
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from sqlalchemy.types import JSON
@@ -51,67 +51,12 @@ class User(SQLAlchemyBaseUserTable[uuid.UUID], Base):
     # until backfilled; unique once populated.
     handle: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
 
-    # Subscription & billing
-    subscription_tier: Mapped[str] = mapped_column(
-        String, default="free"
-    )  # free, basic, pro, ultra
-    stripe_customer_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    stripe_subscription_id: Mapped[str | None] = mapped_column(
-        String, nullable=True
-    )  # Active subscription ID
-    total_spend: Mapped[int] = mapped_column(Integer, default=0)  # Lifetime spend in cents
-    deployed_projects_count: Mapped[int] = mapped_column(
-        Integer, default=0
-    )  # Number of deployed projects
-
-    # Credit system: bundled = monthly allowance (resets), purchased = permanent (never expire)
-    bundled_credits: Mapped[int] = mapped_column(
-        Integer, default=0
-    )  # Monthly allowance, resets on billing date
-    purchased_credits: Mapped[int] = mapped_column(Integer, default=0)  # Never expire
-    credits_reset_date: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )  # When bundled credits reset
-
-    # Signup bonus credits (expire after signup_bonus_expiry_days)
-    signup_bonus_credits: Mapped[int] = mapped_column(Integer, default=0)
-    signup_bonus_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-    # Daily credits for free tier (reset each day)
-    daily_credits: Mapped[int] = mapped_column(Integer, default=0)
-    daily_credits_reset_date: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-    # Support tier flag (community, email, priority)
-    support_tier: Mapped[str] = mapped_column(String(20), default="community")
-
     # RBAC: user's active/default team
     default_team_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
         ForeignKey("teams.id", ondelete="SET NULL", use_alter=True, name="fk_users_default_team"),
         nullable=True,
     )
-
-    @property
-    def total_credits(self) -> int:
-        """Total available credits (daily + bundled + signup_bonus + purchased)."""
-        from datetime import UTC
-
-        from .database import ensure_aware
-
-        bonus = self.signup_bonus_credits or 0
-        _expires = ensure_aware(self.signup_bonus_expires_at)
-        if _expires and datetime.now(UTC) > _expires:
-            bonus = 0
-        return (
-            (self.daily_credits or 0)
-            + (self.bundled_credits or 0)
-            + bonus
-            + (self.purchased_credits or 0)
-        )
 
     # Creator payouts (Stripe Connect)
     creator_stripe_account_id: Mapped[str | None] = mapped_column(

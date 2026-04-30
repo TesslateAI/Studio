@@ -24,11 +24,6 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
     name: str
     username: str
     slug: str
-    subscription_tier: str = "free"
-    stripe_customer_id: str | None = None
-    total_spend: int = 0
-    bundled_credits: int = 1000
-    purchased_credits: int = 0
     litellm_api_key: str | None = None
     litellm_user_id: str | None = None
     diagram_model: str | None = None
@@ -82,7 +77,6 @@ class UserUpdate(schemas.BaseUserUpdate):
     # Custom updatable fields
     name: str | None = Field(None, min_length=1, max_length=100)
     username: str | None = Field(None, min_length=3, max_length=50)
-    subscription_tier: str | None = None
     diagram_model: str | None = None
 
 

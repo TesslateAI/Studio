@@ -41,12 +41,7 @@ def _make_user(default_team_id=None):
     user = MagicMock()
     user.id = uuid.uuid4()
     user.is_active = True
-    user.default_team_id = default_team_id
-    user.daily_credits = 100
-    user.bundled_credits = 500
-    user.signup_bonus_credits = 0
-    user.purchased_credits = 1000
-    user.total_credits = 1600
+    user.default_team_id = default_team_id or uuid.uuid4()
     return user
 
 

@@ -38,7 +38,6 @@ def mock_regular_user():
     user.email = "test@example.com"
     user.is_admin = False
     user.is_suspended = False
-    user.subscription_tier = "free"
     user.credits = 1000
     user.created_at = datetime.utcnow() - timedelta(days=30)
     return user

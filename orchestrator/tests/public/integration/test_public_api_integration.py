@@ -28,16 +28,23 @@ pytestmark = pytest.mark.asyncio
 # ---------------------------------------------------------------------------
 
 
+def _make_team(**overrides) -> MagicMock:
+    team = MagicMock()
+    team.id = overrides.get("id", uuid.uuid4())
+    team.daily_credits = overrides.get("daily_credits", 100)
+    team.bundled_credits = overrides.get("bundled_credits", 500)
+    team.signup_bonus_credits = overrides.get("signup_bonus_credits", 0)
+    team.purchased_credits = overrides.get("purchased_credits", 1000)
+    team.total_credits = overrides.get("total_credits", 1600)
+    return team
+
+
 def _make_user(**overrides) -> MagicMock:
+    _team_id = overrides.get("default_team_id", uuid.uuid4())
     user = MagicMock()
     user.id = overrides.get("id", uuid.uuid4())
     user.is_active = overrides.get("is_active", True)
-    user.default_team_id = overrides.get("default_team_id")
-    user.daily_credits = overrides.get("daily_credits", 100)
-    user.bundled_credits = overrides.get("bundled_credits", 500)
-    user.signup_bonus_credits = overrides.get("signup_bonus_credits", 0)
-    user.purchased_credits = overrides.get("purchased_credits", 1000)
-    user.total_credits = overrides.get("total_credits", 1600)
+    user.default_team_id = _team_id
     key = MagicMock()
     key.scopes = overrides.get("scopes")  # None = all allowed
     key.key_prefix = "tsk_test"
@@ -676,9 +683,13 @@ class TestModelsEndpoint:
 
 class TestUsageEndpoint:
     async def test_usage_returns_credits(self, client, mock_database, mock_api_user):
-        # Calls: 30d total summary, per-model breakdown
+        team = _make_team()
+        # Calls: team lookup, 30d total summary, per-model breakdown
+        team_result = MagicMock()
+        team_result.scalar_one_or_none.return_value = team
         mock_database.execute = AsyncMock(
             side_effect=[
+                team_result,  # team lookup by default_team_id
                 _row_result((150, 4200, 50000, 12000)),  # total summary
                 _rows_all([("gpt-4o", 100, 3000), ("claude-3", 50, 1200)]),  # by model
             ]
@@ -693,8 +704,12 @@ class TestUsageEndpoint:
         assert credits["total"] == 1600
 
     async def test_usage_30d_summary(self, client, mock_database):
+        team = _make_team()
+        team_result = MagicMock()
+        team_result.scalar_one_or_none.return_value = team
         mock_database.execute = AsyncMock(
             side_effect=[
+                team_result,  # team lookup by default_team_id
                 _row_result((75, 1500, 30000, 8000)),
                 _rows_all([("gpt-4o", 75, 1500)]),
             ]

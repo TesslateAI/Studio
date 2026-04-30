@@ -85,6 +85,8 @@ class StripeService:
         """
         Get existing Stripe customer ID or create a new one.
 
+        Billing is team-scoped — customer ID lives on the user's default Team.
+
         Args:
             user: User object
             db: Database session
@@ -92,17 +94,22 @@ class StripeService:
         Returns:
             Stripe customer ID
         """
-        if user.stripe_customer_id:
-            return user.stripe_customer_id
+        if user.default_team_id:
+            team_result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+            team = team_result.scalar_one_or_none()
+            if team:
+                if team.stripe_customer_id:
+                    return team.stripe_customer_id
 
-        customer = await self.create_customer(
-            email=user.email, name=user.name, metadata={"user_id": str(user.id)}
-        )
-
-        if customer:
-            user.stripe_customer_id = customer["id"]
-            await db.commit()
-            return customer["id"]
+                customer = await self.create_customer(
+                    email=user.email,
+                    name=team.name,
+                    metadata={"team_id": str(team.id), "user_id": str(user.id)},
+                )
+                if customer:
+                    team.stripe_customer_id = customer["id"]
+                    await db.commit()
+                    return customer["id"]
 
         return None
 
@@ -673,6 +680,12 @@ class StripeService:
             if not customer_id:
                 raise ValueError("Failed to create Stripe customer")
 
+            # Load the user's billing team for credit deduction
+            team: Team | None = None
+            if user.default_team_id:
+                team_result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+                team = team_result.scalar_one_or_none()
+
             # Calculate total cost
             total_cost = sum(log.cost_total for log in usage_logs)
 
@@ -680,45 +693,45 @@ class StripeService:
                 logger.info(f"No charges for user {user.id} this month")
                 return None
 
-            # Deduct from credits in order: daily → bundled → signup_bonus → purchased
+            # Deduct from team credits in order: daily → bundled → signup_bonus → purchased
             remaining_cost = total_cost
-            total_available = user.total_credits
+            total_available = team.total_credits if team else 0
 
             if total_available >= total_cost:
                 # Fully covered by credits - deduct in priority order
                 to_deduct = total_cost
 
-                # 1. Daily credits first (expire soonest)
-                daily = user.daily_credits or 0
-                if daily > 0:
-                    used = min(daily, to_deduct)
-                    user.daily_credits = daily - used
-                    to_deduct -= used
-
-                # 2. Bundled credits
-                if to_deduct > 0:
-                    bundled = user.bundled_credits or 0
-                    used = min(bundled, to_deduct)
-                    user.bundled_credits = bundled - used
-                    to_deduct -= used
-
-                # 3. Signup bonus credits
-                if to_deduct > 0:
-                    bonus = user.signup_bonus_credits or 0
-                    # Check if bonus is still valid
-                    from ..database import ensure_aware as _ensure_aware
-
-                    _bonus_exp = _ensure_aware(user.signup_bonus_expires_at)
-                    if _bonus_exp and datetime.now(UTC) > _bonus_exp:
-                        bonus = 0
-                    if bonus > 0:
-                        used = min(bonus, to_deduct)
-                        user.signup_bonus_credits = bonus - used
+                if team:
+                    # 1. Daily credits first (expire soonest)
+                    daily = team.daily_credits or 0
+                    if daily > 0:
+                        used = min(daily, to_deduct)
+                        team.daily_credits = daily - used
                         to_deduct -= used
 
-                # 4. Purchased credits (never expire)
-                if to_deduct > 0:
-                    user.purchased_credits = (user.purchased_credits or 0) - to_deduct
+                    # 2. Bundled credits
+                    if to_deduct > 0:
+                        bundled = team.bundled_credits or 0
+                        used = min(bundled, to_deduct)
+                        team.bundled_credits = bundled - used
+                        to_deduct -= used
+
+                    # 3. Signup bonus credits
+                    if to_deduct > 0:
+                        bonus = team.signup_bonus_credits or 0
+                        from ..database import ensure_aware as _ensure_aware
+
+                        _bonus_exp = _ensure_aware(team.signup_bonus_expires_at)
+                        if _bonus_exp and datetime.now(UTC) > _bonus_exp:
+                            bonus = 0
+                        if bonus > 0:
+                            used = min(bonus, to_deduct)
+                            team.signup_bonus_credits = bonus - used
+                            to_deduct -= used
+
+                    # 4. Purchased credits (never expire)
+                    if to_deduct > 0:
+                        team.purchased_credits = (team.purchased_credits or 0) - to_deduct
 
                 await db.commit()
                 logger.info(f"Usage paid from credits for user {user.id}: ${total_cost / 100:.2f}")
@@ -732,10 +745,11 @@ class StripeService:
             elif total_available > 0:
                 # Partially covered by credits - use all available
                 remaining_cost = total_cost - total_available
-                user.daily_credits = 0
-                user.bundled_credits = 0
-                user.signup_bonus_credits = 0
-                user.purchased_credits = 0
+                if team:
+                    team.daily_credits = 0
+                    team.bundled_credits = 0
+                    team.signup_bonus_credits = 0
+                    team.purchased_credits = 0
                 await db.commit()
 
             # Create invoice for remaining amount
@@ -767,7 +781,8 @@ class StripeService:
                 log.billed_status = "invoiced"
                 log.billed_at = datetime.now(UTC)
 
-            user.total_spend += remaining_cost
+            if team:
+                team.total_spend += remaining_cost
             await db.commit()
 
             logger.info(
@@ -996,7 +1011,7 @@ class StripeService:
             logger.info(f"Agent purchase already processed: user {user_id}, agent {agent_id}")
             return
 
-        # Fetch user for total_spend update and team_id
+        # Fetch user for team_id
         user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one()
 
@@ -1038,8 +1053,12 @@ class StripeService:
         )
         db.add(transaction)
 
-        # Update user total spend
-        user.total_spend += amount_total
+        # Track spend on team
+        if user.default_team_id:
+            team_result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+            team = team_result.scalar_one_or_none()
+            if team:
+                team.total_spend += amount_total
 
         await db.commit()
         logger.info(f"User {user_id} purchased agent {agent_id}")
@@ -1056,10 +1075,12 @@ class StripeService:
         user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one()
 
-        # This doesn't increase current count, just allows one more deploy
-        # The actual count is managed when projects are deployed
-        # We track this purchase via total_spend
-        user.total_spend += session["amount_total"]
+        # Track spend on team
+        if user.default_team_id:
+            team_result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+            team = team_result.scalar_one_or_none()
+            if team:
+                team.total_spend += session["amount_total"]
 
         await db.commit()
         logger.info(f"User {user_id} purchased additional deploy slot")
@@ -1076,26 +1097,23 @@ class StripeService:
         """Handle subscription cancellation."""
         subscription_id = subscription["id"]
 
-        # Check if it's a platform subscription (basic, pro, ultra)
-        user_result = await db.execute(
-            select(User).where(User.stripe_subscription_id == subscription_id)
+        # Primary path: team-scoped billing (all new subscriptions).
+        # fulfill_subscription() attaches stripe_subscription_id to the Team,
+        # so cancellations must be looked up and applied there first.
+        team_result = await db.execute(
+            select(Team).where(Team.stripe_subscription_id == subscription_id)
         )
-        user = user_result.scalar_one_or_none()
+        team = team_result.scalar_one_or_none()
 
-        if user:
-            # Downgrade to free tier
-            old_tier = user.subscription_tier
-            user.subscription_tier = "free"
-            user.stripe_subscription_id = None
-            user.support_tier = settings.get_support_tier("free")
-
-            # Reset bundled credits to free tier amount
-            user.bundled_credits = settings.get_tier_bundled_credits("free")
-
-            # Note: purchased_credits are NOT affected - they never expire
-
+        if team:
+            old_tier = team.subscription_tier
+            team.subscription_tier = "free"
+            team.stripe_subscription_id = None
+            team.support_tier = settings.get_support_tier("free")
+            # Reset bundled credits to free allowance; purchased_credits never expire
+            team.bundled_credits = settings.get_tier_bundled_credits("free")
             await db.commit()
-            logger.info(f"User {user.id} downgraded from {old_tier} to free tier")
+            logger.info(f"Team {team.id} downgraded from {old_tier} to free tier")
             return
 
         # Check if it's an agent subscription
@@ -1123,18 +1141,19 @@ class StripeService:
         subscription_id = invoice.get("subscription")
 
         if billing_reason == "subscription_cycle" and subscription_id:
-            user_result = await db.execute(
-                select(User).where(User.stripe_subscription_id == subscription_id)
+            # Primary path: team-scoped billing.
+            team_result = await db.execute(
+                select(Team).where(Team.stripe_subscription_id == subscription_id)
             )
-            user = user_result.scalar_one_or_none()
-            if user:
-                tier_credits = settings.get_tier_bundled_credits(user.subscription_tier)
-                user.bundled_credits = tier_credits
-                user.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
+            team = team_result.scalar_one_or_none()
+            if team:
+                tier_credits = settings.get_tier_bundled_credits(team.subscription_tier)
+                team.bundled_credits = tier_credits
+                team.credits_reset_date = datetime.now(UTC) + timedelta(days=30)
                 await db.commit()
                 logger.info(
-                    f"Subscription renewal: reset {user.id} bundled credits "
-                    f"to {tier_credits} ({user.subscription_tier} tier)"
+                    f"Subscription renewal: reset team {team.id} bundled credits "
+                    f"to {tier_credits} ({team.subscription_tier} tier)"
                 )
 
         # --- Usage invoice fulfillment ---

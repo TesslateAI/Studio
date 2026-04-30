@@ -20,16 +20,23 @@ from app.routers.public.models import (
 # ---------------------------------------------------------------------------
 
 
+def _make_team(team_id=None):
+    team = MagicMock()
+    team.id = team_id or uuid.uuid4()
+    team.daily_credits = 100
+    team.bundled_credits = 500
+    team.signup_bonus_credits = 0
+    team.purchased_credits = 1000
+    team.total_credits = 1600
+    return team
+
+
 def _make_user(default_team_id=None):
+    _team_id = default_team_id or uuid.uuid4()
     user = MagicMock()
     user.id = uuid.uuid4()
     user.is_active = True
-    user.default_team_id = default_team_id
-    user.daily_credits = 100
-    user.bundled_credits = 500
-    user.signup_bonus_credits = 0
-    user.purchased_credits = 1000
-    user.total_credits = 1600
+    user.default_team_id = _team_id
     return user
 
 
@@ -378,21 +385,26 @@ class TestListModels:
 class TestUsage:
     @pytest.mark.asyncio
     async def test_usage_returns_credits(self):
-        user = _make_user()
+        team = _make_team()
+        user = _make_user(default_team_id=team.id)
         mock_db = AsyncMock()
 
-        # Call 1: total summary
+        # Call 1: team lookup (by default_team_id)
+        team_result = MagicMock()
+        team_result.scalar_one_or_none.return_value = team
+
+        # Call 2: total summary
         total_result = MagicMock()
         total_result.one.return_value = (5, 120, 5000, 2000)
 
-        # Call 2: per-model breakdown
+        # Call 3: per-model breakdown
         by_model_result = MagicMock()
         by_model_result.all.return_value = [
             ("gpt-4o", 3, 80),
             ("claude-sonnet", 2, 40),
         ]
 
-        mock_db.execute = AsyncMock(side_effect=[total_result, by_model_result])
+        mock_db.execute = AsyncMock(side_effect=[team_result, total_result, by_model_result])
 
         result = await get_usage(user=user, db=mock_db)
 
@@ -404,8 +416,13 @@ class TestUsage:
 
     @pytest.mark.asyncio
     async def test_usage_30d_summary(self):
-        user = _make_user()
+        team = _make_team()
+        user = _make_user(default_team_id=team.id)
         mock_db = AsyncMock()
+
+        # Call 1: team lookup
+        team_result = MagicMock()
+        team_result.scalar_one_or_none.return_value = team
 
         total_result = MagicMock()
         total_result.one.return_value = (10, 250, 10000, 5000)
@@ -413,7 +430,7 @@ class TestUsage:
         by_model_result = MagicMock()
         by_model_result.all.return_value = [("gpt-4o", 10, 250)]
 
-        mock_db.execute = AsyncMock(side_effect=[total_result, by_model_result])
+        mock_db.execute = AsyncMock(side_effect=[team_result, total_result, by_model_result])
 
         result = await get_usage(user=user, db=mock_db)
 
@@ -426,8 +443,13 @@ class TestUsage:
 
     @pytest.mark.asyncio
     async def test_usage_empty_history(self):
-        user = _make_user()
+        team = _make_team()
+        user = _make_user(default_team_id=team.id)
         mock_db = AsyncMock()
+
+        # Call 1: team lookup
+        team_result = MagicMock()
+        team_result.scalar_one_or_none.return_value = team
 
         total_result = MagicMock()
         total_result.one.return_value = (0, 0, 0, 0)
@@ -435,7 +457,7 @@ class TestUsage:
         by_model_result = MagicMock()
         by_model_result.all.return_value = []
 
-        mock_db.execute = AsyncMock(side_effect=[total_result, by_model_result])
+        mock_db.execute = AsyncMock(side_effect=[team_result, total_result, by_model_result])
 
         result = await get_usage(user=user, db=mock_db)
 

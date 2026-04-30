@@ -44,6 +44,7 @@ from ..models import (
     UserPurchasedAgent,
     UserPurchasedBase,
 )
+from ..models_team import Team
 from ..services.git_providers.url_utils import strip_git_credentials as _strip_git_credentials
 from ..services.litellm_service import litellm_service
 from ..users import current_superuser
@@ -1763,8 +1764,10 @@ async def list_users(
             .label("creator_agent_count")
         )
 
-        # Base query with computed columns
-        query = select(User, project_count_subq, creator_count_subq)
+        # Base query with computed columns; left-join Team for billing data
+        query = select(User, project_count_subq, creator_count_subq, Team).outerjoin(
+            Team, Team.id == User.default_team_id
+        )
         count_query = select(func.count()).select_from(User)
 
         # Apply filters
@@ -1781,9 +1784,14 @@ async def list_users(
                 )
             )
 
-        # Subscription tier filter
+        # Subscription tier filter (billing is team-scoped)
         if tier:
-            filters.append(User.subscription_tier == tier)
+            filters.append(
+                select(Team.id)
+                .where(Team.id == User.default_team_id, Team.subscription_tier == tier)
+                .correlate(User)
+                .exists()
+            )
 
         # Account status filter
         if status:
@@ -1869,7 +1877,7 @@ async def list_users(
 
         # Format response
         users_data = []
-        for user, project_count, creator_agent_count in rows:
+        for user, project_count, creator_agent_count, team in rows:
             users_data.append(
                 {
                     "id": str(user.id),
@@ -1877,16 +1885,16 @@ async def list_users(
                     "username": user.username,
                     "name": user.name,
                     "avatar_url": user.avatar_url,
-                    "subscription_tier": user.subscription_tier,
+                    "subscription_tier": team.subscription_tier if team else "free",
                     "is_active": user.is_active,
                     "is_suspended": user.is_suspended,
                     "is_deleted": user.is_deleted,
                     "is_verified": user.is_verified,
                     "is_superuser": user.is_superuser,
-                    "total_credits": user.total_credits,
-                    "bundled_credits": user.bundled_credits,
-                    "purchased_credits": user.purchased_credits,
-                    "total_spend": user.total_spend,
+                    "total_credits": team.total_credits if team else 0,
+                    "bundled_credits": team.bundled_credits if team else 0,
+                    "purchased_credits": team.purchased_credits if team else 0,
+                    "total_spend": team.total_spend if team else 0,
                     "project_count": project_count or 0,
                     "is_creator": (creator_agent_count or 0) > 0,
                     "last_active_at": user.last_active_at.isoformat()
@@ -1919,8 +1927,8 @@ async def export_users(
 ):
     """Export users to CSV."""
     try:
-        # Build query (similar to list_users but without pagination)
-        query = select(User)
+        # Build query (similar to list_users but without pagination); join Team for billing
+        query = select(User, Team).outerjoin(Team, Team.id == User.default_team_id)
         filters = []
 
         if search:
@@ -1933,7 +1941,12 @@ async def export_users(
                 )
             )
         if tier:
-            filters.append(User.subscription_tier == tier)
+            filters.append(
+                select(Team.id)
+                .where(Team.id == User.default_team_id, Team.subscription_tier == tier)
+                .correlate(User)
+                .exists()
+            )
         if status == "active":
             filters.append(and_(User.is_suspended.is_(False), User.is_deleted.is_(False)))
         elif status == "suspended":
@@ -1945,7 +1958,7 @@ async def export_users(
             query = query.where(and_(*filters))
 
         result = await db.execute(query.order_by(User.created_at.desc()))
-        users = result.scalars().all()
+        rows = result.all()
 
         # Create CSV
         output = io.StringIO()
@@ -1965,7 +1978,7 @@ async def export_users(
             ]
         )
 
-        for user in users:
+        for user, team in rows:
             status_str = "active"
             if user.is_deleted:
                 status_str = "deleted"
@@ -1980,10 +1993,10 @@ async def export_users(
                     user.email,
                     user.username,
                     user.name,
-                    user.subscription_tier,
+                    team.subscription_tier if team else "free",
                     status_str,
-                    user.total_credits,
-                    user.total_spend / 100 if user.total_spend else 0,
+                    team.total_credits if team else 0,
+                    (team.total_spend or 0) / 100 if team else 0,
                     user.created_at.isoformat() if user.created_at else "",
                     user.last_active_at.isoformat() if user.last_active_at else "",
                 ]
@@ -2012,6 +2025,12 @@ async def get_user_detail(
 
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # Load billing team (billing is team-scoped)
+        user_team: Team | None = None
+        if user.default_team_id:
+            team_res = await db.execute(select(Team).where(Team.id == user.default_team_id))
+            user_team = team_res.scalar_one_or_none()
 
         # Get project count
         project_count = await db.scalar(
@@ -2053,9 +2072,9 @@ async def get_user_detail(
             "twitter_handle": user.twitter_handle,
             "github_username": user.github_username,
             "website_url": user.website_url,
-            "subscription_tier": user.subscription_tier,
-            "stripe_customer_id": user.stripe_customer_id,
-            "stripe_subscription_id": user.stripe_subscription_id,
+            "subscription_tier": user_team.subscription_tier if user_team else "free",
+            "stripe_customer_id": user_team.stripe_customer_id if user_team else None,
+            "stripe_subscription_id": user_team.stripe_subscription_id if user_team else None,
             "is_active": user.is_active,
             "is_suspended": user.is_suspended,
             "suspended_at": user.suspended_at.isoformat() if user.suspended_at else None,
@@ -2065,13 +2084,13 @@ async def get_user_detail(
             "deleted_reason": user.deleted_reason,
             "is_verified": user.is_verified,
             "is_superuser": user.is_superuser,
-            "bundled_credits": user.bundled_credits,
-            "purchased_credits": user.purchased_credits,
-            "total_credits": user.total_credits,
-            "credits_reset_date": user.credits_reset_date.isoformat()
-            if user.credits_reset_date
+            "bundled_credits": user_team.bundled_credits if user_team else 0,
+            "purchased_credits": user_team.purchased_credits if user_team else 0,
+            "total_credits": user_team.total_credits if user_team else 0,
+            "credits_reset_date": user_team.credits_reset_date.isoformat()
+            if user_team and user_team.credits_reset_date
             else None,
-            "total_spend": user.total_spend,
+            "total_spend": user_team.total_spend if user_team else 0,
             "referral_code": user.referral_code,
             "referred_by": user.referred_by,
             "project_count": project_count,
@@ -2161,6 +2180,12 @@ async def get_user_billing(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # Load billing team (billing is team-scoped)
+        billing_team: Team | None = None
+        if user.default_team_id:
+            team_res = await db.execute(select(Team).where(Team.id == user.default_team_id))
+            billing_team = team_res.scalar_one_or_none()
+
         # Get credit purchases
         purchases_result = await db.execute(
             select(CreditPurchase)
@@ -2192,19 +2217,24 @@ async def get_user_billing(
 
         return {
             "subscription": {
-                "tier": user.subscription_tier,
-                "stripe_customer_id": user.stripe_customer_id,
-                "stripe_subscription_id": user.stripe_subscription_id,
-            },
-            "credits": {
-                "bundled": user.bundled_credits,
-                "purchased": user.purchased_credits,
-                "total": user.total_credits,
-                "reset_date": user.credits_reset_date.isoformat()
-                if user.credits_reset_date
+                "tier": billing_team.subscription_tier if billing_team else "free",
+                "stripe_customer_id": billing_team.stripe_customer_id if billing_team else None,
+                "stripe_subscription_id": billing_team.stripe_subscription_id
+                if billing_team
                 else None,
             },
-            "spend": {"total_lifetime_cents": user.total_spend, "monthly_cents": monthly_spend},
+            "credits": {
+                "bundled": billing_team.bundled_credits if billing_team else 0,
+                "purchased": billing_team.purchased_credits if billing_team else 0,
+                "total": billing_team.total_credits if billing_team else 0,
+                "reset_date": billing_team.credits_reset_date.isoformat()
+                if billing_team and billing_team.credits_reset_date
+                else None,
+            },
+            "spend": {
+                "total_lifetime_cents": billing_team.total_spend if billing_team else 0,
+                "monthly_cents": monthly_spend,
+            },
             "purchases": [
                 {
                     "id": str(p.id),
@@ -2425,20 +2455,29 @@ async def adjust_user_credits(
     admin: User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Adjust a user's credit balance."""
+    """Adjust a user's credit balance (applied to the user's billing team)."""
     try:
         user = await db.scalar(select(User).where(User.id == user_id))
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        old_balance = user.purchased_credits
+        # Billing is team-scoped — adjust team purchased_credits
+        credit_team: Team | None = None
+        if user.default_team_id:
+            team_res = await db.execute(select(Team).where(Team.id == user.default_team_id))
+            credit_team = team_res.scalar_one_or_none()
+
+        if not credit_team:
+            raise HTTPException(status_code=404, detail="User has no billing team")
+
+        old_balance = credit_team.purchased_credits or 0
 
         # Adjust purchased_credits (not bundled, as those reset monthly)
-        new_balance = user.purchased_credits + request_data.amount
+        new_balance = old_balance + request_data.amount
         if new_balance < 0:
             raise HTTPException(status_code=400, detail="Cannot reduce credits below zero")
 
-        user.purchased_credits = new_balance
+        credit_team.purchased_credits = new_balance
 
         await db.commit()
 
@@ -3771,10 +3810,12 @@ async def get_billing_overview(
         tier_revenue = {}
         tier_prices = {"free": 0, "basic": 900, "pro": 2900, "ultra": 9900}  # cents/month
 
+        # Tier counts via Team (billing is team-scoped); count personal teams only to avoid
+        # double-counting users who belong to multiple teams
         tier_query = (
-            select(User.subscription_tier, func.count(User.id).label("count"))
-            .where(User.is_deleted.is_(False))
-            .group_by(User.subscription_tier)
+            select(Team.subscription_tier, func.count(Team.id).label("count"))
+            .where(Team.is_personal.is_(True))
+            .group_by(Team.subscription_tier)
         )
 
         tier_result = await db.execute(tier_query)

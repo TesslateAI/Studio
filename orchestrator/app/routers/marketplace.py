@@ -896,11 +896,21 @@ async def verify_agent_purchase(
         if session.payment_status != "paid":
             raise HTTPException(status_code=400, detail="Payment not completed")
 
-        # Verify the customer matches the current user
+        # Verify the customer matches the user's billing team
+        from ..models_team import Team as _BillingTeam
+
         user_billing = await db.execute(select(User).where(User.id == current_user.id))
         user = user_billing.scalar_one()
+        team_customer_id = None
+        if user.default_team_id:
+            team_res = await db.execute(
+                select(_BillingTeam).where(_BillingTeam.id == user.default_team_id)
+            )
+            billing_team = team_res.scalar_one_or_none()
+            if billing_team:
+                team_customer_id = billing_team.stripe_customer_id
 
-        if not user.stripe_customer_id or user.stripe_customer_id != session.customer:
+        if not team_customer_id or team_customer_id != session.customer:
             raise HTTPException(status_code=403, detail="Session customer does not match user")
 
         # Get agent from metadata or slug parameter
@@ -1335,9 +1345,7 @@ def _is_tool_driven_request(request: Request | None) -> bool:
     if (request.headers.get("X-Tool-Created") or "").lower() == "true":
         return True
     scope_header = request.headers.get("X-API-Scope") or ""
-    if "marketplace.author" in scope_header.split():
-        return True
-    return False
+    return "marketplace.author" in scope_header.split()
 
 
 @router.post("/agents/create")
@@ -1465,9 +1473,7 @@ async def update_custom_agent(
         # Tool-driven calls require explicit ownership: no fork-on-edit
         # for open-source agents (that's an interactive flow).
         agent_lookup = (
-            await db.execute(
-                select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
-            )
+            await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
         ).scalar_one_or_none()
         if agent_lookup is None:
             raise HTTPException(status_code=404, detail="Agent not found")
