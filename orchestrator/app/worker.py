@@ -24,6 +24,10 @@ from arq.connections import RedisSettings
 
 from .services.apps.app_invocations import invoke_app_instance_task
 from .services.apps.settlement_worker import settle_spend_batch as settle_spend_batch_cron
+from .services.marketplace_sync import (
+    marketplace_sync_periodic_cron,
+    marketplace_yanks_fast_cron,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2476,6 +2480,33 @@ def _build_cron_jobs():
         )
     )
 
+    # Federated marketplace (Wave 3): periodic sync against every active
+    # MarketplaceSource. Drains /v1/changes per source every 5 minutes and
+    # applies upsert/delete/deactivate/yank/version_remove/pricing_change
+    # tombstones. Failures per source are logged but never raised.
+    jobs.append(
+        cron(
+            marketplace_sync_periodic_cron,
+            minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+            timeout=300,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
+    # Federated marketplace (Wave 3): fast yank propagation. Polls each
+    # source's /v1/yanks every minute so a critical yank reaches the
+    # orchestrator's cache within ~1 minute of being published upstream.
+    jobs.append(
+        cron(
+            marketplace_yanks_fast_cron,
+            minute=set(range(0, 60)),
+            timeout=120,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
     return jobs
 
 
@@ -2504,6 +2535,8 @@ class WorkerSettings:
         db_event_dispatcher_cron,
         reap_orphaned_install_attempts_cron,
         invoke_app_instance_task,
+        marketplace_sync_periodic_cron,
+        marketplace_yanks_fast_cron,
     ]
     cron_jobs = _build_cron_jobs()
     redis_settings = _get_redis_settings()

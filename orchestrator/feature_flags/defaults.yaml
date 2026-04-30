@@ -35,6 +35,33 @@ agent_plan_mode: true
 agent_subagents: true
 agent_apply_patch: true
 
+# -- Federated marketplace (Wave 3) -------------------------------------------
+# Per-capability rollout flags. Default ON because the protocol exists in
+# Wave 3 — UI exposure and per-source enablement are gated by trust-level
+# checks in services/marketplace_federation.py rather than these flags.
+marketplace_federation_catalog_read: true
+marketplace_federation_catalog_changes: true
+marketplace_federation_catalog_categories: true
+marketplace_federation_catalog_featured: true
+marketplace_federation_catalog_search: true
+marketplace_federation_bundles_signed_url: true
+marketplace_federation_bundles_signed_manifests: false
+marketplace_federation_publish: false
+marketplace_federation_submissions: false
+marketplace_federation_submissions_staged: false
+marketplace_federation_yanks: true
+marketplace_federation_yanks_feed: true
+marketplace_federation_yanks_appeals: false
+marketplace_federation_reviews_read: true
+marketplace_federation_reviews_write: false
+marketplace_federation_reviews_aggregates: true
+marketplace_federation_pricing_read: true
+# Wave 9 flips this on per-source via per-environment overrides.
+marketplace_federation_checkout_use_hub_checkout: false
+marketplace_federation_attestations: false
+marketplace_federation_telemetry_opt_in: false
+marketplace_federation_cross_source_ranking: false
+
 # =============================================================================
 # Public flags — exposed via GET /api/feature-flags for the frontend.
 # Backend can access ALL flags. Only flags listed here are served to clients.

@@ -656,6 +656,18 @@ async def startup():
 
     register_litellm_budget_callback()
 
+    # Federated marketplace sync (Wave 3): desktop sidecar runs the periodic
+    # sync as an in-process asyncio task because it has no ARQ worker. Cloud
+    # uses the ARQ cron registered in app/worker.py instead.
+    if settings.is_desktop_mode:
+        try:
+            from .services.marketplace_sync import register_desktop_periodic
+
+            register_desktop_periodic(asyncio.get_running_loop())
+            logger.info("Federated marketplace sync registered (desktop, 15-min cadence)")
+        except Exception:
+            logger.exception("Failed to register desktop marketplace_sync (non-fatal)")
+
     # Eagerly build btrfs templates for featured bases on startup (K8s only)
     if (
         settings.is_kubernetes_mode
