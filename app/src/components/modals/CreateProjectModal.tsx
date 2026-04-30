@@ -22,10 +22,17 @@ interface SiblingFolder {
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Called with the chosen name. ``baseId === ''`` (empty string) signals
+   * an empty-workspace creation; the caller should branch and call
+   * ``projectsApi.create(name, '', 'empty')``. ``undefined`` falls back to
+   * the user's selected template. */
   onConfirm: (projectName: string, baseId?: string, baseVersion?: string) => void;
   isLoading?: boolean;
   initialBaseId?: string;
   baseVersion?: string;
+  /** Pre-toggle the modal into "empty workspace" mode. Used by the
+   * dashboard's "New empty workspace" button. */
+  initialEmptyMode?: boolean;
 }
 
 const FEATURED_SLUGS = ['nextjs-16', 'vite-react-fastapi', 'vite-react-go', 'expo-default'];
@@ -49,6 +56,7 @@ export function CreateProjectModal({
   isLoading = false,
   initialBaseId,
   baseVersion,
+  initialEmptyMode = false,
 }: CreateProjectModalProps) {
   const { activeTeam } = useTeam();
 
@@ -57,6 +65,14 @@ export function CreateProjectModal({
   const [allBases, setAllBases] = useState<MarketplaceBase[]>([]);
   const [userBases, setUserBases] = useState<MarketplaceBase[]>([]);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  // Empty-workspace toggle. When true, the template picker hides and submit
+  // dispatches with baseId === '' so the caller knows to use source_type='empty'.
+  const [emptyMode, setEmptyMode] = useState<boolean>(initialEmptyMode);
+
+  // Sync the toggle when the parent re-opens the modal in a different mode.
+  useEffect(() => {
+    if (isOpen) setEmptyMode(initialEmptyMode);
+  }, [isOpen, initialEmptyMode]);
 
   const [siblings, setSiblings] = useState<SiblingFolder[]>([]);
 
@@ -84,9 +100,9 @@ export function CreateProjectModal({
             const preselected = bases.find((b) => b.id === initialBaseId);
             if (preselected) return preselected;
           }
-          const defaultBase = FEATURED_SLUGS.map((slug) =>
-            bases.find((b) => b.slug === slug)
-          ).find(Boolean);
+          const defaultBase = FEATURED_SLUGS.map((slug) => bases.find((b) => b.slug === slug)).find(
+            Boolean
+          );
           return defaultBase || null;
         });
       })
@@ -187,12 +203,19 @@ export function CreateProjectModal({
   };
 
   const handleConfirm = () => {
-    if (isLoading || !projectName.trim() || !selectedBase) return;
+    if (isLoading || !projectName.trim()) return;
+    if (emptyMode) {
+      onConfirm(projectName.trim(), '', undefined);
+      return;
+    }
+    if (!selectedBase) return;
     onConfirm(projectName.trim(), selectedBase.id, baseVersion || undefined);
   };
 
+  const canSubmit = !isLoading && projectName.trim() && (emptyMode || selectedBase);
+
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter' && projectName.trim() && selectedBase && !isLoading) {
+    if (e.key === 'Enter' && canSubmit) {
       e.preventDefault();
       handleConfirm();
     } else if (e.key === 'Escape' && !isLoading) {
@@ -226,11 +249,7 @@ export function CreateProjectModal({
             id="create-workspace-title"
             className="flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-muted)]"
           >
-            <Folder
-              size={12}
-              weight="fill"
-              className="flex-shrink-0 text-[var(--primary)]"
-            />
+            <Folder size={12} weight="fill" className="flex-shrink-0 text-[var(--primary)]" />
             <span className="truncate">{teamSlug}</span>
             <CaretRight size={9} className="flex-shrink-0 text-[var(--text-subtle)]" />
             <span className="truncate text-[var(--text)]">New folder</span>
@@ -269,11 +288,7 @@ export function CreateProjectModal({
 
           {/* The new folder row — this is where the cursor lives */}
           <div className="flex items-center gap-2 rounded-[var(--radius-small)] bg-[rgba(var(--primary-rgb),0.08)] px-2 py-1.5 ring-1 ring-[var(--primary)]">
-            <Folder
-              size={14}
-              weight="fill"
-              className="flex-shrink-0 text-[var(--primary)]"
-            />
+            <Folder size={14} weight="fill" className="flex-shrink-0 text-[var(--primary)]" />
             <input
               ref={inputRef}
               type="text"
@@ -292,51 +307,62 @@ export function CreateProjectModal({
 
         {/* Footer — template + keyboard hint + primary action */}
         <div className="relative flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--sidebar-bg)] px-3 py-2">
-          {/* Template picker — tiny affordance */}
-          <button
-            type="button"
-            ref={templateBtnRef}
-            onClick={() => setTemplatePickerOpen((v) => !v)}
-            disabled={isLoading}
-            className="flex min-w-0 items-center gap-1 rounded-[var(--radius-small)] px-1.5 py-1 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-50"
-          >
-            <span className="text-[var(--text-subtle)]">as</span>
-            <span className="truncate text-[var(--text)]">
-              {selectedBase?.name || 'template'}
-            </span>
-            <CaretDown
-              size={9}
-              className={`flex-shrink-0 text-[var(--text-subtle)] motion-safe:transition-transform ${
-                templatePickerOpen ? 'rotate-180' : ''
-              }`}
+          {/* Empty-workspace toggle. Hides the template picker when on. */}
+          <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] select-none">
+            <input
+              type="checkbox"
+              checked={emptyMode}
+              disabled={isLoading}
+              onChange={(e) => setEmptyMode(e.target.checked)}
+              className="h-3 w-3 accent-[var(--primary)]"
             />
-          </button>
+            <span>Empty workspace (no template)</span>
+          </label>
+
+          {!emptyMode && (
+            <button
+              type="button"
+              ref={templateBtnRef}
+              onClick={() => setTemplatePickerOpen((v) => !v)}
+              disabled={isLoading}
+              className="flex min-w-0 items-center gap-1 rounded-[var(--radius-small)] px-1.5 py-1 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-50"
+            >
+              <span className="text-[var(--text-subtle)]">as</span>
+              <span className="truncate text-[var(--text)]">
+                {selectedBase?.name || 'template'}
+              </span>
+              <CaretDown
+                size={9}
+                className={`flex-shrink-0 text-[var(--text-subtle)] motion-safe:transition-transform ${
+                  templatePickerOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+          )}
 
           <div className="flex flex-shrink-0 items-center gap-2">
             <span className="hidden text-[10px] text-[var(--text-subtle)] sm:inline">
-              <kbd className="font-mono">esc</kbd> cancel ·{' '}
-              <kbd className="font-mono">↵</kbd> create
+              <kbd className="font-mono">esc</kbd> cancel · <kbd className="font-mono">↵</kbd>{' '}
+              create
             </span>
             <button
               type="button"
               onClick={handleConfirm}
-              disabled={!projectName.trim() || !selectedBase || isLoading}
+              disabled={!canSubmit}
               className="btn btn-sm btn-filled"
             >
               {isLoading ? 'Creating…' : 'Create'}
             </button>
           </div>
 
-          {/* Template dropdown */}
-          {templatePickerOpen && (
+          {/* Template dropdown — only when emptyMode is off */}
+          {!emptyMode && templatePickerOpen && (
             <div
               ref={templatePanelRef}
               className="absolute bottom-full left-2 mb-1 max-h-[240px] w-[220px] overflow-y-auto rounded-[var(--radius-small)] border border-[var(--border-hover)] bg-[var(--surface)] p-1 shadow-[var(--shadow-large)]"
             >
               {displayBases.length === 0 ? (
-                <div className="px-2 py-1.5 text-[11px] text-[var(--text-subtle)]">
-                  Loading…
-                </div>
+                <div className="px-2 py-1.5 text-[11px] text-[var(--text-subtle)]">Loading…</div>
               ) : (
                 displayBases.map((base) => {
                   const isSelected = selectedBase?.id === base.id;
@@ -353,9 +379,7 @@ export function CreateProjectModal({
                       ].join(' ')}
                     >
                       <span className="min-w-0 flex-1 truncate">{base.name}</span>
-                      {isSelected && (
-                        <span className="flex-shrink-0 text-[var(--primary)]">•</span>
-                      )}
+                      {isSelected && <span className="flex-shrink-0 text-[var(--primary)]">•</span>}
                     </button>
                   );
                 })

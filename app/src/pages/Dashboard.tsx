@@ -68,6 +68,7 @@ export default function Dashboard() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [createInitialEmpty, setCreateInitialEmpty] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
@@ -207,17 +208,19 @@ export default function Dashboard() {
     const creatingToast = toast.loading('Creating project...');
 
     try {
-      // Create project with base (creates container automatically)
-      // baseId is required - CreateProjectModal auto-selects a base
-      const response = await projectsApi.create(
-        projectName,
-        '',
-        'base', // Always use 'base' source type
-        undefined,
-        'main',
-        baseId,
-        baseVersion || undefined
-      );
+      // Empty workspace branch — CreateProjectModal signals it via baseId === ''
+      const isEmpty = baseId === '';
+      const response = isEmpty
+        ? await projectsApi.create(projectName, '', 'empty')
+        : await projectsApi.create(
+            projectName,
+            '',
+            'base', // Always use 'base' source type
+            undefined,
+            'main',
+            baseId,
+            baseVersion || undefined
+          );
 
       const project = response.project;
       const taskId = response.task_id;
@@ -666,14 +669,31 @@ export default function Dashboard() {
           <h2 className="text-xs font-semibold text-[var(--text)] flex-1">Workspaces</h2>
 
           {canCreateProject && (
-            <button
-              onClick={() => setShowCreateDialog(true)}
-              disabled={isCreating}
-              className="btn btn-icon"
-              aria-label="New project"
-            >
-              <FilePlus className="w-4 h-4" />
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  setCreateInitialEmpty(true);
+                  setShowCreateDialog(true);
+                }}
+                disabled={isCreating}
+                className="btn btn-icon"
+                title="New empty workspace (no template)"
+                aria-label="New empty workspace"
+              >
+                <Folder className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => {
+                  setCreateInitialEmpty(false);
+                  setShowCreateDialog(true);
+                }}
+                disabled={isCreating}
+                className="btn btn-icon"
+                aria-label="New project"
+              >
+                <FilePlus className="w-4 h-4" />
+              </button>
+            </>
           )}
         </div>
 
@@ -1313,11 +1333,13 @@ export default function Dashboard() {
           setShowCreateDialog(false);
           setCreateBaseId(undefined);
           setCreateBaseVersion(undefined);
+          setCreateInitialEmpty(false);
         }}
         onConfirm={handleCreateProject}
         isLoading={isCreating}
         initialBaseId={createBaseId}
         baseVersion={createBaseVersion}
+        initialEmptyMode={createInitialEmpty}
       />
 
       {/* Import from Repository Modal */}
