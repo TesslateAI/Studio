@@ -691,6 +691,61 @@ class Message(Base):
     )
 
 
+class ChatAttachment(Base):
+    """Persistent record of a file uploaded into a chat's attached workspace.
+
+    Storage layout:
+        <workspace_root>/.chat/<chat_id>/uploads/<sha256>-<filename>
+
+    Lifecycle:
+        1. ``POST /api/chats/{chat_id}/attachments`` streams the upload, writes
+           the file, INSERTs a row with ``message_id=NULL`` and returns the
+           ``attachment_id``.
+        2. The next ``POST /api/chat/agent`` carries the id back inside a
+           ``SerializedAttachment`` (file_reference variant). The chat-send
+           handler patches ``message_id`` so the row is no longer orphaned.
+        3. Orphan rows (still ``message_id=NULL`` after 24h) are GC'd by a
+           cron task that also deletes the file from disk.
+
+    NOT TO BE CONFUSED with ``schemas.ChatAttachmentSchema`` — that's the
+    Pydantic shape for the *outgoing* serialized attachment carried inside
+    an agent task payload. This SQLAlchemy model is the durable upload
+    record on disk + DB.
+    """
+
+    __tablename__ = "chat_attachments"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    chat_id = Column(
+        GUID(),
+        ForeignKey("chats.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(
+        GUID(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Nullable until the user actually sends the message that references this
+    # upload. Orphan GC keys off (message_id IS NULL AND created_at < now()-24h).
+    message_id = Column(
+        GUID(),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    file_path = Column(String(1024), nullable=False)
+    original_filename = Column(String(512), nullable=False)
+    sha256 = Column(String(64), nullable=False, index=True)
+    mime_type = Column(String(255), nullable=True)
+    size_bytes = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (Index("ix_chat_attachments_chat_created", "chat_id", "created_at"),)
+
+
 class AgentStep(Base):
     """Append-only log of individual agent execution steps.
 

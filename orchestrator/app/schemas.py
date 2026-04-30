@@ -697,7 +697,17 @@ class AgentCommandStatsResponse(BaseModel):
 
 
 class ChatAttachmentSchema(BaseModel):
-    """Attachment sent alongside a chat message."""
+    """Attachment carried in an outgoing agent task payload.
+
+    Pydantic shape for the *serialized* attachment that travels alongside a
+    user's chat message. NOT the same as ``models.ChatAttachment``, which is
+    the durable on-disk + DB record of a file uploaded into the chat's
+    workspace. The two are linked via ``attachment_id``: when a user uploads
+    a file via ``POST /api/chats/{chat_id}/attachments`` the orchestrator
+    INSERTs a ``ChatAttachment`` row and returns its id; the frontend then
+    sets that id here so the chat-send handler can mark the row bound to
+    the just-saved message.
+    """
 
     # Per-attachment size caps. These are defense-in-depth against very large
     # pastes/images inflating a single turn past the model's context window or
@@ -711,6 +721,11 @@ class ChatAttachmentSchema(BaseModel):
     mime_type: str | None = None
     file_path: str | None = None
     label: str | None = None
+    # Optional pointer to a ``ChatAttachment`` row when this serialized
+    # attachment was produced by an earlier ``POST /api/chats/{chat_id}/attachments``
+    # upload. The chat-send handler patches ``ChatAttachment.message_id`` with
+    # the freshly-saved user message id so orphan GC leaves the row alone.
+    attachment_id: str | None = None
 
     @field_validator("type")
     @classmethod

@@ -102,6 +102,61 @@ async def _get_arq_pool():
         return None
 
 
+async def _bind_chat_attachments_to_message(
+    db: AsyncSession,
+    *,
+    chat_id: UUID,
+    message_id: UUID,
+    attachments,
+) -> None:
+    """Patch ``ChatAttachment.message_id`` for any orphan upload referenced by
+    the just-saved user message.
+
+    Iterates ``attachments`` (a list of ``ChatAttachmentSchema``) and looks
+    for ``file_reference`` entries carrying an ``attachment_id``. Each
+    matching row gets its ``message_id`` set so the orphan GC leaves it
+    alone — and so cascade deletes do the right thing when the chat or
+    message is later removed.
+
+    Best-effort: a missing row, a wrong-chat row, or a non-orphan row
+    (already bound) is logged and skipped. Never raises into the caller.
+    """
+    if not attachments:
+        return
+    ids: list[UUID] = []
+    for att in attachments:
+        # ChatAttachmentSchema fields: type, content, mime_type, file_path,
+        # label, attachment_id (optional, added in Phase B/C).
+        att_id = getattr(att, "attachment_id", None)
+        if not att_id:
+            continue
+        try:
+            ids.append(UUID(str(att_id)))
+        except (ValueError, TypeError):
+            logger.warning("[chat] invalid attachment_id %r in message %s", att_id, message_id)
+    if not ids:
+        return
+    try:
+        from ..models import ChatAttachment
+
+        rows = await db.execute(
+            select(ChatAttachment).where(
+                ChatAttachment.id.in_(ids),
+                ChatAttachment.chat_id == chat_id,
+            )
+        )
+        bound = 0
+        for row in rows.scalars().all():
+            if row.message_id is None:
+                row.message_id = message_id
+                bound += 1
+        if bound:
+            await db.commit()
+            logger.info("[chat] bound %d chat_attachment rows to message=%s", bound, message_id)
+    except Exception:
+        logger.exception("[chat] failed to bind chat_attachments to message=%s", message_id)
+
+
 @router.get("/", response_model=list[ChatSchema])
 async def get_chats(
     current_user: User = Depends(get_authenticated_user), db: AsyncSession = Depends(get_db)
@@ -449,6 +504,24 @@ async def delete_chat_session(
         )
         if count_result.scalar() <= 1:
             raise HTTPException(status_code=400, detail="Cannot delete the last chat session")
+
+    # Best-effort cleanup of any chat-attachment uploads on disk before the
+    # cascade DELETE removes the ChatAttachment rows. Keeps the workspace
+    # tree tidy when a chat is deleted but the workspace stays.
+    if chat.project_id is not None:
+        try:
+            from .chat_attachments import _resolve_workspace_root
+
+            project = await db.get(Project, chat.project_id)
+            if project is not None:
+                workspace_root = await _resolve_workspace_root(project)
+                chat_dir = workspace_root / ".chat" / str(chat.id)
+                if chat_dir.exists():
+                    import shutil as _shutil
+
+                    _shutil.rmtree(chat_dir, ignore_errors=True)
+        except Exception:
+            logger.exception("[chat] failed to clean .chat/%s on delete", chat.id)
 
     await db.delete(chat)
     await db.commit()
@@ -1319,6 +1392,9 @@ async def agent_chat(
                 )
 
             await db.commit()
+            await _bind_chat_attachments_to_message(
+                db, chat_id=chat.id, message_id=user_message.id, attachments=request.attachments
+            )
         except Exception as e:
             await db.rollback()
             logger.error(f"Database error during chat history setup: {e}", exc_info=True)
@@ -1585,6 +1661,9 @@ async def agent_chat_stream(
             )
             db.add(user_message)
             await db.commit()
+            await _bind_chat_attachments_to_message(
+                db, chat_id=chat.id, message_id=user_message.id, attachments=request.attachments
+            )
 
             # Create agent using same pattern as HTTP endpoint
             from ..config import get_settings
@@ -1832,9 +1911,7 @@ async def agent_chat_stream(
                 # worker — here we just slice the structured array. Empty/None
                 # request.mentions means legacy behavior (no @-effects).
                 _mentions = list(request.mentions or [])
-                _mention_agent_ids = [
-                    m.ref_id for m in _mentions if m.kind == "agent" and m.ref_id
-                ]
+                _mention_agent_ids = [m.ref_id for m in _mentions if m.kind == "agent" and m.ref_id]
                 _mention_mcp_config_ids = [
                     m.ref_id for m in _mentions if m.kind == "mcp" and m.ref_id
                 ]
@@ -3221,9 +3298,7 @@ async def save_file(
         try:
             from ..services.project_files import upsert_project_file
 
-            await upsert_project_file(
-                db, project_id=project_id, file_path=file_path, content=code
-            )
+            await upsert_project_file(db, project_id=project_id, file_path=file_path, content=code)
             await db.commit()
             print(f"[DB] Saved {file_path} to database")
         except Exception as e:

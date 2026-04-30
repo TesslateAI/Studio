@@ -42,8 +42,9 @@ from .routers import (
     automations,
     billing,
     channels,
-    communication_destinations,
     chat,
+    chat_attachments,
+    communication_destinations,
     contract_templates,
     creators,
     deployment_credentials,
@@ -362,6 +363,51 @@ async def agent_task_cleanup_loop():
             await asyncio.sleep(60)
 
 
+async def chat_attachment_orphan_gc_loop():
+    """Background task: prune orphan ``ChatAttachment`` rows + their files.
+
+    An orphan is a row whose ``message_id`` is still NULL after 24 hours —
+    the user uploaded a file but never sent the message that would have
+    bound it. Runs every 30 minutes; deletions are best-effort and logged.
+    """
+    import asyncio
+
+    from .database import AsyncSessionLocal
+    from .routers.chat_attachments import gc_orphan_chat_attachments
+
+    logger.info("Chat-attachment orphan GC task started")
+    error_count = 0
+    max_consecutive_errors = 5
+
+    while True:
+        db = None
+        try:
+            async with AsyncSessionLocal() as db:
+                pruned = await gc_orphan_chat_attachments(db)
+                if pruned:
+                    logger.info("Chat-attachment orphan GC pruned %d rows", pruned)
+                error_count = 0
+        except Exception as e:
+            error_count += 1
+            logger.error(
+                f"Chat-attachment orphan GC error ({error_count}/{max_consecutive_errors}): {e}",
+                exc_info=True,
+            )
+            if error_count >= max_consecutive_errors:
+                backoff_time = min(900, 60 * (2 ** (error_count - max_consecutive_errors)))
+                logger.warning(
+                    f"Too many chat-attachment GC errors, backing off for {backoff_time}s"
+                )
+                await asyncio.sleep(backoff_time)
+                continue
+        finally:
+            if db is not None:
+                with contextlib.suppress(Exception):
+                    await db.close()
+
+        await asyncio.sleep(30 * 60)
+
+
 async def container_cleanup_loop():
     """
     Background task to clean up idle project containers.
@@ -652,6 +698,9 @@ async def startup():
         asyncio.create_task(dlock.run_with_lock("model_health", model_health_check_loop))
         asyncio.create_task(dlock.run_with_lock("credit_reset", daily_credit_reset_loop))
         asyncio.create_task(dlock.run_with_lock("agent_task_cleanup", agent_task_cleanup_loop))
+        asyncio.create_task(
+            dlock.run_with_lock("chat_attachment_orphan_gc", chat_attachment_orphan_gc_loop)
+        )
         logger.info("Background loops started with distributed locking")
     else:
         # No Redis: run all loops locally (single-pod fallback)
@@ -660,6 +709,7 @@ async def startup():
         asyncio.create_task(stats_flush_loop())
         asyncio.create_task(model_health_check_loop())
         asyncio.create_task(daily_credit_reset_loop())
+        asyncio.create_task(chat_attachment_orphan_gc_loop())
         # agent_task_cleanup_loop not needed without Redis
         logger.info("Background loops started without distributed locking (single-pod mode)")
 
@@ -1243,6 +1293,7 @@ async def get_csrf_token():
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(node_config.router, prefix="/api", tags=["node-config"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(chat_attachments.router, prefix="/api", tags=["chat-attachments"])
 app.include_router(sidebar.router)  # prefix set on the router itself (/api/sidebar)
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
@@ -1254,7 +1305,9 @@ app.include_router(marketplace_sources.router)  # /api/marketplace/sources
 app.include_router(creators.router)  # /api/creators - already prefixed in router
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(admin_spend.router, tags=["admin-spend"])  # /api/admin/spend
-app.include_router(contract_templates.router, tags=["contract-templates"])  # /api/contract-templates
+app.include_router(
+    contract_templates.router, tags=["contract-templates"]
+)  # /api/contract-templates
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
 app.include_router(git_providers.router, prefix="/api", tags=["git-providers"])
@@ -1372,9 +1425,7 @@ app.include_router(app_composition.router)  # /api/v1/composition/installs/...
 from .services.apps.connector_proxy import router as connector_proxy_router  # noqa: E402
 
 if not settings.is_connector_proxy_dedicated:
-    app.include_router(
-        connector_proxy_router
-    )  # /api/v1/connector-proxy/connectors/{id}/{path}
+    app.include_router(connector_proxy_router)  # /api/v1/connector-proxy/connectors/{id}/{path}
 else:
     logger.info(
         "Connector Proxy: CONNECTOR_PROXY_MODE=dedicated — router not "
