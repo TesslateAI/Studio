@@ -136,7 +136,7 @@ class DockerOrchestrator(BaseOrchestrator):
         try:
             self.projects_path.mkdir(parents=True, exist_ok=True)
         except PermissionError:
-            logger.debug(
+            logger.warning(
                 "[DOCKER] Cannot create %s (permission denied); skipping", self.projects_path
             )
 

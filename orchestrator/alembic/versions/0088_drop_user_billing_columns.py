@@ -18,6 +18,24 @@ daily_credits_reset_date, support_tier, deployed_projects_count
 
 All live billing/deployment data is on the ``teams`` table.  A downgrade
 re-adds the columns as nullable so the schema rolls back cleanly.
+
+Pre-migration audit (run before upgrading production)
+------------------------------------------------------
+Verify no orphaned billing data exists on the users table::
+
+    SELECT COUNT(*) FROM users
+    WHERE (bundled_credits > 0 OR purchased_credits > 0 OR total_spend > 0)
+      AND default_team_id IS NULL;
+
+Any non-zero result means that user has credits not mirrored to a team row.
+Backfill or zero out before proceeding.
+
+Deployment ordering
+-------------------
+Deploy the new application code *before* running this migration.  The new
+code does not reference any of the dropped columns, so it is safe against the
+old schema.  Running the migration first against old code would cause
+AttributeError on every request that reads the now-absent user fields.
 """
 
 from collections.abc import Sequence

@@ -2468,7 +2468,10 @@ async def adjust_user_credits(
             credit_team = team_res.scalar_one_or_none()
 
         if not credit_team:
-            raise HTTPException(status_code=404, detail="User has no billing team")
+            raise HTTPException(
+                status_code=400,
+                detail="User's billing team not found; the account has no team association",
+            )
 
         old_balance = credit_team.purchased_credits or 0
 

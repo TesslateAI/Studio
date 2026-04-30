@@ -4431,6 +4431,7 @@ async def deploy_project(
     # Resolve tier and total_spend from the active team
     _tier = "free"
     _total_spend = 0
+    _team = None
     if _team_id:
         _team_result = await db.execute(select(Team).where(Team.id == _team_id))
         _team = _team_result.scalar_one_or_none()

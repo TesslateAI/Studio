@@ -358,18 +358,14 @@ class TestStripeSubscriptionRenewal:
             "metadata": {},
         }
 
-        team = Mock()
-        team.subscription_tier = "pro"
-        team.bundled_credits = 500
-
         db = AsyncMock()
         db.execute = AsyncMock()
         db.commit = AsyncMock()
 
         await service._handle_invoice_payment_succeeded(invoice, db)
 
-        # bundled_credits should remain untouched
-        assert team.bundled_credits == 500
+        # non-cycle invoices must not trigger any DB write
+        db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_usage_invoice_marks_logs_paid(self):
