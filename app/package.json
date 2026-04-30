@@ -23,6 +23,7 @@
   "dependencies": {
     "@dagrejs/dagre": "^1.1.8",
     "@hello-pangea/dnd": "^18.0.1",
+    "@huggingface/transformers": "^3.8.1",
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-dialog": "^1.1.4",

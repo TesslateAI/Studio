@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
+  Mic,
 } from 'lucide-react';
 
 interface SettingsSidebarProps {
@@ -39,6 +40,7 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Profile', path: '/settings/profile', icon: User },
       { label: 'Preferences', path: '/settings/preferences', icon: Settings },
+      { label: 'Voice input', path: '/settings/voice-input', icon: Mic },
       { label: 'Security', path: '/settings/security', icon: Shield },
     ],
   },

@@ -40,6 +40,7 @@ import { SettingsLayout } from './layouts/SettingsLayout';
 import { MarketplaceLayout } from './layouts/MarketplaceLayout';
 import ProfileSettings from './pages/settings/ProfileSettings';
 import PreferencesSettings from './pages/settings/PreferencesSettings';
+import VoiceInputSettings from './pages/settings/VoiceInputSettings';
 import SecuritySettings from './pages/settings/SecuritySettings';
 import DeploymentSettings from './pages/settings/DeploymentSettings';
 import BillingSettings from './pages/settings/BillingSettings';
@@ -434,6 +435,7 @@ function AppContent() {
           <Route index element={<Navigate to="/settings/profile" replace />} />
           <Route path="profile" element={<ProfileSettings />} />
           <Route path="preferences" element={<PreferencesSettings />} />
+          <Route path="voice-input" element={<VoiceInputSettings />} />
           <Route path="security" element={<SecuritySettings />} />
           <Route path="deployment" element={<DeploymentSettings />} />
           {/* /settings/connectors moved to Library → Connectors (#307). */}

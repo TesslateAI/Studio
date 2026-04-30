@@ -40,6 +40,7 @@ import { useAttachments } from '../../hooks/useAttachments';
 import { AttachmentStrip } from './AttachmentStrip';
 import { PlusMenu } from './PlusMenu';
 import { MentionPicker, type MentionPickerFile } from './MentionPicker';
+import { VoiceInput } from './VoiceInput';
 
 // Width thresholds for responsive collapse
 // Below VERY_COMPACT: Only essential icons (agent icon, menu, send button)
@@ -1490,6 +1491,17 @@ export function ChatInput({
               compact={isCompact}
             />
           </div>
+
+          {/* Voice input — always visible. Owns its own modal/panel via portals. */}
+          <VoiceInput
+            disabled={disabled || isExecuting}
+            onTranscript={(text) => {
+              const trimmed = text.trim();
+              if (!trimmed) return;
+              setMessage((prev) => (prev ? `${prev.replace(/\s+$/, '')} ${trimmed}` : trimmed));
+              textareaRef.current?.focus();
+            }}
+          />
 
           {/* Send button - always visible */}
           <button

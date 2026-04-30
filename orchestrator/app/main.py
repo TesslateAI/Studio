@@ -37,6 +37,7 @@ from .routers import (
     app_triggers,
     app_versions,
     app_yanks,
+    asr_cleanup,
     auth,
     automations,
     billing,
@@ -1275,6 +1276,7 @@ app.include_router(referrals.router, prefix="/api", tags=["referrals"])
 app.include_router(billing.router, prefix="/api", tags=["billing"])
 app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
 app.include_router(feedback.router, tags=["feedback"])
+app.include_router(asr_cleanup.router, tags=["asr"])  # /api/asr/cleanup - browser-side voice input
 app.include_router(tasks.router)
 app.include_router(deployments.router)
 app.include_router(deployment_credentials.router)
