@@ -44,9 +44,6 @@ from ..permissions import Permission, get_effective_project_role
 from ..schemas import AgentChatRequest, AgentChatResponse, AgentStepResponse
 from ..schemas import Chat as ChatSchema
 from ..services.agent_context import (
-    _build_architecture_context,
-    _build_git_context,
-    _build_tesslate_context,
     _get_chat_history,
     _resolve_container_name,
 )
@@ -1267,28 +1264,11 @@ async def agent_chat(
             "containers": _tier_snapshot.get("containers", []),
         }
 
-        # Get project context
-        project_context = {"project_name": project.name, "project_description": project.description}
-
-        # Build TESSLATE.md context (project-specific documentation for AI agents)
-        tesslate_context = await _build_tesslate_context(
-            project,
-            current_user.id,
-            db,
-            container_name=container_name,
-            container_directory=container_directory,
-        )
-        if tesslate_context:
-            project_context["tesslate_context"] = tesslate_context
-            logger.info(f"[AGENT-CHAT] Added TESSLATE.md context for project {project.id}")
-
-        # Check if project has Git repository connected and inject Git context
-        git_context = await _build_git_context(project, current_user.id, db)
-        if git_context:
-            project_context["git_context"] = git_context
-
-        # Add project_context to agent execution context
-        context["project_context"] = project_context
+        # Build project context (name + description only — the agent reads these via {project_name})
+        context["project_context"] = {
+            "project_name": project.name,
+            "project_description": project.description,
+        }
 
         # ============================================================================
         # NEW: Run Agent and Collect Events (HTTP Adapter for AsyncIterator)
@@ -1794,25 +1774,13 @@ async def agent_chat_stream(
             if hasattr(agent_instance, "max_iterations"):
                 agent_instance.max_iterations = request.max_iterations or 0
 
-            # Build project context
+            # Build project context (name + description only — the agent reads these via {project_name})
             project_context = {}
             if project:
                 project_context = {
                     "project_name": project.name,
                     "project_description": project.description,
                 }
-                tesslate_context = await _build_tesslate_context(
-                    project,
-                    current_user.id,
-                    db,
-                    container_name=container_name,
-                    container_directory=container_directory,
-                )
-                if tesslate_context:
-                    project_context["tesslate_context"] = tesslate_context
-                git_context = await _build_git_context(project, current_user.id, db)
-                if git_context:
-                    project_context["git_context"] = git_context
 
             # Prepare execution context
             # Note: container_directory was already captured during initial container lookup above
@@ -2990,37 +2958,6 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         if not container_id:
             logger.info("[UNIFIED-CHAT] Project-level agent (no container_id)")
 
-        # Build TESSLATE context
-        tesslate_context = None
-        if project:
-            tesslate_context = await _build_tesslate_context(
-                project,
-                user.id,
-                db,
-                container_name=container_name,
-                container_directory=container_directory,
-            )
-
-        # Build Git context
-        git_context = None
-        if project:
-            git_context = await _build_git_context(project, user.id, db)
-
-        # Build architecture context (containers, connections, injected env vars)
-        arch_context = None
-        if project:
-            arch_context = await _build_architecture_context(project, db)
-
-        # Combine all context
-        if tesslate_context:
-            project_context_str += tesslate_context
-        if git_context:
-            project_context_str += (
-                git_context.get("formatted", "") if isinstance(git_context, dict) else git_context
-            )
-        if arch_context:
-            project_context_str += arch_context
-
     except Exception as e:
         await db.rollback()
         logger.error(f"[UNIFIED-CHAT] Error building context: {e}", exc_info=True)
@@ -3115,25 +3052,11 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         "containers": _tier_snapshot.get("containers", []),
     }
 
-    # Add project context if available
-    try:
-        if project:
-            execution_context["project_context"] = {
-                "project_name": project.name,
-                "project_description": project.description,
-            }
-
-            # Add tesslate_context if available
-            if tesslate_context:
-                execution_context["project_context"]["tesslate_context"] = tesslate_context
-                logger.info(f"[UNIFIED-CHAT] Added TESSLATE.md context for project {project.id}")
-
-            # Add git_context if available
-            if git_context:
-                execution_context["project_context"]["git_context"] = git_context
-                logger.info(f"[UNIFIED-CHAT] Added Git context for project {project.id}")
-    except NameError as e:
-        logger.warning(f"[UNIFIED-CHAT] Context variables not available: {e}")
+    if project:
+        execution_context["project_context"] = {
+            "project_name": project.name,
+            "project_description": project.description,
+        }
 
     # 5. Run the agent and stream events back to the client
     full_response = ""

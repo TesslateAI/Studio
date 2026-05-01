@@ -448,10 +448,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
         UserPurchasedAgent,
     )
     from .services.agent_context import (
-        _build_architecture_context,
         _build_cross_platform_context,
-        _build_git_context,
-        _build_tesslate_context,
         _get_chat_history,
         _resolve_container_name,
     )
@@ -895,21 +892,6 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     "project_name": project.name,
                     "project_description": project.description,
                 }
-                tesslate_context = await _build_tesslate_context(
-                    project,
-                    UUID(payload.user_id),
-                    db,
-                    container_name=container_name,
-                    container_directory=container_directory,
-                )
-                if tesslate_context:
-                    project_context["tesslate_context"] = tesslate_context
-                git_context = await _build_git_context(project, UUID(payload.user_id), db)
-                if git_context:
-                    project_context["git_context"] = git_context
-                architecture_context = await _build_architecture_context(project, db)
-                if architecture_context:
-                    project_context["architecture_context"] = architecture_context
             else:
                 project_context = payload.project_context or {}
 

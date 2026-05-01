@@ -315,38 +315,6 @@ async def _get_chat_history(
                             formatted_messages.append(
                                 {"role": "assistant", "content": iteration_content}
                             )
-
-                            # Add tool results as user feedback (simulating the iterative flow)
-                            if tool_calls:
-                                tool_results_feedback = "Tool Results:\n"
-                                for idx, tc in enumerate(tool_calls):
-                                    tool_name = tc.get("name", "unknown")
-                                    tool_result = tc.get("result", {})
-                                    success = tool_result.get("success", False)
-
-                                    tool_results_feedback += f"\n{idx + 1}. {tool_name}: {'✓ Success' if success else '✗ Failed'}\n"
-
-                                    if tool_result.get("result"):
-                                        result_data = tool_result["result"]
-                                        if isinstance(result_data, dict):
-                                            # Add key result fields
-                                            for key in ["message", "content", "stdout", "output"]:
-                                                if key in result_data:
-                                                    content = str(result_data[key])[
-                                                        :500
-                                                    ]  # Limit content length
-                                                    tool_results_feedback += (
-                                                        f"   {key}: {content}\n"
-                                                    )
-                                                    break
-                                        else:
-                                            tool_results_feedback += (
-                                                f"   {str(result_data)[:500]}\n"
-                                            )
-
-                                formatted_messages.append(
-                                    {"role": "user", "content": tool_results_feedback}
-                                )
                 else:
                     # Regular assistant message without iterations
                     formatted_messages.append({"role": msg.role, "content": msg.content})
@@ -478,43 +446,9 @@ async def _build_tesslate_context(
                 except Exception as e:
                     logger.error(f"[TESSLATE-CONTEXT] Failed to copy template: {e}")
 
-        # Also try to read .tesslate/config.json for architecture context
-        config_content = None
-        try:
-            orchestrator = get_orchestrator()
-            config_content = await orchestrator.read_file(
-                user_id=user_id,
-                project_id=project.id,
-                container_name=container_name,
-                file_path=".tesslate/config.json",
-                project_slug=project.slug,
-            )
-        except Exception:
-            pass
-
-        if not config_content and not is_kubernetes_mode():
-            # Docker fallback
-            config_path = os.path.join(
-                get_project_path(user_id, project.id), ".tesslate", "config.json"
-            )
-            if os.path.exists(config_path):
-                try:
-                    async with aiofiles.open(config_path, encoding="utf-8") as f:
-                        config_content = await f.read()
-                except Exception:
-                    pass
-
-        # Build combined context
-        parts = []
         if tesslate_content:
-            parts.append(f"=== Project Context (TESSLATE.md) ===\n\n{tesslate_content}")
-        if config_content:
-            parts.append(f"=== Architecture Config (.tesslate/config.json) ===\n\n{config_content}")
-
-        if parts:
-            return "\n" + "\n\n".join(parts) + "\n"
-        else:
-            return None
+            return "\n=== Project Context (TESSLATE.md) ===\n\n" + tesslate_content + "\n"
+        return None
 
     except Exception as e:
         logger.error(f"[TESSLATE-CONTEXT] Failed to build TESSLATE context: {e}", exc_info=True)
