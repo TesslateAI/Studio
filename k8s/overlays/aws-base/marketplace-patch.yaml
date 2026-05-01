@@ -1,0 +1,22 @@
+# Marketplace deployment patch for AWS EKS
+# - Forces imagePullPolicy: Always on every container so the mutable
+#   :production / :beta tags actually re-pull on rollout. The base
+#   defaults to IfNotPresent for minikube parity, which would otherwise
+#   strand stale images on EKS nodes after a `build` push.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-marketplace
+  namespace: tesslate
+spec:
+  template:
+    spec:
+      containers:
+        - name: marketplace
+          imagePullPolicy: Always
+      initContainers:
+        - name: alembic-migrate
+          imagePullPolicy: Always
+        # create-database uses the upstream postgres:16-alpine image
+        # which is content-addressed enough that IfNotPresent is fine —
+        # not patched here.
