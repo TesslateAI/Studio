@@ -1,3 +1,6 @@
+# See postgres-pdb.yaml for the full rationale.
+# tl;dr: minAvailable: 1 with replicas: 1 = un-evictable forever.
+# maxUnavailable: 1 = evictable now, still safe if scaled to 2+ later.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,7 +10,7 @@ metadata:
     app: redis
     component: cache
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app: redis
