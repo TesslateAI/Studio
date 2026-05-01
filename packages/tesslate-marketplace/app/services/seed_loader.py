@@ -28,6 +28,13 @@ Design constraints:
   * Failure on one row never blocks the others. Each row is wrapped in its
     own try/except + per-row rollback to a SAVEPOINT so a single bad seed
     does not poison the whole startup.
+  * Removal-by-omission. After the upsert pass, any *seed-owned* row whose
+    ``(kind, slug)`` is no longer represented in the JSON is deactivated
+    and a ``deactivate`` change event is emitted. "Seed-owned" is scoped
+    to ``creator_handle == 'tesslate'`` — the publisher namespace
+    intentionally reserved for first-party seeds. This removes the need
+    for per-item tombstone rows in the seed JSON to hide an item we no
+    longer ship.
 """
 
 from __future__ import annotations
@@ -65,6 +72,14 @@ logger = logging.getLogger(__name__)
 # manifest gets cached. Keep at "0.1.0" for backwards compatibility.
 DEFAULT_VERSION = "0.1.0"
 
+# Publisher handle the seed loader claims as its own. Every row created or
+# updated here gets ``creator_handle = SEED_OWNER_HANDLE`` so the reconcile
+# pass can find seed-owned rows that disappeared from the JSON without
+# touching community-published items. The publish endpoint should treat
+# this handle as reserved (a community user cannot ship under it) — see
+# ``app/routers/publish.py``.
+SEED_OWNER_HANDLE = "tesslate"
+
 # Order matters only for human-readable boot logs — every file is independently
 # upserted by ``(kind, slug)``.
 SEED_FILES: tuple[str, ...] = (
@@ -89,6 +104,7 @@ class SeedLoadResult:
     items_updated: int = 0
     items_unchanged: int = 0
     items_failed: int = 0
+    items_deactivated: int = 0
     bundles_attached: int = 0
     categories_seeded: int = 0
     featured_seeded: int = 0
@@ -283,6 +299,64 @@ async def _seed_featured(session: AsyncSession, entries: list[dict[str, Any]]) -
     return seeded
 
 
+async def _reconcile_removed_seeds(
+    session: AsyncSession,
+    seed_keys: set[tuple[str, str]],
+    seeded_kinds: set[str],
+) -> int:
+    """Deactivate seed-owned rows whose ``(kind, slug)`` is no longer in JSON.
+
+    This is the structural answer to the "tombstone in seed JSON" pattern.
+    Previously, hiding a seeded item meant leaving a dummy entry with
+    ``is_active=false, is_published=false`` because :func:`_upsert_item`
+    only UPSERTs and never DELETEs. Now we walk the rows owned by this
+    loader (``creator_handle == SEED_OWNER_HANDLE``) for the kinds that
+    appeared in this run, and deactivate any whose ``(kind, slug)`` no
+    longer matches a seed entry.
+
+    Scope: only kinds that *had at least one* entry in the current run.
+    This guards against an empty-on-disk seed file accidentally wiping the
+    catalog — if no agents were loaded in this run, we don't deactivate
+    any agents either. The publisher handle filter prevents touching
+    community-published items.
+
+    A ``deactivate`` ``ChangesEvent`` is emitted per row so the
+    orchestrator's federation sync drains it on the next poll and flips
+    its local cache row to ``is_active=False`` via ``_handle_deactivate``.
+    """
+    if not seeded_kinds:
+        return 0
+
+    candidate_stmt = select(Item).where(
+        Item.kind.in_(seeded_kinds),
+        Item.creator_handle == SEED_OWNER_HANDLE,
+        Item.is_active.is_(True),
+    )
+    rows = (await session.execute(candidate_stmt)).scalars().all()
+
+    deactivated = 0
+    for row in rows:
+        if (row.kind, row.slug) in seed_keys:
+            continue
+        row.is_active = False
+        row.is_published = False
+        await changes_emitter.emit(
+            session,
+            op="deactivate",
+            kind=row.kind,
+            slug=row.slug,
+            version=row.latest_version,
+            payload={"reason": "removed from seed JSON"},
+        )
+        deactivated += 1
+        logger.info(
+            "seed_loader: deactivated %s/%s (no longer present in seed JSON)",
+            row.kind,
+            row.slug,
+        )
+    return deactivated
+
+
 async def _upsert_item(
     session: AsyncSession, entry: dict[str, Any], settings: Settings
 ) -> tuple[Item, ItemVersion, Bundle | None, bool, bool]:
@@ -305,6 +379,7 @@ async def _upsert_item(
         await session.execute(select(Item).where(Item.kind == kind, Item.slug == slug))
     ).scalar_one_or_none()
     created = False
+    visibility_flipped = False
     if item is None:
         item = Item(
             kind=kind,
@@ -327,7 +402,10 @@ async def _upsert_item(
             features=list(entry.get("features") or []),
             tech_stack=list(entry.get("tech_stack") or []),
             extra_metadata=dict(entry.get("extra_metadata") or {}),
-            creator_handle=entry.get("creator_handle") or "tesslate",
+            # creator_handle is forced to SEED_OWNER_HANDLE so the reconcile
+            # pass can identify rows the loader owns. Seed JSON should not
+            # set this field; if it does, the loader's value wins.
+            creator_handle=SEED_OWNER_HANDLE,
             creator_display_name=entry.get("creator_display_name") or "Tesslate",
             creator_avatar_url=entry.get("creator_avatar_url"),
             git_repo_url=entry.get("git_repo_url"),
@@ -350,9 +428,24 @@ async def _upsert_item(
         item.icon = entry.get("icon", item.icon)
         item.avatar_url = entry.get("avatar_url", item.avatar_url)
         item.preview_image = entry.get("preview_image", item.preview_image)
-        item.is_active = bool(entry.get("is_active", item.is_active))
+        # Snapshot the prior visibility flags so we can detect a re-activation
+        # (e.g. an item that was deactivated by a previous reconcile pass and
+        # is now back in the seed JSON). Without this the manifest-signature
+        # short-circuit below would suppress the change event the federation
+        # client needs to flip its local cache back to is_active=True.
+        prior_is_active = bool(item.is_active)
+        prior_is_published = bool(item.is_published)
+        # JSON is canonical. Use the same defaults as the create branch so a
+        # re-seed of an entry whose JSON omits the visibility flags resets
+        # them to "visible" — symmetric with how a brand-new row is born.
+        # The reconcile pass is the only sanctioned path to deactivate.
+        item.is_active = bool(entry.get("is_active", True))
         item.is_featured = bool(entry.get("is_featured", item.is_featured))
-        item.is_published = bool(entry.get("is_published", item.is_published))
+        item.is_published = bool(entry.get("is_published", True))
+        visibility_flipped = (
+            item.is_active != prior_is_active
+            or item.is_published != prior_is_published
+        )
         item.pricing_type = pricing_type
         item.price_cents = price_cents
         item.stripe_price_id = entry.get("stripe_price_id")
@@ -361,6 +454,9 @@ async def _upsert_item(
         item.features = list(entry.get("features") or item.features or [])
         item.tech_stack = list(entry.get("tech_stack") or item.tech_stack or [])
         item.extra_metadata = dict(entry.get("extra_metadata") or item.extra_metadata or {})
+        # Always reclaim ownership — covers rows seeded before SEED_OWNER_HANDLE
+        # enforcement was added, so reconcile finds them.
+        item.creator_handle = SEED_OWNER_HANDLE
         item.git_repo_url = entry.get("git_repo_url", item.git_repo_url)
         item.homepage_url = entry.get("homepage_url", item.homepage_url)
 
@@ -389,6 +485,13 @@ async def _upsert_item(
         if _manifest_signature(iv.manifest or {}) != _manifest_signature(entry):
             iv.manifest = entry
             changed = True
+
+    # Visibility-flip changes (re-activation after a prior reconcile-deactivate)
+    # also need a downstream upsert event even when the manifest is byte-
+    # identical to last run — otherwise the orchestrator's federation cache
+    # stays stuck on is_active=False.
+    if visibility_flipped and not created:
+        changed = True
 
     item.latest_version = version
     item.latest_version_id = iv.id
@@ -573,6 +676,22 @@ async def load_seeds(
             if bundle is not None:
                 result.bundles_attached += 1
 
+        # Reconcile removals: deactivate any seed-owned row whose (kind, slug)
+        # is no longer in the JSON. Runs in its own SAVEPOINT so a reconcile
+        # failure (e.g. a transient DB error mid-loop) doesn't roll back the
+        # successful upserts above. ``emit_changes_events`` controls whether
+        # downstream federation is notified — same toggle as the upsert pass.
+        seeded_kinds = {e["kind"] for e in entries if e.get("kind") and e.get("slug")}
+        seed_keys = {(e["kind"], e["slug"]) for e in entries if e.get("kind") and e.get("slug")}
+        try:
+            async with session.begin_nested():
+                deactivated = await _reconcile_removed_seeds(
+                    session, seed_keys, seeded_kinds
+                )
+            result.items_deactivated = deactivated
+        except Exception:  # noqa: BLE001
+            logger.exception("seed_loader: reconcile pass failed")
+
         try:
             featured_count = await _seed_featured(session, entries)
             result.featured_seeded = featured_count
@@ -617,11 +736,13 @@ async def load_seeds(
     result.files_skipped = [f for f in SEED_FILES if not (seed_root / f).exists()]
     logger.info(
         "seed_loader: complete — created=%d updated=%d unchanged=%d failed=%d "
-        "bundles=%d categories=%d featured=%d first_etag=%s last_etag=%s",
+        "deactivated=%d bundles=%d categories=%d featured=%d "
+        "first_etag=%s last_etag=%s",
         result.items_created,
         result.items_updated,
         result.items_unchanged,
         result.items_failed,
+        result.items_deactivated,
         result.bundles_attached,
         result.categories_seeded,
         result.featured_seeded,

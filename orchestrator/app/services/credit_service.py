@@ -50,12 +50,21 @@ def is_byok_model(model_name: str) -> bool:
     return any(model_name.startswith(p) for p in _get_byok_prefixes())
 
 
-async def check_credits(user, model_name: str, team=None) -> tuple[bool, str]:
+async def check_credits(
+    user, model_name: str, team=None, db: AsyncSession | None = None
+) -> tuple[bool, str]:
     """
     Pre-request guard: verify credits before making an LLM call.
 
-    Checks team credits first (if team provided), falls back to user credits
-    for backward compatibility during migration.
+    Credits live on the Team row (see migration 0088_drop_user_billing_columns
+    which removed the per-user balance columns). Resolution order:
+
+      1. Explicit ``team`` argument (preferred — caller already loaded it).
+      2. ``user.default_team_id`` looked up via ``db`` (fallback so single-team
+         users don't have to be re-plumbed at every call site).
+      3. No team resolvable → permissive (return True). Users without any
+         team have no credit ledger to evaluate, and silently failing-open
+         here is safer than 500-ing the request path.
 
     Returns:
         (True, "") if user can proceed.
@@ -64,9 +73,20 @@ async def check_credits(user, model_name: str, team=None) -> tuple[bool, str]:
     if is_byok_model(model_name):
         return True, ""
 
-    # Check team credits if available, otherwise fall back to user
-    credit_source = team if team is not None else user
-    if credit_source.total_credits <= 0:
+    # Lazy-resolve team from user.default_team_id when caller didn't pass one.
+    if team is None and db is not None and user is not None:
+        team_id = getattr(user, "default_team_id", None)
+        if team_id is not None:
+            from ..models_team import Team
+
+            result = await db.execute(select(Team).where(Team.id == team_id))
+            team = result.scalar_one_or_none()
+
+    # No team = no credit ledger to evaluate. Don't block the request.
+    if team is None:
+        return True, ""
+
+    if team.total_credits <= 0:
         return False, (
             "You have no credits remaining. "
             "Please purchase credits or upgrade your plan to continue using AI features."

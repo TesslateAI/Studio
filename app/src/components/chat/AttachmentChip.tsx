@@ -16,7 +16,11 @@ export function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
   const isLive = isLiveAttachment(attachment);
 
   if (attachment.type === 'image') {
-    const src = isLive ? attachment.previewUrl : (attachment.content ? `data:${attachment.mime_type || 'image/png'};base64,${attachment.content}` : undefined);
+    const src = isLive
+      ? attachment.previewUrl
+      : attachment.content
+        ? `data:${attachment.mime_type || 'image/png'};base64,${attachment.content}`
+        : undefined;
     return (
       <div className="relative group inline-flex items-center gap-1">
         {src && (
@@ -38,8 +42,15 @@ export function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
           </button>
         )}
         {showPreview && src && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowPreview(false)}>
-            <img src={src} alt="preview" className="max-w-[80vw] max-h-[80vh] rounded-lg shadow-2xl" />
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+            onClick={() => setShowPreview(false)}
+          >
+            <img
+              src={src}
+              alt="preview"
+              className="max-w-[80vw] max-h-[80vh] rounded-lg shadow-2xl"
+            />
           </div>
         )}
       </div>
@@ -47,7 +58,7 @@ export function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
   }
 
   if (attachment.type === 'pasted_text') {
-    const lineCount = isLive ? attachment.lineCount : (attachment.content?.split('\n').length || 0);
+    const lineCount = isLive ? attachment.lineCount : attachment.content?.split('\n').length || 0;
     const fullText = isLive ? attachment.text : attachment.content;
     return (
       <div className="relative group inline-flex items-center">
@@ -56,22 +67,32 @@ export function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
           onClick={() => setShowPreview(!showPreview)}
           className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium bg-[var(--surface-hover)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--border-hover)] transition-colors"
         >
-          <span className="opacity-70">📋</span>
           <span>Pasted text +{lineCount} lines</span>
         </button>
         {onRemove && (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
             className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[var(--surface)] border border-[var(--border)] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20 hover:border-red-500/40"
           >
             <X size={8} weight="bold" className="text-[var(--text-muted)]" />
           </button>
         )}
         {showPreview && fullText && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-8" onClick={() => setShowPreview(false)}>
-            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-2xl max-w-2xl max-h-[70vh] overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-              <pre className="text-xs text-[var(--text)] font-mono whitespace-pre-wrap">{fullText}</pre>
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-8"
+            onClick={() => setShowPreview(false)}
+          >
+            <div
+              className="bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-2xl max-w-2xl max-h-[70vh] overflow-auto p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <pre className="text-xs text-[var(--text)] font-mono whitespace-pre-wrap">
+                {fullText}
+              </pre>
             </div>
           </div>
         )}

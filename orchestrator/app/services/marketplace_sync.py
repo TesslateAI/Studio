@@ -794,17 +794,26 @@ class MarketplaceSyncWorker:
             )
             common_fields["skill_body"] = skill_body if isinstance(skill_body, str) else None
 
-        # Agent-specific fields.
+        # Agent-specific fields. The federated marketplace stores these in
+        # the version manifest (versions[0].manifest); older / private sources
+        # may instead pack them into extra_metadata. Prefer the manifest, fall
+        # back to extra_metadata so both shapes work.
         if item_type == "agent":
-            extra = item.get("extra_metadata") or {}
-            common_fields["system_prompt"] = (
-                extra.get("system_prompt") if isinstance(extra, dict) else None
-            )
-            common_fields["agent_type"] = (
-                extra.get("agent_type") if isinstance(extra, dict) else None
-            )
-            common_fields["model"] = extra.get("model") if isinstance(extra, dict) else None
-            common_fields["tools"] = extra.get("tools") if isinstance(extra, dict) else None
+            extra_raw = item.get("extra_metadata")
+            extra = extra_raw if isinstance(extra_raw, dict) else {}
+            manifest_dict = manifest if isinstance(manifest, dict) else {}
+
+            def _agent_field(key: str) -> Any:
+                if key in manifest_dict and manifest_dict[key] is not None:
+                    return manifest_dict[key]
+                if key in extra and extra[key] is not None:
+                    return extra[key]
+                return None
+
+            common_fields["system_prompt"] = _agent_field("system_prompt")
+            common_fields["agent_type"] = _agent_field("agent_type")
+            common_fields["model"] = _agent_field("model")
+            common_fields["tools"] = _agent_field("tools")
 
         if existing is None:
             row = MarketplaceAgent(**common_fields)

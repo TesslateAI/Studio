@@ -709,11 +709,13 @@ class ChatAttachmentSchema(BaseModel):
     the just-saved message.
     """
 
-    # Per-attachment size caps. These are defense-in-depth against very large
-    # pastes/images inflating a single turn past the model's context window or
-    # blowing up Redis payload size. Frontend should enforce similar limits
-    # for UX but these are the source of truth.
-    MAX_PASTED_TEXT_CHARS: ClassVar[int] = 100_000
+    # 500_000 chars ≈ 125k tokens. Fits Claude (200k) and Gemini (1M+) with
+    # room for system prompt + history + response; intentionally exceeds
+    # GPT-4o (128k) so oversize pastes targeting GPT-4o fail upstream with
+    # a context-overflow error rather than silently truncating. Pastes of
+    # this size should ideally route through POST /api/chats/{id}/attachments
+    # so the payload only carries an attachment_id, not full bytes.
+    MAX_PASTED_TEXT_CHARS: ClassVar[int] = 500_000
     MAX_IMAGE_BASE64_CHARS: ClassVar[int] = 20_000_000  # ~15 MB raw; typical screenshots
 
     type: str  # "image", "pasted_text", "file_reference"

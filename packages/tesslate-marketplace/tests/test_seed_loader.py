@@ -284,6 +284,235 @@ async def test_load_seeds_picks_up_pre_built_bundle_when_present(env, tmp_path) 
 
 
 # ---------------------------------------------------------------------------
+# Reconcile pass — removal-by-omission contract.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconcile_deactivates_seed_owned_row_dropped_from_json(
+    env, tmp_path
+) -> None:
+    """Removing an entry from a seed JSON deactivates the existing seed-owned
+    row and emits a ``deactivate`` change event.
+
+    This is the structural replacement for the "tombstone in JSON" pattern —
+    instead of leaving an inactive entry behind, the loader notices the
+    omission and reconciles.
+    """
+    seeds = tmp_path / "seeds"
+    seeds.mkdir()
+    (seeds / "agents.json").write_text(
+        json.dumps(
+            [
+                {"kind": "agent", "slug": "keep-me", "name": "Keep"},
+                {"kind": "agent", "slug": "drop-me", "name": "Drop"},
+            ]
+        )
+    )
+
+    first = await load_seeds(seeds_dir=seeds)
+    assert first.items_created == 2
+    assert first.items_deactivated == 0
+
+    # Drop one entry and re-run.
+    (seeds / "agents.json").write_text(
+        json.dumps([{"kind": "agent", "slug": "keep-me", "name": "Keep"}])
+    )
+    second = await load_seeds(seeds_dir=seeds)
+    assert second.items_deactivated == 1
+
+    async with session_scope() as session:
+        kept = (
+            await session.execute(
+                select(Item).where(Item.slug == "keep-me", Item.kind == "agent")
+            )
+        ).scalar_one()
+        dropped = (
+            await session.execute(
+                select(Item).where(Item.slug == "drop-me", Item.kind == "agent")
+            )
+        ).scalar_one()
+
+        assert kept.is_active is True
+        assert kept.is_published is True
+        assert dropped.is_active is False
+        assert dropped.is_published is False
+
+        # A `deactivate` change event must exist for the dropped row so the
+        # orchestrator's federation sync drains it.
+        events = (
+            await session.execute(
+                select(ChangesEvent.op, ChangesEvent.kind, ChangesEvent.slug).where(
+                    ChangesEvent.kind == "agent",
+                    ChangesEvent.slug == "drop-me",
+                )
+            )
+        ).all()
+        assert any(e.op == "deactivate" for e in events), (
+            "no deactivate event was emitted for the removed seed"
+        )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_does_not_touch_community_published_rows(
+    env, tmp_path
+) -> None:
+    """The reconcile must only consider rows the loader owns
+    (``creator_handle == 'tesslate'``). Community-published items in the
+    same kind must survive a seed-loader run that doesn't reference them.
+    """
+    from app.models import Item, ItemVersion
+
+    # Stand up a seed and reconcile-able row, then a separately-owned row.
+    seeds = tmp_path / "seeds"
+    seeds.mkdir()
+    (seeds / "agents.json").write_text(
+        json.dumps([{"kind": "agent", "slug": "seeded", "name": "Seeded"}])
+    )
+    await load_seeds(seeds_dir=seeds)
+
+    async with session_scope() as session:
+        community = Item(
+            kind="agent",
+            slug="community-built",
+            name="Community Agent",
+            creator_handle="some-other-handle",
+            is_active=True,
+            is_published=True,
+        )
+        session.add(community)
+        await session.flush()
+        session.add(
+            ItemVersion(
+                item_id=community.id,
+                version="1.0.0",
+                changelog="published",
+                manifest={"kind": "agent", "slug": "community-built"},
+            )
+        )
+        await session.commit()
+
+    # Re-run seeds with the same JSON; reconcile must not touch the community row.
+    second = await load_seeds(seeds_dir=seeds)
+    assert second.items_deactivated == 0
+
+    async with session_scope() as session:
+        community = (
+            await session.execute(select(Item).where(Item.slug == "community-built"))
+        ).scalar_one()
+        assert community.is_active is True
+        assert community.is_published is True
+
+
+@pytest.mark.asyncio
+async def test_reactivation_emits_upsert_event_after_prior_deactivate(
+    env, tmp_path
+) -> None:
+    """A row that was deactivated by a previous reconcile pass and is
+    re-added to the JSON later must:
+
+      1. flip back to ``is_active=True`` on the marketplace side, AND
+      2. emit a fresh ``upsert`` change event so the orchestrator's
+         federation cache flips back too.
+
+    Without (2) the orchestrator stays stuck at ``is_active=False`` because
+    the manifest blob is byte-identical to the last seen version and the
+    "unchanged" short-circuit suppresses the event.
+    """
+    seeds = tmp_path / "seeds"
+    seeds.mkdir()
+
+    # Round 1: seed two agents.
+    (seeds / "agents.json").write_text(
+        json.dumps(
+            [
+                {"kind": "agent", "slug": "stays", "name": "Stays"},
+                {"kind": "agent", "slug": "yo-yo", "name": "YoYo"},
+            ]
+        )
+    )
+    await load_seeds(seeds_dir=seeds)
+
+    # Round 2: drop yo-yo → reconcile deactivates it.
+    (seeds / "agents.json").write_text(
+        json.dumps([{"kind": "agent", "slug": "stays", "name": "Stays"}])
+    )
+    r2 = await load_seeds(seeds_dir=seeds)
+    assert r2.items_deactivated == 1
+
+    # Round 3: re-add yo-yo with byte-identical entry → must flip back AND emit event.
+    (seeds / "agents.json").write_text(
+        json.dumps(
+            [
+                {"kind": "agent", "slug": "stays", "name": "Stays"},
+                {"kind": "agent", "slug": "yo-yo", "name": "YoYo"},
+            ]
+        )
+    )
+    r3 = await load_seeds(seeds_dir=seeds)
+    assert r3.items_updated == 1, (
+        "re-activated row should count as updated, not unchanged"
+    )
+
+    async with session_scope() as session:
+        yoyo = (
+            await session.execute(select(Item).where(Item.slug == "yo-yo"))
+        ).scalar_one()
+        assert yoyo.is_active is True
+        assert yoyo.is_published is True
+
+        # The most recent change event for yo-yo must be an upsert (Round 3),
+        # NOT the deactivate from Round 2.
+        latest = (
+            await session.execute(
+                select(ChangesEvent.op)
+                .where(ChangesEvent.kind == "agent", ChangesEvent.slug == "yo-yo")
+                .order_by(ChangesEvent.seq.desc())
+                .limit(1)
+            )
+        ).scalar_one()
+        assert latest == "upsert", (
+            "re-activation must emit a fresh upsert event so federation "
+            "clients flip is_active back to true"
+        )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_skips_kinds_with_no_seeds_in_run(env, tmp_path) -> None:
+    """If a kind has no entries in this run (e.g. the JSON file went
+    missing), the reconcile must NOT wipe every seeded row of that kind.
+    The scope is "kinds that appeared", not "all known kinds".
+    """
+    seeds = tmp_path / "seeds"
+    seeds.mkdir()
+
+    # First run: agent + base populated.
+    (seeds / "agents.json").write_text(
+        json.dumps([{"kind": "agent", "slug": "a1", "name": "A1"}])
+    )
+    (seeds / "bases.json").write_text(
+        json.dumps([{"kind": "base", "slug": "b1", "name": "B1"}])
+    )
+    first = await load_seeds(seeds_dir=seeds)
+    assert first.items_created == 2
+
+    # Second run: agents.json removed entirely; bases unchanged.
+    (seeds / "agents.json").unlink()
+    second = await load_seeds(seeds_dir=seeds)
+    assert second.items_deactivated == 0, (
+        "kind with zero entries in the run must not trigger reconcile"
+    )
+
+    async with session_scope() as session:
+        agent_active = (
+            await session.execute(
+                select(Item.is_active).where(Item.kind == "agent", Item.slug == "a1")
+            )
+        ).scalar_one()
+        assert agent_active is True
+
+
+# ---------------------------------------------------------------------------
 # FastAPI startup wiring — Wave 10 end-state contract.
 # ---------------------------------------------------------------------------
 

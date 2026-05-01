@@ -441,6 +441,11 @@ export default function Chat() {
           onToggleSidebar={() => setIsSidebarOpen(true)}
           sessionTitle={sessionTitle}
           onNewSession={handleNewSession}
+          connectedProjectId={connectedProjectId}
+          connectedProjectName={connectedProjectName}
+          onConnectProject={handleConnectProject}
+          onDisconnectProject={handleDisconnectProject}
+          onRequestNewWorkspace={() => setShowCreateWorkspace(true)}
         />
 
         {isLanding ? (
@@ -519,6 +524,7 @@ export default function Chat() {
                   isExecuting={isExecuting}
                   onApproval={handleApprovalResponse}
                   toolCallsCollapsed={toolCallsCollapsed}
+                  onRetry={retryLastMessage}
                 />
               </div>
             </div>
@@ -527,7 +533,7 @@ export default function Chat() {
               className="absolute left-1/2 -translate-x-1/2 bottom-6 z-30
                          w-[min(760px,calc(100%-48px))]
                          bg-[var(--bg)] border border-[var(--border-hover)]
-                         rounded-[var(--radius)]
+                         rounded-[var(--radius)] overflow-hidden
                          max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:translate-x-0
                          max-md:w-full max-md:rounded-b-none"
             >

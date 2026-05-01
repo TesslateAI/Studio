@@ -1019,7 +1019,27 @@ export const chatApi = {
     }
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const cloned = response.clone();
+      let detail: string | undefined;
+      try {
+        const body = await response.json();
+        if (typeof body?.detail === 'string') {
+          detail = body.detail;
+        } else if (Array.isArray(body?.detail) && body.detail.length > 0) {
+          const first = body.detail[0];
+          const loc = Array.isArray(first?.loc) ? first.loc.join('.') : '';
+          detail = loc ? `${loc}: ${first?.msg ?? ''}` : (first?.msg ?? '');
+        } else if (typeof body?.message === 'string') {
+          detail = body.message;
+        }
+      } catch {
+        try {
+          detail = (await cloned.text()).slice(0, 500);
+        } catch {
+          /* both attempts failed; fall back to status code */
+        }
+      }
+      throw new Error(detail || `HTTP ${response.status}`);
     }
 
     const reader = response.body?.getReader();

@@ -21,6 +21,7 @@ interface ChatMessageListProps {
   ) => void;
   emptyState?: React.ReactNode;
   toolCallsCollapsed?: boolean;
+  onRetry?: () => void;
 }
 
 export function ChatMessageList({
@@ -29,6 +30,7 @@ export function ChatMessageList({
   onApproval,
   emptyState,
   toolCallsCollapsed,
+  onRetry,
 }: ChatMessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -75,6 +77,8 @@ export function ChatMessageList({
       </div>
     );
   }
+
+  const lastAiId = messages.findLast((m) => m.type === 'ai')?.id;
 
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto">
@@ -126,6 +130,8 @@ export function ChatMessageList({
               type={msg.type as 'user' | 'ai'}
               content={msg.content}
               attachments={msg.attachments}
+              onRetry={onRetry}
+              showRetry={msg.type === 'ai' && msg.id === lastAiId && !isExecuting}
             />
           );
         })}

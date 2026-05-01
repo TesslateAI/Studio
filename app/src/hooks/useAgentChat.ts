@@ -961,6 +961,7 @@ export function useAgentChat({
           return;
         }
 
+        const detail = error instanceof Error && error.message ? error.message : 'Unknown error';
         setMessages((prev) => {
           const withoutThinking = prev.filter((msg) => msg.id !== thinkingMessageId);
           return [
@@ -968,7 +969,7 @@ export function useAgentChat({
             {
               id: `msg-${crypto.randomUUID()}-error`,
               type: 'ai',
-              content: 'I encountered an error while working on your request. Please try again.',
+              content: `Send failed: ${detail}`,
             },
           ];
         });
@@ -976,7 +977,11 @@ export function useAgentChat({
         isExecutingRef.current = false;
         setIsExecuting(false);
         abortControllerRef.current = null;
-        setMessages((prev) => prev.filter((msg) => msg.id !== thinkingMessageId));
+        setMessages((prev) =>
+          prev.some((msg) => msg.id === thinkingMessageId)
+            ? prev.filter((msg) => msg.id !== thinkingMessageId)
+            : prev
+        );
       }
     },
     [chatId, projectId, agent, isExecuting]

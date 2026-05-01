@@ -1095,7 +1095,7 @@ async def agent_chat(
         # 2b. Pre-request credit check
         from ..services.credit_service import check_credits as _check_credits
 
-        has_credits, credit_error = await _check_credits(current_user, model_name)
+        has_credits, credit_error = await _check_credits(current_user, model_name, db=db)
         if not has_credits:
             raise HTTPException(status_code=402, detail=credit_error)
 
@@ -1734,7 +1734,7 @@ async def agent_chat_stream(
             # 2b. Pre-request credit check
             from ..services.credit_service import check_credits as _check_credits
 
-            has_credits, credit_error = await _check_credits(current_user, model_name)
+            has_credits, credit_error = await _check_credits(current_user, model_name, db=db)
             if not has_credits:
                 error_event = {
                     "type": "error",
