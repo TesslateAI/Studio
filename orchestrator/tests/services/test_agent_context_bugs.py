@@ -172,6 +172,11 @@ async def test_build_tesslate_context_excludes_config_json(monkeypatch):
     _build_architecture_context() (DB-backed, live) is the sole authoritative
     source for container info. The config.json block in _build_tesslate_context()
     is stale and creates conflicting container descriptions if both are active.
+
+    Monkeypatch note: agent_context.py imports get_orchestrator and
+    is_kubernetes_mode lazily inside the function body
+    (`from .orchestration import ...`), so patching the source module
+    (app.services.orchestration.*) is intercepted at call time. This is correct.
     """
     from app.services.agent_context import _build_tesslate_context
 
@@ -331,4 +336,28 @@ def test_chat_py_source_no_dead_context_assignments():
     )
     assert 'project_context["git_context"]' not in source, (
         'chat.py still writes dead key project_context["git_context"] — remove it'
+    )
+
+
+def test_external_agent_source_no_dead_context_builders():
+    """#397: external_agent.py must not import or call the three dead context builders.
+
+    external_agent.py was previously inconsistent — still calling _build_architecture_context,
+    _build_git_context, and _build_tesslate_context while chat.py and worker.py removed them.
+    All three paths must be consistent: project_context carries only project_name + project_description.
+    """
+    import inspect
+
+    import app.routers.external_agent as ext_module
+
+    source = inspect.getsource(ext_module)
+
+    assert "_build_architecture_context" not in source, (
+        "external_agent.py still references dead builder _build_architecture_context — remove it"
+    )
+    assert "_build_git_context" not in source, (
+        "external_agent.py still references dead builder _build_git_context — remove it"
+    )
+    assert "_build_tesslate_context" not in source, (
+        "external_agent.py still references dead builder _build_tesslate_context — remove it"
     )
