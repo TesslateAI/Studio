@@ -21,9 +21,13 @@ spec:
 ---
 # Marketplace pod — flip OPENSAIL_ENV to prod, replace the dev-flavoured
 # HUB_DISPLAY_NAME from the base manifest, and disable on-startup seed
-# loading so a pod restart never re-seeds the live catalog. Bundle
-# storage stays on the 5Gi PVC for now; S3 backend requires adding boto3
-# to packages/tesslate-marketplace/pyproject.toml (follow-up).
+# loading so a pod restart never re-seeds the live catalog.
+#
+# Bundle storage uses S3 (tesslate-marketplace-bundles-{env}-{suffix}).
+# The marketplace pod reuses tesslate-backend-sa for IRSA, which now
+# carries marketplace_s3_policy granting GetObject/PutObject/DeleteObject
+# on the bucket only. Install clients hit the S3 presigned URLs directly
+# — the marketplace pod is out of the bundle data path.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,6 +45,15 @@ spec:
               value: "Tesslate Official"
             - name: MARKETPLACE_LOAD_SEEDS_ON_STARTUP
               value: "false"
+            - name: BUNDLE_STORAGE_BACKEND
+              value: "s3"
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: marketplace-secret
+                  key: S3_BUCKET
+            - name: S3_REGION
+              value: "us-east-1"
       initContainers:
         # Keep alembic-migrate's OPENSAIL_ENV in sync with the runtime
         # container so any alembic env() reads pick the same code path.

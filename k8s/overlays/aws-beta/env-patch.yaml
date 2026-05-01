@@ -18,10 +18,12 @@ spec:
             - name: CONNECTOR_PROXY_MODE
               value: "dedicated"
 ---
-# Marketplace pod — beta uses staging-like flag and disables on-startup
-# seed loading so a pod restart never re-seeds the live catalog. Beta's
-# DATABASE_URL points at the in-cluster postgres pod (terraform branches
-# on var.create_rds=false in marketplace-secret).
+# Marketplace pod — beta uses a staging-like OPENSAIL_ENV, disables
+# on-startup seed loading so a pod restart never re-seeds the live
+# catalog, and uses S3 for bundle storage (matches production so the
+# behaviour we test in beta is the same we ship). Beta's DATABASE_URL
+# still points at the in-cluster postgres pod (terraform branches on
+# var.create_rds=false in marketplace-secret).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,6 +41,15 @@ spec:
               value: "Tesslate Beta"
             - name: MARKETPLACE_LOAD_SEEDS_ON_STARTUP
               value: "false"
+            - name: BUNDLE_STORAGE_BACKEND
+              value: "s3"
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: marketplace-secret
+                  key: S3_BUCKET
+            - name: S3_REGION
+              value: "us-east-1"
       initContainers:
         - name: alembic-migrate
           env:

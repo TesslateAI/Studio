@@ -25,8 +25,9 @@ module "tesslate_backend_irsa" {
   }
 
   role_policy_arns = {
-    s3_policy = aws_iam_policy.tesslate_s3_access.arn
-    ecr_policy = aws_iam_policy.tesslate_ecr_access.arn
+    s3_policy             = aws_iam_policy.tesslate_s3_access.arn
+    ecr_policy            = aws_iam_policy.tesslate_ecr_access.arn
+    marketplace_s3_policy = aws_iam_policy.tesslate_marketplace_s3_access.arn
   }
 
   tags = local.common_tags
@@ -52,6 +53,37 @@ resource "aws_iam_policy" "tesslate_s3_access" {
         Resource = [
           aws_s3_bucket.tesslate_projects.arn,
           "${aws_s3_bucket.tesslate_projects.arn}/*"
+        ]
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+# Marketplace S3 access policy — read+write the bundle archives bucket.
+# Used by the tesslate-marketplace pod (which reuses tesslate-backend-sa
+# and therefore inherits this IRSA role). Scoped to the bundles bucket
+# only — the project-hibernation bucket has its own statement above.
+resource "aws_iam_policy" "tesslate_marketplace_s3_access" {
+  name        = "${local.cluster_name}-tesslate-marketplace-s3-access"
+  description = "Marketplace bundle archive read/write on the dedicated S3 bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+        ]
+        Resource = [
+          aws_s3_bucket.tesslate_marketplace_bundles.arn,
+          "${aws_s3_bucket.tesslate_marketplace_bundles.arn}/*",
         ]
       }
     ]

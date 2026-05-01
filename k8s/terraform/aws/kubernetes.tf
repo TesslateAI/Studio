@@ -419,6 +419,10 @@ resource "kubernetes_secret" "marketplace_secret" {
     ADMIN_DATABASE_URL = local.marketplace_admin_database_url
     BUNDLE_URL_SECRET  = random_password.marketplace_bundle_url_secret.result
     STATIC_TOKENS      = "${random_password.marketplace_admin_token.result}:admin.write:publish:yanks.write:catalog.write:pricing.write"
+    # S3 bundle storage — overlays set BUNDLE_STORAGE_BACKEND=s3 and pull
+    # this bucket name in via secretKeyRef. Auth uses the IRSA role
+    # tesslate_backend_irsa (which now has marketplace_s3_policy attached).
+    S3_BUCKET = aws_s3_bucket.tesslate_marketplace_bundles.id
   }
 
   type = "Opaque"
