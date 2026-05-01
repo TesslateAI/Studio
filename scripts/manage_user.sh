@@ -139,19 +139,33 @@ superuser = args.get("superuser", False)
 from app.database import AsyncSessionLocal
 import app.models  # noqa: F401 — register all SQLAlchemy models so relationships resolve
 from app.models_auth import User
+from app.models_team import Team, TeamMembership
 from app.auth import get_password_hash
 from app.config import get_settings
 from sqlalchemy import select
 
 settings = get_settings()
 
-# Tier bundled credits mapping
+# Tier bundled credits mapping. After alembic 0035 (RBAC teams) and
+# 0088 (drop user billing columns) the credits live on Team, not User —
+# so each create-user also provisions a personal Team that owns billing
+# state, and upgrade-plan targets that team instead of the user row.
 TIER_CREDITS = {
     "free": settings.tier_bundled_credits_free,
     "basic": settings.tier_bundled_credits_basic,
     "pro": settings.tier_bundled_credits_pro,
     "ultra": settings.tier_bundled_credits_ultra,
 }
+
+
+async def _personal_team(session, user):
+    """Return the user's personal team (the one this script created)."""
+    result = await session.execute(
+        select(Team)
+        .join(TeamMembership, TeamMembership.team_id == Team.id)
+        .where(TeamMembership.user_id == user.id, Team.is_personal.is_(True))
+    )
+    return result.scalar_one_or_none()
 
 
 async def create_user(session):
@@ -168,7 +182,7 @@ async def create_user(session):
     hashed_password = get_password_hash(password)
 
     from nanoid import generate
-    slug = f"{username.lower().replace('_', '-').replace(' ', '-')}-{generate(size=6)}"
+    user_slug = f"{username.lower().replace('_', '-').replace(' ', '-')}-{generate(size=6)}"
     referral_code = generate(size=8).upper()
 
     user = User(
@@ -176,20 +190,42 @@ async def create_user(session):
         hashed_password=hashed_password,
         name=name,
         username=username,
-        slug=slug,
+        slug=user_slug,
         referral_code=referral_code,
         is_active=True,
         is_superuser=superuser,
         is_verified=True,
-        subscription_tier="free",
-        total_spend=0,
-        bundled_credits=TIER_CREDITS["free"],
-        purchased_credits=0,
     )
     session.add(user)
+    await session.flush()  # populates user.id
+
+    # Personal team — owns billing state. Slug must be unique across teams.
+    team = Team(
+        name=name,
+        slug=f"{username.lower().replace('_', '-').replace(' ', '-')}-team-{generate(size=6)}",
+        is_personal=True,
+        created_by_id=user.id,
+        subscription_tier="free",
+        bundled_credits=TIER_CREDITS["free"],
+    )
+    session.add(team)
+    await session.flush()
+
+    # Admin membership + default team pointer.
+    session.add(
+        TeamMembership(
+            user_id=user.id, team_id=team.id, role="admin", is_active=True
+        )
+    )
+    user.default_team_id = team.id
+
     await session.commit()
     await session.refresh(user)
-    print(f"Created user: {user.email} ({user.username}) [slug={user.slug}]")
+    await session.refresh(team)
+    print(
+        f"Created user: {user.email} ({user.username}) [slug={user.slug}] "
+        f"team={team.slug} tier={team.subscription_tier} credits={team.bundled_credits}"
+    )
     return user
 
 
@@ -200,13 +236,21 @@ async def upgrade_plan(session):
         print(f"ERROR: No user found with email '{email}'")
         sys.exit(1)
 
-    old_tier = user.subscription_tier or "free"
-    user.subscription_tier = tier
-    user.bundled_credits = TIER_CREDITS.get(tier, TIER_CREDITS["free"])
+    team = await _personal_team(session, user)
+    if not team:
+        print(f"ERROR: No personal team found for {user.email}")
+        sys.exit(1)
+
+    old_tier = team.subscription_tier or "free"
+    team.subscription_tier = tier
+    team.bundled_credits = TIER_CREDITS.get(tier, TIER_CREDITS["free"])
 
     await session.commit()
-    await session.refresh(user)
-    print(f"Upgraded {user.email}: {old_tier} -> {tier} (credits: {user.bundled_credits})")
+    await session.refresh(team)
+    print(
+        f"Upgraded {user.email} (team={team.slug}): "
+        f"{old_tier} -> {tier} (credits: {team.bundled_credits})"
+    )
     return user
 
 
