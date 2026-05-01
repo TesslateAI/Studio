@@ -46,6 +46,13 @@ spec:
       # access). Cloud overlays will switch BUNDLE_STORAGE_BACKEND=s3
       # via env-patch; the IAM is already in place.
       serviceAccountName: tesslate-backend-sa
+      # The marketplace image runs as user `marketplace` (UID 10001) but
+      # the /data PVC mount is owned by root by default. fsGroup tells
+      # the kubelet to chown the volume to GID 10001 on attach so the
+      # runtime can write the hub_id, attestation key, and URL signing
+      # secret cache files.
+      securityContext:
+        fsGroup: 10001
       initContainers:
       # 1. Idempotent CREATE DATABASE. Postgres has no `CREATE DATABASE
       #    IF NOT EXISTS`, so we check pg_database first and skip if the

@@ -55,9 +55,15 @@ spec:
             - name: S3_REGION
               value: "us-east-1"
       initContainers:
-        # Keep alembic-migrate's OPENSAIL_ENV in sync with the runtime
-        # container so any alembic env() reads pick the same code path.
+        # IMPORTANT: list both initContainers here in the desired execution
+        # order. Kustomize's strategic merge of initContainers reorders by
+        # the patch sequence — if we only mention `alembic-migrate`,
+        # `create-database` ends up after it and never runs (alembic fails
+        # on missing DB). create-database must run first.
+        - name: create-database
         - name: alembic-migrate
           env:
+            # Keep alembic-migrate's OPENSAIL_ENV in sync with the runtime
+            # container so any alembic env() reads pick the same code path.
             - name: OPENSAIL_ENV
               value: "prod"
