@@ -41,7 +41,40 @@ spec:
         component: marketplace
     spec:
       terminationGracePeriodSeconds: 30
+      # Reuse the orchestrator backend's ServiceAccount so this pod
+      # inherits the same IRSA role (currently grants ECR pull + S3
+      # access). Cloud overlays will switch BUNDLE_STORAGE_BACKEND=s3
+      # via env-patch; the IAM is already in place.
+      serviceAccountName: tesslate-backend-sa
       initContainers:
+      # 1. Idempotent CREATE DATABASE. Postgres has no `CREATE DATABASE
+      #    IF NOT EXISTS`, so we check pg_database first and skip if the
+      #    row exists. ADMIN_DATABASE_URL points at the maintenance DB
+      #    (`postgres`) on the same instance the orchestrator uses, so
+      #    one shared Postgres serves both `tesslate` and
+      #    `tesslate_marketplace`. Local-cluster overlays without an
+      #    ADMIN_DATABASE_URL secret skip the initContainer (kustomize
+      #    in those overlays patches it out — see overlays/minikube).
+      - name: create-database
+        image: postgres:16-alpine
+        command:
+        - sh
+        - -ec
+        - |
+          DBNAME="tesslate_marketplace"
+          if psql "$ADMIN_DATABASE_URL" -tAc "SELECT 1 FROM pg_database WHERE datname='${DBNAME}'" | grep -q 1; then
+            echo "[create-database] ${DBNAME} already exists — skipping"
+          else
+            echo "[create-database] creating ${DBNAME}"
+            psql "$ADMIN_DATABASE_URL" -c "CREATE DATABASE ${DBNAME}"
+          fi
+        env:
+        - name: ADMIN_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: marketplace-secret
+              key: ADMIN_DATABASE_URL
+      # 2. Apply alembic migrations against the marketplace DB.
       - name: alembic-migrate
         image: tesslate-marketplace:latest
         imagePullPolicy: IfNotPresent

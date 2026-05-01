@@ -166,6 +166,31 @@ resource "aws_ecr_repository" "deerflow" {
 }
 
 # -----------------------------------------------------------------------------
+# Marketplace ECR Repository
+# -----------------------------------------------------------------------------
+# Hosts the federated /v1 protocol service (packages/tesslate-marketplace).
+# Pushed by both production and beta with environment-specific tags; pulled
+# by the tesslate-marketplace Deployment in each cluster.
+resource "aws_ecr_repository" "marketplace" {
+  name                 = "${var.project_name}-marketplace"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = false
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = {
+    Name      = "${var.project_name}-marketplace"
+    Component = "marketplace"
+  }
+}
+
+# -----------------------------------------------------------------------------
 # ECR Lifecycle Policy (shared by all repos)
 # -----------------------------------------------------------------------------
 # Note: tagStatus=any rules MUST have the lowest priority (highest number)
@@ -234,6 +259,11 @@ resource "aws_ecr_lifecycle_policy" "markitdown" {
 
 resource "aws_ecr_lifecycle_policy" "deerflow" {
   repository = aws_ecr_repository.deerflow.name
+  policy     = local.ecr_lifecycle_policy
+}
+
+resource "aws_ecr_lifecycle_policy" "marketplace" {
+  repository = aws_ecr_repository.marketplace.name
   policy     = local.ecr_lifecycle_policy
 }
 

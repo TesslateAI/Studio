@@ -356,6 +356,69 @@ resource "kubernetes_secret" "app_secrets" {
     # /api/internal/*.  Must match ORCHESTRATOR_INTERNAL_SECRET in btrfs-csi-config.
     INTERNAL_API_SECRET = var.internal_api_secret
 
+    # Federated marketplace — orchestrator → tesslate-marketplace service.
+    # MARKETPLACE_ADMIN_TOKEN must match one of marketplace-secret.STATIC_TOKENS
+    # entries that holds admin.write scope (governance writes: publish, yank).
+    # TESSLATE_OFFICIAL_BASE_URL points at the in-cluster marketplace Service.
+    MARKETPLACE_ADMIN_TOKEN    = random_password.marketplace_admin_token.result
+    TESSLATE_OFFICIAL_BASE_URL = "http://tesslate-marketplace:8800"
+  }
+
+  type = "Opaque"
+}
+
+# -----------------------------------------------------------------------------
+# Marketplace Secret (Federated /v1 protocol service)
+# -----------------------------------------------------------------------------
+# Lives next to app_secrets so the marketplace pod has its own connection
+# string + signing key + admin tokens. DATABASE_URL points at the SAME
+# Postgres instance the orchestrator uses (RDS in production via
+# create_rds=true, in-cluster postgres pod in beta), but a different
+# database name (tesslate_marketplace). The CREATE DATABASE itself is
+# handled by an idempotent initContainer in the marketplace Deployment
+# that connects via ADMIN_DATABASE_URL (postgres maintenance database).
+#
+# BUNDLE_URL_SECRET signs bundle redirect URLs (HMAC). Random per-env.
+# STATIC_TOKENS grants the orchestrator admin scopes for governance
+# writes; we mint exactly one (admin) token here and propagate it to
+# tesslate-app-secrets above as MARKETPLACE_ADMIN_TOKEN so the two stay
+# in sync without manual rotation.
+
+resource "random_password" "marketplace_bundle_url_secret" {
+  length  = 48
+  special = false
+}
+
+resource "random_password" "marketplace_admin_token" {
+  length  = 48
+  special = false
+}
+
+locals {
+  # postgres_host swaps RDS endpoint vs in-cluster postgres pod the same
+  # way app_secrets.DATABASE_URL does — keeps a single source of truth.
+  marketplace_postgres_host = var.create_rds ? aws_db_instance.tesslate[0].endpoint : "postgres:5432"
+  marketplace_postgres_user = var.create_rds ? var.rds_username : "tesslate_user"
+
+  marketplace_database_url = "postgresql+asyncpg://${local.marketplace_postgres_user}:${var.postgres_password}@${local.marketplace_postgres_host}/tesslate_marketplace"
+
+  # ADMIN_DATABASE_URL is plain libpq (no asyncpg driver suffix) because
+  # the initContainer uses psql, not SQLAlchemy. Connects to the
+  # maintenance database (`postgres`) so it can issue CREATE DATABASE.
+  marketplace_admin_database_url = "postgresql://${local.marketplace_postgres_user}:${var.postgres_password}@${local.marketplace_postgres_host}/postgres"
+}
+
+resource "kubernetes_secret" "marketplace_secret" {
+  metadata {
+    name      = "marketplace-secret"
+    namespace = kubernetes_namespace.tesslate.metadata[0].name
+  }
+
+  data = {
+    DATABASE_URL       = local.marketplace_database_url
+    ADMIN_DATABASE_URL = local.marketplace_admin_database_url
+    BUNDLE_URL_SECRET  = random_password.marketplace_bundle_url_secret.result
+    STATIC_TOKENS      = "${random_password.marketplace_admin_token.result}:admin.write:publish:yanks.write:catalog.write:pricing.write"
   }
 
   type = "Opaque"

@@ -27,6 +27,7 @@
 #   ./scripts/aws-deploy.sh build beta compute               # Build compute image, deploy + restart
 #   ./scripts/aws-deploy.sh deploy-compute beta              # Apply compute manifests (CSI + Volume Hub)
 #   ./scripts/aws-deploy.sh build beta backend --cached      # Build only backend with cache
+#   ./scripts/aws-deploy.sh build production marketplace --cached  # Build only marketplace
 #
 # Role selection (kubectl-using commands only):
 #   Default role is `team-admin` for the target environment so cluster-mutating
@@ -458,6 +459,9 @@ case "$COMMAND" in
             [devserver]="orchestrator/Dockerfile.devserver"
             [compute]="services/btrfs-csi/Dockerfile"
             [ast]="services/ast/Dockerfile"
+            # Federated /v1 marketplace service. Built from its own
+            # subtree so the orchestrator image stays small.
+            [marketplace]="packages/tesslate-marketplace/Dockerfile"
             # Seeded Tesslate Apps — external images mirrored to ECR so EKS
             # nodes can pull (short names in manifests get prefixed via
             # APP_IMAGE_REGISTRY_PREFIX at install time). mirofish is pulled
@@ -471,6 +475,7 @@ case "$COMMAND" in
             [devserver]="."
             [compute]="services/btrfs-csi/"
             [ast]="services/ast/"
+            [marketplace]="packages/tesslate-marketplace/"
             [markitdown]="seeds/apps/markitdown/"
             [deerflow]="seeds/apps/deer-flow/"
         )
@@ -480,6 +485,7 @@ case "$COMMAND" in
             # AST rides as a sidecar in the backend pod — rolling the
             # backend deployment is what picks up a new tesslate-ast image.
             [ast]="app=tesslate-backend"
+            [marketplace]="app=tesslate-marketplace"
         )
         # Additional deployments to restart when a given image is built
         # (e.g., worker uses the same image as backend)
@@ -512,8 +518,8 @@ case "$COMMAND" in
         # Validate image names
         for img in $IMAGES; do
             case "$img" in
-                backend|frontend|devserver|compute|ast|markitdown|deerflow) ;;
-                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute, ast, markitdown, deerflow" ;;
+                backend|frontend|devserver|compute|ast|marketplace|markitdown|deerflow) ;;
+                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute, ast, marketplace, markitdown, deerflow" ;;
             esac
         done
 

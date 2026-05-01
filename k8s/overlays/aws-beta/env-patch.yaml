@@ -12,3 +12,35 @@ spec:
           env:
             - name: DEPLOYMENT_ENV
               value: "beta"
+            # Use the standalone opensail-runtime pod (added by the 2026-04
+            # automation runtime) for connector-proxy traffic instead of the
+            # embedded in-process router.
+            - name: CONNECTOR_PROXY_MODE
+              value: "dedicated"
+---
+# Marketplace pod — beta uses staging-like flag and disables on-startup
+# seed loading so a pod restart never re-seeds the live catalog. Beta's
+# DATABASE_URL points at the in-cluster postgres pod (terraform branches
+# on var.create_rds=false in marketplace-secret).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-marketplace
+  namespace: tesslate
+spec:
+  template:
+    spec:
+      containers:
+        - name: marketplace
+          env:
+            - name: OPENSAIL_ENV
+              value: "staging"
+            - name: HUB_DISPLAY_NAME
+              value: "Tesslate Beta"
+            - name: MARKETPLACE_LOAD_SEEDS_ON_STARTUP
+              value: "false"
+      initContainers:
+        - name: alembic-migrate
+          env:
+            - name: OPENSAIL_ENV
+              value: "staging"
