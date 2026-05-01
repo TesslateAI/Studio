@@ -449,6 +449,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
     )
     from .services.agent_context import (
         _build_cross_platform_context,
+        _build_tesslate_context,
         _get_chat_history,
         _resolve_container_name,
     )
@@ -905,6 +906,20 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     project_context["mcp_resource_catalog"] = mcp_context["resource_catalog"]
                 if mcp_context.get("prompt_catalog"):
                     project_context["mcp_prompt_catalog"] = mcp_context["prompt_catalog"]
+
+            # Inject TESSLATE.md into the system prompt via project_context.
+            # Guard prevents a double-read when chat.py already populated it
+            # for inline (non-queued) execution paths.
+            if project and not project_context.get("tesslate_context"):
+                tesslate_ctx = await _build_tesslate_context(
+                    project,
+                    UUID(payload.user_id),
+                    db,
+                    container_name=container_name,
+                    container_directory=container_directory,
+                )
+                if tesslate_ctx:
+                    project_context["tesslate_context"] = tesslate_ctx
 
             # Warm the local plan mirror from Redis before the agent builds its prompt.
             from .services.plan_manager import PlanManager
