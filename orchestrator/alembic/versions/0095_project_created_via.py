@@ -1,8 +1,8 @@
 """Add Project.created_via provenance column.
 
-Revision ID: 0089_project_created_via
-Revises: 0088
-Create Date: 2026-04-29
+Revision ID: 0095_project_created_via
+Revises: 0094_drop_user_billing_columns
+Create Date: 2026-04-29 (renumbered 2026-05-04 to slot above marketplace federation chain)
 
 Distinguishes the origin of a Project row so future cleanup decisions
 (stale-empty-workspace GC, template-fork accounting, import vs. fresh
@@ -19,8 +19,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0089_project_created_via"
-down_revision: str | Sequence[str] | None = "0088"
+revision: str = "0095_project_created_via"
+down_revision: str | Sequence[str] | None = "0094_drop_user_billing_columns"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

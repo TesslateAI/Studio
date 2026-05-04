@@ -1,8 +1,8 @@
 """Drop deprecated billing and deployment-count columns from the users table.
 
-Revision ID: 0088
-Revises: 0087_automation_app_inst
-Create Date: 2026-04-29
+Revision ID: 0094_drop_user_billing_columns
+Revises: 0093_msrc_checkout_hub
+Create Date: 2026-04-29 (renumbered 2026-05-04 to slot above marketplace federation chain)
 
 Billing has been team-scoped since migration 0035_rbac_teams, which copied
 all billing fields from User to Team.  The per-user columns became dead code
@@ -43,8 +43,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0088"
-down_revision: str | Sequence[str] | None = "0087_automation_app_inst"
+revision: str = "0094_drop_user_billing_columns"
+down_revision: str | Sequence[str] | None = "0093_msrc_checkout_hub"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
