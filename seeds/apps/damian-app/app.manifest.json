@@ -4,7 +4,7 @@
     "id": "com.tesslate.damian-app",
     "slug": "damian-app",
     "name": "Damian App",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Minimal Next.js 16 + React 19 + Tailwind starter built on the Tesslate nextjs-16-base template. Boots a live dev server with Turbopack; ready to hack on immediately after install.",
     "category": "productivity",
     "forkable": "true"
