@@ -4,13 +4,15 @@
     "id": "com.tesslate.crm",
     "slug": "crm-demo",
     "name": "Tesslate CRM",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "A minimal CRM demo with a chat-drawer agent running on the Tesslate Apps runtime.",
     "category": "productivity",
     "forkable": "true"
   },
   "compatibility": {
-    "studio": {"min": "0.0.0"},
+    "studio": {
+      "min": "0.0.0"
+    },
     "manifest_schema": "2025-02",
     "runtime_api": "^1.0",
     "required_features": []
@@ -23,7 +25,9 @@
         "name": "web",
         "primary": true,
         "image": "tesslate-devserver:latest",
-        "ports": [3000],
+        "ports": [
+          3000
+        ],
         "startup_command": "sh -c 'cd /app && (test -d node_modules || npm install) && npx prisma migrate deploy || npx prisma db push --skip-generate --accept-data-loss; npm run build && node .next/standalone/server.js'",
         "env": {
           "NODE_ENV": "production",
@@ -37,13 +41,28 @@
     "connections": []
   },
   "surfaces": [
-    {"kind": "ui", "entrypoint": "/"}
+    {
+      "kind": "ui",
+      "entrypoint": "/"
+    }
   ],
-  "state": {"model": "per-install-volume", "volume_size": "2Gi"},
-  "billing": {
-    "ai_compute": {"payer": "installer", "markup_pct": 0},
-    "general_compute": {"payer": "platform"},
-    "platform_fee": {"model": "free"}
+  "state": {
+    "model": "per-install-volume",
+    "volume_size": "2Gi"
   },
-  "listing": {"visibility": "public"}
+  "billing": {
+    "ai_compute": {
+      "payer": "installer",
+      "markup_pct": 0
+    },
+    "general_compute": {
+      "payer": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "listing": {
+    "visibility": "public"
+  }
 }

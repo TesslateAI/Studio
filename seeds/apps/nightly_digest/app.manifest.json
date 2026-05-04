@@ -4,13 +4,15 @@
     "id": "com.tesslate.digest",
     "slug": "nightly-digest",
     "name": "Nightly Activity Digest",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "Headless cron-triggered digest that summarizes CRM activity each night via Llama.",
     "category": "automation",
     "forkable": "true"
   },
   "compatibility": {
-    "studio": {"min": "0.0.0"},
+    "studio": {
+      "min": "0.0.0"
+    },
     "manifest_schema": "2025-02",
     "runtime_api": "^1.0",
     "required_features": []
@@ -45,11 +47,22 @@
       "optional": false
     }
   ],
-  "state": {"model": "per-install-volume", "volume_size": "500Mi"},
-  "billing": {
-    "ai_compute": {"payer": "platform"},
-    "general_compute": {"payer": "platform"},
-    "platform_fee": {"model": "free"}
+  "state": {
+    "model": "per-install-volume",
+    "volume_size": "500Mi"
   },
-  "listing": {"visibility": "public"}
+  "billing": {
+    "ai_compute": {
+      "payer": "platform"
+    },
+    "general_compute": {
+      "payer": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "listing": {
+    "visibility": "public"
+  }
 }

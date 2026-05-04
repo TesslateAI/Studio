@@ -24,7 +24,7 @@ from pathlib import Path
 from scripts._seed_publish_federated import (
     already_published_on_hub,
     build_app_bundle,
-    derive_tesslate_config_from_manifest,
+    maybe_extras_for_config_injection,
     publish_app_via_federation,
 )
 
@@ -72,17 +72,14 @@ async def main() -> int:
         logger.info("hub already has %s@%s; nothing to do", SLUG, version)
         return 0
 
-    config = derive_tesslate_config_from_manifest(manifest_dict)
-    extra_files = {
-        ".tesslate/config.json": json.dumps(config, indent=2, sort_keys=True).encode("utf-8"),
-    }
-
+    extra_files = maybe_extras_for_config_injection(manifest_dict, ASSETS_DIR)
     bundle_bytes = build_app_bundle(ASSETS_DIR, extra_files=extra_files)
     logger.info(
-        "built bundle for %s: %d bytes (tar.zst, %d files in tree + .tesslate/config.json)",
+        "built bundle for %s: %d bytes (tar.zst, %d files in tree, %d injected)",
         SLUG,
         len(bundle_bytes),
         sum(1 for p in ASSETS_DIR.rglob("*") if p.is_file()),
+        len(extra_files),
     )
 
     envelope = await publish_app_via_federation(

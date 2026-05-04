@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 import os
 import tarfile
@@ -211,6 +212,42 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
     return config
 
 
+def maybe_extras_for_config_injection(
+    manifest: dict[str, Any], assets_dir: Path
+) -> dict[str, bytes]:
+    """Return ``{path: bytes}`` extras to inject when synthesising config makes sense.
+
+    Returns ``{}`` (empty) when:
+      * the asset directory already ships ``.tesslate/config.json`` on disk
+        (creator authored it explicitly — don't clobber), OR
+      * the manifest produces an empty derived config (no apps; e.g. 2026-05
+        manifests that drop the legacy ``compute.containers`` block — the
+        creator must ship ``.tesslate/config.json`` themselves).
+
+    Returns ``{".tesslate/config.json": bytes}`` only when the manifest has
+    a non-empty derivable config AND the asset dir doesn't already have one.
+
+    The 2026-05 schema deliberately drops ``compute.containers`` because
+    the App Runtime Contract treats the bundle CAS as the source of truth
+    for the container layout — see ``services.apps.install_compute_materializer``.
+    """
+    on_disk = assets_dir / ".tesslate" / "config.json"
+    if on_disk.is_file():
+        # Authored config wins; build_app_bundle would overlay our synthesised
+        # one on top otherwise (extras override source paths by design).
+        return {}
+
+    derived = derive_tesslate_config_from_manifest(manifest)
+    if not derived.get("apps"):
+        # Nothing useful to inject — install will fail with BundleConfigMissing
+        # which is the right signal for a creator to add a config.
+        return {}
+
+    return {
+        ".tesslate/config.json": json.dumps(derived, indent=2, sort_keys=True).encode("utf-8"),
+    }
+
+
 def flatten_manifest_for_scoring(manifest: dict[str, Any]) -> dict[str, Any]:
     """Add the top-level keys that ``stage2_sandbox.compute_score`` checks.
 
@@ -374,6 +411,7 @@ __all__ = [
     "DEFAULT_SKIP_DIR_NAMES",
     "build_app_bundle",
     "derive_tesslate_config_from_manifest",
+    "maybe_extras_for_config_injection",
     "flatten_manifest_for_scoring",
     "already_published_on_hub",
     "publish_app_via_federation",

@@ -4,13 +4,15 @@
     "id": "com.tesslate.crm-with-postgres",
     "slug": "crm-with-postgres",
     "name": "Tesslate CRM with Postgres",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "Matrix demo app exercising the full platform container toolbox: Next.js web surface + Node API + Postgres service container with a CSI-backed volume, secrets, and env_injection wiring.",
     "category": "productivity",
     "forkable": "true"
   },
   "compatibility": {
-    "studio": {"min": "0.0.0"},
+    "studio": {
+      "min": "0.0.0"
+    },
     "manifest_schema": "2025-02",
     "runtime_api": "^1.0",
     "required_features": []
@@ -25,7 +27,9 @@
         "primary": true,
         "kind": "base",
         "image": "tesslate-devserver:latest",
-        "ports": [3000],
+        "ports": [
+          3000
+        ],
         "directory": "/app/web",
         "startup_command": "sh -c 'cd /app/web && (test -d node_modules || npm install) && npm run dev'",
         "env": {
@@ -37,7 +41,9 @@
         "name": "api",
         "kind": "base",
         "image": "tesslate-devserver:latest",
-        "ports": [3001],
+        "ports": [
+          3001
+        ],
         "directory": "/app/api",
         "startup_command": "sh -c 'cd /app/api && (test -d node_modules || npm install) && node server.js'",
         "env": {
@@ -48,9 +54,13 @@
         "name": "db",
         "kind": "service",
         "image": "postgres:16-alpine",
-        "ports": [5432],
+        "ports": [
+          5432
+        ],
         "directory": "/app/db",
-        "volumes": ["/var/lib/postgresql/data"],
+        "volumes": [
+          "/var/lib/postgresql/data"
+        ],
         "env": {
           "POSTGRES_USER": "crm",
           "POSTGRES_PASSWORD": "${secret:pg-creds/password}",
@@ -72,7 +82,10 @@
     ]
   },
   "surfaces": [
-    {"kind": "ui", "entrypoint": "/"}
+    {
+      "kind": "ui",
+      "entrypoint": "/"
+    }
   ],
   "state": {
     "model": "per-install-volume",
@@ -80,9 +93,18 @@
   },
   "schedules": [],
   "billing": {
-    "ai_compute": {"payer": "installer", "markup_pct": 0},
-    "general_compute": {"payer": "platform"},
-    "platform_fee": {"model": "free"}
+    "ai_compute": {
+      "payer": "installer",
+      "markup_pct": 0
+    },
+    "general_compute": {
+      "payer": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
   },
-  "listing": {"visibility": "public"}
+  "listing": {
+    "visibility": "public"
+  }
 }

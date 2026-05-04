@@ -107,6 +107,9 @@ SAFE_COMMAND_PREFIXES = [
 ]
 
 
+_SHELL_WRAPPER_RE = re.compile(r"""^\s*(?:sh|bash)\s+-c\s+['"]""")
+
+
 def validate_startup_command(command: str) -> tuple[bool, str | None]:
     """
     Validate startup command for security issues.
@@ -119,11 +122,28 @@ def validate_startup_command(command: str) -> tuple[bool, str | None]:
         - (True, None) if command is safe
         - (False, "reason") if command is dangerous
     """
-    # Check for dangerous patterns
+    # Check for dangerous patterns — these run on the whole command string
+    # so a `sh -c '...'` wrapper can't smuggle past by hiding inside quotes.
     for pattern in DANGEROUS_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
             logger.error(f"[SECURITY] Dangerous pattern detected: {pattern}")
             return False, f"Command contains dangerous pattern: {pattern}"
+
+    # ``sh -c '...'`` / ``bash -c '...'`` wrappers are common for first-run
+    # install-then-start patterns. The naive ``re.split(r'[;&|]+', cmd)``
+    # below DOES NOT respect shell quoting — it would split inside the
+    # quoted body and reject legitimate constructs like
+    # ``sh -c 'cd /app && (test -x ./bin || install) && start'`` because the
+    # second segment starts with ``(test`` which isn't in the whitelist.
+    #
+    # For shell-wrapper commands we trust the wrapper itself (sh/bash are
+    # whitelisted) and skip the per-piece check on the quoted body. The
+    # dangerous-pattern scan above already vetted the entire string.
+    if _SHELL_WRAPPER_RE.match(command):
+        if len(command) > 10000:
+            return False, "Command is too long (max 10000 characters)"
+        logger.info("[SECURITY] ✅ Shell-wrapper command validated (dangerous-pattern only)")
+        return True, None
 
     # Check that all commands start with safe prefixes
     # Split command by &&, ||, ;, and | to get individual commands

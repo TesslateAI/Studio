@@ -4,13 +4,15 @@
     "id": "com.microsoft.markitdown",
     "slug": "markitdown",
     "name": "MarkItDown",
-    "version": "0.1.1",
-    "description": "Microsoft MarkItDown wrapped in a minimal FastAPI uploader — converts PDF, Office docs, audio, YouTube URLs and more to Markdown for LLM pipelines.",
+    "version": "0.1.2",
+    "description": "Microsoft MarkItDown wrapped in a minimal FastAPI uploader \u2014 converts PDF, Office docs, audio, YouTube URLs and more to Markdown for LLM pipelines.",
     "category": "utility",
     "forkable": "true"
   },
   "compatibility": {
-    "studio": {"min": "0.0.0"},
+    "studio": {
+      "min": "0.0.0"
+    },
     "manifest_schema": "2025-02",
     "runtime_api": "^1.0",
     "required_features": []
@@ -24,7 +26,9 @@
         "name": "web",
         "primary": true,
         "image": "tesslate-markitdown:latest",
-        "ports": [3000],
+        "ports": [
+          3000
+        ],
         "startup_command": "uvicorn server:app --host 0.0.0.0 --port 3000",
         "env": {}
       }
@@ -32,13 +36,26 @@
     "connections": []
   },
   "surfaces": [
-    {"kind": "ui", "entrypoint": "/"}
+    {
+      "kind": "ui",
+      "entrypoint": "/"
+    }
   ],
-  "state": {"model": "stateless"},
-  "billing": {
-    "ai_compute": {"payer": "platform"},
-    "general_compute": {"payer": "platform"},
-    "platform_fee": {"model": "free"}
+  "state": {
+    "model": "stateless"
   },
-  "listing": {"visibility": "public"}
+  "billing": {
+    "ai_compute": {
+      "payer": "platform"
+    },
+    "general_compute": {
+      "payer": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "listing": {
+    "visibility": "public"
+  }
 }
