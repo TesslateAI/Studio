@@ -4,7 +4,7 @@
     "id": "com.tesslate.hello-node",
     "slug": "hello-node",
     "name": "Hello Node",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Zero-dependency Node.js server seed — proves the Apps runtime boots a live process (not a static page) with no npm install.",
     "category": "utility",
     "forkable": "true"
