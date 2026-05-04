@@ -69,6 +69,7 @@ def build_app_bundle(
     assets_dir: Path,
     *,
     skip_dir_names: Iterable[str] = DEFAULT_SKIP_DIR_NAMES,
+    extra_files: dict[str, bytes] | None = None,
     compression_level: int = 6,
 ) -> bytes:
     """Build a deterministic ``tar.zst`` archive from ``assets_dir``.
@@ -76,32 +77,135 @@ def build_app_bundle(
     Files are sorted by path so the resulting bundle has a stable sha256
     across runs (matches the reproducibility guarantee that desktop's
     ``marketplace_local.synthesise_bundle`` makes).
+
+    ``extra_files`` injects synthesised files (path → bytes) on top of
+    the asset tree — used to derive ``.tesslate/config.json`` from the
+    app manifest at seed time so the install path's compute materializer
+    can read it. Extras override on-disk files at the same relative path.
     """
     if not assets_dir.is_dir():
         raise FileNotFoundError(f"assets_dir does not exist or is not a directory: {assets_dir}")
 
     skip = set(skip_dir_names)
+    extras = {k.lstrip("./"): v for k, v in (extra_files or {}).items()}
+
+    # Collect source files first so extras can override at the same path.
+    source_paths: dict[str, Path] = {}
+    for path in sorted(assets_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(assets_dir).as_posix()
+        if any(part in skip for part in rel.split("/")):
+            continue
+        source_paths[rel] = path
+
     tar_buf = io.BytesIO()
     with tarfile.open(fileobj=tar_buf, mode="w") as tf:
-        for path in sorted(assets_dir.rglob("*")):
-            if not path.is_file():
-                continue
-            rel = path.relative_to(assets_dir)
-            if any(part in skip for part in rel.parts):
-                continue
-            info = tarfile.TarInfo(name=rel.as_posix())
-            info.size = path.stat().st_size
-            info.mtime = 0  # deterministic
-            info.mode = 0o644
-            info.uid = 0
-            info.gid = 0
-            info.uname = ""
-            info.gname = ""
-            with path.open("rb") as fh:
-                tf.addfile(info, fh)
+        for rel in sorted(set(source_paths) | set(extras)):
+            if rel in extras:
+                data = extras[rel]
+                info = tarfile.TarInfo(name=rel)
+                info.size = len(data)
+                info.mtime = 0
+                info.mode = 0o644
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                tf.addfile(info, io.BytesIO(data))
+            else:
+                path = source_paths[rel]
+                info = tarfile.TarInfo(name=rel)
+                info.size = path.stat().st_size
+                info.mtime = 0  # deterministic
+                info.mode = 0o644
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                with path.open("rb") as fh:
+                    tf.addfile(info, fh)
 
     cctx = zstandard.ZstdCompressor(level=compression_level)
     return cctx.compress(tar_buf.getvalue())
+
+
+def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Generate the ``.tesslate/config.json`` dict from a 2025-02 app manifest.
+
+    The install path's ``install_compute_materializer`` reads
+    ``.tesslate/config.json`` from the bundle volume to materialise
+    Container rows + ContainerConnection rows. Without this file install
+    fails with ``BundleConfigMissing``. Local publishes (pre-Wave-8) used
+    to write the config from a project's existing canvas state via
+    ``services.config_sync.sync_project_config``; for federated publishes
+    that path doesn't apply, so we synthesise the config from the
+    manifest's ``compute.containers`` block here.
+
+    Mapping (manifest 2025-02 → config 2025-02):
+
+      * ``compute.containers[*].name`` → ``apps[name]``
+      * ``compute.containers[*].primary=true`` → ``primaryApp = name``
+        (falls back to first container if none are flagged)
+      * ``compute.containers[*].image`` → ``apps[name].framework`` (best-
+        effort label; the install path doesn't actually use this)
+      * ``compute.containers[*].ports[0]`` → ``apps[name].port``
+      * ``compute.containers[*].startup_command`` → ``apps[name].start``
+      * ``compute.containers[*].env`` → ``apps[name].env``
+      * ``compute.connections[]`` → ``connections[]``
+    """
+    compute = manifest.get("compute") or {}
+    containers = compute.get("containers") or []
+    if not isinstance(containers, list):
+        containers = []
+
+    apps: dict[str, dict[str, Any]] = {}
+    primary_name: str | None = None
+
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        name = container.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+
+        ports = container.get("ports") or []
+        port = ports[0] if isinstance(ports, list) and ports else None
+
+        env = container.get("env") if isinstance(container.get("env"), dict) else {}
+
+        apps[name] = {
+            "directory": container.get("directory") or ".",
+            "port": port,
+            "start": container.get("startup_command") or "",
+            "framework": container.get("image") or None,
+            "env": env,
+        }
+
+        if container.get("primary") is True and primary_name is None:
+            primary_name = name
+
+    if primary_name is None and apps:
+        primary_name = next(iter(apps))
+
+    config: dict[str, Any] = {"apps": apps}
+    if primary_name:
+        config["primaryApp"] = primary_name
+
+    connections_raw = compute.get("connections") or []
+    if isinstance(connections_raw, list):
+        connections: list[dict[str, str]] = []
+        for conn in connections_raw:
+            if not isinstance(conn, dict):
+                continue
+            from_node = conn.get("from") or conn.get("from_node")
+            to_node = conn.get("to") or conn.get("to_node")
+            if isinstance(from_node, str) and isinstance(to_node, str):
+                connections.append({"from": from_node, "to": to_node})
+        if connections:
+            config["connections"] = connections
+
+    return config
 
 
 def flatten_manifest_for_scoring(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -266,6 +370,7 @@ async def publish_app_via_federation(
 __all__ = [
     "DEFAULT_SKIP_DIR_NAMES",
     "build_app_bundle",
+    "derive_tesslate_config_from_manifest",
     "flatten_manifest_for_scoring",
     "already_published_on_hub",
     "publish_app_via_federation",

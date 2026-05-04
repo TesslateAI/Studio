@@ -32,6 +32,7 @@ from pathlib import Path
 from scripts._seed_publish_federated import (
     already_published_on_hub,
     build_app_bundle,
+    derive_tesslate_config_from_manifest,
     publish_app_via_federation,
 )
 
@@ -79,9 +80,18 @@ async def main() -> int:
         logger.info("hub already has %s@%s; nothing to do", SLUG, version)
         return 0
 
-    bundle_bytes = build_app_bundle(ASSETS_DIR)
+    # Synthesise .tesslate/config.json from the manifest's compute block.
+    # The install path's compute materializer reads this file out of the
+    # bundle volume to derive Container rows; without it, install fails
+    # with "publish-time inferrer should have rejected the manifest".
+    config = derive_tesslate_config_from_manifest(manifest_dict)
+    extra_files = {
+        ".tesslate/config.json": json.dumps(config, indent=2, sort_keys=True).encode("utf-8"),
+    }
+
+    bundle_bytes = build_app_bundle(ASSETS_DIR, extra_files=extra_files)
     logger.info(
-        "built bundle for %s: %d bytes (tar.zst, %d files in tree)",
+        "built bundle for %s: %d bytes (tar.zst, %d files in tree + .tesslate/config.json)",
         SLUG,
         len(bundle_bytes),
         sum(1 for p in ASSETS_DIR.rglob("*") if p.is_file()),
