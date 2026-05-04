@@ -87,7 +87,10 @@ def build_app_bundle(
         raise FileNotFoundError(f"assets_dir does not exist or is not a directory: {assets_dir}")
 
     skip = set(skip_dir_names)
-    extras = {k.lstrip("./"): v for k, v in (extra_files or {}).items()}
+    # Use removeprefix (not lstrip) so leading dots in dotfile names like
+    # ``.tesslate/config.json`` survive — lstrip eats characters from the
+    # set rather than removing a literal prefix.
+    extras = {k.removeprefix("./"): v for k, v in (extra_files or {}).items()}
 
     # Collect source files first so extras can override at the same path.
     source_paths: dict[str, Path] = {}
