@@ -1,8 +1,16 @@
-"""Seed the GeoPin Tesslate App.
+"""Seed the GeoPin Tesslate App via the federated marketplace.
 
-Run inside the backend pod:
+Run inside the backend pod (the seed_apps cron does this automatically):
+
     kubectl --context=tesslate -n tesslate exec deploy/tesslate-backend -- \\
-      env TSL_APPS_DEV_AUTO_APPROVE=1 python -m scripts.seed_geopin_app
+      python -m scripts.seed_geopin_app
+
+Publishes the asset tree at <repo>/seeds/apps/geopin to the marketplace pod
+via ``POST /v1/publish/app``. ``.tesslate/config.json`` is synthesised from
+the manifest's ``compute.containers`` block at seed time so the install
+path's compute materializer can derive Container rows. The marketplace
+runs the staged pipeline + auto-approves; the orchestrator's marketplace_sync
+worker mirrors the new version into the local catalog within 5 min.
 """
 
 from __future__ import annotations
@@ -12,18 +20,14 @@ import json
 import logging
 import os
 import sys
-import uuid
 from pathlib import Path
 
-from sqlalchemy import select
-
-from app.config import get_settings
-from app.database import AsyncSessionLocal
-from app.models import AppVersion, MarketplaceApp
-from app.services.apps.publisher import DuplicateVersionError, publish_version
-from app.services.fileops_client import FileOpsClient
-from app.services.hub_client import HubClient
-from scripts._seed_helpers import resolve_seeder_user
+from scripts._seed_publish_federated import (
+    already_published_on_hub,
+    build_app_bundle,
+    derive_tesslate_config_from_manifest,
+    publish_app_via_federation,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("seed_geopin")
@@ -31,7 +35,6 @@ logger = logging.getLogger("seed_geopin")
 SLUG = "geopin"
 _SEEDS_SLUG = "geopin"
 MANIFEST_FILENAME = "app.manifest.json"
-SKIP_DIR_NAMES = {"node_modules", ".next", ".git", "dist", "__pycache__"}
 
 
 def _resolve_assets_dir() -> Path:
@@ -53,132 +56,53 @@ def _resolve_assets_dir() -> Path:
 ASSETS_DIR = _resolve_assets_dir()
 
 
-def _iter_asset_files(root: Path):
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        if any(part in SKIP_DIR_NAMES for part in path.relative_to(root).parts):
-            continue
-        yield path
-
-
-async def _write_file(fops: FileOpsClient, volume_id: str, rel_path: str, data: bytes) -> None:
-    if hasattr(fops, "write_file_safe"):
-        await fops.write_file_safe(volume_id, rel_path, data)
-    else:
-        await fops.write_file(volume_id, rel_path, data)
-
-
 async def main() -> int:
     if not ASSETS_DIR.exists():
         logger.error("assets dir missing: %s", ASSETS_DIR)
         return 2
 
-    settings = get_settings()
-    hub = HubClient(settings.volume_hub_address)
-
     manifest_path = ASSETS_DIR / MANIFEST_FILENAME
     manifest_dict = json.loads(manifest_path.read_text())
+    app_meta = manifest_dict.get("app", {})
+    version = str(app_meta.get("version") or "0.1.0")
+    name = str(app_meta.get("name") or "GeoPin")
+    description = str(app_meta.get("description") or "")
+    category = app_meta.get("category")
 
-    async with AsyncSessionLocal() as db:
-        creator, team_id = await resolve_seeder_user(db)
-        logger.info("using creator=%s (%s) team=%s", creator.id, creator.email, team_id)
-
-        existing = (
-            await db.execute(select(MarketplaceApp).where(MarketplaceApp.slug == SLUG))
-        ).scalar_one_or_none()
-        app_id = existing.id if existing is not None else None
-        if existing is not None:
-            # Check if this manifest version is already published
-            manifest_version = manifest_dict["app"]["version"]
-            existing_version = (
-                await db.execute(
-                    select(AppVersion)
-                    .where(AppVersion.app_id == existing.id)
-                    .where(AppVersion.version == manifest_version)
-                )
-            ).scalar_one_or_none()
-            if existing_version is not None:
-                logger.info(
-                    "app slug=%s version=%s already published; nothing to do",
-                    SLUG,
-                    manifest_version,
-                )
-                return 0
-            logger.info(
-                "app slug=%s exists; publishing new version %s",
-                SLUG,
-                manifest_version,
-            )
-
-        logger.info("creating blank volume via Hub %s", settings.volume_hub_address)
-        volume_id, node_name = await hub.create_volume()
-        logger.info("created volume=%s on node=%s", volume_id, node_name)
-
-        resp = await hub.resolve_volume(volume_id)
-        fileops_address = resp.get("fileops_address")
-        if not fileops_address:
-            logger.error("hub did not return a fileops address for volume %s", volume_id)
-            return 3
-
-        files_written = 0
-        async with FileOpsClient(fileops_address) as fops:
-            for abs_path in _iter_asset_files(ASSETS_DIR):
-                rel = abs_path.relative_to(ASSETS_DIR).as_posix()
-                data = abs_path.read_bytes()
-                await _write_file(fops, volume_id, rel, data)
-                files_written += 1
-        logger.info("wrote %d files into volume %s", files_written, volume_id)
-
-        from app.models import Project
-
-        proj = Project(
-            id=uuid.uuid4(),
-            name="GeoPin (source)",
-            slug=f"geopin-src-{uuid.uuid4().hex[:6]}",
-            owner_id=creator.id,
-            team_id=team_id,
-            visibility="team",
-            volume_id=volume_id,
-            cache_node=node_name,
-            project_kind="app_source",
-        )
-        db.add(proj)
-        await db.flush()
-        logger.info("created source project=%s slug=%s", proj.id, proj.slug)
-
-        auto_approve = (
-            os.environ.get("TSL_APPS_DEV_AUTO_APPROVE") == "1"
-            or os.environ.get("TSL_APPS_SKIP_APPROVAL") == "1"
-        )
-        if not auto_approve:
-            logger.warning(
-                "TSL_APPS_DEV_AUTO_APPROVE not set; app will be in pending-approval state"
-            )
-
-        try:
-            result = await publish_version(
-                db,
-                creator_user_id=creator.id,
-                project_id=proj.id,
-                manifest_source=manifest_dict,
-                hub_client=hub,
-                app_id=app_id,
-            )
-        except DuplicateVersionError as e:
-            logger.warning("duplicate: %s", e)
-            await db.rollback()
-            return 0
-        await db.commit()
-        logger.info(
-            "published app=%s version=%s bundle=%s submission=%s",
-            result.app_id,
-            result.version,
-            result.bundle_hash[:12],
-            result.submission_id,
-        )
-        logger.info("done. visit /apps to install GeoPin.")
+    if await already_published_on_hub(SLUG, version=version):
+        logger.info("hub already has %s@%s; nothing to do", SLUG, version)
         return 0
+
+    config = derive_tesslate_config_from_manifest(manifest_dict)
+    extra_files = {
+        ".tesslate/config.json": json.dumps(config, indent=2, sort_keys=True).encode("utf-8"),
+    }
+
+    bundle_bytes = build_app_bundle(ASSETS_DIR, extra_files=extra_files)
+    logger.info(
+        "built bundle for %s: %d bytes (tar.zst, %d files in tree + .tesslate/config.json)",
+        SLUG,
+        len(bundle_bytes),
+        sum(1 for p in ASSETS_DIR.rglob("*") if p.is_file()),
+    )
+
+    envelope = await publish_app_via_federation(
+        slug=SLUG,
+        name=name,
+        description=description,
+        category=category,
+        version=version,
+        manifest=manifest_dict,
+        bundle_bytes=bundle_bytes,
+    )
+    logger.info(
+        "published %s@%s submission=%s state=%s",
+        SLUG,
+        version,
+        envelope.get("id"),
+        envelope.get("state"),
+    )
+    return 0
 
 
 if __name__ == "__main__":
