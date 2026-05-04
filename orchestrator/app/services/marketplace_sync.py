@@ -1008,42 +1008,10 @@ class MarketplaceSyncWorker:
                 except ValueError:
                     published_at = None
 
-            # ``bundle_hash`` is required by the installer; the versions
-            # endpoint doesn't expose it (only manifest + flags), so we
-            # fetch the per-version bundle envelope which carries the
-            # sha256. The same envelope is what install hits later anyway,
-            # so this is the natural prefetch hop. Skipped on yanks since
-            # the bundle endpoint may be gone for yanked rows.
-            bundle_hash: str | None = None
-            if is_published and not is_yanked:
-                try:
-                    envelope = await client.get_bundle("app", app.slug, str(ver_str))
-                    if isinstance(envelope, dict):
-                        sha = envelope.get("sha256")
-                        if isinstance(sha, str) and sha:
-                            bundle_hash = sha
-                except MarketplaceNotFoundError:
-                    bundle_hash = None
-                except MarketplaceClientError as exc:
-                    logger.warning(
-                        "marketplace_sync: bundle envelope fetch failed for %s/%s@%s: %s",
-                        source.handle,
-                        app.slug,
-                        ver_str,
-                        exc,
-                    )
-
-            manifest_hash = _stable_manifest_hash(manifest)
-            required_features = manifest.get("required_features")
-            if not isinstance(required_features, list):
-                required_features = []
-            schema_version = (
-                manifest.get("manifest_schema_version")
-                or manifest.get("compatibility", {}).get("manifest_schema")
-                if isinstance(manifest.get("compatibility"), dict)
-                else None
-            ) or "2025-02"
-
+            # Look up the existing AppVersion FIRST — bundle_hash logic
+            # below needs to know whether we already materialised this
+            # version into Hub on a prior sync (Hub publish is not
+            # idempotent at the chain-hash level, so we must not redo it).
             existing_av = (
                 (
                     await session.execute(
@@ -1055,6 +1023,92 @@ class MarketplaceSyncWorker:
                 .scalars()
                 .first()
             )
+
+            # ``bundle_hash`` is required by the installer; the versions
+            # endpoint doesn't expose it (only manifest + flags), so we
+            # fetch the per-version bundle envelope which carries the
+            # tar.zst sha256 + signed download URL.
+            #
+            # Wave 8 storage bridge: the marketplace stores bundles as
+            # monolithic tar.zst in S3, but install_app delegates to the
+            # Volume Hub which uses btrfs send-stream chains in its own
+            # CAS. Different storage layers, incompatible hash schemes —
+            # the marketplace's tar sha256 is meaningless to the Hub.
+            #
+            # Bridge: download the tar.zst, extract into a fresh Hub
+            # volume via FileOpsClient, publish the volume → Hub returns
+            # its own bundle_hash (the head btrfs send stream's sha256).
+            # That hash is what install_app's Hub.create_volume_from_bundle
+            # call will resolve, so it's what we record on AppVersion.
+            #
+            # Existing AppVersion rows that already carry a bundle_hash
+            # from a prior sync are NOT re-materialised — Hub publish is
+            # not idempotent in the chain hash, so re-publishing the same
+            # bytes can produce a new chain and break already-installed
+            # AppInstances pinned to the old hash.
+            bundle_hash: str | None = existing_av.bundle_hash if existing_av is not None else None
+            if is_published and not is_yanked and not bundle_hash:
+                try:
+                    envelope = await client.get_bundle("app", app.slug, str(ver_str))
+                except MarketplaceNotFoundError:
+                    envelope = None
+                except MarketplaceClientError as exc:
+                    logger.warning(
+                        "marketplace_sync: bundle envelope fetch failed for %s/%s@%s: %s",
+                        source.handle,
+                        app.slug,
+                        ver_str,
+                        exc,
+                    )
+                    envelope = None
+
+                if isinstance(envelope, dict):
+                    bundle_url = envelope.get("url")
+                    if isinstance(bundle_url, str) and bundle_url:
+                        # Materialise into Hub-CAS so install_app finds
+                        # the bundle. The hub_client is constructed lazily
+                        # to avoid wiring it through every sync entry-
+                        # point — we only need it on the first publish of
+                        # each (slug, version) pair.
+                        from ..config import get_settings
+                        from .hub_client import HubClient
+                        from .marketplace_bundle_materializer import (
+                            BundleMaterializeError,
+                            materialize_bundle_into_hub,
+                        )
+
+                        settings = get_settings()
+                        hub_client = HubClient(settings.volume_hub_address)
+                        try:
+                            bundle_hash = await materialize_bundle_into_hub(
+                                bundle_url=bundle_url,
+                                slug=app.slug,
+                                version=str(ver_str),
+                                hub_client=hub_client,
+                            )
+                        except BundleMaterializeError as exc:
+                            logger.warning(
+                                "marketplace_sync: bundle materialise failed for "
+                                "%s/%s@%s: %s; AppVersion will land without "
+                                "bundle_hash and install will 422 until next sync",
+                                source.handle,
+                                app.slug,
+                                ver_str,
+                                exc,
+                            )
+                        finally:
+                            await hub_client.close()
+
+            manifest_hash = _stable_manifest_hash(manifest)
+            required_features = manifest.get("required_features")
+            if not isinstance(required_features, list):
+                required_features = []
+            schema_version = (
+                manifest.get("manifest_schema_version")
+                or manifest.get("compatibility", {}).get("manifest_schema")
+                if isinstance(manifest.get("compatibility"), dict)
+                else None
+            ) or "2025-02"
 
             if existing_av is None:
                 session.add(
