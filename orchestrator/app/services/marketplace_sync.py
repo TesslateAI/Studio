@@ -33,6 +33,8 @@ loop never raises out of ``sync_all_active_sources``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -130,6 +132,17 @@ _manifest_refresh_at: dict[UUID, float] = {}
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _stable_manifest_hash(manifest: dict[str, Any]) -> str:
+    """Sha256 over the canonical JSON encoding of the manifest.
+
+    Mirrors the helper in ``services.apps.manifest_parser._canonical_bytes``
+    so a federated sync of a manifest produces the same hash that a local
+    publish of the same manifest would (sort_keys + tight separators).
+    """
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 # Type alias for the factories the worker accepts (testable injection).
@@ -663,12 +676,13 @@ class MarketplaceSyncWorker:
                 )
                 return
 
-        await self._upsert_row(session, source, kind, slug, item, etag=etag)
+        await self._upsert_row(session, source, client, kind, slug, item, etag=etag)
 
     async def _upsert_row(
         self,
         session: AsyncSession,
         source: MarketplaceSource,
+        client: MarketplaceClient,
         kind: str,
         slug: str,
         item: JsonObject,
@@ -680,7 +694,7 @@ class MarketplaceSyncWorker:
         elif kind == "base":
             await self._upsert_marketplace_base(session, source, slug, item, etag)
         elif kind == "app":
-            await self._upsert_marketplace_app(session, source, slug, item, etag)
+            await self._upsert_marketplace_app(session, source, client, slug, item, etag)
         elif kind == "theme":
             await self._upsert_theme(session, source, slug, item, etag)
         elif kind == "workflow_template":
@@ -875,6 +889,7 @@ class MarketplaceSyncWorker:
         self,
         session: AsyncSession,
         source: MarketplaceSource,
+        client: MarketplaceClient,
         slug: str,
         item: JsonObject,
         etag: Any,
@@ -904,10 +919,131 @@ class MarketplaceSyncWorker:
             # Apps require visibility/state defaults — set them explicitly.
             fields.setdefault("visibility", "public")
             fields.setdefault("state", "approved")
-            session.add(MarketplaceApp(**fields))
+            app_row = MarketplaceApp(**fields)
+            session.add(app_row)
+            # Flush so the FK target exists before we INSERT child AppVersion rows.
+            await session.flush()
         else:
             for k, v in fields.items():
                 setattr(existing, k, v)
+            app_row = existing
+
+        # Mirror AppVersion rows so the install dialog has a target. The
+        # changes-feed only carries item metadata; versions live on the
+        # /v1/items/{kind}/{slug}/versions endpoint and we fetch on each
+        # upsert (cheap — sub-100ms even on busy hubs, and only fires when
+        # the app's etag actually moved).
+        try:
+            await self._sync_app_versions(session, source, client, app_row)
+        except MarketplaceClientError as exc:
+            logger.warning(
+                "marketplace_sync: app=%s/%s versions fetch failed: %s; "
+                "AppVersion rows will be retried on next sync",
+                source.handle,
+                slug,
+                exc,
+            )
+
+    async def _sync_app_versions(
+        self,
+        session: AsyncSession,
+        source: MarketplaceSource,
+        client: MarketplaceClient,
+        app: MarketplaceApp,
+    ) -> None:
+        """Upsert :class:`AppVersion` rows for a federated app.
+
+        Wave 7 split AppVersion authoring across two paths:
+
+        * Local publishes (orchestrator's ``apps.publisher.publish_version``)
+          insert the AppVersion themselves and own ``approval_state`` directly.
+        * Federated publishes happen on the marketplace pod, which only
+          tells the orchestrator about item-level changes via the changes
+          feed. The version manifests live on a separate endpoint
+          (``/v1/items/{kind}/{slug}/versions``) and never appear in the
+          changes feed itself.
+
+        Without mirroring versions here, federated apps land on the
+        orchestrator with zero AppVersion rows — the marketplace UI then
+        renders "No versions available" and the install dialog can't
+        open. This method bridges the gap by fetching the versions list
+        and inserting / updating an AppVersion per row.
+        """
+        try:
+            versions = await client.list_versions("app", app.slug)
+        except MarketplaceNotFoundError:
+            return
+
+        for entry in versions:
+            if not isinstance(entry, dict):
+                continue
+            ver_str = entry.get("version")
+            manifest = entry.get("manifest") if isinstance(entry.get("manifest"), dict) else {}
+            if not ver_str or not isinstance(manifest, dict):
+                continue
+
+            # Approval state mirrors the marketplace's published/yanked flags.
+            # is_published is the marketplace's signal that the version cleared
+            # the staged pipeline (stage3 → approved); we map that to the
+            # orchestrator's ``stage2_approved`` since the local AppVersion
+            # state machine collapses stage2/stage3 (see services/apps/submissions.py).
+            is_yanked = bool(entry.get("is_yanked"))
+            is_published = bool(entry.get("is_published"))
+            if is_yanked:
+                approval_state = "yanked"
+            elif is_published:
+                approval_state = "stage2_approved"
+            else:
+                approval_state = "pending_stage1"
+
+            manifest_hash = _stable_manifest_hash(manifest)
+            required_features = manifest.get("required_features")
+            if not isinstance(required_features, list):
+                required_features = []
+            schema_version = (
+                manifest.get("manifest_schema_version")
+                or manifest.get("compatibility", {}).get("manifest_schema")
+                if isinstance(manifest.get("compatibility"), dict)
+                else None
+            ) or "2025-02"
+
+            existing_av = (
+                (
+                    await session.execute(
+                        select(AppVersion)
+                        .where(AppVersion.app_id == app.id)
+                        .where(AppVersion.version == ver_str)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+
+            if existing_av is None:
+                session.add(
+                    AppVersion(
+                        app_id=app.id,
+                        version=str(ver_str),
+                        manifest_schema_version=str(schema_version),
+                        manifest_json=manifest,
+                        manifest_hash=manifest_hash,
+                        feature_set_hash=manifest_hash,  # placeholder — re-derive once feature
+                        # set hashing lands as a public helper
+                        required_features=required_features,
+                        approval_state=approval_state,
+                        source_id=source.id,
+                        source_remote_id=str(entry.get("id") or ""),
+                    )
+                )
+            else:
+                existing_av.approval_state = approval_state
+                existing_av.manifest_json = manifest
+                existing_av.manifest_hash = manifest_hash
+                existing_av.required_features = required_features
+                existing_av.source_id = source.id
+                existing_av.source_remote_id = (
+                    str(entry.get("id") or "") or existing_av.source_remote_id
+                )
 
     async def _upsert_theme(
         self,
