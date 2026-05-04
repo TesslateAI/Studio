@@ -1008,6 +1008,31 @@ class MarketplaceSyncWorker:
                 except ValueError:
                     published_at = None
 
+            # ``bundle_hash`` is required by the installer; the versions
+            # endpoint doesn't expose it (only manifest + flags), so we
+            # fetch the per-version bundle envelope which carries the
+            # sha256. The same envelope is what install hits later anyway,
+            # so this is the natural prefetch hop. Skipped on yanks since
+            # the bundle endpoint may be gone for yanked rows.
+            bundle_hash: str | None = None
+            if is_published and not is_yanked:
+                try:
+                    envelope = await client.get_bundle("app", app.slug, str(ver_str))
+                    if isinstance(envelope, dict):
+                        sha = envelope.get("sha256")
+                        if isinstance(sha, str) and sha:
+                            bundle_hash = sha
+                except MarketplaceNotFoundError:
+                    bundle_hash = None
+                except MarketplaceClientError as exc:
+                    logger.warning(
+                        "marketplace_sync: bundle envelope fetch failed for %s/%s@%s: %s",
+                        source.handle,
+                        app.slug,
+                        ver_str,
+                        exc,
+                    )
+
             manifest_hash = _stable_manifest_hash(manifest)
             required_features = manifest.get("required_features")
             if not isinstance(required_features, list):
@@ -1046,6 +1071,7 @@ class MarketplaceSyncWorker:
                         source_id=source.id,
                         source_remote_id=str(entry.get("id") or ""),
                         published_at=published_at,
+                        bundle_hash=bundle_hash,
                     )
                 )
             else:
@@ -1059,6 +1085,8 @@ class MarketplaceSyncWorker:
                 )
                 if published_at is not None:
                     existing_av.published_at = published_at
+                if bundle_hash is not None:
+                    existing_av.bundle_hash = bundle_hash
 
     async def _upsert_theme(
         self,
