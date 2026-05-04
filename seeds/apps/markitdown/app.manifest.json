@@ -4,7 +4,7 @@
     "id": "com.microsoft.markitdown",
     "slug": "markitdown",
     "name": "MarkItDown",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Microsoft MarkItDown wrapped in a minimal FastAPI uploader — converts PDF, Office docs, audio, YouTube URLs and more to Markdown for LLM pipelines.",
     "category": "utility",
     "forkable": "true"

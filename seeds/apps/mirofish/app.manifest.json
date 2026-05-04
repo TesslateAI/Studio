@@ -4,7 +4,7 @@
     "id": "com.666ghj.mirofish",
     "slug": "mirofish",
     "name": "MiroFish",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Swarm-intelligence multi-agent prediction engine. Uploads a seed report or novel, runs thousands of persona-driven agents in a simulated world, and returns a prediction report. Requires an OpenAI-compatible LLM API key.",
     "category": "research",
     "forkable": "restricted"

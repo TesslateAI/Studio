@@ -4,7 +4,7 @@
     "id": "com.tesslate.geopin",
     "slug": "geopin",
     "name": "GeoPin",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "Interactive GeoJSON map editor — add pins, lines, and polygons with labels. Built on Leaflet + OpenStreetMap. Per-install persistent storage, full REST API.",
     "category": "productivity",
     "forkable": true

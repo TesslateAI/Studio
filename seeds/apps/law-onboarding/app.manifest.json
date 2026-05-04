@@ -4,7 +4,7 @@
     "id": "com.tesslate.law-onboarding",
     "slug": "law-onboarding",
     "name": "Law Onboarding & Redline",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Demo legal client-intake + document-redline workbench. Next.js 16 + NextAuth dashboard with a built-in demo-data layer (runs without a database). Log in with attorney / demo1234.",
     "category": "productivity",
     "forkable": "true"

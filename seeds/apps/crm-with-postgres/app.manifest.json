@@ -4,7 +4,7 @@
     "id": "com.tesslate.crm-with-postgres",
     "slug": "crm-with-postgres",
     "name": "Tesslate CRM with Postgres",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Matrix demo app exercising the full platform container toolbox: Next.js web surface + Node API + Postgres service container with a CSI-backed volume, secrets, and env_injection wiring.",
     "category": "productivity",
     "forkable": "true"

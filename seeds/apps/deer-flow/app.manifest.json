@@ -4,7 +4,7 @@
     "id": "com.bytedance.deer-flow",
     "slug": "deer-flow",
     "name": "DeerFlow",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "ByteDance DeerFlow 2.0 — open-source super-agent harness orchestrating sub-agents, memory, and sandboxes for deep research. Requires an OpenAI-compatible LLM API key.",
     "category": "research",
     "forkable": "restricted"

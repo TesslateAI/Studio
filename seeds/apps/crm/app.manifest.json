@@ -4,7 +4,7 @@
     "id": "com.tesslate.crm",
     "slug": "crm-demo",
     "name": "Tesslate CRM",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "A minimal CRM demo with a chat-drawer agent running on the Tesslate Apps runtime.",
     "category": "productivity",
     "forkable": "true"

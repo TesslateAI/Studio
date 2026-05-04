@@ -95,6 +95,15 @@ SAFE_COMMAND_PREFIXES = [
     "while",
     "test",
     "[",  # Shell control flow
+    "sh",
+    "bash",  # Shell wrappers — used by app manifests that need first-run
+    # ``install && start`` patterns that don't fit a single binary invocation.
+    # Manifests still pass through the federated marketplace's stage1 scanner
+    # which catches dangerous patterns; this whitelist is defence-in-depth at
+    # the orchestrator boundary, not the primary gate.
+    "make",  # Many seed images use ``make dev`` / ``make build`` as the
+    # canonical build/run entrypoint (e.g. deer-flow). Same risk profile
+    # as npm/cargo (project-defined targets).
 ]
 
 
@@ -176,6 +185,7 @@ def _install_deps_if_missing_command() -> str:
 @dataclass
 class AppConfig:
     """Configuration for a single app in .tesslate/config.json."""
+
     directory: str = "."
     port: int | None = 3000
     start: str = ""
@@ -191,6 +201,7 @@ class AppConfig:
 @dataclass
 class InfraConfig:
     """Configuration for an infrastructure service in .tesslate/config.json."""
+
     image: str = ""
     port: int = 5432
     env: dict[str, str] = field(default_factory=dict)
@@ -205,6 +216,7 @@ class InfraConfig:
 @dataclass
 class ConnectionConfig:
     """A connection between two nodes in the config."""
+
     from_node: str = ""
     to_node: str = ""
 
@@ -212,6 +224,7 @@ class ConnectionConfig:
 @dataclass
 class DeploymentConfig:
     """A deployment target in the config."""
+
     provider: str = ""
     targets: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -222,6 +235,7 @@ class DeploymentConfig:
 @dataclass
 class PreviewConfig:
     """A browser preview node in the config."""
+
     target: str = ""
     x: float | None = None
     y: float | None = None
@@ -230,6 +244,7 @@ class PreviewConfig:
 @dataclass(frozen=True)
 class HostedAgentConfig:
     """Hosted agent spec authored via canvas; mirrors HostedAgentSpec in app_manifest."""
+
     id: str = ""
     system_prompt_ref: str = ""
     model_pref: str | None = None
@@ -279,6 +294,7 @@ class HostedAgentConfig:
 @dataclass
 class TesslateProjectConfig:
     """Parsed .tesslate/config.json configuration."""
+
     apps: dict[str, AppConfig] = field(default_factory=dict)
     infrastructure: dict[str, InfraConfig] = field(default_factory=dict)
     connections: list[ConnectionConfig] = field(default_factory=list)
@@ -346,10 +362,12 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
 
     # Parse connections
     for conn_data in data.get("connections", []):
-        config.connections.append(ConnectionConfig(
-            from_node=conn_data.get("from", ""),
-            to_node=conn_data.get("to", ""),
-        ))
+        config.connections.append(
+            ConnectionConfig(
+                from_node=conn_data.get("from", ""),
+                to_node=conn_data.get("to", ""),
+            )
+        )
 
     # Parse deployments
     for name, deploy_data in data.get("deployments", {}).items():
@@ -386,7 +404,9 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
 
     # Validate primaryApp exists in apps (if specified)
     if config.primaryApp and config.primaryApp not in config.apps:
-        logger.warning(f"[CONFIG] primaryApp '{config.primaryApp}' not found in apps, will use first app")
+        logger.warning(
+            f"[CONFIG] primaryApp '{config.primaryApp}' not found in apps, will use first app"
+        )
         if config.apps:
             config.primaryApp = next(iter(config.apps))
 
@@ -472,10 +492,7 @@ def _config_to_dict(config: TesslateProjectConfig) -> dict[str, Any]:
         data["infrastructure"][name] = infra_data
 
     if config.connections:
-        data["connections"] = [
-            {"from": c.from_node, "to": c.to_node}
-            for c in config.connections
-        ]
+        data["connections"] = [{"from": c.from_node, "to": c.to_node} for c in config.connections]
 
     if config.deployments:
         deployments: dict[str, Any] = {}

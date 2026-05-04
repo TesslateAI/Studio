@@ -4,7 +4,7 @@
     "id": "com.tesslate.digest",
     "slug": "nightly-digest",
     "name": "Nightly Activity Digest",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Headless cron-triggered digest that summarizes CRM activity each night via Llama.",
     "category": "automation",
     "forkable": "true"
