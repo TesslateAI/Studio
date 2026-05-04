@@ -996,6 +996,18 @@ class MarketplaceSyncWorker:
             else:
                 approval_state = "pending_stage1"
 
+            # Without published_at the UI renders the version with an
+            # "unpublished" badge. The marketplace's ``created_at`` is the
+            # closest analogue — by the time it lands in our sync the
+            # row has already cleared the staged pipeline.
+            published_at_raw = entry.get("created_at") if is_published else None
+            published_at: datetime | None = None
+            if isinstance(published_at_raw, str):
+                try:
+                    published_at = datetime.fromisoformat(published_at_raw.replace("Z", "+00:00"))
+                except ValueError:
+                    published_at = None
+
             manifest_hash = _stable_manifest_hash(manifest)
             required_features = manifest.get("required_features")
             if not isinstance(required_features, list):
@@ -1033,6 +1045,7 @@ class MarketplaceSyncWorker:
                         approval_state=approval_state,
                         source_id=source.id,
                         source_remote_id=str(entry.get("id") or ""),
+                        published_at=published_at,
                     )
                 )
             else:
@@ -1044,6 +1057,8 @@ class MarketplaceSyncWorker:
                 existing_av.source_remote_id = (
                     str(entry.get("id") or "") or existing_av.source_remote_id
                 )
+                if published_at is not None:
+                    existing_av.published_at = published_at
 
     async def _upsert_theme(
         self,

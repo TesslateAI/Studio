@@ -2,11 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CaretDown, CaretRight, Package } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
-import {
-  marketplaceAppsApi,
-  type AppVersionSummary,
-  type MarketplaceApp,
-} from '../lib/api';
+import { marketplaceAppsApi, type AppVersionSummary, type MarketplaceApp } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { AppInstallWizard } from '../components/apps/AppInstallWizard';
 import { ForkModal } from '../components/apps/ForkModal';
@@ -65,7 +61,13 @@ function VersionRow({ version, onInstall }: VersionRowProps) {
           )}
           <button
             className="btn btn-filled"
-            disabled={version.approval_state !== 'approved' || !!version.yanked_at}
+            disabled={
+              !(
+                version.approval_state === 'approved' ||
+                version.approval_state === 'stage1_approved' ||
+                version.approval_state === 'stage2_approved'
+              ) || !!version.yanked_at
+            }
             onClick={() => onInstall(version.id)}
           >
             Install this version
@@ -120,8 +122,16 @@ export default function AppDetailPage() {
     return true;
   });
 
+  // Backend's installer accepts ``stage1_approved`` and ``stage2_approved``
+  // (services/apps/installer.py:_APPROVED_STATES). The model has no plain
+  // ``approved`` state — that was a pre-Wave-3 alias. Keep the alias accepted
+  // for back-compat with any out-of-band rows that still carry it.
   const latestInstallable = visibleVersions.find(
-    (v) => v.approval_state === 'approved' && !v.yanked_at
+    (v) =>
+      (v.approval_state === 'approved' ||
+        v.approval_state === 'stage1_approved' ||
+        v.approval_state === 'stage2_approved') &&
+      !v.yanked_at
   );
 
   const canFork = app && (app.forkable === 'true' || app.forkable === 'restricted');
@@ -188,11 +198,7 @@ export default function AppDetailPage() {
             <p className="text-xs text-[var(--text-subtle)]">No versions available.</p>
           ) : (
             visibleVersions.map((v) => (
-              <VersionRow
-                key={v.id}
-                version={v}
-                onInstall={(id) => setInstallVersionId(id)}
-              />
+              <VersionRow key={v.id} version={v} onInstall={(id) => setInstallVersionId(id)} />
             ))
           )}
         </div>
