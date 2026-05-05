@@ -151,8 +151,23 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
       * ``compute.containers[*].name`` → ``apps[name]``
       * ``compute.containers[*].primary=true`` → ``primaryApp = name``
         (falls back to first container if none are flagged)
-      * ``compute.containers[*].image`` → ``apps[name].framework`` (best-
-        effort label; the install path doesn't actually use this)
+      * ``compute.containers[*].image`` → BOTH ``apps[name].image`` (used
+        by ``install_compute_materializer`` to populate ``Container.image``
+        so the K8s deployer renders the right image instead of falling
+        back to ``tesslate-devserver:latest``) AND ``apps[name].framework``
+        (UI label only — keeps the canvas card label populated for image-
+        based apps that don't otherwise carry a framework hint).
+      * ``compute.containers[*].source_strategy`` → ``apps[name].source_strategy``
+        — explicit creator declaration. If unset, defaults to ``'image'``
+        when ``image`` is present (the App Runtime Contract treats a
+        custom image as self-contained unless told otherwise) and
+        ``'bundle'`` otherwise. ``'bundle'`` keeps the legacy behaviour
+        (PVC at /app); ``'image'`` lets the image's WORKDIR/source remain
+        authoritative.
+      * ``compute.containers[*].state_mount_path`` → ``apps[name].state_mount_path``
+        — explicit. If unset and ``state.model='per-install-volume'`` and
+        the resolved strategy is ``'image'``, falls back to
+        ``state.mount_path`` from the manifest's ``state`` block.
       * ``compute.containers[*].ports[0]`` → ``apps[name].port``
       * ``compute.containers[*].startup_command`` → ``apps[name].start``
       * ``compute.containers[*].env`` → ``apps[name].env``
@@ -162,6 +177,10 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
     containers = compute.get("containers") or []
     if not isinstance(containers, list):
         containers = []
+
+    state_block = manifest.get("state") or {}
+    state_model = state_block.get("model") if isinstance(state_block, dict) else None
+    state_mount_default = state_block.get("mount_path") if isinstance(state_block, dict) else None
 
     apps: dict[str, dict[str, Any]] = {}
     primary_name: str | None = None
@@ -178,13 +197,48 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
 
         env = container.get("env") if isinstance(container.get("env"), dict) else {}
 
-        apps[name] = {
+        image = container.get("image") or None
+
+        # Source strategy: explicit > inferred. A custom image without an
+        # explicit strategy defaults to ``'image'`` (the App Runtime
+        # Contract treats a docker image as self-contained source unless
+        # the creator says otherwise). No image → ``'bundle'`` (devserver
+        # generic runtime; bundle is the source of truth at /app).
+        explicit_strategy = container.get("source_strategy")
+        if isinstance(explicit_strategy, str) and explicit_strategy in ("bundle", "image"):
+            source_strategy = explicit_strategy
+        elif image:
+            source_strategy = "image"
+        else:
+            source_strategy = "bundle"
+
+        # State mount path: only meaningful when source_strategy='image'
+        # AND the manifest declares a per-install volume. Container-level
+        # explicit override beats the manifest's state.mount_path default.
+        state_mount_path: str | None = None
+        if source_strategy == "image" and state_model == "per-install-volume":
+            container_mount = container.get("state_mount_path")
+            if isinstance(container_mount, str) and container_mount:
+                state_mount_path = container_mount
+            elif isinstance(state_mount_default, str) and state_mount_default:
+                state_mount_path = state_mount_default
+
+        app_entry: dict[str, Any] = {
             "directory": container.get("directory") or ".",
             "port": port,
             "start": container.get("startup_command") or "",
-            "framework": container.get("image") or None,
+            # ``image`` is the deploy image (consumed by install_compute_materializer
+            # → Container.image → K8s spec). ``framework`` is the UI label only.
+            # Keeping both populated avoids two regressions: app preview running
+            # the wrong image, and the canvas card showing an empty framework chip.
+            "image": image,
+            "framework": image,
+            "source_strategy": source_strategy,
             "env": env,
         }
+        if state_mount_path:
+            app_entry["state_mount_path"] = state_mount_path
+        apps[name] = app_entry
 
         if container.get("primary") is True and primary_name is None:
             primary_name = name

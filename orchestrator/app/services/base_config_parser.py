@@ -212,6 +212,25 @@ class AppConfig:
     build: str | None = None
     output: str | None = None
     framework: str | None = None
+    # Container image override. Apps that ship a pre-built image (e.g.
+    # ``ghcr.io/owner/app:tag`` or short ECR-resolvable name like
+    # ``tesslate-markitdown:latest``) populate this so the orchestrator's
+    # K8s deployer renders the right image instead of falling back to
+    # ``tesslate-devserver:latest``. ``framework`` is just a UI label and
+    # MUST NOT be reused as the deploy image (compute_manager reads
+    # ``Container.image`` directly).
+    image: str | None = None
+    # Where the runnable code lives. ``'bundle'`` (default; PVC at /app
+    # holds the source) OR ``'image'`` (image is self-contained; PVC
+    # mounts at ``state_mount_path`` only and image's WORKDIR remains
+    # authoritative). When unset, the publish layer infers ``'image'``
+    # iff the manifest sets a non-default ``image`` field.
+    source_strategy: str | None = None
+    # When ``source_strategy='image'`` and ``state.model='per-install-volume'``,
+    # this is where the per-install PVC mounts inside the container.
+    # E.g. ``/data``, ``/var/lib/app``. Ignored for stateless apps and for
+    # bundle-strategy apps (which always mount at /app).
+    state_mount_path: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     exports: dict[str, str] = field(default_factory=dict)
     x: float | None = None
@@ -359,6 +378,9 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             build=app_data.get("build") or None,
             output=app_data.get("output") or None,
             framework=app_data.get("framework") or None,
+            image=app_data.get("image") or None,
+            source_strategy=app_data.get("source_strategy") or None,
+            state_mount_path=app_data.get("state_mount_path") or None,
             env=app_data.get("env", {}),
             exports=app_data.get("exports", {}),
             x=app_data.get("x"),
@@ -482,6 +504,12 @@ def _config_to_dict(config: TesslateProjectConfig) -> dict[str, Any]:
             app_data["output"] = app.output
         if app.framework:
             app_data["framework"] = app.framework
+        if app.image:
+            app_data["image"] = app.image
+        if app.source_strategy:
+            app_data["source_strategy"] = app.source_strategy
+        if app.state_mount_path:
+            app_data["state_mount_path"] = app.state_mount_path
         if app.exports:
             app_data["exports"] = app.exports
         if app.x is not None:

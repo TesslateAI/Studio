@@ -316,6 +316,17 @@ class Container(Base):
     # replace the TSL_CONTAINER_IMAGE env-var smuggling hack.
     image = Column(String, nullable=True)
 
+    # 2026-05 App Runtime Contract — see migration 0097.
+    # ``source_strategy``: 'bundle' (default; PVC mounts at /app, source
+    # comes from the bundle, image is generic devserver) OR 'image' (image
+    # is self-contained, PVC mounts at ``state_mount_path`` only). NULL
+    # means 'bundle' for legacy / bundle-based apps.
+    source_strategy = Column(String, nullable=True)
+    # ``state_mount_path``: where the per-install volume mounts when
+    # source_strategy='image' AND the manifest declares
+    # ``state.model='per-install-volume'``. NULL = no extra mount.
+    state_mount_path = Column(String, nullable=True)
+
     # Container type: 'base' (user app from marketplace base) or 'service' (infra service like postgres)
     container_type = Column(String, default="base", nullable=False)
     service_slug = Column(
@@ -1428,12 +1439,8 @@ class MarketplaceAgent(Base):
     source_pricing_type_original = Column(String(32), nullable=True)
     source_pricing_payload_original = Column(JSON, nullable=True)
     source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
-    source_pricing_ignored = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
-    deleted_upstream = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
+    source_pricing_ignored = Column(Boolean, nullable=False, default=False, server_default="false")
+    deleted_upstream = Column(Boolean, nullable=False, default=False, server_default="false")
     deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
     deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -1612,12 +1619,8 @@ class MarketplaceBase(Base):
     source_pricing_type_original = Column(String(32), nullable=True)
     source_pricing_payload_original = Column(JSON, nullable=True)
     source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
-    source_pricing_ignored = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
-    deleted_upstream = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
+    source_pricing_ignored = Column(Boolean, nullable=False, default=False, server_default="false")
+    deleted_upstream = Column(Boolean, nullable=False, default=False, server_default="false")
     deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
     deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -1742,12 +1745,8 @@ class WorkflowTemplate(Base):
     source_pricing_type_original = Column(String(32), nullable=True)
     source_pricing_payload_original = Column(JSON, nullable=True)
     source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
-    source_pricing_ignored = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
-    deleted_upstream = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
+    source_pricing_ignored = Column(Boolean, nullable=False, default=False, server_default="false")
+    deleted_upstream = Column(Boolean, nullable=False, default=False, server_default="false")
     deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
     deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -2166,12 +2165,8 @@ class MarketplaceApp(Base):
     source_pricing_type_original = Column(String(32), nullable=True)
     source_pricing_payload_original = Column(JSON, nullable=True)
     source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
-    source_pricing_ignored = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
-    deleted_upstream = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
+    source_pricing_ignored = Column(Boolean, nullable=False, default=False, server_default="false")
+    deleted_upstream = Column(Boolean, nullable=False, default=False, server_default="false")
     deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
     deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -2247,12 +2242,8 @@ class AppVersion(Base):
     source_pricing_type_original = Column(String(32), nullable=True)
     source_pricing_payload_original = Column(JSON, nullable=True)
     source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
-    source_pricing_ignored = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
-    deleted_upstream = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
+    source_pricing_ignored = Column(Boolean, nullable=False, default=False, server_default="false")
+    deleted_upstream = Column(Boolean, nullable=False, default=False, server_default="false")
     deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
     deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
     yanked_upstream_at = Column(DateTime(timezone=True), nullable=True)
@@ -2717,9 +2708,7 @@ class Theme(Base):
     tags = Column(JSON, nullable=True)  # e.g. ["dark", "minimal", "neon"]
     category = Column(String(50), default="general")  # general / minimal / vibrant / professional
     source_type = Column(String(20), default="open")  # open / closed
-    parent_theme_id = Column(
-        GUID(), ForeignKey("themes.id", ondelete="SET NULL"), nullable=True
-    )
+    parent_theme_id = Column(GUID(), ForeignKey("themes.id", ondelete="SET NULL"), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -2745,18 +2734,12 @@ class Theme(Base):
     source_pricing_type_original = Column(String(32), nullable=True)
     source_pricing_payload_original = Column(JSON, nullable=True)
     source_pricing_stripped_at = Column(DateTime(timezone=True), nullable=True)
-    source_pricing_ignored = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
-    deleted_upstream = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
+    source_pricing_ignored = Column(Boolean, nullable=False, default=False, server_default="false")
+    deleted_upstream = Column(Boolean, nullable=False, default=False, server_default="false")
     deleted_upstream_at = Column(DateTime(timezone=True), nullable=True)
     deactivated_upstream_at = Column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("source_id", "slug", name="uq_themes_source_slug"),
-    )
+    __table_args__ = (UniqueConstraint("source_id", "slug", name="uq_themes_source_slug"),)
 
 
 class UserLibraryTheme(Base):

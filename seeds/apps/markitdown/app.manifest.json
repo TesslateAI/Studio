@@ -4,7 +4,7 @@
     "id": "com.microsoft.markitdown",
     "slug": "markitdown",
     "name": "MarkItDown",
-    "version": "0.1.2",
+    "version": "0.1.4",
     "description": "Microsoft MarkItDown wrapped in a minimal FastAPI uploader \u2014 converts PDF, Office docs, audio, YouTube URLs and more to Markdown for LLM pipelines.",
     "category": "utility",
     "forkable": "true"
@@ -26,6 +26,7 @@
         "name": "web",
         "primary": true,
         "image": "tesslate-markitdown:latest",
+        "source_strategy": "image",
         "ports": [
           3000
         ],

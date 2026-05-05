@@ -4,7 +4,7 @@
     "id": "com.bytedance.deer-flow",
     "slug": "deer-flow",
     "name": "DeerFlow",
-    "version": "0.1.2",
+    "version": "0.1.4",
     "description": "ByteDance DeerFlow 2.0 \u2014 open-source super-agent harness orchestrating sub-agents, memory, and sandboxes for deep research. Requires an OpenAI-compatible LLM API key.",
     "category": "research",
     "forkable": "restricted"
@@ -26,6 +26,7 @@
         "name": "web",
         "primary": true,
         "image": "tesslate-deerflow:latest",
+        "source_strategy": "image",
         "ports": [
           3000,
           8001,
@@ -51,7 +52,8 @@
   ],
   "state": {
     "model": "per-install-volume",
-    "volume_size": "4Gi"
+    "volume_size": "4Gi",
+    "mount_path": "/data"
   },
   "billing": {
     "ai_compute": {

@@ -1322,6 +1322,7 @@ def create_v2_dev_deployment(
     image: str,
     port: int,
     startup_command: str,
+    tsinit_source_image: str,
     pvc_name: str = "project-source",
     working_directory: str = "",
     image_pull_policy: str = "IfNotPresent",
@@ -1330,6 +1331,8 @@ def create_v2_dev_deployment(
     preferred_node: str | None = None,
     spec_hash: str | None = None,
     tsinit_restart_policy: str = "never",
+    source_strategy: str | None = None,
+    state_mount_path: str | None = None,
 ) -> client.V1Deployment:
     """
     Create a v2 dev container deployment using CSI-backed PVC volumes.
@@ -1344,9 +1347,15 @@ def create_v2_dev_deployment(
         user_id: User UUID
         container_id: Container UUID
         container_directory: Container directory name for K8s resource naming (DNS-safe)
-        image: Container image (tesslate-devserver)
+        image: Container image (tesslate-devserver, OR a Tesslate App's
+            manifest-declared image like ``tesslate-markitdown:latest`` /
+            ``ghcr.io/owner/app:tag``)
         port: Port the dev server listens on
         startup_command: Command to start the dev server
+        tsinit_source_image: Image that ships ``/usr/local/bin/tsinit`` —
+            an initContainer copies the binary into a shared emptyDir so
+            the main container can be ANY image (not just tesslate-devserver).
+            Pass ``settings.k8s_devserver_image`` from the call site.
         pvc_name: PVC claim name (default "project-source")
         working_directory: Actual filesystem path ("." for root, "frontend", etc.)
         image_pull_policy: Image pull policy
@@ -1370,9 +1379,30 @@ def create_v2_dev_deployment(
 
     selector_labels = {"tesslate.io/container-id": str(container_id)}
 
+    # 2026-05 App Runtime Contract — see migration 0097 + base_config_parser.
+    # NULL/'bundle' (default): bundle PVC mounts at /app, source comes from
+    # the bundle, tsinit cd's into the working dir before launching.
+    # 'image': image is self-contained — bundle PVC is NOT mounted at /app.
+    # If state_mount_path is set, the SAME PVC mounts there as the
+    # per-install volume (the bundle materialised it; runtime can write).
+    # tsinit doesn't override the cwd, so the image's WORKDIR/source remain
+    # authoritative.
+    use_image_source = (source_strategy or "bundle").lower() == "image"
+
     # Working directory inside container
     effective_dir = working_directory or container_directory
-    working_dir = "/app" if effective_dir in (".", "") else f"/app/{effective_dir}"
+    if use_image_source:
+        # Image is the source of truth. Don't ``cd /app`` (would mask
+        # the image's WORKDIR with an empty mount). Use the manifest-
+        # declared subdirectory only if explicitly non-default; otherwise
+        # let the image's WORKDIR take over.
+        if effective_dir in (".", "", container_directory):
+            working_dir_prefix = ""
+        else:
+            working_dir_prefix = f"cd {effective_dir} && "
+    else:
+        working_dir = "/app" if effective_dir in (".", "") else f"/app/{effective_dir}"
+        working_dir_prefix = f"mkdir -p {working_dir} && cd {working_dir} && "
 
     # Environment variables
     env_vars = [
@@ -1385,18 +1415,50 @@ def create_v2_dev_deployment(
     _filtered = {k: v for k, v in (extra_env or {}).items() if k not in _RESERVED_DEV_ENV_KEYS}
     env_vars.extend(resolve_env_for_pod(_filtered))
 
+    # Absolute path to the sideloaded tsinit binary. The initContainer below
+    # copies ``/usr/local/bin/tsinit`` from ``tsinit_source_image`` (the
+    # devserver image) into the ``tsinit-bin`` emptyDir so the dev container
+    # can be any image — not just tesslate-devserver. Using an absolute path
+    # avoids relying on PATH munging in the user image.
+    tsinit_path = "/opt/tesslate/bin/tsinit"
+
+    # Container volume mounts vary by source strategy:
+    #   bundle → bundle PVC at /app + tsinit binary
+    #   image  → tsinit binary + (optionally) per-install PVC at state_mount_path
+    container_mounts = [
+        client.V1VolumeMount(name="tsinit-bin", mount_path="/opt/tesslate/bin", read_only=True),
+    ]
+    if use_image_source:
+        if state_mount_path:
+            container_mounts.append(
+                client.V1VolumeMount(name="project-source", mount_path=state_mount_path)
+            )
+    else:
+        container_mounts.insert(0, client.V1VolumeMount(name="project-source", mount_path="/app"))
+
+    # tsinit's ``--dir`` becomes ``cmd.Dir`` for the managed process.
+    # For bundle strategy we anchor to ``/`` (the working_dir_prefix
+    # ``cd``s into the right subdir of /app). For image strategy we MUST
+    # pass an empty string so ``exec.Cmd`` inherits cwd from tsinit's
+    # parent — kubelet seeds that with the image's WORKDIR. Passing
+    # ``/`` here would clobber the image's WORKDIR and the app would
+    # fail to find its baked-in source files (regression: markitdown's
+    # ``Could not import module "server"``, mirofish's
+    # ``ENOENT: no such file or directory, open '//package.json'``).
+    tsinit_dir = "" if use_image_source else "/"
+
     dev_container = client.V1Container(
         name="dev-server",
         image=image,
         image_pull_policy=image_pull_policy,
         # tsinit as PID 1: proper signal forwarding, process group kill,
         # zombie reaping. Dev server runs as managed process "main".
-        command=["tsinit", "serve"],
+        command=[tsinit_path, "serve"],
         args=[
             "--process",
-            f"main=mkdir -p {working_dir} && cd {working_dir} && rm -rf .next/dev/lock && {startup_command}",
+            f"main={working_dir_prefix}rm -rf .next/dev/lock 2>/dev/null; {startup_command}",
             "--dir",
-            "/",
+            tsinit_dir,
             "--grace-period",
             "10s",
             "--restart-policy",
@@ -1405,14 +1467,14 @@ def create_v2_dev_deployment(
             "/tmp/tsinit.sock",
         ],
         ports=[client.V1ContainerPort(container_port=port, name="http")],
-        volume_mounts=[client.V1VolumeMount(name="project-source", mount_path="/app")],
+        volume_mounts=container_mounts,
         env=env_vars,
         resources=client.V1ResourceRequirements(
             requests={"memory": "256Mi", "cpu": "50m"},
             limits={"memory": "1Gi", "cpu": "1000m"},
         ),
         startup_probe=client.V1Probe(
-            _exec=client.V1ExecAction(command=["tsinit", "health", "/tmp/tsinit.sock"]),
+            _exec=client.V1ExecAction(command=[tsinit_path, "health", "/tmp/tsinit.sock"]),
             initial_delay_seconds=2,
             period_seconds=3,
             timeout_seconds=5,
@@ -1426,7 +1488,7 @@ def create_v2_dev_deployment(
             failure_threshold=3,
         ),
         liveness_probe=client.V1Probe(
-            _exec=client.V1ExecAction(command=["tsinit", "health", "/tmp/tsinit.sock"]),
+            _exec=client.V1ExecAction(command=[tsinit_path, "health", "/tmp/tsinit.sock"]),
             initial_delay_seconds=10,
             period_seconds=10,
             timeout_seconds=5,
@@ -1434,9 +1496,36 @@ def create_v2_dev_deployment(
         ),
     )
 
+    # initContainer that copies tsinit out of the devserver image into the
+    # shared emptyDir. Cheap on cold start (~500ms) and the devserver image
+    # is already pulled on every node by the file-manager pod, so the layer
+    # is cache-warm. Runs as root only long enough to chmod the binary.
+    install_tsinit = client.V1Container(
+        name="install-tsinit",
+        image=tsinit_source_image,
+        image_pull_policy=image_pull_policy,
+        command=[
+            "sh",
+            "-c",
+            "cp /usr/local/bin/tsinit /opt/bin/tsinit && chmod 0755 /opt/bin/tsinit",
+        ],
+        volume_mounts=[client.V1VolumeMount(name="tsinit-bin", mount_path="/opt/bin")],
+        # Init runs as the same uid as the main container. tsinit is owned
+        # by root in devserver but world-readable / world-executable, so the
+        # cp below works without root.
+        security_context=client.V1SecurityContext(
+            run_as_non_root=True, run_as_user=1000, allow_privilege_escalation=False
+        ),
+        resources=client.V1ResourceRequirements(
+            requests={"memory": "16Mi", "cpu": "10m"},
+            limits={"memory": "64Mi", "cpu": "100m"},
+        ),
+    )
+
     # Pod spec — PVC volume, scheduler uses PV node affinity for placement
     pod_spec = client.V1PodSpec(
         priority_class_name="tesslate-environment",
+        init_containers=[install_tsinit],
         containers=[dev_container],
         automount_service_account_token=False,
         volumes=[
@@ -1445,7 +1534,11 @@ def create_v2_dev_deployment(
                 persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
                     claim_name=pvc_name,
                 ),
-            )
+            ),
+            client.V1Volume(
+                name="tsinit-bin",
+                empty_dir=client.V1EmptyDirVolumeSource(medium="Memory", size_limit="16Mi"),
+            ),
         ],
         security_context=client.V1PodSecurityContext(
             run_as_non_root=True, run_as_user=1000, fs_group=1000
@@ -1477,9 +1570,7 @@ def create_v2_dev_deployment(
             )
         )
 
-    deployment_annotations = (
-        {"tesslate.io/spec-hash": spec_hash} if spec_hash else None
-    )
+    deployment_annotations = {"tesslate.io/spec-hash": spec_hash} if spec_hash else None
 
     return client.V1Deployment(
         metadata=client.V1ObjectMeta(

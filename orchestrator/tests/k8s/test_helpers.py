@@ -1065,6 +1065,7 @@ class TestCreateV2DevDeployment:
             "image": "tesslate-devserver:latest",
             "port": 3000,
             "startup_command": "npm run dev",
+            "tsinit_source_image": "tesslate-devserver:latest",
         }
         defaults.update(overrides)
         return create_v2_dev_deployment(**defaults)
@@ -1075,27 +1076,168 @@ class TestCreateV2DevDeployment:
 
     def test_pvc_volume_name(self):
         dep = self._make()
-        volumes = dep.spec.template.spec.volumes
-        assert volumes[0].name == "project-source"
-        assert volumes[0].persistent_volume_claim.claim_name == "project-source"
+        volumes = {v.name: v for v in dep.spec.template.spec.volumes}
+        assert "project-source" in volumes
+        assert volumes["project-source"].persistent_volume_claim.claim_name == "project-source"
 
     def test_custom_pvc_name(self):
         dep = self._make(pvc_name="custom-pvc")
-        volumes = dep.spec.template.spec.volumes
-        assert volumes[0].persistent_volume_claim.claim_name == "custom-pvc"
+        volumes = {v.name: v for v in dep.spec.template.spec.volumes}
+        assert volumes["project-source"].persistent_volume_claim.claim_name == "custom-pvc"
 
     def test_tesslate_init_command(self):
+        """Command uses ABSOLUTE path so the dev image doesn't need tsinit on PATH.
+
+        Image-based apps (e.g. tesslate-markitdown:latest) ship their own
+        runtime without tsinit. The initContainer copies tsinit into the
+        shared emptyDir; the main container invokes it by absolute path.
+        """
         dep = self._make(startup_command="npm run dev")
         container = dep.spec.template.spec.containers[0]
-        assert container.command == ["tsinit", "serve"]
+        assert container.command == ["/opt/tesslate/bin/tsinit", "serve"]
         assert any("npm run dev" in a for a in container.args)
 
     def test_volume_mount_path(self):
         dep = self._make()
         container = dep.spec.template.spec.containers[0]
-        vm = container.volume_mounts[0]
-        assert vm.mount_path == "/app"
-        assert vm.name == "project-source"
+        mounts = {m.name: m for m in container.volume_mounts}
+        assert mounts["project-source"].mount_path == "/app"
+        # Sideloaded tsinit binary, mounted read-only on /opt/tesslate/bin.
+        assert mounts["tsinit-bin"].mount_path == "/opt/tesslate/bin"
+        assert mounts["tsinit-bin"].read_only is True
+
+    def test_init_container_sideloads_tsinit(self):
+        """An initContainer must copy tsinit out of the devserver image so
+        the main container can be ANY image — not just tesslate-devserver."""
+        dep = self._make(
+            image="ghcr.io/owner/some-app:latest",
+            tsinit_source_image="tesslate-devserver:beta",
+        )
+        inits = dep.spec.template.spec.init_containers
+        assert inits is not None and len(inits) == 1
+        init = inits[0]
+        assert init.name == "install-tsinit"
+        assert init.image == "tesslate-devserver:beta"
+        # Copies into the shared emptyDir.
+        joined = " ".join(init.command)
+        assert "/usr/local/bin/tsinit" in joined and "/opt/bin/tsinit" in joined
+        mounts = {m.name: m.mount_path for m in init.volume_mounts}
+        assert mounts == {"tsinit-bin": "/opt/bin"}
+
+    def test_tsinit_emptydir_volume(self):
+        dep = self._make()
+        volumes = {v.name: v for v in dep.spec.template.spec.volumes}
+        assert "tsinit-bin" in volumes
+        assert volumes["tsinit-bin"].empty_dir is not None
+        # Memory-backed so the binary isn't written to PV-backed disks.
+        assert volumes["tsinit-bin"].empty_dir.medium == "Memory"
+
+    # ---------------------------------------------------------------------
+    # source_strategy='image' — the runtime contract for self-contained
+    # docker images. PVC must NOT mount at /app (would mask image WORKDIR);
+    # tsinit must NOT prepend ``cd /app``; per-install state mounts at
+    # state_mount_path when the manifest declares one.
+    # ---------------------------------------------------------------------
+
+    def test_image_source_strategy_no_app_mount(self):
+        """source_strategy='image' must NOT mount the bundle PVC at /app —
+        that overlay hides the image's baked-in source. Regression: deer-flow
+        and mirofish were unable to find their Makefile/package.json because
+        the bundle PVC was clobbering their image's /app contents."""
+        dep = self._make(
+            image="ghcr.io/owner/app:latest",
+            source_strategy="image",
+        )
+        container = dep.spec.template.spec.containers[0]
+        mounts = {m.name: m for m in container.volume_mounts}
+        # tsinit binary is still sideloaded.
+        assert "tsinit-bin" in mounts
+        # CRITICAL: bundle PVC must NOT be mounted on the dev container.
+        assert "project-source" not in mounts
+
+    def test_image_source_strategy_with_state_mount(self):
+        """When state_mount_path is set, the per-install PVC mounts there
+        (NOT at /app). Image's WORKDIR remains authoritative; mutable state
+        lives in the PVC at e.g. /data."""
+        dep = self._make(
+            image="ghcr.io/owner/app:latest",
+            source_strategy="image",
+            state_mount_path="/data",
+        )
+        container = dep.spec.template.spec.containers[0]
+        mounts = {m.name: m for m in container.volume_mounts}
+        assert mounts["project-source"].mount_path == "/data"
+        # Sanity: not also at /app.
+        assert all(m.mount_path != "/app" for m in container.volume_mounts)
+
+    def test_image_source_strategy_no_cd_app_prefix(self):
+        """tsinit args must NOT prepend ``cd /app`` for image strategy —
+        that would override the image's WORKDIR before the startup command
+        runs (which is exactly the regression that broke deer-flow's `make
+        dev` and mirofish's `npm run dev`)."""
+        dep = self._make(
+            image="ghcr.io/owner/app:latest",
+            source_strategy="image",
+            startup_command="make dev",
+        )
+        container = dep.spec.template.spec.containers[0]
+        process_arg = container.args[container.args.index("--process") + 1]
+        assert "cd /app" not in process_arg
+        assert "mkdir -p /app" not in process_arg
+        # The startup command itself is still there.
+        assert "make dev" in process_arg
+
+    def test_bundle_source_strategy_default_keeps_app_mount(self):
+        """source_strategy unset / 'bundle' preserves the legacy contract:
+        bundle PVC at /app, tsinit cd's into the working dir."""
+        dep = self._make()  # no source_strategy = default bundle
+        container = dep.spec.template.spec.containers[0]
+        mounts = {m.name: m for m in container.volume_mounts}
+        assert mounts["project-source"].mount_path == "/app"
+        process_arg = container.args[container.args.index("--process") + 1]
+        assert "cd /app" in process_arg
+
+    def test_image_source_strategy_inherits_image_workdir(self):
+        """tsinit's ``--dir`` must be EMPTY for image strategy so the managed
+        process inherits cwd from tsinit (which kubelet seeds with the image's
+        WORKDIR). Passing ``--dir /`` would clobber the image's WORKDIR and
+        the app would fail to find its baked-in source — regression caught by
+        markitdown (uvicorn's ``Could not import module "server"``) and
+        mirofish (``ENOENT ... '//package.json'``)."""
+        dep = self._make(
+            image="ghcr.io/owner/app:latest",
+            source_strategy="image",
+        )
+        container = dep.spec.template.spec.containers[0]
+        dir_arg = container.args[container.args.index("--dir") + 1]
+        assert dir_arg == "", f"expected empty --dir for image strategy, got {dir_arg!r}"
+
+    def test_bundle_source_strategy_dir_is_root(self):
+        """Bundle strategy keeps the legacy --dir / (the cwd is set by the
+        ``cd /app`` prefix in the process command, so --dir is just a
+        fallback)."""
+        dep = self._make()  # default = bundle
+        container = dep.spec.template.spec.containers[0]
+        dir_arg = container.args[container.args.index("--dir") + 1]
+        assert dir_arg == "/"
+
+    def test_image_source_strategy_explicit_subdirectory(self):
+        """When the manifest declares a non-default working directory under
+        image strategy, tsinit cd's into that path inside the image (not
+        /app/<dir>). Lets image-based apps with multi-service layouts pick
+        which baked-in directory to cd into."""
+        dep = self._make(
+            image="ghcr.io/owner/app:latest",
+            source_strategy="image",
+            working_directory="services/web",
+            container_directory="web",
+            startup_command="bun run start",
+        )
+        container = dep.spec.template.spec.containers[0]
+        process_arg = container.args[container.args.index("--process") + 1]
+        assert "cd services/web" in process_arg
+        # No /app prefix — the cd is relative to image WORKDIR.
+        assert "cd /app/services/web" not in process_arg
 
     def test_deployment_name(self):
         dep = self._make(container_directory="frontend")
@@ -1138,7 +1280,11 @@ class TestCreateV2DevDeployment:
         dep = self._make()
         container = dep.spec.template.spec.containers[0]
         assert container.startup_probe is not None
-        assert container.startup_probe._exec.command == ["tsinit", "health", "/tmp/tsinit.sock"]
+        assert container.startup_probe._exec.command == [
+            "/opt/tesslate/bin/tsinit",
+            "health",
+            "/tmp/tsinit.sock",
+        ]
 
     def test_readiness_probe(self):
         dep = self._make(port=5173)

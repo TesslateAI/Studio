@@ -85,7 +85,6 @@ type Process struct {
 }
 
 const (
-	defaultDir             = "/"
 	defaultCols            = 120
 	defaultRows            = 30
 	DefaultOutputBufferLen = 10000
@@ -94,10 +93,16 @@ const (
 
 // NewProcess creates a Process from the given config. It does not start it;
 // call Start() to launch. bufferLines sets the ring buffer capacity (0 = default).
+//
+// config.Dir semantics:
+//   - non-empty path → exec.Cmd.Dir = that path
+//   - empty string   → inherit cwd from tsinit's own process (which kubelet
+//     seeds with the image's WORKDIR). This is REQUIRED for image-based
+//     Tesslate Apps where the runtime contract is "image is self-contained;
+//     the orchestrator must not override the image's WORKDIR" — passing
+//     ``--dir /`` would silently break apps whose source lives at e.g.
+//     /app/server.py because exec.Cmd would chdir to / first.
 func NewProcess(config ProcessConfig, stdout io.Writer, bufferLines int) *Process {
-	if config.Dir == "" {
-		config.Dir = defaultDir
-	}
 	if config.Cols <= 0 {
 		config.Cols = defaultCols
 	}

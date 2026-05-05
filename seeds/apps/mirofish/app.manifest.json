@@ -4,7 +4,7 @@
     "id": "com.666ghj.mirofish",
     "slug": "mirofish",
     "name": "MiroFish",
-    "version": "0.1.2",
+    "version": "0.1.4",
     "description": "Swarm-intelligence multi-agent prediction engine. Uploads a seed report or novel, runs thousands of persona-driven agents in a simulated world, and returns a prediction report. Requires an OpenAI-compatible LLM API key.",
     "category": "research",
     "forkable": "restricted"
@@ -26,6 +26,7 @@
         "name": "web",
         "primary": true,
         "image": "ghcr.io/666ghj/mirofish:latest",
+        "source_strategy": "image",
         "ports": [
           3000,
           5001
@@ -48,7 +49,8 @@
   ],
   "state": {
     "model": "per-install-volume",
-    "volume_size": "2Gi"
+    "volume_size": "2Gi",
+    "mount_path": "/data"
   },
   "billing": {
     "ai_compute": {

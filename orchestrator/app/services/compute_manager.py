@@ -160,6 +160,20 @@ _EPHEMERAL_HEADROOM_MEM = "512Mi"
 SPEC_HASH_ANNOTATION = "tesslate.io/spec-hash"
 
 
+_POD_TEMPLATE_REVISION = "v4"
+"""Bump when the rendered Deployment pod template gains structural elements
+(initContainers, volumes, additional containers) that the per-field inputs
+below don't already capture. Acts as a dimension in the spec hash so
+existing warm-startable Deployments cold-redeploy on the next bring-up.
+
+History:
+  v1 — original spec
+  v2 — added install-tsinit initContainer + tsinit-bin emptyDir
+  v3 — branched mounts on source_strategy (image vs bundle)
+  v4 — empty tsinit --dir for image strategy (inherit image WORKDIR)
+"""
+
+
 def compute_dev_container_spec_hash(
     *,
     startup_command: str,
@@ -183,6 +197,9 @@ def compute_dev_container_spec_hash(
         "port": int(port) if port is not None else 0,
         "working_directory": working_directory or "",
         "env": sorted((extra_env or {}).items()),
+        # Pod-template version: bump to invalidate cached Deployments when
+        # the helper structurally changes (e.g. tsinit sideloader added).
+        "pod_template_revision": _POD_TEMPLATE_REVISION,
     }
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
@@ -1189,9 +1206,7 @@ class ComputeManager:
 
             container_env_dict = container.environment_vars or {}
             legacy_env_image = container_env_dict.get("TSL_CONTAINER_IMAGE")
-            effective_image = (
-                container.image or legacy_env_image or settings.k8s_devserver_image
-            )
+            effective_image = container.image or legacy_env_image or settings.k8s_devserver_image
             prefix = (settings.app_image_registry_prefix or "").strip()
             if prefix and effective_image and "/" not in effective_image:
                 effective_image = f"{prefix.rstrip('/')}/{effective_image}"
@@ -1226,18 +1241,12 @@ class ComputeManager:
             )
             live_hashes: dict[str, str | None] = {}
             for dep in live.items or []:
-                cdir = (dep.metadata.labels or {}).get(
-                    "tesslate.io/container-directory"
-                )
+                cdir = (dep.metadata.labels or {}).get("tesslate.io/container-directory")
                 if not cdir:
                     continue
-                live_hashes[cdir] = (dep.metadata.annotations or {}).get(
-                    SPEC_HASH_ANNOTATION
-                )
+                live_hashes[cdir] = (dep.metadata.annotations or {}).get(SPEC_HASH_ANNOTATION)
 
-            expected = await self._compute_expected_spec_hashes(
-                project, containers, db
-            )
+            expected = await self._compute_expected_spec_hashes(project, containers, db)
             for cdir, exp_hash in expected.items():
                 if live_hashes.get(cdir) != exp_hash:
                     logger.info(
@@ -1465,10 +1474,7 @@ class ComputeManager:
                 for c in dev_containers_for_urls:
                     cdir = resolve_k8s_container_dir(c)
                     preview: str | None = None
-                    if (
-                        getattr(project, "project_kind", None)
-                        == PROJECT_KIND_APP_RUNTIME
-                    ):
+                    if getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME:
                         preview = await resolve_app_url_for_container(
                             db,
                             c,
@@ -1789,6 +1795,11 @@ class ComputeManager:
                 image=effective_image,
                 port=port,
                 startup_command=startup_command,
+                # Source for the sideloaded tsinit binary. The dev container
+                # may be ANY image (devserver OR an app's manifest-declared
+                # image like ghcr.io/owner/app:tag), so tsinit is mounted in
+                # via initContainer rather than expected on PATH.
+                tsinit_source_image=settings.k8s_devserver_image,
                 pvc_name="project-source",
                 working_directory=working_directory,
                 image_pull_policy=settings.k8s_image_pull_policy,
@@ -1797,6 +1808,15 @@ class ComputeManager:
                 preferred_node=node_name,
                 spec_hash=spec_hash,
                 tsinit_restart_policy=tsinit_restart_policy,
+                # 2026-05 App Runtime Contract: declare which mount strategy
+                # the renderer should use. NULL/'bundle' = legacy behaviour
+                # (bundle PVC at /app, source comes from bundle). 'image' =
+                # image is self-contained; per-install PVC mounts at
+                # ``state_mount_path`` and image's WORKDIR remains
+                # authoritative. Set by install_compute_materializer from
+                # the app manifest's compute.containers[].source_strategy.
+                source_strategy=container.source_strategy,
+                state_mount_path=container.state_mount_path,
             )
             await k8s.create_deployment(deployment, namespace)
 
@@ -1814,6 +1834,7 @@ class ComputeManager:
             # (``{dir}-{app}-{creator}.{domain}`` or ``{app}-{creator}.{domain}``
             # for single-container apps). Non-app projects and apps without
             # handles fall back to the legacy slug-based shape.
+            from ..models import PROJECT_KIND_APP_RUNTIME
             from .apps.runtime_urls import (
                 container_url as _container_url,
             )
@@ -1821,13 +1842,9 @@ class ComputeManager:
                 resolve_app_url_for_container,
             )
 
-            from ..models import PROJECT_KIND_APP_RUNTIME
-
             preview_url: str | None = None
             ingress_hostname: str | None = None
-            if (
-                getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME
-            ):
+            if getattr(project, "project_kind", None) == PROJECT_KIND_APP_RUNTIME:
                 preview_url = await resolve_app_url_for_container(
                     db, container, protocol=settings.k8s_container_url_protocol
                 )
