@@ -9,6 +9,7 @@ import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { type EditMode } from './EditModeStatus';
 import { ApprovalRequestCard } from './ApprovalRequestCard';
+import { WorkspaceAttachCard } from './WorkspaceAttachCard';
 import { ChatSessionPopover } from './ChatSessionPopover';
 import { ToolDebugModal } from './ToolDebugModal';
 import { createWebSocket, chatApi, marketplaceApi } from '../../lib/api';
@@ -41,7 +42,7 @@ function formatAgentError(raw: string): string {
 
 interface Message {
   id: string;
-  type: 'user' | 'ai' | 'approval_request';
+  type: 'user' | 'ai' | 'approval_request' | 'workspace_attach_request';
   content: string;
   agentData?: AgentMessageData;
   agentIcon?: string;
@@ -62,6 +63,16 @@ interface Message {
   toolParameters?: Record<string, unknown>;
   toolDescription?: string;
   attachments?: SerializedAttachment[];
+  // Workspace-attach (request_workspace tool) prompt fields.
+  workspaceAttachInputId?: string;
+  workspaceAttachReason?: string;
+  workspaceAttachCandidates?: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    compute_tier: string;
+    created_via?: string | null;
+  }>;
 }
 
 interface StreamingFile {
@@ -2556,6 +2567,23 @@ export function ChatContainer({
               );
             }
 
+            // Render workspace-attach prompt (request_workspace tool paused)
+            if (message.type === 'workspace_attach_request' && message.workspaceAttachInputId) {
+              return (
+                <div
+                  key={message.id}
+                  className={`mb-4 ${shouldAnimate ? 'animate-[slideIn_0.2s_ease-out]' : ''}`}
+                >
+                  <WorkspaceAttachCard
+                    mode="agent-prompt"
+                    inputId={message.workspaceAttachInputId}
+                    candidates={message.workspaceAttachCandidates || []}
+                    reason={message.workspaceAttachReason}
+                  />
+                </div>
+              );
+            }
+
             // Render agent message with special component
             if (message.type === 'ai' && message.agentData) {
               return (
@@ -2623,17 +2651,16 @@ export function ChatContainer({
                 disabled={!onOpenConfigTab}
                 className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--primary)]/10 border border-[var(--primary)]/40 rounded-[var(--radius-small)] text-left hover:bg-[var(--primary)]/15 transition-colors disabled:cursor-default"
               >
-                <Pause
-                  size={14}
-                  className="text-[var(--primary)] flex-shrink-0"
-                />
+                <Pause size={14} className="text-[var(--primary)] flex-shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-medium text-[var(--text)] truncate">
                     Agent paused — waiting on{' '}
                     <span className="font-semibold">{p.containerName}</span> config
                   </p>
                   <p className="text-[10px] text-[var(--text-muted)] truncate">
-                    {onOpenConfigTab ? 'Click to open the Config tab and fill the card.' : 'Open the Config tab to fill the card.'}
+                    {onOpenConfigTab
+                      ? 'Click to open the Config tab and fill the card.'
+                      : 'Open the Config tab to fill the card.'}
                   </p>
                 </div>
               </button>

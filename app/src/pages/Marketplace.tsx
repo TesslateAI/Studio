@@ -22,6 +22,7 @@ import {
   Funnel,
   Lightning,
   SquaresFour,
+  Cloud,
 } from '@phosphor-icons/react';
 import { MobileMenu } from '../components/ui';
 import { AgentCard, SkeletonCard, type MarketplaceItem } from '../components/marketplace';
@@ -36,13 +37,7 @@ import { useMarketplaceAuth } from '../contexts/MarketplaceAuthContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ShieldCheck } from '@phosphor-icons/react';
 
-type ItemType =
-  | 'app'
-  | 'agent'
-  | 'base'
-  | 'theme'
-  | 'skill'
-  | 'mcp_server';
+type ItemType = 'app' | 'agent' | 'base' | 'theme' | 'skill' | 'mcp_server';
 type SortOption =
   | 'featured'
   | 'popular'
@@ -165,10 +160,16 @@ export default function Marketplace() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { theme, toggleTheme } = useTheme();
-  const { isAuthenticated } = useMarketplaceAuth();
+  const {
+    isAuthenticated,
+    sources: federatedSources,
+    selectedSource,
+    setSelectedSource,
+  } = useMarketplaceAuth();
   const { user } = useAuth();
   const isSuperuser = Boolean(user?.is_superuser);
   const { teamSwitchKey } = useTeam();
+  const [showSourceDropdown, setShowSourceDropdown] = useState(false);
 
   // Refs
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -313,9 +314,13 @@ export default function Marketplace() {
       search: string;
       sort: SortOption;
       pricing: PricingFilter;
+      source: string | null;
       pageNum: number;
     }) => {
-      const { itemType, category, search, sort, pricing, pageNum } = params;
+      const { itemType, category, search, sort, pricing, source, pageNum } = params;
+      // Empty/"all" sentinel means "merge across every visible source" — the
+      // backend treats omitting the param the same way.
+      const sourceParam = source ?? undefined;
 
       // Cancel any in-flight request
       abortControllerRef.current?.abort();
@@ -355,6 +360,7 @@ export default function Marketplace() {
               sort,
               page: pageNum,
               limit: ITEMS_PER_PAGE,
+              source: sourceParam,
             },
             { signal: abortControllerRef.current.signal }
           );
@@ -371,6 +377,7 @@ export default function Marketplace() {
               sort,
               page: pageNum,
               limit: ITEMS_PER_PAGE,
+              source: sourceParam,
             },
             { signal: abortControllerRef.current.signal }
           );
@@ -400,6 +407,7 @@ export default function Marketplace() {
               sort,
               page: pageNum,
               limit: ITEMS_PER_PAGE,
+              source: sourceParam,
             },
             { signal: abortControllerRef.current.signal }
           );
@@ -416,6 +424,7 @@ export default function Marketplace() {
               sort,
               page: pageNum,
               limit: ITEMS_PER_PAGE,
+              source: sourceParam,
             },
             { signal: abortControllerRef.current.signal }
           );
@@ -451,6 +460,7 @@ export default function Marketplace() {
           search: string;
           sort: SortOption;
           pricing: PricingFilter;
+          source: string | null;
         }) => {
           setPage(1);
           loadItems({ ...params, pageNum: 1 });
@@ -476,6 +486,7 @@ export default function Marketplace() {
       search: searchQuery,
       sort: sortBy,
       pricing: pricingFilter,
+      source: selectedSource,
       pageNum: 1,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -485,7 +496,9 @@ export default function Marketplace() {
   useEffect(() => {
     if (initialLoading) return;
 
-    // Update URL params (category is handled by dedicated category pages)
+    // Update URL params (category is handled by dedicated category pages).
+    // ``source`` is owned by MarketplaceLayout / setSelectedSource so we
+    // preserve it rather than rewriting it here.
     const params = new URLSearchParams();
     if (selectedItemType !== 'app') params.set('type', selectedItemType);
     if (searchQuery) params.set('search', searchQuery);
@@ -501,6 +514,7 @@ export default function Marketplace() {
         search: searchQuery,
         sort: sortBy,
         pricing: pricingFilter,
+        source: selectedSource,
       });
     } else {
       debouncedLoadItems.cancel();
@@ -511,11 +525,12 @@ export default function Marketplace() {
         search: searchQuery,
         sort: sortBy,
         pricing: pricingFilter,
+        source: selectedSource,
         pageNum: 1,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedItemType, searchQuery, sortBy, pricingFilter]);
+  }, [selectedItemType, searchQuery, sortBy, pricingFilter, selectedSource]);
 
   const handleInstallApp = async (app: MarketplaceApp) => {
     try {
@@ -680,6 +695,101 @@ export default function Marketplace() {
 
             {/* Filter + Sort */}
             <div className="flex items-center gap-[2px]">
+              {/* Source Dropdown — federated marketplace selector (Wave 5).
+                  Shown only when more than the system rows are visible to
+                  the user, i.e. they've added at least one user/team source. */}
+              {isAuthenticated && federatedSources.length > 0 && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowSourceDropdown(!showSourceDropdown)}
+                    className={`btn ${selectedSource ? 'btn-active' : ''}`}
+                    style={{ gap: '4px' }}
+                    title="Filter by federated marketplace source"
+                    aria-label="Source"
+                    data-testid="marketplace-source-trigger"
+                  >
+                    <Cloud size={14} />
+                    <span className="hidden sm:inline text-xs">
+                      {selectedSource
+                        ? (federatedSources.find((s) => s.handle === selectedSource)
+                            ?.display_name ?? selectedSource)
+                        : 'All sources'}
+                    </span>
+                    <CaretDown className="w-3 h-3 opacity-50" />
+                  </button>
+
+                  {showSourceDropdown && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowSourceDropdown(false)}
+                      />
+                      <div
+                        className="absolute right-0 top-full mt-1 z-50 min-w-[220px] py-1 rounded-[var(--radius-medium)] border bg-[var(--surface)] shadow-xl"
+                        style={{
+                          borderWidth: 'var(--border-width)',
+                          borderColor: 'var(--border-hover)',
+                        }}
+                        data-testid="marketplace-source-menu"
+                      >
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-subtle)] uppercase tracking-wider">
+                          Source
+                        </div>
+                        <button
+                          onClick={() => {
+                            setSelectedSource(null);
+                            setShowSourceDropdown(false);
+                          }}
+                          className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                            !selectedSource
+                              ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                              : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                          }`}
+                        >
+                          All sources
+                          {!selectedSource && (
+                            <svg
+                              className="w-3 h-3 ml-auto"
+                              fill="currentColor"
+                              viewBox="0 0 16 16"
+                            >
+                              <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                            </svg>
+                          )}
+                        </button>
+                        {federatedSources
+                          .filter((s) => s.is_active)
+                          .map((source) => (
+                            <button
+                              key={source.id}
+                              onClick={() => {
+                                setSelectedSource(source.handle);
+                                setShowSourceDropdown(false);
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                                selectedSource === source.handle
+                                  ? 'text-[var(--text)] bg-[var(--surface-hover)]'
+                                  : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
+                              }`}
+                              data-testid={`marketplace-source-option-${source.handle}`}
+                            >
+                              <span className="truncate flex-1">{source.display_name}</span>
+                              <span className="text-[10px] text-[var(--text-subtle)] font-mono">
+                                {source.handle}
+                              </span>
+                              {selectedSource === source.handle && (
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+                                  <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                                </svg>
+                              )}
+                            </button>
+                          ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Filter Dropdown */}
               <div className="relative">
                 <button

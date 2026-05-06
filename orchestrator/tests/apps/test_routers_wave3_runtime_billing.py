@@ -21,7 +21,6 @@ from app.services.apps import billing_dispatcher
 from app.services.apps import runtime as runtime_svc
 from app.users import current_active_user, current_superuser
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -70,6 +69,7 @@ def app_factory(fake_db):
         async def _override_super():
             if not getattr(user, "is_superuser", False):
                 from fastapi import HTTPException
+
                 raise HTTPException(status_code=403, detail="superuser required")
             return user
 
@@ -132,9 +132,7 @@ async def test_post_session_happy_path(client_factory, installer_user, monkeypat
     assert body["app_instance_id"] == str(instance_id)
 
 
-async def test_post_session_409_when_not_runnable(
-    client_factory, installer_user, monkeypatch
-):
+async def test_post_session_409_when_not_runnable(client_factory, installer_user, monkeypatch):
     instance_id = uuid4()
     instance = SimpleNamespace(id=instance_id, installer_user_id=installer_user.id)
 
@@ -173,7 +171,6 @@ async def test_post_session_forbidden_for_non_installer(
         return _Result()
 
     # Patch db.execute on the dependency override
-    from app import routers
     # We use the real _assert_installer_or_superuser; it calls db.execute(...).scalar_one_or_none()
     # So override get_db to a session that exposes execute()
     fake_db = SimpleNamespace(execute=_execute)
@@ -251,24 +248,39 @@ async def test_get_wallet_auto_creates(client_factory, installer_user, monkeypat
 async def test_get_spend_filters(client_factory, installer_user, monkeypatch):
     instance_id = uuid4()
     matching = SimpleNamespace(
-        id=uuid4(), app_instance_id=instance_id, session_id=None,
-        installer_user_id=installer_user.id, dimension="ai_compute", payer="installer",
-        payer_user_id=installer_user.id, amount_usd=Decimal("0.10"),
-        litellm_key_id="k", usage_log_id=None, settled=False, settled_at=None,
-        meta={}, created_at=None,
+        id=uuid4(),
+        app_instance_id=instance_id,
+        session_id=None,
+        installer_user_id=installer_user.id,
+        dimension="ai_compute",
+        payer="installer",
+        payer_user_id=installer_user.id,
+        amount_usd=Decimal("0.10"),
+        litellm_key_id="k",
+        usage_log_id=None,
+        settled=False,
+        settled_at=None,
+        meta={},
+        created_at=None,
     )
 
     captured: dict = {}
 
     class _Scalars:
-        def __init__(self, items): self._items = items
-        def all(self): return self._items
+        def __init__(self, items):
+            self._items = items
+
+        def all(self):
+            return self._items
+
     class _Result:
         def __init__(self, items=None, scalar=None):
             self._items = items
             self._scalar = scalar
+
         def scalars(self):
             return _Scalars(self._items or [])
+
         def scalar_one(self):
             return self._scalar
 
@@ -297,7 +309,11 @@ async def test_get_spend_filters(client_factory, installer_user, monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get(
             "/api/apps/billing/spend",
-            params={"app_instance_id": str(instance_id), "dimension": "ai_compute", "settled": "false"},
+            params={
+                "app_instance_id": str(instance_id),
+                "dimension": "ai_compute",
+                "settled": "false",
+            },
         )
     assert r.status_code == 200
     body = r.json()
@@ -313,8 +329,10 @@ async def test_post_record_spend_superuser_only(
 ):
     spend_id = uuid4()
     outcome = billing_dispatcher.SpendOutcome(
-        spend_record_id=spend_id, payer="installer",
-        amount_usd=Decimal("0.05"), dimension="ai_compute",
+        spend_record_id=spend_id,
+        payer="installer",
+        amount_usd=Decimal("0.05"),
+        dimension="ai_compute",
     )
 
     async def _fake_record(db, **kw):
@@ -345,3 +363,65 @@ async def test_post_record_spend_superuser_only(
     assert body["payer"] == "installer"
     assert body["amount_usd"] == 0.05
     assert body["dimension"] == "ai_compute"
+
+
+# ---------------------------------------------------------------------------
+# Creator wallet — returns null for non-creator (regression for #379)
+# ---------------------------------------------------------------------------
+
+
+async def test_get_creator_wallet_returns_null_for_non_creator(
+    client_factory, installer_user, monkeypatch
+):
+    """Non-creator users must get 200 + null, not 403.
+
+    Previously the endpoint raised HTTPException(403), which polluted the
+    browser console on every app workspace load for every non-creator user.
+    """
+    called = {"n": 0}
+
+    async def _fake_focw(db, *, owner_type, owner_user_id):
+        called["n"] += 1
+        return None
+
+    monkeypatch.setattr(app_billing, "find_or_create_wallet", _fake_focw)
+
+    # installer_user has no creator_stripe_account_id
+    client, _app = await client_factory(installer_user)
+    async with client as c:
+        r = await c.get("/api/apps/billing/wallet/creator")
+
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    assert r.json() is None
+    # find_or_create_wallet must NOT be called — we return early before it
+    assert called["n"] == 0, "find_or_create_wallet should not be called for non-creator"
+
+
+async def test_get_creator_wallet_returns_wallet_for_creator(client_factory, monkeypatch):
+    """Users with creator_stripe_account_id get their wallet back."""
+    creator_user = _make_user(creator=True)
+    wallet_id = uuid4()
+    wallet = SimpleNamespace(
+        id=wallet_id,
+        balance_usd=Decimal("10.50"),
+        state="active",
+        owner_type="creator",
+        created_at=None,
+        updated_at=None,
+    )
+
+    async def _fake_focw(db, *, owner_type, owner_user_id):
+        assert owner_type == "creator"
+        return wallet
+
+    monkeypatch.setattr(app_billing, "find_or_create_wallet", _fake_focw)
+
+    client, _app = await client_factory(creator_user)
+    async with client as c:
+        r = await c.get("/api/apps/billing/wallet/creator")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body is not None
+    assert body["id"] == str(wallet_id)
+    assert body["owner_type"] == "creator"

@@ -224,11 +224,7 @@ export default function Chat() {
 
   // Handle send message — sendMessage handles session creation via onSessionNeeded
   const handleSendMessage = useCallback(
-    async (
-      message: string,
-      attachments?: SerializedAttachment[],
-      mentions?: ChatMention[]
-    ) => {
+    async (message: string, attachments?: SerializedAttachment[], mentions?: ChatMention[]) => {
       sendMessage(message, undefined, attachments, mentions);
     },
     [sendMessage]
@@ -300,15 +296,19 @@ export default function Chat() {
       setIsCreatingWorkspace(true);
       const loadingToast = toast.loading('Creating workspace...');
       try {
-        const response = await projectsApi.create(
-          projectName,
-          '',
-          'base',
-          undefined,
-          'main',
-          baseId,
-          baseVersion || undefined
-        );
+        // Empty-workspace branch — CreateProjectModal signals via baseId === ''.
+        const isEmpty = baseId === '';
+        const response = isEmpty
+          ? await projectsApi.create(projectName, '', 'empty')
+          : await projectsApi.create(
+              projectName,
+              '',
+              'base',
+              undefined,
+              'main',
+              baseId,
+              baseVersion || undefined
+            );
         const project = response.project;
         const taskId = response.task_id;
 
@@ -339,8 +339,8 @@ export default function Chat() {
           });
         }
       } catch (err) {
-        const detail = (err as { response?: { data?: { detail?: string } } })?.response
-          ?.data?.detail;
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail;
         toast.error(detail || 'Failed to create workspace', { id: loadingToast });
       } finally {
         setIsCreatingWorkspace(false);
@@ -412,9 +412,7 @@ export default function Chat() {
         />
       )}
       {isSidebarOpen && (
-        <div
-          className="fixed inset-y-0 left-0 z-30 md:relative md:inset-auto"
-        >
+        <div className="fixed inset-y-0 left-0 z-30 md:relative md:inset-auto">
           <ChatSessionSidebar
             sessions={sessions}
             currentSessionId={currentSessionId}
@@ -443,6 +441,11 @@ export default function Chat() {
           onToggleSidebar={() => setIsSidebarOpen(true)}
           sessionTitle={sessionTitle}
           onNewSession={handleNewSession}
+          connectedProjectId={connectedProjectId}
+          connectedProjectName={connectedProjectName}
+          onConnectProject={handleConnectProject}
+          onDisconnectProject={handleDisconnectProject}
+          onRequestNewWorkspace={() => setShowCreateWorkspace(true)}
         />
 
         {isLanding ? (
@@ -521,6 +524,7 @@ export default function Chat() {
                   isExecuting={isExecuting}
                   onApproval={handleApprovalResponse}
                   toolCallsCollapsed={toolCallsCollapsed}
+                  onRetry={retryLastMessage}
                 />
               </div>
             </div>
@@ -529,7 +533,7 @@ export default function Chat() {
               className="absolute left-1/2 -translate-x-1/2 bottom-6 z-30
                          w-[min(760px,calc(100%-48px))]
                          bg-[var(--bg)] border border-[var(--border-hover)]
-                         rounded-[var(--radius)]
+                         rounded-[var(--radius)] overflow-hidden
                          max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:translate-x-0
                          max-md:w-full max-md:rounded-b-none"
             >

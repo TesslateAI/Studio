@@ -19,6 +19,7 @@ from typing import Any
 from sqlalchemy import select
 
 from ....services.automations.scopes import MARKETPLACE_AUTHOR
+from ....services.marketplace_constants import LOCAL_SOURCE_ID
 from ....models import MarketplaceAgent, UserPurchasedAgent
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
@@ -123,6 +124,7 @@ async def create_agent_executor(
         pricing_type="free",
         price=0,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         requires_user_keys=False,
         downloads=0,
         rating=5.0,

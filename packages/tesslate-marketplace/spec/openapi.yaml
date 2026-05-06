@@ -1,0 +1,1173 @@
+openapi: 3.0.3
+info:
+  title: Tesslate Federated Marketplace `/v1`
+  version: v1
+  description: |
+    Federated marketplace wire protocol for OpenSail / Tesslate Studio.
+
+    Every response includes `X-Tesslate-Hub-Id` and
+    `X-Tesslate-Hub-Api-Version: v1` headers. Endpoints whose capability
+    isn't advertised in `/v1/manifest.capabilities[]` return a typed
+    `501 unsupported_capability` JSON envelope.
+  contact:
+    name: Tesslate
+    email: marketplace@tesslate.com
+servers:
+  - url: http://localhost:8800
+    description: Local dev
+  - url: https://marketplace.tesslate.com
+    description: Tesslate Official
+tags:
+  - name: manifest
+  - name: items
+  - name: categories
+  - name: featured
+  - name: changes
+  - name: reviews
+  - name: pricing
+  - name: publish
+  - name: yanks
+  - name: telemetry
+
+paths:
+  /v1/manifest:
+    get:
+      tags: [manifest]
+      summary: Hub identity, advertised capabilities, and policies
+      responses:
+        "200":
+          description: Hub manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HubManifest"
+
+  /v1/items:
+    get:
+      tags: [items]
+      summary: List items (cache-fed, paginated)
+      parameters:
+        - in: query
+          name: kind
+          schema:
+            type: string
+        - in: query
+          name: category
+          schema:
+            type: string
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: cursor
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [featured, newest, popular, name, rating]
+      responses:
+        "200":
+          description: Paginated item list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemList"
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/items/{kind}/{slug}:
+    get:
+      tags: [items]
+      summary: Item detail with embedded version list
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "200":
+          description: Item detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemDetail"
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [items]
+      summary: Hard-delete an item (admin) — emits `delete` op
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "204": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/items/{kind}/{slug}/versions:
+    get:
+      tags: [items]
+      summary: Version list
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ItemVersion"
+
+  /v1/items/{kind}/{slug}/versions/{version}:
+    get:
+      tags: [items]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+        - $ref: "#/components/parameters/Version"
+      responses:
+        "200":
+          description: Version detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemVersion"
+    delete:
+      tags: [items]
+      summary: Hard-remove a single version (admin) — emits `version_remove` op
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+        - $ref: "#/components/parameters/Version"
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Cannot remove the only remaining version
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/items/{kind}/{slug}/versions/{version}/bundle:
+    get:
+      tags: [items]
+      summary: Bundle envelope (signed URL)
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+        - $ref: "#/components/parameters/Version"
+      responses:
+        "200":
+          description: Bundle envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BundleEnvelope"
+        "410":
+          description: Version yanked
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/items/{kind}/{slug}/versions/{version}/attestation:
+    get:
+      tags: [items]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+        - $ref: "#/components/parameters/Version"
+      responses:
+        "200":
+          description: Detached signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attestation"
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/categories:
+    get:
+      tags: [categories]
+      parameters:
+        - in: query
+          name: kind
+          schema: { type: string }
+      responses:
+        "200":
+          description: Categories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryList"
+
+  /v1/featured:
+    get:
+      tags: [featured]
+      parameters:
+        - in: query
+          name: kind
+          schema: { type: string }
+      responses:
+        "200":
+          description: Featured listings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeaturedList"
+
+  /v1/changes:
+    get:
+      tags: [changes]
+      summary: Incremental tombstone-aware sync feed
+      parameters:
+        - in: query
+          name: since
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Changes feed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangesFeed"
+
+  /v1/yanks:
+    get:
+      tags: [yanks]
+      summary: Yank-only subset of the changes feed
+      parameters:
+        - in: query
+          name: since
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Yank events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangesFeed"
+    post:
+      tags: [yanks]
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/YankCreate"
+      responses:
+        "201":
+          description: Yank created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Yank"
+
+  /v1/yanks/{id}:
+    get:
+      tags: [yanks]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Yank detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Yank"
+
+  /v1/yanks/{id}/appeal:
+    post:
+      tags: [yanks]
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/YankAppealCreate"
+      responses:
+        "201":
+          description: Appeal recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/YankAppeal"
+
+  /v1/items/{kind}/{slug}/reviews:
+    get:
+      tags: [reviews]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "200":
+          description: Reviews
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewList"
+    post:
+      tags: [reviews]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  /v1/items/{kind}/{slug}/reviews/aggregate:
+    get:
+      tags: [reviews]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "200":
+          description: Aggregate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewAggregate"
+
+  /v1/items/{kind}/{slug}/pricing:
+    get:
+      tags: [pricing]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "200":
+          description: Pricing detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingDetail"
+    patch:
+      tags: [pricing]
+      summary: Update pricing snapshot (admin) — emits `pricing_change` op
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingUpdate"
+      responses:
+        "200":
+          description: Updated pricing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingDetail"
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/items/{kind}/{slug}/checkout:
+    post:
+      tags: [pricing]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutRequest"
+      responses:
+        "200":
+          description: Checkout session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResponse"
+
+  /v1/publish/{kind}:
+    post:
+      tags: [publish]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishRequest"
+      responses:
+        "201":
+          description: Submission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+
+  /v1/publish/{kind}/{slug}/versions/{version}:
+    post:
+      tags: [publish]
+      security: [{ bearer: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Kind"
+        - $ref: "#/components/parameters/Slug"
+        - $ref: "#/components/parameters/Version"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishRequest"
+      responses:
+        "201":
+          description: Submission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+
+  /v1/submissions/{id}:
+    get:
+      tags: [publish]
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Submission detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+
+  /v1/submissions/{id}/withdraw:
+    post:
+      tags: [publish]
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+
+  /v1/submissions/{id}/advance:
+    post:
+      tags: [publish]
+      summary: Run the next stage's checks (stage1 → stage2 → stage3)
+      description: |
+        Wave 8 staged-pipeline endpoint. The marketplace runs the appropriate
+        scanner for the submission's current stage, records every check as a
+        `SubmissionCheck` row, and advances `submission.stage`. Idempotent on
+        terminal rows.
+
+        Requires `submissions.staged` capability + `submissions.write` scope.
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Submission with updated stage + new check rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Invalid stage transition }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/submissions/{id}/finalize:
+    post:
+      tags: [publish]
+      summary: Force a terminal decision (approved / rejected / withdrawn)
+      description: |
+        Wave 8: terminal-decision write. Approval is only valid from
+        `stage3`. Rejection is allowed from any non-terminal stage.
+        Withdraw is the submitter's own affordance; admins can withdraw
+        on a submitter's behalf with `submissions.write`.
+
+        Requires `submissions.staged` capability. Approve / reject require
+        `submissions.write` scope. Withdraw on behalf of another submitter
+        requires `submissions.write` too.
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmissionFinalize"
+      responses:
+        "200":
+          description: Submission moved to terminal state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "400": { description: Missing or invalid decision }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Invalid transition or already terminal }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/admin/submissions/{id}/force-approve:
+    post:
+      tags: [admin]
+      summary: Skip remaining stages and approve a submission
+      description: |
+        Wave 8 admin override. Walks the submission forward through any
+        remaining stages, records an `admin_override_approve` check on
+        stage 3, then finalises as approved. Requires `admin.write` scope.
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminForceApprove"
+      responses:
+        "200":
+          description: Submission approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "403": { description: admin.write scope required }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Submission already terminal }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/admin/submissions/{id}/force-reject:
+    post:
+      tags: [admin]
+      summary: Reject a submission immediately, skipping remaining stages
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminForceReject"
+      responses:
+        "200":
+          description: Submission rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Submission"
+        "403": { description: admin.write scope required }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Submission already terminal }
+        "501": { $ref: "#/components/responses/UnsupportedCapability" }
+
+  /v1/admin/yanks/{id}/override:
+    post:
+      tags: [admin]
+      summary: Force a yank to a state without a second-admin appeal
+      description: |
+        Wave 8 admin override. Critical yanks normally need a distinct
+        second admin to flip them to `resolved`; this endpoint lets a
+        superuser admin close the loop unilaterally during incident
+        response. Emits the yank changes-event so federated consumers
+        re-sync. Requires `admin.write` scope.
+      security: [{ bearer: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminOverrideYank"
+      responses:
+        "200":
+          description: Yank state mutated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Yank"
+        "403": { description: admin.write scope required }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/telemetry/install:
+    post:
+      tags: [telemetry]
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelemetryEvent"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelemetryAck"
+
+  /v1/telemetry/usage:
+    post:
+      tags: [telemetry]
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelemetryEvent"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelemetryAck"
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    Kind:
+      in: path
+      name: kind
+      required: true
+      schema:
+        type: string
+        enum: [agent, skill, mcp_server, base, app, theme, workflow_template]
+    Slug:
+      in: path
+      name: slug
+      required: true
+      schema: { type: string }
+    Version:
+      in: path
+      name: version
+      required: true
+      schema: { type: string }
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+    UnsupportedCapability:
+      description: Capability disabled on this hub
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, example: unsupported_capability }
+              capability: { type: string }
+              hub_id: { type: string }
+              details: { type: string }
+  schemas:
+    Pricing:
+      type: object
+      properties:
+        pricing_type:
+          type: string
+          enum: [free, paid, subscription]
+        price_cents: { type: integer }
+        currency: { type: string }
+        stripe_price_id: { type: string, nullable: true }
+        interval: { type: string, nullable: true }
+        extras: { type: object, additionalProperties: true, nullable: true }
+    HubPolicies:
+      type: object
+      required: [max_bundle_size_bytes]
+      properties:
+        requires_signed_bundles: { type: boolean }
+        max_bundle_size_bytes:
+          type: object
+          additionalProperties:
+            type: integer
+        supported_archive_formats:
+          type: array
+          items: { type: string }
+        bundle_url_ttl_seconds: { type: integer }
+    HubManifest:
+      type: object
+      required: [hub_id, display_name, api_version, capabilities, policies]
+      properties:
+        hub_id: { type: string }
+        display_name: { type: string }
+        api_version: { type: string }
+        build_revision: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+        policies:
+          $ref: "#/components/schemas/HubPolicies"
+        contact:
+          type: object
+          properties:
+            email: { type: string }
+            homepage: { type: string }
+            support_url: { type: string }
+        terms_url: { type: string, nullable: true }
+        attestation_keys:
+          type: array
+          items:
+            type: object
+            properties:
+              key_id: { type: string }
+              public_key_pem: { type: string }
+              algorithm: { type: string }
+              is_active: { type: boolean }
+        kinds:
+          type: array
+          items: { type: string }
+    ItemSummary:
+      type: object
+      required: [id, kind, slug, name, pricing, updated_at]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        icon: { type: string, nullable: true }
+        avatar_url: { type: string, nullable: true }
+        is_active: { type: boolean }
+        is_featured: { type: boolean }
+        is_published: { type: boolean }
+        pricing: { $ref: "#/components/schemas/Pricing" }
+        tags: { type: array, items: { type: string } }
+        rating: { type: number }
+        reviews_count: { type: integer }
+        downloads: { type: integer }
+        install_count: { type: integer }
+        latest_version: { type: string, nullable: true }
+        creator_handle: { type: string, nullable: true }
+        updated_at: { type: string, format: date-time }
+    ItemDetail:
+      allOf:
+        - $ref: "#/components/schemas/ItemSummary"
+        - type: object
+          properties:
+            long_description: { type: string, nullable: true }
+            features: { type: array, items: { type: string } }
+            tech_stack: { type: array, items: { type: string } }
+            extra_metadata: { type: object, additionalProperties: true }
+            homepage_url: { type: string, nullable: true }
+            git_repo_url: { type: string, nullable: true }
+            versions:
+              type: array
+              items: { $ref: "#/components/schemas/ItemVersion" }
+    ItemList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ItemSummary" }
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+        total: { type: integer, nullable: true }
+    ItemVersion:
+      type: object
+      required: [id, version, created_at]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        changelog: { type: string, nullable: true }
+        is_yanked: { type: boolean }
+        yanked_at: { type: string, format: date-time, nullable: true }
+        yank_reason: { type: string, nullable: true }
+        yank_severity: { type: string, nullable: true }
+        is_published: { type: boolean }
+        pricing: { $ref: "#/components/schemas/Pricing" }
+        manifest: { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, format: date-time }
+    Attestation:
+      type: object
+      required: [signature, key_id, algorithm]
+      properties:
+        signature: { type: string }
+        key_id: { type: string }
+        algorithm: { type: string, default: ed25519 }
+    BundleEnvelope:
+      type: object
+      required: [url, sha256, size_bytes, content_type, archive_format, expires_at]
+      properties:
+        url: { type: string }
+        sha256: { type: string }
+        size_bytes: { type: integer }
+        content_type: { type: string }
+        archive_format: { type: string }
+        expires_at: { type: string, format: date-time }
+        attestation: { $ref: "#/components/schemas/Attestation" }
+    Category:
+      type: object
+      properties:
+        kind: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        icon: { type: string, nullable: true }
+        sort_order: { type: integer }
+    CategoryList:
+      type: object
+      properties:
+        categories:
+          type: array
+          items: { $ref: "#/components/schemas/Category" }
+    FeaturedEntry:
+      type: object
+      properties:
+        item: { $ref: "#/components/schemas/ItemSummary" }
+        rank: { type: integer }
+        note: { type: string, nullable: true }
+    FeaturedList:
+      type: object
+      properties:
+        featured:
+          type: array
+          items: { $ref: "#/components/schemas/FeaturedEntry" }
+    ChangeEvent:
+      type: object
+      required: [op, kind, slug, etag]
+      properties:
+        op:
+          type: string
+          enum: [upsert, delete, deactivate, yank, version_remove, pricing_change]
+        kind: { type: string }
+        slug: { type: string }
+        version: { type: string, nullable: true }
+        etag: { type: string }
+        payload: { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, format: date-time }
+    ChangesFeed:
+      type: object
+      properties:
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/ChangeEvent" }
+        next_etag: { type: string }
+        has_more: { type: boolean }
+    Review:
+      type: object
+      properties:
+        id: { type: string }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        title: { type: string, nullable: true }
+        body: { type: string, nullable: true }
+        reviewer_handle: { type: string }
+        reviewer_avatar_url: { type: string, nullable: true }
+        is_verified_install: { type: boolean }
+        created_at: { type: string, format: date-time }
+    ReviewList:
+      type: object
+      properties:
+        reviews:
+          type: array
+          items: { $ref: "#/components/schemas/Review" }
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+    ReviewAggregate:
+      type: object
+      properties:
+        count: { type: integer }
+        mean: { type: number }
+        distribution:
+          type: object
+          additionalProperties: { type: integer }
+    ReviewCreate:
+      type: object
+      required: [rating]
+      properties:
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        title: { type: string, nullable: true }
+        body: { type: string, nullable: true }
+        reviewer_handle: { type: string, nullable: true }
+    PricingDetail:
+      type: object
+      properties:
+        pricing: { $ref: "#/components/schemas/Pricing" }
+        listings:
+          type: array
+          items: { type: object, additionalProperties: true }
+    PricingUpdate:
+      type: object
+      properties:
+        pricing_type:
+          type: string
+          enum: [free, paid, subscription]
+        price_cents: { type: integer, minimum: 0, nullable: true }
+        stripe_price_id: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        interval: { type: string, nullable: true }
+    CheckoutRequest:
+      type: object
+      properties:
+        customer_email: { type: string, nullable: true }
+        success_url: { type: string, nullable: true }
+        cancel_url: { type: string, nullable: true }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+    CheckoutResponse:
+      type: object
+      properties:
+        checkout_url: { type: string }
+        session_id: { type: string }
+        mode:
+          type: string
+          enum: [live, dev_simulator]
+        expires_at: { type: string, format: date-time, nullable: true }
+    PublishItem:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        long_description: { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        icon: { type: string, nullable: true }
+        tags: { type: array, items: { type: string } }
+        features: { type: array, items: { type: string } }
+        tech_stack: { type: array, items: { type: string } }
+        extra_metadata: { type: object, additionalProperties: true }
+        creator_handle: { type: string, nullable: true }
+        git_repo_url: { type: string, nullable: true }
+        homepage_url: { type: string, nullable: true }
+        pricing: { $ref: "#/components/schemas/Pricing" }
+    PublishVersion:
+      type: object
+      required: [version]
+      properties:
+        version: { type: string }
+        changelog: { type: string, nullable: true }
+        manifest: { type: object, additionalProperties: true, nullable: true }
+        bundle_b64: { type: string, nullable: true }
+        pricing: { $ref: "#/components/schemas/Pricing" }
+    PublishRequest:
+      type: object
+      required: [item, version]
+      properties:
+        item: { $ref: "#/components/schemas/PublishItem" }
+        version: { $ref: "#/components/schemas/PublishVersion" }
+    SubmissionCheck:
+      description: |
+        One per-stage check row in the standardized `submissions.staged`
+        schema. The orchestrator's UI groups checks by `stage` to render
+        the rich stage-by-stage timeline.
+      type: object
+      required: [stage, name, status, created_at]
+      properties:
+        stage:
+          type: string
+          enum: [stage0, stage1, stage2, stage3]
+          description: Pipeline stage that produced this check
+        name:
+          type: string
+          description: Stable check identifier (e.g. `slug_format`, `bundle_size`)
+        status:
+          type: string
+          enum: [passed, failed, warning, errored, skipped]
+          description: |
+            * `passed` — check succeeded
+            * `failed` — check failed; submission transitions to rejected
+            * `warning` — informational; does not fail the stage
+            * `errored` — execution itself failed; submission transitions to rejected
+            * `skipped` — check did not run (e.g. dependent check failed)
+        message: { type: string, nullable: true }
+        details: { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, format: date-time }
+    Submission:
+      description: |
+        Full submission row with the standardized `submissions.staged`
+        check shape. The orchestrator's `routers/app_submissions.py`
+        proxy mirrors this row directly into the local `app_submissions`
+        cache so existing UI rendering keeps working unchanged.
+      type: object
+      required: [id, kind, slug, state, stage, created_at, updated_at]
+      properties:
+        id: { type: string, description: Submission UUID (string form) }
+        kind:
+          type: string
+          enum: [agent, skill, mcp_server, base, app, theme, workflow_template]
+        slug: { type: string }
+        version: { type: string, nullable: true }
+        state:
+          type: string
+          enum: [stage0_received, stage1_static, stage2_dynamic, stage3_review, approved, rejected, withdrawn]
+          description: Wire-stable state string mirrored from the row
+        stage:
+          type: string
+          enum: [stage0, stage1, stage2, stage3, approved, rejected, withdrawn]
+          description: Current stage; terminal stages mirror the decision
+        decision:
+          type: string
+          nullable: true
+          enum: [approved, rejected, withdrawn]
+        decision_reason: { type: string, nullable: true }
+        submitter_handle: { type: string, nullable: true }
+        bundle_sha256: { type: string, nullable: true }
+        bundle_size_bytes: { type: integer, nullable: true }
+        item_id: { type: string, nullable: true }
+        item_version_id: { type: string, nullable: true }
+        checks:
+          type: array
+          description: |
+            Append-only per-stage check rows. Clients with the
+            `submissions.staged` capability render these grouped by
+            `stage` to surface the staged pipeline timeline.
+          items: { $ref: "#/components/schemas/SubmissionCheck" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SubmissionFinalize:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected, withdrawn]
+        decision_reason: { type: string, nullable: true }
+    AdminForceApprove:
+      type: object
+      properties:
+        decision_reason: { type: string, nullable: true }
+        skip_remaining_stages: { type: boolean, default: true }
+    AdminForceReject:
+      type: object
+      required: [decision_reason]
+      properties:
+        decision_reason: { type: string }
+    AdminOverrideYank:
+      type: object
+      required: [new_state]
+      properties:
+        new_state:
+          type: string
+          enum: [resolved, open]
+        resolution: { type: string, nullable: true }
+        note: { type: string, nullable: true }
+    YankCreate:
+      type: object
+      required: [kind, slug, reason]
+      properties:
+        kind: { type: string }
+        slug: { type: string }
+        version: { type: string, nullable: true }
+        severity:
+          type: string
+          enum: [low, medium, critical]
+        reason: { type: string }
+        requested_by: { type: string, nullable: true }
+    Yank:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        slug: { type: string }
+        version: { type: string, nullable: true }
+        severity: { type: string }
+        reason: { type: string }
+        requested_by: { type: string, nullable: true }
+        state: { type: string }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        resolution: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    YankAppealCreate:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string }
+        submitted_by: { type: string, nullable: true }
+    YankAppeal:
+      type: object
+      properties:
+        id: { type: string }
+        yank_id: { type: string }
+        submitted_by: { type: string, nullable: true }
+        reason: { type: string }
+        state: { type: string }
+        decision: { type: string, nullable: true }
+        decision_reason: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TelemetryEvent:
+      type: object
+      required: [kind, slug]
+      properties:
+        kind: { type: string }
+        slug: { type: string }
+        version: { type: string, nullable: true }
+        install_id: { type: string, nullable: true }
+        payload: { type: object, additionalProperties: true, nullable: true }
+    TelemetryAck:
+      type: object
+      properties:
+        accepted: { type: boolean }
+        received_at: { type: string, format: date-time }

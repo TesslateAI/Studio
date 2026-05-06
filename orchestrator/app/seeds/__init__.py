@@ -1,173 +1,110 @@
 """
 Database seed scripts for initial data population.
 
-All seed functions are idempotent and safe to run on every startup.
+After Wave 10 the orchestrator no longer carries any marketplace catalog
+seeds. The federation sync worker (``services.marketplace_sync``) is the
+sole population path for catalog rows on fresh deploys — it pulls items
+from each registered ``MarketplaceSource`` and upserts them into the
+local cache tables, tagging every row with ``source_id`` and
+``source_etag``.
+
+This module is intentionally narrow now. It owns only:
+
+  * ``seed_marketplace_sources`` — the two immutable system rows
+    (``Tesslate Official`` + ``Local``) that anchor every other catalog
+    write. Mirrors the alembic 0088 migration so a DB restored from a
+    partial backup or a fresh-table-creation environment still ends up
+    with a valid source registry.
+  * ``seed_deployment_targets`` — system-managed deployment provider
+    catalog (``item_type='deployment_target'``). NOT a federated
+    marketplace primitive; lives orchestrator-side because the deploy
+    pipeline routes through it directly.
+  * Library auto-add backfill — every user gets the canonical Tesslate
+    agents in their library on every boot. The agents themselves come
+    from federation sync; this code only manages the user-state
+    ``UserPurchasedAgent`` rows. The actual logic lives in
+    ``services.library_seeder`` and is called from here so the boot
+    sequence stays observable in one place.
+
+All seed functions are idempotent and safe to run on every startup. Each
+call is wrapped in its own try/except so one failure doesn't cascade.
 """
 
 import logging
 
-from .community_bases import seed_community_bases
 from .deployment_targets import seed_deployment_targets
-from .marketplace_agents import (
-    auto_add_agent_builder_to_users,
-    auto_add_automation_builder_to_users,
-    auto_add_librarian_agent_to_users,
-    auto_add_service_integrator_to_users,
-    auto_add_tesslate_agent_to_users,
-    get_or_create_tesslate_account,
-    seed_marketplace_agents,
-)
-from .marketplace_bases import seed_marketplace_bases
-from .mcp_servers import seed_mcp_servers
-from .opensource_agents import seed_opensource_agents
-from .skills import seed_skills
-from .themes import seed_themes
-from .workflow_templates import WORKFLOW_TEMPLATES, seed_workflow_templates
+from .marketplace_sources import seed_marketplace_sources
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "run_all_seeds",
-    "seed_marketplace_bases",
-    "seed_community_bases",
-    "seed_marketplace_agents",
-    "seed_mcp_servers",
-    "seed_opensource_agents",
-    "seed_skills",
-    "seed_themes",
-    "seed_workflow_templates",
+    "seed_marketplace_sources",
     "seed_deployment_targets",
-    "auto_add_tesslate_agent_to_users",
-    "auto_add_librarian_agent_to_users",
-    "auto_add_agent_builder_to_users",
-    "auto_add_automation_builder_to_users",
-    "auto_add_service_integrator_to_users",
-    "get_or_create_tesslate_account",
-    "WORKFLOW_TEMPLATES",
 ]
 
 
 async def run_all_seeds():
-    """Run all seeds in dependency order. Idempotent, safe for every startup.
+    """Run the orchestrator's system-row seeds + library auto-add backfill.
 
-    Each seed is wrapped in try/except so one failure doesn't block the rest.
-    Runs in a single session for efficiency.
+    The catalog itself is owned by the marketplace service after Wave 10;
+    this entry point is intentionally narrow.
+
+    Idempotent — safe for every startup. Each step is wrapped in
+    try/except so one failure doesn't block the rest.
     """
     from ..database import AsyncSessionLocal
+    from ..services.library_seeder import (
+        CANONICAL_AGENTS,
+        add_agent_to_users_by_slug,
+        auto_add_tesslate_agent_to_users,
+    )
 
     async with AsyncSessionLocal() as db:
-        # 1. Marketplace bases (no dependencies)
+        # 0. Marketplace sources MUST seed first — every other row that
+        # might land via federation sync carries source_id (NOT NULL FK to
+        # marketplace_sources). The alembic migration creates the two
+        # system rows on first upgrade; this seed is the safety net for
+        # environments that bypassed migrations or restored from a
+        # partial backup, and refreshes the mutable display_name/base_url
+        # fields on every boot.
         try:
-            count = await seed_marketplace_bases(db)
-            logger.info("Seed marketplace bases: %d new", count)
+            count = await seed_marketplace_sources(db)
+            logger.info("Seed marketplace sources: %d new", count)
         except Exception:
-            logger.exception("Failed to seed marketplace bases")
+            logger.exception("Failed to seed marketplace sources")
             await db.rollback()
 
-        # 1.5. Community bases (creates community account)
-        try:
-            count = await seed_community_bases(db)
-            logger.info("Seed community bases: %d new", count)
-        except Exception:
-            logger.exception("Failed to seed community bases")
-            await db.rollback()
-
-        # 2. Official agents (creates Tesslate account)
-        try:
-            count = await seed_marketplace_agents(db)
-            logger.info("Seed marketplace agents: %d new", count)
-        except Exception:
-            logger.exception("Failed to seed marketplace agents")
-            await db.rollback()
-
-        # 3. Open-source agents (reuses Tesslate account)
-        try:
-            count = await seed_opensource_agents(db)
-            logger.info("Seed open-source agents: %d new", count)
-        except Exception:
-            logger.exception("Failed to seed open-source agents")
-            await db.rollback()
-
-        # 4a. Auto-add Librarian agent to all users
-        try:
-            count = await auto_add_librarian_agent_to_users(db)
-            logger.info("Auto-add Librarian agent: %d users updated", count)
-        except Exception:
-            logger.exception("Failed to auto-add Librarian agent to users")
-            await db.rollback()
-
-        # 4b. Auto-add Agent Builder to all users
-        try:
-            count = await auto_add_agent_builder_to_users(db)
-            logger.info("Auto-add Agent Builder: %d users updated", count)
-        except Exception:
-            logger.exception("Failed to auto-add Agent Builder to users")
-            await db.rollback()
-
-        # 4c. Auto-add Automation Builder to all users
-        try:
-            count = await auto_add_automation_builder_to_users(db)
-            logger.info("Auto-add Automation Builder: %d users updated", count)
-        except Exception:
-            logger.exception("Failed to auto-add Automation Builder to users")
-            await db.rollback()
-
-        # 4d. Auto-add Service Integrator to all users
-        try:
-            count = await auto_add_service_integrator_to_users(db)
-            logger.info("Auto-add Service Integrator: %d users updated", count)
-        except Exception:
-            logger.exception("Failed to auto-add Service Integrator to users")
-            await db.rollback()
-
-        # 4e. Auto-add Tesslate Agent LAST so its purchase_date is the most
-        # recent — library order is `purchase_date DESC` and the chat picks
-        # `library[0]` as the default. Tesslate Agent must be at the top.
-        try:
-            count = await auto_add_tesslate_agent_to_users(db)
-            logger.info("Auto-add Tesslate Agent: %d users updated", count)
-        except Exception:
-            logger.exception("Failed to auto-add Tesslate Agent to users")
-            await db.rollback()
-
-        # 5. Skills (item_type='skill')
-        try:
-            count = await seed_skills(db)
-            logger.info("Seed skills: %d new", count)
-        except Exception:
-            logger.exception("Failed to seed skills")
-            await db.rollback()
-
-        # 6. MCP servers / connectors (item_type='mcp_server')
-        try:
-            count = await seed_mcp_servers(db)
-            logger.info("Seed MCP servers: %d new", count)
-        except Exception:
-            logger.exception("Failed to seed MCP servers")
-            await db.rollback()
-
-        # 7. Themes
-        try:
-            count = await seed_themes(db)
-            logger.info("Seed themes: %d processed", count)
-        except Exception:
-            logger.exception("Failed to seed themes")
-            await db.rollback()
-
-        # 8. Workflow templates
-        try:
-            count = await seed_workflow_templates(db)
-            logger.info("Seed workflow templates: %d new", count)
-        except Exception:
-            logger.exception("Failed to seed workflow templates")
-            await db.rollback()
-
-        # 9. Deployment targets (item_type='deployment_target')
+        # 1. Deployment targets (item_type='deployment_target'). Not part
+        # of the federated catalog — system-managed provider list backing
+        # the deploy router.
         try:
             count = await seed_deployment_targets(db)
             logger.info("Seed deployment targets: %d new", count)
         except Exception:
             logger.exception("Failed to seed deployment targets")
+            await db.rollback()
+
+        # 2. Library auto-add: ensure every user has the canonical
+        # Tesslate agents in their library. These functions look up
+        # MarketplaceAgent rows by slug — the rows themselves are
+        # populated by the federation sync worker, so on a TRULY fresh
+        # deploy these auto-adds may no-op until the first successful
+        # sync poll lands. After that, every restart picks them up.
+        # Order matters for the chat default-agent pick: Tesslate Agent
+        # is added LAST so its purchase_date is the most recent.
+        for slug, label in CANONICAL_AGENTS:
+            try:
+                count = await add_agent_to_users_by_slug(db, slug=slug, display_name=label)
+                logger.info("Auto-add %s: %d users updated", label, count)
+            except Exception:
+                logger.exception("Failed to auto-add %s to users", label)
+                await db.rollback()
+        try:
+            count = await auto_add_tesslate_agent_to_users(db)
+            logger.info("Auto-add Tesslate Agent: %d users updated", count)
+        except Exception:
+            logger.exception("Failed to auto-add Tesslate Agent to users")
             await db.rollback()
 
     logger.info("All database seeds completed")

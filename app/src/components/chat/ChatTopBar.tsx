@@ -1,10 +1,16 @@
 import { PanelLeft, SquarePen } from 'lucide-react';
+import { ProjectConnector } from './ProjectConnector';
 
 interface ChatTopBarProps {
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
   sessionTitle: string;
   onNewSession: () => void;
+  connectedProjectId: string | null;
+  connectedProjectName: string | null;
+  onConnectProject: (projectId: string, projectName: string) => void;
+  onDisconnectProject: () => void;
+  onRequestNewWorkspace: () => void;
 }
 
 export function ChatTopBar({
@@ -12,6 +18,11 @@ export function ChatTopBar({
   onToggleSidebar,
   sessionTitle,
   onNewSession,
+  connectedProjectId,
+  connectedProjectName,
+  onConnectProject,
+  onDisconnectProject,
+  onRequestNewWorkspace,
 }: ChatTopBarProps) {
   return (
     <div
@@ -42,6 +53,15 @@ export function ChatTopBar({
       <span className="text-xs font-medium text-[var(--text)] truncate max-w-[120px] sm:max-w-[200px] ml-1">
         {sessionTitle}
       </span>
+      <div className="ml-auto">
+        <ProjectConnector
+          projectId={connectedProjectId}
+          projectName={connectedProjectName}
+          onConnect={onConnectProject}
+          onDisconnect={onDisconnectProject}
+          onRequestNewWorkspace={onRequestNewWorkspace}
+        />
+      </div>
     </div>
   );
 }

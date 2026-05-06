@@ -130,9 +130,15 @@ class DockerOrchestrator(BaseOrchestrator):
         self.host_users_base = self._detect_host_users_path()
         self.use_volumes = use_volumes
 
-        # Shared projects volume path
+        # Shared projects volume path — created by Docker/K8s at runtime;
+        # skip silently if the process lacks permissions (e.g. test environments).
         self.projects_path = PROJECTS_BASE_PATH
-        self.projects_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.projects_path.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            logger.warning(
+                "[DOCKER] Cannot create %s (permission denied); skipping", self.projects_path
+            )
 
         logger.info("[DOCKER] Docker Compose orchestrator initialized")
         logger.info(f"[DOCKER] Storage mode: {'VOLUMES' if use_volumes else 'BIND_MOUNTS'}")

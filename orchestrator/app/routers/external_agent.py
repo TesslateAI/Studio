@@ -37,9 +37,6 @@ from ..schemas import (
     ScopeOption,
 )
 from ..services.agent_context import (
-    _build_architecture_context,
-    _build_git_context,
-    _build_tesslate_context,
     _get_chat_history,
     _resolve_container_name,
 )
@@ -166,29 +163,11 @@ async def invoke_agent(
     db.add(user_message)
     await db.commit()
 
-    # Build project context
-    project_context = {}
-
-    # Architecture context
-    arch_context = await _build_architecture_context(project, db)
-    if arch_context:
-        project_context["architecture"] = arch_context
-
-    # Git context
-    git_context = await _build_git_context(project, user.id, db)
-    if git_context:
-        project_context["git"] = git_context
-
-    # TESSLATE.md context
-    tesslate_context = await _build_tesslate_context(
-        project,
-        user.id,
-        db,
-        container_name=container_name,
-        container_directory=container_directory,
-    )
-    if tesslate_context:
-        project_context["tesslate_md"] = tesslate_context
+    # Build project context (name + description only — the agent reads these via {project_name})
+    project_context = {
+        "project_name": project.name,
+        "project_description": project.description,
+    }
 
     # Chat history (empty for new session, but the API allows reuse in future)
     chat_history = await _get_chat_history(chat.id, db, limit=10)

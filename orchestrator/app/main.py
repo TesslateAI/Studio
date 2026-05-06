@@ -37,12 +37,14 @@ from .routers import (
     app_triggers,
     app_versions,
     app_yanks,
+    asr_cleanup,
     auth,
     automations,
     billing,
     channels,
-    communication_destinations,
     chat,
+    chat_attachments,
+    communication_destinations,
     contract_templates,
     creators,
     deployment_credentials,
@@ -66,6 +68,7 @@ from .routers import (
     marketplace,
     marketplace_apps,
     marketplace_local,
+    marketplace_sources,
     mcp,
     mcp_oauth,
     mcp_server,
@@ -85,6 +88,7 @@ from .routers import (
     users,
     version,
     webhooks,
+    workspace_attach,
 )
 from .schemas_auth import UserCreate, UserRead, UserUpdate
 from .services.volume_manager import VolumeRestoringError, VolumeUnavailableError
@@ -101,6 +105,35 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="AI Application Builder API")
 
 
+def _jsonify_validation_errors(errors: list[dict]) -> list[dict]:
+    """Convert pydantic ValidationError errors into JSON-serializable form.
+
+    Pydantic v2 puts the underlying ``ValueError`` instance into ``ctx['error']``
+    when a custom ``field_validator`` raises ``ValueError(msg)``. That object
+    is not JSON-serializable and trips ``JSONResponse``'s default encoder
+    when our exception handler echoes ``exc.errors()`` back to the client.
+    Replace any non-string error in ``ctx`` with its ``str()`` representation
+    so the 422 response surfaces cleanly.
+    """
+    safe = []
+    for err in errors:
+        new_err = dict(err)
+        ctx = new_err.get("ctx")
+        if isinstance(ctx, dict):
+            safe_ctx = {}
+            for k, v in ctx.items():
+                if isinstance(v, BaseException):
+                    safe_ctx[k] = str(v)
+                else:
+                    safe_ctx[k] = v
+            new_err["ctx"] = safe_ctx
+        # ``loc`` is a tuple in pydantic v2 — turn it into a list for JSON.
+        if isinstance(new_err.get("loc"), tuple):
+            new_err["loc"] = list(new_err["loc"])
+        safe.append(new_err)
+    return safe
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
     """Log request validation failures with enough detail to debug 422s in production."""
@@ -110,17 +143,33 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     if "body_preview" not in locals():
         body_preview = "<unavailable>"
 
+    safe_errors = _jsonify_validation_errors(list(exc.errors()))
+
     logger.warning(
         "[VALIDATION] %s %s failed validation: errors=%s body=%s",
         request.method,
         request.url.path,
-        exc.errors(),
+        safe_errors,
         body_preview,
     )
 
+    # Pydantic puts the original Python exception object in ctx.error for
+    # value_error entries, which JSONResponse can't serialize. Stringify any
+    # non-JSON-friendly ctx values so validators raising ValueError surface as
+    # clean 422s instead of 500s.
+    safe_errors = []
+    for err in exc.errors():
+        ctx = err.get("ctx")
+        if isinstance(ctx, dict):
+            err = {
+                **err,
+                "ctx": {k: str(v) if isinstance(v, BaseException) else v for k, v in ctx.items()},
+            }
+        safe_errors.append(err)
+
     return JSONResponse(
         status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors()},
+        content={"detail": safe_errors},
     )
 
 
@@ -327,6 +376,51 @@ async def agent_task_cleanup_loop():
         except Exception as e:
             logger.error(f"Agent task cleanup error: {e}", exc_info=True)
             await asyncio.sleep(60)
+
+
+async def chat_attachment_orphan_gc_loop():
+    """Background task: prune orphan ``ChatAttachment`` rows + their files.
+
+    An orphan is a row whose ``message_id`` is still NULL after 24 hours —
+    the user uploaded a file but never sent the message that would have
+    bound it. Runs every 30 minutes; deletions are best-effort and logged.
+    """
+    import asyncio
+
+    from .database import AsyncSessionLocal
+    from .routers.chat_attachments import gc_orphan_chat_attachments
+
+    logger.info("Chat-attachment orphan GC task started")
+    error_count = 0
+    max_consecutive_errors = 5
+
+    while True:
+        db = None
+        try:
+            async with AsyncSessionLocal() as db:
+                pruned = await gc_orphan_chat_attachments(db)
+                if pruned:
+                    logger.info("Chat-attachment orphan GC pruned %d rows", pruned)
+                error_count = 0
+        except Exception as e:
+            error_count += 1
+            logger.error(
+                f"Chat-attachment orphan GC error ({error_count}/{max_consecutive_errors}): {e}",
+                exc_info=True,
+            )
+            if error_count >= max_consecutive_errors:
+                backoff_time = min(900, 60 * (2 ** (error_count - max_consecutive_errors)))
+                logger.warning(
+                    f"Too many chat-attachment GC errors, backing off for {backoff_time}s"
+                )
+                await asyncio.sleep(backoff_time)
+                continue
+        finally:
+            if db is not None:
+                with contextlib.suppress(Exception):
+                    await db.close()
+
+        await asyncio.sleep(30 * 60)
 
 
 async def container_cleanup_loop():
@@ -570,6 +664,17 @@ async def startup():
     except Exception:
         logger.exception("Failed to register db_event_bus listeners (non-fatal)")
 
+    # Wave 7: register the AppVersion source_id consistency listener so any
+    # ORM write that would violate the (source_id == parent.source_id)
+    # invariant raises AppVersionSourceMismatch on flush. Auto-registers on
+    # import — explicit import here pins the wire-up to startup.
+    try:
+        from .services.apps import app_version_source_consistency  # noqa: F401
+    except Exception:
+        logger.exception(
+            "Failed to wire AppVersion source_id consistency listener (non-fatal)"
+        )
+
     # Seed database (bases, agents, themes, workflows) — non-blocking background task
     from .seeds import run_all_seeds
 
@@ -608,6 +713,9 @@ async def startup():
         asyncio.create_task(dlock.run_with_lock("model_health", model_health_check_loop))
         asyncio.create_task(dlock.run_with_lock("credit_reset", daily_credit_reset_loop))
         asyncio.create_task(dlock.run_with_lock("agent_task_cleanup", agent_task_cleanup_loop))
+        asyncio.create_task(
+            dlock.run_with_lock("chat_attachment_orphan_gc", chat_attachment_orphan_gc_loop)
+        )
         logger.info("Background loops started with distributed locking")
     else:
         # No Redis: run all loops locally (single-pod fallback)
@@ -616,6 +724,7 @@ async def startup():
         asyncio.create_task(stats_flush_loop())
         asyncio.create_task(model_health_check_loop())
         asyncio.create_task(daily_credit_reset_loop())
+        asyncio.create_task(chat_attachment_orphan_gc_loop())
         # agent_task_cleanup_loop not needed without Redis
         logger.info("Background loops started without distributed locking (single-pod mode)")
 
@@ -655,6 +764,35 @@ async def startup():
     from .services.agent_budget import register_litellm_budget_callback
 
     register_litellm_budget_callback()
+
+    # Federated marketplace sync (Wave 3): desktop sidecar runs the periodic
+    # sync as an in-process asyncio task because it has no ARQ worker. Cloud
+    # uses the ARQ cron registered in app/worker.py instead.
+    if settings.is_desktop_mode:
+        try:
+            from .services.marketplace_sync import register_desktop_periodic
+
+            register_desktop_periodic(asyncio.get_running_loop())
+            logger.info("Federated marketplace sync registered (desktop, 15-min cadence)")
+        except Exception:
+            logger.exception("Failed to register desktop marketplace_sync (non-fatal)")
+
+        # Local-source filesystem sync (Wave 6): desktop scans
+        # $OPENSAIL_HOME/{kind}s/ every 15 minutes and emits virtual
+        # changes-feed events that populate the Local source's catalog
+        # cache. Independent of the HTTP federation sync above so a hung
+        # community hub never blocks local items from appearing.
+        try:
+            from .database import AsyncSessionLocal
+            from .services.marketplace_local import sync_local_loop
+
+            asyncio.create_task(
+                sync_local_loop(AsyncSessionLocal),
+                name="marketplace_local_sync_loop",
+            )
+            logger.info("Local marketplace sync registered (desktop, 15-min cadence)")
+        except Exception:
+            logger.exception("Failed to register desktop marketplace_local sync (non-fatal)")
 
     # Eagerly build btrfs templates for featured bases on startup (K8s only)
     if (
@@ -1170,14 +1308,22 @@ async def get_csrf_token():
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(node_config.router, prefix="/api", tags=["node-config"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(chat_attachments.router, prefix="/api", tags=["chat-attachments"])
+app.include_router(workspace_attach.router, prefix="/api", tags=["workspace-attach"])
 app.include_router(sidebar.router)  # prefix set on the router itself (/api/sidebar)
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
+# Federated marketplace source CRUD (Wave 5). Mounted before the wildcard
+# /api/marketplace router so /api/marketplace/sources resolves to this
+# router rather than the legacy bare-slug fall-through.
+app.include_router(marketplace_sources.router)  # /api/marketplace/sources
 app.include_router(creators.router)  # /api/creators - already prefixed in router
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(admin_spend.router, tags=["admin-spend"])  # /api/admin/spend
-app.include_router(contract_templates.router, tags=["contract-templates"])  # /api/contract-templates
+app.include_router(
+    contract_templates.router, tags=["contract-templates"]
+)  # /api/contract-templates
 app.include_router(github.router, prefix="/api", tags=["github"])
 app.include_router(git.router, prefix="/api", tags=["git"])
 app.include_router(git_providers.router, prefix="/api", tags=["git-providers"])
@@ -1199,6 +1345,7 @@ app.include_router(referrals.router, prefix="/api", tags=["referrals"])
 app.include_router(billing.router, prefix="/api", tags=["billing"])
 app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
 app.include_router(feedback.router, tags=["feedback"])
+app.include_router(asr_cleanup.router, tags=["asr"])  # /api/asr/cleanup - browser-side voice input
 app.include_router(tasks.router)
 app.include_router(deployments.router)
 app.include_router(deployment_credentials.router)
@@ -1294,9 +1441,7 @@ app.include_router(app_composition.router)  # /api/v1/composition/installs/...
 from .services.apps.connector_proxy import router as connector_proxy_router  # noqa: E402
 
 if not settings.is_connector_proxy_dedicated:
-    app.include_router(
-        connector_proxy_router
-    )  # /api/v1/connector-proxy/connectors/{id}/{path}
+    app.include_router(connector_proxy_router)  # /api/v1/connector-proxy/connectors/{id}/{path}
 else:
     logger.info(
         "Connector Proxy: CONNECTOR_PROXY_MODE=dedicated — router not "

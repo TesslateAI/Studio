@@ -10,18 +10,17 @@ import uuid
 from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
-from app.services.apps import hosted_agent_runtime, warm_pool
+from app.services.apps import warm_pool
 from app.services.apps.hosted_agent_runtime import (
     AgentNotDeclaredError,
     begin_hosted_invocation,
     list_declared_agents,
 )
 from app.services.apps.key_lifecycle import KeyState, KeyTier
-
 
 # ---------------------------------------------------------------------------
 # FakeDelegate (Wave 0 pattern)
@@ -199,9 +198,9 @@ async def test_begin_hosted_invocation_uses_nested_tier_when_parent_given() -> N
     db = FakeDb(
         [
             _Result(one=(instance, app, version)),  # _load_instance_with_version
-            _Result(scalar=parent_row),              # _find_parent_session_key
-            _Result(scalar=parent_row),              # mint: lock parent (with_for_update)
-            _Result(scalar=None),                    # mint: _compute_ancestor_chain_len walk
+            _Result(scalar=parent_row),  # _find_parent_session_key
+            _Result(scalar=parent_row),  # mint: lock parent (with_for_update)
+            _Result(scalar=None),  # mint: _compute_ancestor_chain_len walk
         ]
     )
     delegate = FakeDelegate()
@@ -216,6 +215,32 @@ async def test_begin_hosted_invocation_uses_nested_tier_when_parent_given() -> N
     )
     assert delegate.minted[0]["tier"] == KeyTier.NESTED.value
     assert handle.budget_usd == Decimal("0.10")
+
+
+@pytest.mark.asyncio
+async def test_begin_hosted_invocation_raises_on_empty_api_key() -> None:
+    from app.services.apps.runtime import ApiKeyExtractionError
+
+    instance, app, version = _mk_instance(
+        hosted_agents=[{"id": "agent-x", "system_prompt_ref": "p"}]
+    )
+
+    class _EmptyKeyDelegate:
+        async def create_scoped_key(self, *, tier, budget_usd, ttl_seconds, metadata):
+            return {"key_id": "k1", "api_key": ""}
+
+        async def revoke_key(self, key_id):
+            pass
+
+    db = FakeDb([_Result(one=(instance, app, version))])
+    with pytest.raises(ApiKeyExtractionError):
+        await begin_hosted_invocation(
+            db,  # type: ignore[arg-type]
+            app_instance_id=instance.id,
+            agent_id="agent-x",
+            installer_user_id=uuid4(),
+            delegate=_EmptyKeyDelegate(),
+        )
 
 
 @pytest.mark.asyncio
@@ -250,9 +275,7 @@ async def test_list_declared_agents_returns_list() -> None:
 
 @pytest.mark.asyncio
 async def test_refill_warm_pool_mints_shortfall(monkeypatch) -> None:
-    instance, app, version = _mk_instance(
-        hosted_agents=[{"id": "agent-w", "warm_pool_size": 3}]
-    )
+    instance, app, version = _mk_instance(hosted_agents=[{"id": "agent-w", "warm_pool_size": 3}])
     # First execute = _load_manifest_hosted_agents
     # Second execute = _count_unclaimed (returns 1 existing key)
     existing_key = "warm-existing-1"
@@ -271,9 +294,7 @@ async def test_refill_warm_pool_mints_shortfall(monkeypatch) -> None:
         row.key_id = f"new-{len(mint_calls)}"
         return row
 
-    monkeypatch.setattr(
-        "app.services.apps.warm_pool.litellm_keys.mint", fake_mint
-    )
+    monkeypatch.setattr("app.services.apps.warm_pool.litellm_keys.mint", fake_mint)
 
     result = await warm_pool.refill_warm_pool(
         db,  # type: ignore[arg-type]
@@ -287,9 +308,7 @@ async def test_refill_warm_pool_mints_shortfall(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_refill_warm_pool_noop_when_full(monkeypatch) -> None:
-    instance, app, version = _mk_instance(
-        hosted_agents=[{"id": "agent-w", "warm_pool_size": 2}]
-    )
+    instance, app, version = _mk_instance(hosted_agents=[{"id": "agent-w", "warm_pool_size": 2}])
     db = FakeDb(
         [
             _Result(one=(instance, version, app)),
@@ -305,9 +324,7 @@ async def test_refill_warm_pool_noop_when_full(monkeypatch) -> None:
         row.key_id = "nope"
         return row
 
-    monkeypatch.setattr(
-        "app.services.apps.warm_pool.litellm_keys.mint", fake_mint
-    )
+    monkeypatch.setattr("app.services.apps.warm_pool.litellm_keys.mint", fake_mint)
 
     result = await warm_pool.refill_warm_pool(
         db,  # type: ignore[arg-type]

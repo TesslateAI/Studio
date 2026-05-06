@@ -40,10 +40,12 @@ import { SettingsLayout } from './layouts/SettingsLayout';
 import { MarketplaceLayout } from './layouts/MarketplaceLayout';
 import ProfileSettings from './pages/settings/ProfileSettings';
 import PreferencesSettings from './pages/settings/PreferencesSettings';
+import VoiceInputSettings from './pages/settings/VoiceInputSettings';
 import SecuritySettings from './pages/settings/SecuritySettings';
 import DeploymentSettings from './pages/settings/DeploymentSettings';
 import BillingSettings from './pages/settings/BillingSettings';
 import ApiKeysSettings from './pages/settings/ApiKeysSettings';
+import MarketplaceSourcesSettings from './pages/settings/MarketplaceSourcesSettings';
 import TeamSettingsPage from './pages/settings/TeamSettingsPage';
 import TeamMembersPage from './pages/settings/TeamMembersPage';
 import AuditLogPage from './pages/settings/AuditLogPage';
@@ -433,11 +435,13 @@ function AppContent() {
           <Route index element={<Navigate to="/settings/profile" replace />} />
           <Route path="profile" element={<ProfileSettings />} />
           <Route path="preferences" element={<PreferencesSettings />} />
+          <Route path="voice-input" element={<VoiceInputSettings />} />
           <Route path="security" element={<SecuritySettings />} />
           <Route path="deployment" element={<DeploymentSettings />} />
           {/* /settings/connectors moved to Library → Connectors (#307). */}
           <Route path="connectors" element={<Navigate to="/library?tab=connectors" replace />} />
           <Route path="api-keys" element={<ApiKeysSettings />} />
+          <Route path="marketplace-sources" element={<MarketplaceSourcesSettings />} />
           <Route path="billing" element={<Navigate to="/settings/team/billing" replace />} />
           <Route path="messaging" element={<ConnectionsSettings />} />
           {/* Channels moved to Library → Channels. Old route stays as a redirect for bookmarks. */}

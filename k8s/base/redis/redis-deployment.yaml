@@ -13,6 +13,8 @@ metadata:
 spec:
   revisionHistoryLimit: 3
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: redis

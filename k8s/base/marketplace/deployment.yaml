@@ -1,0 +1,174 @@
+# Tesslate Marketplace Deployment (Federated /v1 protocol service)
+#
+# Hosts the catalog of agents/skills/mcp_servers/bases/themes/
+# workflow_templates/apps and exposes the federated /v1 endpoints
+# (manifest, items, changes, bundles, yanks, reviews, pricing,
+# publish/submissions, attestations, telemetry).
+#
+# Orchestrator pods read FROM this service via marketplace_client.py;
+# write paths (publish, yank, submit-stage) flow back through this
+# service via the same /v1 protocol with admin tokens.
+#
+# State:
+#   - Postgres database (separate `tesslate_marketplace` DB on the same
+#     postgres pod as the orchestrator).
+#   - PVC for /data: hub_id, attestation key, local bundles cache.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-marketplace
+  namespace: tesslate
+  labels:
+    app: tesslate-marketplace
+    component: marketplace
+spec:
+  revisionHistoryLimit: 3
+  replicas: 1
+  strategy:
+    # Recreate (not rolling) because the PVC is RWO and only one pod can
+    # mount it at a time. Marketplace state is small (hub_id + attestation
+    # key + bundle cache) so brief downtime is acceptable.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tesslate-marketplace
+      component: marketplace
+  template:
+    metadata:
+      labels:
+        app: tesslate-marketplace
+        component: marketplace
+    spec:
+      terminationGracePeriodSeconds: 30
+      # Reuse the orchestrator backend's ServiceAccount so this pod
+      # inherits the same IRSA role (currently grants ECR pull + S3
+      # access). Cloud overlays will switch BUNDLE_STORAGE_BACKEND=s3
+      # via env-patch; the IAM is already in place.
+      serviceAccountName: tesslate-backend-sa
+      # The marketplace image runs as user `marketplace` (UID 10001) but
+      # the /data PVC mount is owned by root by default. fsGroup tells
+      # the kubelet to chown the volume to GID 10001 on attach so the
+      # runtime can write the hub_id, attestation key, and URL signing
+      # secret cache files.
+      securityContext:
+        fsGroup: 10001
+      initContainers:
+      # 1. Idempotent CREATE DATABASE. Postgres has no `CREATE DATABASE
+      #    IF NOT EXISTS`, so we check pg_database first and skip if the
+      #    row exists. ADMIN_DATABASE_URL points at the maintenance DB
+      #    (`postgres`) on the same instance the orchestrator uses, so
+      #    one shared Postgres serves both `tesslate` and
+      #    `tesslate_marketplace`. Local-cluster overlays without an
+      #    ADMIN_DATABASE_URL secret skip the initContainer (kustomize
+      #    in those overlays patches it out — see overlays/minikube).
+      - name: create-database
+        image: postgres:16-alpine
+        command:
+        - sh
+        - -ec
+        - |
+          DBNAME="tesslate_marketplace"
+          if psql "$ADMIN_DATABASE_URL" -tAc "SELECT 1 FROM pg_database WHERE datname='${DBNAME}'" | grep -q 1; then
+            echo "[create-database] ${DBNAME} already exists — skipping"
+          else
+            echo "[create-database] creating ${DBNAME}"
+            psql "$ADMIN_DATABASE_URL" -c "CREATE DATABASE ${DBNAME}"
+          fi
+        env:
+        - name: ADMIN_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: marketplace-secret
+              key: ADMIN_DATABASE_URL
+      # 2. Apply alembic migrations against the marketplace DB.
+      - name: alembic-migrate
+        image: tesslate-marketplace:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-m", "alembic", "upgrade", "head"]
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: marketplace-secret
+              key: DATABASE_URL
+        - name: OPENSAIL_ENV
+          value: "dev"
+      containers:
+      - name: marketplace
+        image: tesslate-marketplace:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8800
+          name: http
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: marketplace-secret
+              key: DATABASE_URL
+        - name: OPENSAIL_ENV
+          value: "dev"
+        - name: HUB_DISPLAY_NAME
+          value: "Tesslate Official (Minikube)"
+        - name: HUB_ID_FILE
+          value: "/data/.hub_id"
+        - name: ATTESTATION_KEY_PATH
+          value: "/data/.attestation_key"
+        - name: BUNDLE_STORAGE_BACKEND
+          value: "local"
+        - name: BUNDLE_STORAGE_DIR
+          value: "/data/bundles"
+        - name: BUNDLE_BASE_URL
+          # In-cluster service URL for signed-bundle redirects. Stays
+          # cluster-internal because the orchestrator pulls bundles too.
+          value: "http://tesslate-marketplace:8800"
+        - name: BUNDLE_URL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: marketplace-secret
+              key: BUNDLE_URL_SECRET
+        - name: STATIC_TOKENS
+          # Tokens shared with orchestrator for admin governance writes
+          # (publish, yanks.write, admin.write). Format:
+          # token1:scope1:scope2,token2:scope3
+          valueFrom:
+            secretKeyRef:
+              name: marketplace-secret
+              key: STATIC_TOKENS
+        - name: DISABLED_CAPABILITIES
+          # Wire on what Wave 8 ships; everything else returns the
+          # 501 unsupported_capability envelope.
+          value: ""
+        - name: MARKETPLACE_LOAD_SEEDS_ON_STARTUP
+          value: "true"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /v1/manifest
+            port: 8800
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /v1/manifest
+            port: 8800
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: marketplace-data

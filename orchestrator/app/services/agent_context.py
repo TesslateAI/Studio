@@ -17,8 +17,6 @@ from ..config import get_settings
 from ..models import (
     AgentStep,
     Container,
-    ContainerConnection,
-    GitRepository,
     Message,
     Project,
 )
@@ -39,166 +37,6 @@ def _resolve_container_name(container) -> str | None:
     dir_for_name = container.name if container.directory in (".", "", None) else container.directory
     safe = dir_for_name.lower().replace(" ", "-").replace("_", "-").replace(".", "-")
     return "".join(c for c in safe if c.isalnum() or c == "-")
-
-
-async def _build_git_context(project: Project, user_id: UUID, db: AsyncSession) -> dict | None:
-    """
-    Build Git context for agent if project has a Git repository connected.
-
-    Returns a dict with structured git info, or None if no Git repo.
-    Keys:
-        - "formatted": Human-readable string for user message context
-        - "branch": Current branch name (for {git_branch} marker)
-        - "repo_url": Repository URL
-        - "auto_push": Whether auto-push is enabled
-    """
-    try:
-        from .git_manager import GitManager
-
-        # Check if project has Git repository
-        result = await db.execute(
-            select(GitRepository).where(GitRepository.project_id == project.id)
-        )
-        git_repo = result.scalar_one_or_none()
-
-        if not git_repo:
-            return None
-
-        # Get current Git status
-        git_manager = GitManager(user_id=user_id, project_id=str(project.id))
-        try:
-            git_status = await git_manager.get_status()
-        except Exception as status_error:
-            logger.warning(f"[GIT-CONTEXT] Could not get Git status: {status_error}")
-            git_status = None
-
-        # Build concise Git context
-        context_lines = [
-            "\n=== Git Repository ===",
-            f"Repository: {git_repo.repo_url}",
-        ]
-
-        branch = ""
-        if git_status:
-            branch = git_status.get("branch", "")
-            context_lines.append(f"Branch: {branch}")
-
-            total_changes = (
-                git_status.get("staged_count", 0)
-                + git_status.get("unstaged_count", 0)
-                + git_status.get("untracked_count", 0)
-            )
-            if total_changes > 0:
-                context_lines.append(f"Uncommitted Changes: {total_changes}")
-
-            sync_info = []
-            if git_status.get("ahead", 0) > 0:
-                sync_info.append(f"{git_status['ahead']} ahead")
-            if git_status.get("behind", 0) > 0:
-                sync_info.append(f"{git_status['behind']} behind")
-            if sync_info:
-                context_lines.append(f"Remote: {', '.join(sync_info)}")
-
-            if git_status.get("last_commit"):
-                last_commit = git_status["last_commit"]
-                context_lines.append(
-                    f"Last Commit: {last_commit['message']} ({last_commit['sha'][:8]})"
-                )
-
-        if git_repo.auto_push:
-            context_lines.append("Auto-push: ENABLED")
-        else:
-            context_lines.append("Auto-push: DISABLED")
-
-        return {
-            "formatted": "\n".join(context_lines),
-            "branch": branch,
-            "repo_url": git_repo.repo_url,
-            "auto_push": git_repo.auto_push,
-        }
-
-    except Exception as e:
-        logger.error(f"[GIT-CONTEXT] Failed to build Git context: {e}", exc_info=True)
-        return None
-
-
-async def _build_architecture_context(project: Project, db: AsyncSession) -> str | None:
-    """
-    Build architecture context describing containers, connections, and
-    auto-injected environment variables so the agent knows what services
-    are available and which env vars it can use in code.
-    """
-    try:
-        from .secret_manager_env import (
-            get_injected_env_vars_for_container,
-        )
-
-        # Fetch containers
-        result = await db.execute(select(Container).where(Container.project_id == project.id))
-        containers = result.scalars().all()
-        if not containers:
-            return None
-
-        # Fetch connections
-        conn_result = await db.execute(
-            select(ContainerConnection).where(ContainerConnection.project_id == project.id)
-        )
-        connections = conn_result.scalars().all()
-
-        # Build container lookup
-        container_map = {str(c.id): c for c in containers}
-
-        lines = ["\n=== Project Architecture ==="]
-
-        # List containers
-        lines.append("\nContainers:")
-        for c in containers:
-            svc_label = f" ({c.service_slug})" if c.service_slug else ""
-            mode_label = ""
-            if c.deployment_mode == "external":
-                mode_label = " [external]"
-            port_label = f" port:{c.effective_port}"
-            lines.append(f"  - {c.name}{svc_label}{mode_label}{port_label} [{c.status}]")
-
-        # List connections
-        if connections:
-            lines.append("\nConnections:")
-            for conn in connections:
-                src = container_map.get(str(conn.source_container_id))
-                tgt = container_map.get(str(conn.target_container_id))
-                if src and tgt:
-                    lines.append(f"  - {src.name} -> {tgt.name} ({conn.connector_type})")
-
-        # List injected env vars per container, grouped by source
-        has_injected = False
-        for c in containers:
-            injected = await get_injected_env_vars_for_container(db, c.id, project.id)
-            if injected:
-                if not has_injected:
-                    lines.append("\nAuto-injected environment variables (from connections):")
-                    has_injected = True
-                # Group by source so multi-source containers read clearly
-                by_source: dict[str, list[str]] = {}
-                for iv in injected:
-                    by_source.setdefault(iv["source_container_name"], []).append(iv["key"])
-                for src_name, keys in by_source.items():
-                    lines.append(f"  {c.name}: {', '.join(keys)}  (from {src_name})")
-
-        if has_injected:
-            lines.append(
-                "\nThese env vars are automatically available at runtime — "
-                "use them directly in code (e.g. process.env.DATABASE_URL) "
-                "without asking the user to configure them."
-            )
-
-        return "\n".join(lines)
-
-    except Exception as e:
-        logger.error(
-            f"[ARCH-CONTEXT] Failed to build architecture context: {e}",
-            exc_info=True,
-        )
-        return None
 
 
 async def _get_chat_history(
@@ -315,38 +153,6 @@ async def _get_chat_history(
                             formatted_messages.append(
                                 {"role": "assistant", "content": iteration_content}
                             )
-
-                            # Add tool results as user feedback (simulating the iterative flow)
-                            if tool_calls:
-                                tool_results_feedback = "Tool Results:\n"
-                                for idx, tc in enumerate(tool_calls):
-                                    tool_name = tc.get("name", "unknown")
-                                    tool_result = tc.get("result", {})
-                                    success = tool_result.get("success", False)
-
-                                    tool_results_feedback += f"\n{idx + 1}. {tool_name}: {'✓ Success' if success else '✗ Failed'}\n"
-
-                                    if tool_result.get("result"):
-                                        result_data = tool_result["result"]
-                                        if isinstance(result_data, dict):
-                                            # Add key result fields
-                                            for key in ["message", "content", "stdout", "output"]:
-                                                if key in result_data:
-                                                    content = str(result_data[key])[
-                                                        :500
-                                                    ]  # Limit content length
-                                                    tool_results_feedback += (
-                                                        f"   {key}: {content}\n"
-                                                    )
-                                                    break
-                                        else:
-                                            tool_results_feedback += (
-                                                f"   {str(result_data)[:500]}\n"
-                                            )
-
-                                formatted_messages.append(
-                                    {"role": "user", "content": tool_results_feedback}
-                                )
                 else:
                     # Regular assistant message without iterations
                     formatted_messages.append({"role": msg.role, "content": msg.content})
@@ -478,43 +284,9 @@ async def _build_tesslate_context(
                 except Exception as e:
                     logger.error(f"[TESSLATE-CONTEXT] Failed to copy template: {e}")
 
-        # Also try to read .tesslate/config.json for architecture context
-        config_content = None
-        try:
-            orchestrator = get_orchestrator()
-            config_content = await orchestrator.read_file(
-                user_id=user_id,
-                project_id=project.id,
-                container_name=container_name,
-                file_path=".tesslate/config.json",
-                project_slug=project.slug,
-            )
-        except Exception:
-            pass
-
-        if not config_content and not is_kubernetes_mode():
-            # Docker fallback
-            config_path = os.path.join(
-                get_project_path(user_id, project.id), ".tesslate", "config.json"
-            )
-            if os.path.exists(config_path):
-                try:
-                    async with aiofiles.open(config_path, encoding="utf-8") as f:
-                        config_content = await f.read()
-                except Exception:
-                    pass
-
-        # Build combined context
-        parts = []
         if tesslate_content:
-            parts.append(f"=== Project Context (TESSLATE.md) ===\n\n{tesslate_content}")
-        if config_content:
-            parts.append(f"=== Architecture Config (.tesslate/config.json) ===\n\n{config_content}")
-
-        if parts:
-            return "\n" + "\n\n".join(parts) + "\n"
-        else:
-            return None
+            return "\n=== Project Context (TESSLATE.md) ===\n\n" + tesslate_content + "\n"
+        return None
 
     except Exception as e:
         logger.error(f"[TESSLATE-CONTEXT] Failed to build TESSLATE context: {e}", exc_info=True)

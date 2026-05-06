@@ -23,6 +23,9 @@ images:
   - name: tesslate-ast
     newName: <ECR_REGISTRY>/tesslate-ast
     newTag: production
+  - name: tesslate-marketplace
+    newName: <ECR_REGISTRY>/tesslate-marketplace
+    newTag: production
 
 labels:
   - pairs:

@@ -13,7 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import MarketplaceAgent
-from .marketplace_agents import get_or_create_tesslate_account
+from ..services.marketplace_constants import TESSLATE_OFFICIAL_ID
+from ..services.tesslate_account import get_or_create_tesslate_account
 
 logger = logging.getLogger(__name__)
 
@@ -580,11 +581,14 @@ async def seed_deployment_targets(db: AsyncSession) -> int:
             for key, value in target_data.items():
                 if key != "slug":
                     setattr(existing, key, value)
+            if not existing.source_id:
+                existing.source_id = TESSLATE_OFFICIAL_ID
             updated += 1
             print(f"  [update] {slug}")
         else:
             agent = MarketplaceAgent(
                 created_by_user_id=tesslate_user.id,
+                source_id=TESSLATE_OFFICIAL_ID,
                 **target_data,
             )
             db.add(agent)

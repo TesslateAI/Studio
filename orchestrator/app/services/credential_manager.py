@@ -3,6 +3,7 @@ Credential Manager for securely storing and retrieving GitHub credentials.
 Uses Fernet symmetric encryption for token storage.
 """
 
+import logging
 from datetime import datetime
 from uuid import UUID
 
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models import GitHubCredential
+
+logger = logging.getLogger(__name__)
 
 
 class CredentialManager:
@@ -241,3 +244,20 @@ def get_credential_manager() -> CredentialManager:
     if _credential_manager is None:
         _credential_manager = CredentialManager()
     return _credential_manager
+
+
+def safe_decrypt_token(encrypted: str | None, *, owner: str) -> str | None:
+    """Decrypt an optional encrypted token, returning ``None`` on any failure.
+
+    Used by call sites that must continue operating on a missing/broken token
+    (the upstream service will return 401 if the token was actually required).
+    Failures are logged once with ``owner`` to identify the caller.
+    """
+    if not encrypted:
+        return None
+    try:
+        decrypted = get_credential_manager().decrypt_token(encrypted)
+        return decrypted or None
+    except Exception:  # noqa: BLE001
+        logger.warning("token decrypt failed for %s", owner, exc_info=True)
+        return None

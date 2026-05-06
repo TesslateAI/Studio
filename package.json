@@ -11,6 +11,7 @@
     "lint-staged": "^15.2.10"
   },
   "dependencies": {
+    "commitlint": "^20.5.2",
     "exceljs": "^4.4.0"
   }
 }

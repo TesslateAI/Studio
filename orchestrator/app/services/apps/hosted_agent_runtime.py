@@ -76,28 +76,20 @@ async def _load_instance_with_version(
             f"app_instance {app_instance_id} state={instance.state!r}"
         )
     if app.state in _UNRUNNABLE_APP_STATES:
-        raise AppInstanceNotRunnableError(
-            f"app {app.id} state={app.state!r} not runnable"
-        )
+        raise AppInstanceNotRunnableError(f"app {app.id} state={app.state!r} not runnable")
     return instance, app, version
 
 
-def _find_hosted_agent_spec(
-    manifest_json: dict[str, Any] | None, agent_id: str
-) -> dict[str, Any]:
+def _find_hosted_agent_spec(manifest_json: dict[str, Any] | None, agent_id: str) -> dict[str, Any]:
     manifest = manifest_json or {}
     compute = manifest.get("compute") or {}
     for spec in compute.get("hosted_agents") or []:
         if isinstance(spec, dict) and spec.get("id") == agent_id:
             return spec
-    raise AgentNotDeclaredError(
-        f"hosted agent {agent_id!r} not declared in manifest"
-    )
+    raise AgentNotDeclaredError(f"hosted agent {agent_id!r} not declared in manifest")
 
 
-def _resolve_budget(
-    caller_budget: Decimal | None, spec: dict[str, Any]
-) -> Decimal:
+def _resolve_budget(caller_budget: Decimal | None, spec: dict[str, Any]) -> Decimal:
     if caller_budget is not None:
         return Decimal(caller_budget)
     # Spec-derived default: scale off max_tokens if present (rough heuristic).
@@ -110,9 +102,7 @@ def _resolve_budget(
     return _DEFAULT_HOSTED_BUDGET_USD
 
 
-async def _find_parent_session_key(
-    db: AsyncSession, session_id: UUID
-) -> LiteLLMKeyLedger:
+async def _find_parent_session_key(db: AsyncSession, session_id: UUID) -> LiteLLMKeyLedger:
     row = (
         await db.execute(
             select(LiteLLMKeyLedger).where(
@@ -157,7 +147,7 @@ async def begin_hosted_invocation(
         parent_key_id = parent.key_id
         tier = KeyTier.NESTED
 
-    row = await litellm_keys.mint(
+    result = await litellm_keys.mint_with_secret(
         db,
         delegate=delegate,
         tier=tier,
@@ -173,21 +163,24 @@ async def begin_hosted_invocation(
             "invocation_id": str(invocation_id),
         },
     )
-    # _extract_api_key raises ApiKeyExtractionError if the delegate didn't
-    # surface the api_key — let it propagate so the caller sees a typed
-    # failure rather than a silent empty-string handle that would only fail
-    # later as an opaque LiteLLM 401.
-    api_key = _extract_api_key(delegate, row.key_id)
+    if not result.api_key:
+        raise ApiKeyExtractionError(
+            f"LiteLLM mint returned empty api_key for key_id={result.ledger.key_id!r}"
+        )
     logger.info(
         "hosted_agent.begin app_instance=%s agent=%s tier=%s key=%s budget=%s",
-        instance.id, agent_id, tier.value, row.key_id, effective_budget,
+        instance.id,
+        agent_id,
+        tier.value,
+        result.ledger.key_id,
+        effective_budget,
     )
     return HostedAgentInvocationHandle(
         invocation_id=invocation_id,
         app_instance_id=instance.id,
         agent_id=agent_id,
-        litellm_key_id=row.key_id,
-        api_key=api_key,
+        litellm_key_id=result.ledger.key_id,
+        api_key=result.api_key,
         model=spec.get("model_pref"),
         system_prompt_ref=spec.get("system_prompt_ref", ""),
         tools_ref=list(spec.get("tools_ref") or []),
@@ -207,9 +200,7 @@ async def end_hosted_invocation(
 ) -> None:
     """Settle the invocation key (begin+finalize). Idempotent."""
     row = (
-        await db.execute(
-            select(LiteLLMKeyLedger).where(LiteLLMKeyLedger.key_id == litellm_key_id)
-        )
+        await db.execute(select(LiteLLMKeyLedger).where(LiteLLMKeyLedger.key_id == litellm_key_id))
     ).scalar_one_or_none()
     if row is None:
         logger.warning("hosted_agent.end: key not found key=%s", litellm_key_id)
@@ -221,7 +212,9 @@ async def end_hosted_invocation(
     await litellm_keys.finalize_settlement(db, key_id=litellm_key_id)
     logger.info(
         "hosted_agent.end invocation=%s key=%s outcome=%s",
-        invocation_id, litellm_key_id, outcome,
+        invocation_id,
+        litellm_key_id,
+        outcome,
     )
 
 

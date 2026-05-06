@@ -4,13 +4,15 @@
     "id": "com.tesslate.law-onboarding",
     "slug": "law-onboarding",
     "name": "Law Onboarding & Redline",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "description": "Demo legal client-intake + document-redline workbench. Next.js 16 + NextAuth dashboard with a built-in demo-data layer (runs without a database). Log in with attorney / demo1234.",
     "category": "productivity",
     "forkable": "true"
   },
   "compatibility": {
-    "studio": {"min": "0.0.0"},
+    "studio": {
+      "min": "0.0.0"
+    },
     "manifest_schema": "2025-02",
     "runtime_api": "^1.0",
     "required_features": []
@@ -23,7 +25,9 @@
         "name": "web",
         "primary": true,
         "image": "tesslate-devserver:latest",
-        "ports": [3000],
+        "ports": [
+          3000
+        ],
         "startup_command": "sh -c 'cd /app && (test -x node_modules/.bin/next || bun install) && bun run dev -- --hostname 0.0.0.0 --port 3000'",
         "env": {
           "NEXTAUTH_SECRET": "demo-secret-key-32chars-minimum-ok",
@@ -36,13 +40,28 @@
     "connections": []
   },
   "surfaces": [
-    {"kind": "ui", "entrypoint": "/"}
+    {
+      "kind": "ui",
+      "entrypoint": "/"
+    }
   ],
-  "state": {"model": "per-install-volume", "volume_size": "2Gi"},
-  "billing": {
-    "ai_compute": {"payer": "installer", "markup_pct": 0},
-    "general_compute": {"payer": "platform"},
-    "platform_fee": {"model": "free"}
+  "state": {
+    "model": "per-install-volume",
+    "volume_size": "2Gi"
   },
-  "listing": {"visibility": "public"}
+  "billing": {
+    "ai_compute": {
+      "payer": "installer",
+      "markup_pct": 0
+    },
+    "general_compute": {
+      "payer": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "listing": {
+    "visibility": "public"
+  }
 }

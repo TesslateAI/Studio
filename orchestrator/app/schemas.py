@@ -84,7 +84,7 @@ class ProjectCreate(ProjectBase):
     @field_validator("source_type")
     @classmethod
     def validate_source_type(cls, v):
-        valid_types = ["template", "github", "gitlab", "bitbucket", "base"]
+        valid_types = ["template", "github", "gitlab", "bitbucket", "base", "empty"]
         if v not in valid_types:
             raise ValueError(f"source_type must be one of: {', '.join(valid_types)}")
         return v
@@ -94,6 +94,13 @@ class ProjectCreate(ProjectBase):
         """Automatically set source_type to 'base' when base_id is provided."""
         if self.base_id is not None and self.source_type == "template":
             self.source_type = "base"
+        return self
+
+    @model_validator(mode="after")
+    def reject_base_id_for_empty_source(self):
+        """Empty workspaces have no template — refuse a stray base_id."""
+        if self.source_type == "empty" and self.base_id is not None:
+            raise ValueError("source_type='empty' is incompatible with base_id")
         return self
 
     @field_validator("github_repo_url")
@@ -140,6 +147,9 @@ class ProjectCreate(ProjectBase):
         # When import_path is set we're adopting an existing directory; no
         # template / base scaffolding runs, so base_id is not required.
         if info.data.get("import_path"):
+            return v
+        # Empty workspaces are blank by design — base_id stays None.
+        if info.data.get("source_type") == "empty":
             return v
         if info.data.get("source_type") == "base":
             if not v:
@@ -687,13 +697,25 @@ class AgentCommandStatsResponse(BaseModel):
 
 
 class ChatAttachmentSchema(BaseModel):
-    """Attachment sent alongside a chat message."""
+    """Attachment carried in an outgoing agent task payload.
 
-    # Per-attachment size caps. These are defense-in-depth against very large
-    # pastes/images inflating a single turn past the model's context window or
-    # blowing up Redis payload size. Frontend should enforce similar limits
-    # for UX but these are the source of truth.
-    MAX_PASTED_TEXT_CHARS: ClassVar[int] = 100_000
+    Pydantic shape for the *serialized* attachment that travels alongside a
+    user's chat message. NOT the same as ``models.ChatAttachment``, which is
+    the durable on-disk + DB record of a file uploaded into the chat's
+    workspace. The two are linked via ``attachment_id``: when a user uploads
+    a file via ``POST /api/chats/{chat_id}/attachments`` the orchestrator
+    INSERTs a ``ChatAttachment`` row and returns its id; the frontend then
+    sets that id here so the chat-send handler can mark the row bound to
+    the just-saved message.
+    """
+
+    # 500_000 chars ≈ 125k tokens. Fits Claude (200k) and Gemini (1M+) with
+    # room for system prompt + history + response; intentionally exceeds
+    # GPT-4o (128k) so oversize pastes targeting GPT-4o fail upstream with
+    # a context-overflow error rather than silently truncating. Pastes of
+    # this size should ideally route through POST /api/chats/{id}/attachments
+    # so the payload only carries an attachment_id, not full bytes.
+    MAX_PASTED_TEXT_CHARS: ClassVar[int] = 500_000
     MAX_IMAGE_BASE64_CHARS: ClassVar[int] = 20_000_000  # ~15 MB raw; typical screenshots
 
     type: str  # "image", "pasted_text", "file_reference"
@@ -701,6 +723,11 @@ class ChatAttachmentSchema(BaseModel):
     mime_type: str | None = None
     file_path: str | None = None
     label: str | None = None
+    # Optional pointer to a ``ChatAttachment`` row when this serialized
+    # attachment was produced by an earlier ``POST /api/chats/{chat_id}/attachments``
+    # upload. The chat-send handler patches ``ChatAttachment.message_id`` with
+    # the freshly-saved user message id so orphan GC leaves the row alone.
+    attachment_id: str | None = None
 
     @field_validator("type")
     @classmethod
@@ -1542,12 +1569,19 @@ class McpInstallRequest(BaseModel):
     - ``scope_level="team"`` is **not accepted** — OAuth connectors are bound
       to a single user's identity and cannot be shared. The install endpoint
       rejects this value with 400.
+
+    Wave 4: ``confirmed`` is the per-install confirmation flag for MCP
+    installs from ``private`` marketplace sources. When the source's
+    trust level requires confirmation, the install endpoint returns a
+    409 with ``scope_tool_list`` so the UI can render a permission
+    prompt; the user re-submits with ``confirmed=true`` to proceed.
     """
 
     marketplace_agent_id: UUID
     credentials: dict[str, Any] | None = None  # API keys etc, will be encrypted
     scope_level: Literal["user", "project"] = "user"
     project_id: UUID | None = None
+    confirmed: bool = False
 
 
 class McpConfigUpdate(BaseModel):

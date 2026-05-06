@@ -1,12 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
-import { Plus, ImageSquare, Plug, GithubLogo, SlackLogo, FigmaLogo } from '@phosphor-icons/react';
+import {
+  Plus,
+  ImageSquare,
+  Plug,
+  GithubLogo,
+  SlackLogo,
+  FigmaLogo,
+  File as FileIcon,
+} from '@phosphor-icons/react';
 
 interface PlusMenuProps {
   /** Called with the picked image File(s). One picker invocation may pick many. */
   onAddImages: (files: File[]) => void;
+  /** Called with non-image File(s) the user picked. The caller is responsible
+   * for resolving a workspace and uploading via chatAttachmentsApi. */
+  onAddFiles?: (files: File[]) => void;
   /** Disabled state — e.g., when the input is locked for viewers. */
   disabled?: boolean;
 }
+
+// Project-wide upload cap (mirrors orchestrator's MAX_ATTACHMENT_BYTES + the
+// 25 MiB convention used by services/gateway/runner.py and the channel
+// adapters). Frontend pre-flights so users don't wait on a doomed upload.
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 interface ConnectorEntry {
   key: string;
@@ -43,10 +59,11 @@ const CONNECTORS: ConnectorEntry[] = [
   },
 ];
 
-export function PlusMenu({ onAddImages, disabled = false }: PlusMenuProps) {
+export function PlusMenu({ onAddImages, onAddFiles, disabled = false }: PlusMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const anyFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -68,6 +85,10 @@ export function PlusMenu({ onAddImages, disabled = false }: PlusMenuProps) {
 
   const handlePick = () => {
     fileInputRef.current?.click();
+  };
+
+  const handlePickAnyFile = () => {
+    anyFileInputRef.current?.click();
   };
 
   return (
@@ -99,6 +120,35 @@ export function PlusMenu({ onAddImages, disabled = false }: PlusMenuProps) {
         }}
       />
 
+      {/* Non-image upload — any mime, hard 25 MiB cap pre-flight. */}
+      <input
+        ref={anyFileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const picked = Array.from(e.target.files ?? []);
+          const valid = picked.filter((f) => {
+            if (f.size > MAX_UPLOAD_BYTES) {
+              const sizeMb = (f.size / 1024 / 1024).toFixed(1);
+              window.dispatchEvent(
+                new CustomEvent('toast', {
+                  detail: {
+                    kind: 'error',
+                    message: `${f.name} is ${sizeMb} MB; the per-file limit is 25 MB.`,
+                  },
+                })
+              );
+              return false;
+            }
+            return true;
+          });
+          if (valid.length > 0) onAddFiles?.(valid);
+          e.target.value = '';
+          setOpen(false);
+        }}
+      />
+
       {open && (
         <div
           role="menu"
@@ -114,12 +164,30 @@ export function PlusMenu({ onAddImages, disabled = false }: PlusMenuProps) {
           >
             <ImageSquare size={14} className="text-[var(--text-muted)] flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-[var(--text)]">Add photos &amp; files</div>
+              <div className="text-xs font-medium text-[var(--text)]">Add photo</div>
               <div className="text-[10px] text-[var(--text-subtle)] mt-0.5">
-                Attach images to the next message.
+                Attach an image inline (no workspace required).
               </div>
             </div>
           </button>
+
+          {onAddFiles && (
+            <button
+              type="button"
+              onClick={handlePickAnyFile}
+              title="Upload a file (any type, up to 25 MB) into the chat's workspace."
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[var(--radius-small)] hover:bg-[var(--surface-hover)] transition-colors text-left"
+              role="menuitem"
+            >
+              <FileIcon size={14} className="text-[var(--text-muted)] flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-[var(--text)]">Upload file</div>
+                <div className="text-[10px] text-[var(--text-subtle)] mt-0.5">
+                  Any file type, up to 25 MB. Saved into the chat workspace.
+                </div>
+              </div>
+            </button>
+          )}
 
           {/* Section 2 — Connectors */}
           <div className="border-t border-[var(--border)] mt-1 pt-1">
@@ -136,17 +204,13 @@ export function PlusMenu({ onAddImages, disabled = false }: PlusMenuProps) {
                   disabled={!c.enabled}
                   title={c.enabled ? c.description : `${c.description} (Coming soon)`}
                   className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[var(--radius-small)] text-left transition-colors ${
-                    c.enabled
-                      ? 'hover:bg-[var(--surface-hover)]'
-                      : 'opacity-50 cursor-not-allowed'
+                    c.enabled ? 'hover:bg-[var(--surface-hover)]' : 'opacity-50 cursor-not-allowed'
                   }`}
                   role="menuitem"
                 >
                   <Icon size={14} className="text-[var(--text-muted)] flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium text-[var(--text)] truncate">
-                      {c.label}
-                    </div>
+                    <div className="text-xs font-medium text-[var(--text)] truncate">{c.label}</div>
                   </div>
                   {!c.enabled && (
                     <span className="text-[9px] uppercase tracking-wider text-[var(--text-subtle)]">

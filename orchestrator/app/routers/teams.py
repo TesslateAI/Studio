@@ -242,7 +242,7 @@ async def list_teams(
             slug=team_slug,
             is_personal=True,
             created_by_id=user.id,
-            subscription_tier=getattr(user, "subscription_tier", "free") or "free",
+            subscription_tier="free",
             daily_credits=0,
             signup_bonus_credits=0,
         )

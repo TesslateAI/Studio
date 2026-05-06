@@ -188,13 +188,37 @@ class TestCache:
         assert "slug-b" in skill_markers._RENDERED
 
 
+def _load_marketplace_tesslate_skills() -> list[dict]:
+    """Read canonical Tesslate-authored skills from the federated marketplace.
+
+    After Wave 10 the orchestrator no longer ships seed Python modules;
+    skill bodies are authored upstream at
+    ``packages/tesslate-marketplace/app/seeds/skills_tesslate.json`` and
+    arrive in the orchestrator's catalog cache via the federation sync
+    worker. The marker-rendering contract is asserted against the upstream
+    source of truth.
+    """
+    import json
+    from pathlib import Path
+
+    seed_path = (
+        Path(__file__).resolve().parents[3]
+        / "packages"
+        / "tesslate-marketplace"
+        / "app"
+        / "seeds"
+        / "skills_tesslate.json"
+    )
+    return json.loads(seed_path.read_text(encoding="utf-8"))
+
+
 class TestBuiltinSkillIntegration:
     """End-to-end check: the project-architecture seed body renders cleanly."""
 
     def test_project_architecture_body_renders(self):
-        from app.seeds.skills import TESSLATE_SKILLS
+        skills = _load_marketplace_tesslate_skills()
 
-        pa = next(s for s in TESSLATE_SKILLS if s["slug"] == "project-architecture")
+        pa = next(s for s in skills if s["slug"] == "project-architecture")
         assert pa.get("is_builtin") is True
 
         raw = pa["skill_body"]
@@ -222,12 +246,11 @@ class TestBuiltinSkillIntegration:
         """
         import re
 
-        from app.seeds.skills import TESSLATE_SKILLS
-
+        skills = _load_marketplace_tesslate_skills()
         marker_pattern = re.compile(r"\{\{[A-Z_]+\}\}")
 
         missing: dict[str, set[str]] = {}
-        for entry in TESSLATE_SKILLS:
+        for entry in skills:
             if not entry.get("is_builtin"):
                 continue
             body = entry.get("skill_body", "")

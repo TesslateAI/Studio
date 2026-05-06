@@ -3,17 +3,22 @@ skill in its catalog, can load its body via the ``load_skill`` tool
 equivalent path, and the body has every marker substituted with live
 content from the Python code.
 
-The orchestrator seed runs automatically on startup (background task), but
-in the isolated test DB it may not have executed yet. We therefore upsert
-the seed's canonical ``project-architecture`` row synchronously at the top
-of each test, matching the seed's fields 1:1 including ``is_builtin=True``.
-Then we exercise ``discover_skills`` + ``load_skill`` against it.
+After Wave 10 the canonical skill body lives in the federated marketplace
+service at ``packages/tesslate-marketplace/app/seeds/skills_tesslate.json``;
+the orchestrator's catalog rows are the cached output of
+``services/marketplace_sync.py``. In the isolated test DB neither the
+sync worker nor the upstream marketplace is running, so we read the
+canonical seed JSON directly and upsert the ``project-architecture`` row
+synchronously at the top of each test, matching the seed's fields 1:1
+including ``is_builtin=True``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -22,6 +27,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.models import MarketplaceAgent
 
 _ASYNC_DB_URL = "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test"
+
+# Canonical built-in skill seeds shipped by the federated marketplace service.
+_MARKETPLACE_SKILLS_TESSLATE = (
+    Path(__file__).resolve().parents[3]
+    / "packages"
+    / "tesslate-marketplace"
+    / "app"
+    / "seeds"
+    / "skills_tesslate.json"
+)
 
 
 def _run_db(coro_fn, *args, **kwargs):
@@ -37,11 +52,19 @@ def _run_db(coro_fn, *args, **kwargs):
     return asyncio.run(_inner())
 
 
-def _upsert_project_architecture_builtin() -> str:
-    """Upsert the canonical built-in skill the way seeds/skills.py does."""
-    from app.seeds.skills import TESSLATE_SKILLS
+def _load_canonical_skill(slug: str) -> dict:
+    """Read the federated marketplace's canonical seed entry for ``slug``."""
+    entries = json.loads(_MARKETPLACE_SKILLS_TESSLATE.read_text(encoding="utf-8"))
+    return next(s for s in entries if s["slug"] == slug)
 
-    pa = next(s for s in TESSLATE_SKILLS if s["slug"] == "project-architecture")
+
+def _upsert_project_architecture_builtin() -> str:
+    """Upsert the canonical built-in skill row from the marketplace seed."""
+    pa = _load_canonical_skill("project-architecture")
+    # The marketplace seed JSON inherits orchestrator-shaped field names but
+    # ships ``is_builtin`` as part of the skill record. Provide a default in
+    # case the upstream seed flips representation in the future.
+    pa.setdefault("is_builtin", True)
 
     async def _do(db: AsyncSession) -> str:
         result = await db.execute(

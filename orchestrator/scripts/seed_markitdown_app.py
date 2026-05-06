@@ -1,16 +1,15 @@
-"""Seed the MarkItDown (Microsoft, FastAPI-wrapped) Tesslate App.
+"""Seed the MarkItDown Tesslate App via the federated marketplace.
 
-Image-based app: the container pulls `tesslate-markitdown:latest` (built
-locally into the minikube docker daemon). The bundle we publish to the Hub
-contains only the manifest so the installer has something to work with.
+Image-based app: the container pulls ``tesslate-markitdown:latest``. The
+bundle we publish contains only the manifest + .tesslate/config.json so
+install_compute_materializer has something to read.
 
-Run inside the backend pod:
-    kubectl --context=tesslate -n tesslate exec deploy/tesslate-backend -- \
-      env TSL_APPS_DEV_AUTO_APPROVE=1 python -m scripts.seed_markitdown_app
+Run inside the backend pod (the seed_apps cron does this automatically):
 
-Prereq: the image must exist in minikube's docker cache:
-    eval $(minikube -p tesslate docker-env)
-    docker build -t tesslate-markitdown:latest seeds/apps/markitdown/
+    kubectl --context=tesslate -n tesslate exec deploy/tesslate-backend -- \\
+      python -m scripts.seed_markitdown_app
+
+See ``seed_hello_node_app.py`` for the federated publish path.
 """
 
 from __future__ import annotations
@@ -20,19 +19,14 @@ import json
 import logging
 import os
 import sys
-import uuid
 from pathlib import Path
 
-from sqlalchemy import select
-
-from app.config import get_settings
-from app.database import AsyncSessionLocal
-from app.models import MarketplaceApp
-from app.services.apps.publisher import DuplicateVersionError, publish_version
-from app.services.fileops_client import FileOpsClient
-from app.services.hub_client import HubClient
-
-from scripts._seed_helpers import resolve_seeder_user
+from scripts._seed_publish_federated import (
+    already_published_on_hub,
+    build_app_bundle,
+    maybe_extras_for_config_injection,
+    publish_app_via_federation,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("seed_markitdown")
@@ -66,91 +60,45 @@ async def main() -> int:
         logger.error("assets dir missing: %s", ASSETS_DIR)
         return 2
 
-    settings = get_settings()
-    hub = HubClient(settings.volume_hub_address)
-
     manifest_path = ASSETS_DIR / MANIFEST_FILENAME
     manifest_dict = json.loads(manifest_path.read_text())
+    app_meta = manifest_dict.get("app", {})
+    version = str(app_meta.get("version") or "0.1.0")
+    name = str(app_meta.get("name") or "MarkItDown")
+    description = str(app_meta.get("description") or "")
+    category = app_meta.get("category")
 
-    async with AsyncSessionLocal() as db:
-        creator, team_id = await resolve_seeder_user(db)
-        logger.info("using creator=%s (%s) team=%s", creator.id, creator.email, team_id)
-
-        existing = (
-            await db.execute(select(MarketplaceApp).where(MarketplaceApp.slug == SLUG))
-        ).scalar_one_or_none()
-        if existing is not None:
-            logger.info("app slug=%s already exists (id=%s); nothing to do", SLUG, existing.id)
-            return 0
-
-        volume_id, node_name = await hub.create_volume()
-        logger.info("created volume=%s on node=%s", volume_id, node_name)
-
-        resp = await hub.resolve_volume(volume_id)
-        fileops_address = resp.get("fileops_address")
-        if not fileops_address:
-            logger.error("hub did not return a fileops address for volume %s", volume_id)
-            return 3
-
-        # Image-based app — nothing to stream into the volume except the manifest.
-        async with FileOpsClient(fileops_address) as fops:
-            writer = getattr(fops, "write_file_safe", fops.write_file)
-            await writer(
-                volume_id,
-                MANIFEST_FILENAME,
-                json.dumps(manifest_dict, indent=2).encode("utf-8"),
-            )
-        logger.info("wrote manifest into volume %s", volume_id)
-
-        from app.models import Project
-
-        proj = Project(
-            id=uuid.uuid4(),
-            name="MarkItDown (source)",
-            slug=f"markitdown-src-{uuid.uuid4().hex[:6]}",
-            owner_id=creator.id,
-            team_id=team_id,
-            visibility="team",
-            volume_id=volume_id,
-            cache_node=node_name,
-            project_kind="app_source",
-        )
-        db.add(proj)
-        await db.flush()
-        logger.info("created source project=%s slug=%s", proj.id, proj.slug)
-
-        auto_approve = (
-            os.environ.get("TSL_APPS_DEV_AUTO_APPROVE") == "1"
-            or os.environ.get("TSL_APPS_SKIP_APPROVAL") == "1"
-        )
-        if not auto_approve:
-            logger.warning(
-                "neither TSL_APPS_DEV_AUTO_APPROVE nor TSL_APPS_SKIP_APPROVAL is set; "
-                "app will be published in pending-approval state"
-            )
-
-        try:
-            result = await publish_version(
-                db,
-                creator_user_id=creator.id,
-                project_id=proj.id,
-                manifest_source=manifest_dict,
-                hub_client=hub,
-            )
-        except DuplicateVersionError as e:
-            logger.warning("duplicate: %s", e)
-            await db.rollback()
-            return 0
-        await db.commit()
-        logger.info(
-            "published app=%s version=%s bundle=%s submission=%s",
-            result.app_id,
-            result.version,
-            result.bundle_hash[:12],
-            result.submission_id,
-        )
-        logger.info("done. visit /apps to install.")
+    if await already_published_on_hub(SLUG, version=version):
+        logger.info("hub already has %s@%s; nothing to do", SLUG, version)
         return 0
+
+    extra_files = maybe_extras_for_config_injection(manifest_dict, ASSETS_DIR)
+    bundle_bytes = build_app_bundle(ASSETS_DIR, extra_files=extra_files)
+    logger.info(
+        "built bundle for %s: %d bytes (tar.zst, %d files in tree, %d injected)",
+        SLUG,
+        len(bundle_bytes),
+        sum(1 for p in ASSETS_DIR.rglob("*") if p.is_file()),
+        len(extra_files),
+    )
+
+    envelope = await publish_app_via_federation(
+        slug=SLUG,
+        name=name,
+        description=description,
+        category=category,
+        version=version,
+        manifest=manifest_dict,
+        bundle_bytes=bundle_bytes,
+    )
+    logger.info(
+        "published %s@%s submission=%s state=%s",
+        SLUG,
+        version,
+        envelope.get("id"),
+        envelope.get("state"),
+    )
+    return 0
 
 
 if __name__ == "__main__":

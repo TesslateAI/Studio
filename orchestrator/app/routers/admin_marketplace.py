@@ -1,7 +1,18 @@
-"""Wave 3: Admin marketplace surface (superuser-gated)."""
+"""Wave 3 + Wave 8: Admin marketplace surface (superuser-gated).
+
+Wave 8 split:
+  * Local-only endpoints (queue, yank-queue, monitoring runs, reputation,
+    stats) continue to read / write the orchestrator's local cache —
+    these are operator dashboards, not governance writes.
+  * Force-approve / force-reject / override-yank become thin proxies to
+    the marketplace's ``/v1/admin/...`` endpoints (gated behind the
+    ``admin.write`` scope). The local cache row is mirrored from the
+    marketplace's authoritative response.
+"""
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -22,11 +33,20 @@ from ..models import (
     User,
     YankRequest,
 )
+from ..services import marketplace_governance
 from ..services.apps import monitoring as monitoring_svc
+from ..services.marketplace_client import MarketplaceClientError
+from ..services.marketplace_http_errors import propagate_marketplace_error
 from ..users import current_superuser
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 IN_FLIGHT_STAGES = ("stage0", "stage1", "stage2", "stage3")
+
+
+def _propagate_marketplace_error(exc: MarketplaceClientError) -> HTTPException:
+    return propagate_marketplace_error(exc)
 
 
 class QueueItemOut(BaseModel):
@@ -287,3 +307,147 @@ async def stats(
         submissions_in_flight=int(submissions_in_flight or 0),
         monitoring_runs_24h=int(monitoring_runs_24h or 0),
     )
+
+
+# ---------------------------------------------------------------------------
+# Wave 8: governance overrides — proxied to the marketplace under admin.write
+# ---------------------------------------------------------------------------
+
+
+class ForceDecisionIn(BaseModel):
+    decision_reason: str | None = None
+
+
+class ForceRejectIn(BaseModel):
+    decision_reason: str
+
+
+class OverrideYankIn(BaseModel):
+    new_state: str  # resolved | open
+    resolution: str | None = None
+    note: str | None = None
+
+
+@router.post("/submissions/{submission_id}/force-approve")
+async def force_approve(
+    submission_id: UUID,
+    body: ForceDecisionIn | None = None,
+    user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    sub = (
+        await db.execute(select(AppSubmission).where(AppSubmission.id == submission_id))
+    ).scalar_one_or_none()
+    if sub is None:
+        raise HTTPException(status_code=404, detail="submission not found")
+    source = await marketplace_governance.resolve_source_for_app_version(db, sub.app_version_id)
+    if source is None:
+        raise HTTPException(status_code=409, detail="no marketplace source")
+
+    decision_reason = (body.decision_reason if body else None) or f"force_approved_by_{user.id}"
+    try:
+        envelope = await marketplace_governance.proxy_admin_force_approve(
+            db,
+            local_submission_id=sub.id,
+            upstream_submission_id=str(sub.id),
+            source=source,
+            decision_reason=decision_reason,
+        )
+    except marketplace_governance.AdminTokenMissingError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "marketplace_admin_token_missing",
+                "message": str(exc),
+            },
+        ) from exc
+    except MarketplaceClientError as exc:
+        raise _propagate_marketplace_error(exc) from exc
+
+    sub.reviewer_user_id = user.id
+    await db.commit()
+    return {"submission": envelope}
+
+
+@router.post("/submissions/{submission_id}/force-reject")
+async def force_reject(
+    submission_id: UUID,
+    body: ForceRejectIn,
+    user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    sub = (
+        await db.execute(select(AppSubmission).where(AppSubmission.id == submission_id))
+    ).scalar_one_or_none()
+    if sub is None:
+        raise HTTPException(status_code=404, detail="submission not found")
+    source = await marketplace_governance.resolve_source_for_app_version(db, sub.app_version_id)
+    if source is None:
+        raise HTTPException(status_code=409, detail="no marketplace source")
+
+    try:
+        envelope = await marketplace_governance.proxy_admin_force_reject(
+            db,
+            local_submission_id=sub.id,
+            upstream_submission_id=str(sub.id),
+            source=source,
+            decision_reason=body.decision_reason,
+        )
+    except marketplace_governance.AdminTokenMissingError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "marketplace_admin_token_missing",
+                "message": str(exc),
+            },
+        ) from exc
+    except MarketplaceClientError as exc:
+        raise _propagate_marketplace_error(exc) from exc
+
+    sub.reviewer_user_id = user.id
+    await db.commit()
+    return {"submission": envelope}
+
+
+@router.post("/yanks/{yank_request_id}/override")
+async def override_yank(
+    yank_request_id: UUID,
+    body: OverrideYankIn,
+    user: User = Depends(current_superuser),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    yank = (
+        await db.execute(select(YankRequest).where(YankRequest.id == yank_request_id))
+    ).scalar_one_or_none()
+    if yank is None:
+        raise HTTPException(status_code=404, detail="yank not found")
+    source = await marketplace_governance.resolve_source_for_app_version(db, yank.app_version_id)
+    if source is None:
+        raise HTTPException(status_code=409, detail="no marketplace source")
+    if body.new_state not in ("resolved", "open"):
+        raise HTTPException(status_code=400, detail="invalid new_state")
+
+    try:
+        async with marketplace_governance.open_proxy_client(source, None) as client:
+            envelope = await client.admin_override_yank(
+                str(yank.id),
+                new_state=body.new_state,
+                resolution=body.resolution,
+                note=body.note or f"override_by_{user.id}",
+            )
+    except marketplace_governance.AdminTokenMissingError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "marketplace_admin_token_missing",
+                "message": str(exc),
+            },
+        ) from exc
+    except MarketplaceClientError as exc:
+        raise _propagate_marketplace_error(exc) from exc
+
+    await marketplace_governance.mirror_yank_into_cache(
+        db, local_yank_id=yank.id, marketplace_envelope=envelope
+    )
+    await db.commit()
+    return {"yank": envelope}

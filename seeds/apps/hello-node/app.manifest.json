@@ -4,13 +4,15 @@
     "id": "com.tesslate.hello-node",
     "slug": "hello-node",
     "name": "Hello Node",
-    "version": "0.1.0",
-    "description": "Zero-dependency Node.js server seed — proves the Apps runtime boots a live process (not a static page) with no npm install.",
+    "version": "0.1.3",
+    "description": "Zero-dependency Node.js server seed \u2014 proves the Apps runtime boots a live process (not a static page) with no npm install.",
     "category": "utility",
     "forkable": "true"
   },
   "compatibility": {
-    "studio": {"min": "0.0.0"},
+    "studio": {
+      "min": "0.0.0"
+    },
     "manifest_schema": "2025-02",
     "runtime_api": "^1.0",
     "required_features": []
@@ -23,7 +25,9 @@
         "name": "web",
         "primary": true,
         "image": "tesslate-devserver:latest",
-        "ports": [3000],
+        "ports": [
+          3000
+        ],
         "startup_command": "node /app/server.js",
         "env": {
           "PORT": "3000",
@@ -34,13 +38,27 @@
     "connections": []
   },
   "surfaces": [
-    {"kind": "ui", "entrypoint": "/"}
+    {
+      "kind": "ui",
+      "entrypoint": "/"
+    }
   ],
-  "state": {"model": "per-install-volume", "volume_size": "256Mi"},
-  "billing": {
-    "ai_compute": {"payer": "platform"},
-    "general_compute": {"payer": "platform"},
-    "platform_fee": {"model": "free"}
+  "state": {
+    "model": "per-install-volume",
+    "volume_size": "256Mi"
   },
-  "listing": {"visibility": "public"}
+  "billing": {
+    "ai_compute": {
+      "payer": "platform"
+    },
+    "general_compute": {
+      "payer": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "listing": {
+    "visibility": "public"
+  }
 }

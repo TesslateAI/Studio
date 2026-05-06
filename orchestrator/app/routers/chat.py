@@ -44,8 +44,6 @@ from ..permissions import Permission, get_effective_project_role
 from ..schemas import AgentChatRequest, AgentChatResponse, AgentStepResponse
 from ..schemas import Chat as ChatSchema
 from ..services.agent_context import (
-    _build_architecture_context,
-    _build_git_context,
     _build_tesslate_context,
     _get_chat_history,
     _resolve_container_name,
@@ -100,6 +98,61 @@ async def _get_arq_pool():
     except Exception as e:
         logger.warning(f"[ARQ] Failed to create Redis pool: {e}")
         return None
+
+
+async def _bind_chat_attachments_to_message(
+    db: AsyncSession,
+    *,
+    chat_id: UUID,
+    message_id: UUID,
+    attachments,
+) -> None:
+    """Patch ``ChatAttachment.message_id`` for any orphan upload referenced by
+    the just-saved user message.
+
+    Iterates ``attachments`` (a list of ``ChatAttachmentSchema``) and looks
+    for ``file_reference`` entries carrying an ``attachment_id``. Each
+    matching row gets its ``message_id`` set so the orphan GC leaves it
+    alone — and so cascade deletes do the right thing when the chat or
+    message is later removed.
+
+    Best-effort: a missing row, a wrong-chat row, or a non-orphan row
+    (already bound) is logged and skipped. Never raises into the caller.
+    """
+    if not attachments:
+        return
+    ids: list[UUID] = []
+    for att in attachments:
+        # ChatAttachmentSchema fields: type, content, mime_type, file_path,
+        # label, attachment_id (optional, added in Phase B/C).
+        att_id = getattr(att, "attachment_id", None)
+        if not att_id:
+            continue
+        try:
+            ids.append(UUID(str(att_id)))
+        except (ValueError, TypeError):
+            logger.warning("[chat] invalid attachment_id %r in message %s", att_id, message_id)
+    if not ids:
+        return
+    try:
+        from ..models import ChatAttachment
+
+        rows = await db.execute(
+            select(ChatAttachment).where(
+                ChatAttachment.id.in_(ids),
+                ChatAttachment.chat_id == chat_id,
+            )
+        )
+        bound = 0
+        for row in rows.scalars().all():
+            if row.message_id is None:
+                row.message_id = message_id
+                bound += 1
+        if bound:
+            await db.commit()
+            logger.info("[chat] bound %d chat_attachment rows to message=%s", bound, message_id)
+    except Exception:
+        logger.exception("[chat] failed to bind chat_attachments to message=%s", message_id)
 
 
 @router.get("/", response_model=list[ChatSchema])
@@ -449,6 +502,24 @@ async def delete_chat_session(
         )
         if count_result.scalar() <= 1:
             raise HTTPException(status_code=400, detail="Cannot delete the last chat session")
+
+    # Best-effort cleanup of any chat-attachment uploads on disk before the
+    # cascade DELETE removes the ChatAttachment rows. Keeps the workspace
+    # tree tidy when a chat is deleted but the workspace stays.
+    if chat.project_id is not None:
+        try:
+            from .chat_attachments import _resolve_workspace_root
+
+            project = await db.get(Project, chat.project_id)
+            if project is not None:
+                workspace_root = await _resolve_workspace_root(project)
+                chat_dir = workspace_root / ".chat" / str(chat.id)
+                if chat_dir.exists():
+                    import shutil as _shutil
+
+                    _shutil.rmtree(chat_dir, ignore_errors=True)
+        except Exception:
+            logger.exception("[chat] failed to clean .chat/%s on delete", chat.id)
 
     await db.delete(chat)
     await db.commit()
@@ -1022,7 +1093,7 @@ async def agent_chat(
         # 2b. Pre-request credit check
         from ..services.credit_service import check_credits as _check_credits
 
-        has_credits, credit_error = await _check_credits(current_user, model_name)
+        has_credits, credit_error = await _check_credits(current_user, model_name, db=db)
         if not has_credits:
             raise HTTPException(status_code=402, detail=credit_error)
 
@@ -1194,28 +1265,20 @@ async def agent_chat(
             "containers": _tier_snapshot.get("containers", []),
         }
 
-        # Get project context
-        project_context = {"project_name": project.name, "project_description": project.description}
-
-        # Build TESSLATE.md context (project-specific documentation for AI agents)
-        tesslate_context = await _build_tesslate_context(
+        # Build project context and inject TESSLATE.md for the system prompt
+        context["project_context"] = {
+            "project_name": project.name,
+            "project_description": project.description,
+        }
+        _tesslate_ctx = await _build_tesslate_context(
             project,
             current_user.id,
             db,
             container_name=container_name,
             container_directory=container_directory,
         )
-        if tesslate_context:
-            project_context["tesslate_context"] = tesslate_context
-            logger.info(f"[AGENT-CHAT] Added TESSLATE.md context for project {project.id}")
-
-        # Check if project has Git repository connected and inject Git context
-        git_context = await _build_git_context(project, current_user.id, db)
-        if git_context:
-            project_context["git_context"] = git_context
-
-        # Add project_context to agent execution context
-        context["project_context"] = project_context
+        if _tesslate_ctx:
+            context["project_context"]["tesslate_context"] = _tesslate_ctx
 
         # ============================================================================
         # NEW: Run Agent and Collect Events (HTTP Adapter for AsyncIterator)
@@ -1319,6 +1382,9 @@ async def agent_chat(
                 )
 
             await db.commit()
+            await _bind_chat_attachments_to_message(
+                db, chat_id=chat.id, message_id=user_message.id, attachments=request.attachments
+            )
         except Exception as e:
             await db.rollback()
             logger.error(f"Database error during chat history setup: {e}", exc_info=True)
@@ -1585,6 +1651,9 @@ async def agent_chat_stream(
             )
             db.add(user_message)
             await db.commit()
+            await _bind_chat_attachments_to_message(
+                db, chat_id=chat.id, message_id=user_message.id, attachments=request.attachments
+            )
 
             # Create agent using same pattern as HTTP endpoint
             from ..config import get_settings
@@ -1655,7 +1724,7 @@ async def agent_chat_stream(
             # 2b. Pre-request credit check
             from ..services.credit_service import check_credits as _check_credits
 
-            has_credits, credit_error = await _check_credits(current_user, model_name)
+            has_credits, credit_error = await _check_credits(current_user, model_name, db=db)
             if not has_credits:
                 error_event = {
                     "type": "error",
@@ -1715,25 +1784,22 @@ async def agent_chat_stream(
             if hasattr(agent_instance, "max_iterations"):
                 agent_instance.max_iterations = request.max_iterations or 0
 
-            # Build project context
+            # Build project context and inject TESSLATE.md for the system prompt
             project_context = {}
             if project:
                 project_context = {
                     "project_name": project.name,
                     "project_description": project.description,
                 }
-                tesslate_context = await _build_tesslate_context(
+                _tesslate_ctx = await _build_tesslate_context(
                     project,
                     current_user.id,
                     db,
                     container_name=container_name,
                     container_directory=container_directory,
                 )
-                if tesslate_context:
-                    project_context["tesslate_context"] = tesslate_context
-                git_context = await _build_git_context(project, current_user.id, db)
-                if git_context:
-                    project_context["git_context"] = git_context
+                if _tesslate_ctx:
+                    project_context["tesslate_context"] = _tesslate_ctx
 
             # Prepare execution context
             # Note: container_directory was already captured during initial container lookup above
@@ -1832,9 +1898,7 @@ async def agent_chat_stream(
                 # worker — here we just slice the structured array. Empty/None
                 # request.mentions means legacy behavior (no @-effects).
                 _mentions = list(request.mentions or [])
-                _mention_agent_ids = [
-                    m.ref_id for m in _mentions if m.kind == "agent" and m.ref_id
-                ]
+                _mention_agent_ids = [m.ref_id for m in _mentions if m.kind == "agent" and m.ref_id]
                 _mention_mcp_config_ids = [
                     m.ref_id for m in _mentions if m.kind == "mcp" and m.ref_id
                 ]
@@ -2913,37 +2977,6 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         if not container_id:
             logger.info("[UNIFIED-CHAT] Project-level agent (no container_id)")
 
-        # Build TESSLATE context
-        tesslate_context = None
-        if project:
-            tesslate_context = await _build_tesslate_context(
-                project,
-                user.id,
-                db,
-                container_name=container_name,
-                container_directory=container_directory,
-            )
-
-        # Build Git context
-        git_context = None
-        if project:
-            git_context = await _build_git_context(project, user.id, db)
-
-        # Build architecture context (containers, connections, injected env vars)
-        arch_context = None
-        if project:
-            arch_context = await _build_architecture_context(project, db)
-
-        # Combine all context
-        if tesslate_context:
-            project_context_str += tesslate_context
-        if git_context:
-            project_context_str += (
-                git_context.get("formatted", "") if isinstance(git_context, dict) else git_context
-            )
-        if arch_context:
-            project_context_str += arch_context
-
     except Exception as e:
         await db.rollback()
         logger.error(f"[UNIFIED-CHAT] Error building context: {e}", exc_info=True)
@@ -3038,25 +3071,20 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
         "containers": _tier_snapshot.get("containers", []),
     }
 
-    # Add project context if available
-    try:
-        if project:
-            execution_context["project_context"] = {
-                "project_name": project.name,
-                "project_description": project.description,
-            }
-
-            # Add tesslate_context if available
-            if tesslate_context:
-                execution_context["project_context"]["tesslate_context"] = tesslate_context
-                logger.info(f"[UNIFIED-CHAT] Added TESSLATE.md context for project {project.id}")
-
-            # Add git_context if available
-            if git_context:
-                execution_context["project_context"]["git_context"] = git_context
-                logger.info(f"[UNIFIED-CHAT] Added Git context for project {project.id}")
-    except NameError as e:
-        logger.warning(f"[UNIFIED-CHAT] Context variables not available: {e}")
+    if project:
+        execution_context["project_context"] = {
+            "project_name": project.name,
+            "project_description": project.description,
+        }
+        _tesslate_ctx = await _build_tesslate_context(
+            project,
+            user.id,
+            db,
+            container_name=container_name,
+            container_directory=container_directory,
+        )
+        if _tesslate_ctx:
+            execution_context["project_context"]["tesslate_context"] = _tesslate_ctx
 
     # 5. Run the agent and stream events back to the client
     full_response = ""
@@ -3221,9 +3249,7 @@ async def save_file(
         try:
             from ..services.project_files import upsert_project_file
 
-            await upsert_project_file(
-                db, project_id=project_id, file_path=file_path, content=code
-            )
+            await upsert_project_file(db, project_id=project_id, file_path=file_path, content=code)
             await db.commit()
             print(f"[DB] Saved {file_path} to database")
         except Exception as e:

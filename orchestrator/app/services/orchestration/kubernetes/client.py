@@ -113,6 +113,32 @@ class KubernetesClient:
         except Exception:
             return "being terminated" in str(e.body)
 
+    @staticmethod
+    def _parse_nginx_hostname_conflict(e: ApiException) -> tuple[str, str] | None:
+        """Parse the conflicting ingress from an NGINX admission webhook 400 error.
+
+        The NGINX admission webhook denies ingress creation when the same host+path
+        is already claimed by a different ingress (possibly in a different namespace).
+        Error body format:
+          "... already defined in ingress {namespace}/{name}"
+
+        Returns (namespace, ingress_name) or None if not this kind of error.
+        """
+        if e.status != 400:
+            return None
+        try:
+            import json
+            import re
+
+            body = json.loads(e.body) if isinstance(e.body, str) else (e.body or {})
+            message = body.get("message", "") if isinstance(body, dict) else str(body)
+            match = re.search(r"already defined in ingress ([^/\s\"]+)/([^\s\"]+)", message)
+            if match:
+                return match.group(1), match.group(2)
+        except Exception:
+            pass
+        return None
+
     async def create_namespace_if_not_exists(
         self,
         namespace: str,
@@ -539,7 +565,41 @@ class KubernetesClient:
                 )
                 logger.info(f"[K8S] ✅ Created ingress (after namespace wait): {ingress_name}")
             else:
-                raise
+                conflict = self._parse_nginx_hostname_conflict(e)
+                if conflict:
+                    conflict_ns, conflict_name = conflict
+                    if conflict_ns != namespace:
+                        logger.warning(
+                            f"[K8S] NGINX admission webhook: hostname conflict with stale ingress "
+                            f"{conflict_ns}/{conflict_name} — deleting and retrying"
+                        )
+                        try:
+                            await asyncio.to_thread(
+                                self.networking_v1.delete_namespaced_ingress,
+                                name=conflict_name,
+                                namespace=conflict_ns,
+                            )
+                            logger.info(
+                                f"[K8S] Deleted stale ingress {conflict_ns}/{conflict_name}"
+                            )
+                        except ApiException as del_exc:
+                            if del_exc.status != 404:
+                                logger.warning(
+                                    f"[K8S] Could not delete stale ingress "
+                                    f"{conflict_ns}/{conflict_name}: {del_exc}"
+                                )
+                        await asyncio.to_thread(
+                            self.networking_v1.create_namespaced_ingress,
+                            namespace=namespace,
+                            body=ingress,
+                        )
+                        logger.info(
+                            f"[K8S] ✅ Created ingress after conflict cleanup: {ingress_name}"
+                        )
+                    else:
+                        raise
+                else:
+                    raise
 
     async def delete_ingress(self, name: str, namespace: str) -> None:
         """Delete an Ingress."""

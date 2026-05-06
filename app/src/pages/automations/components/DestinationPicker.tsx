@@ -1,6 +1,5 @@
 /**
- * DestinationPicker — dropdown that selects a CommunicationDestination
- * (Phase 4 primitive) by id.
+ * DestinationPicker — dropdown that selects a saved destination by id.
  *
  * The user's destinations are loaded once and grouped by their backing
  * ``ChannelConfig`` (e.g., "Slack — Acme Workspace > #standup, DM
@@ -17,11 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, X } from '@phosphor-icons/react';
 import toast from 'react-hot-toast';
-import {
-  channelsApi,
-  communicationDestinationsApi,
-  type ChannelConfig,
-} from '../../../lib/api';
+import { channelsApi, communicationDestinationsApi, type ChannelConfig } from '../../../lib/api';
 import type {
   CommunicationDestination,
   CommunicationDestinationCreate,
@@ -134,7 +129,10 @@ export function DestinationPicker({
   const grouped = useMemo(() => {
     if (!destinations || !channels) return [];
     const channelById = new Map(channels.map((c) => [c.id, c]));
-    const buckets = new Map<string, { channel: ChannelConfig | null; rows: CommunicationDestination[] }>();
+    const buckets = new Map<
+      string,
+      { channel: ChannelConfig | null; rows: CommunicationDestination[] }
+    >();
     for (const dest of destinations) {
       const channel = channelById.get(dest.channel_config_id) ?? null;
       let bucket = buckets.get(dest.channel_config_id);
@@ -190,12 +188,12 @@ export function DestinationPicker({
       </select>
       {loadError && (
         <p className="text-[10px] text-[var(--status-error)]">
-          {loadError} — paste a destination UUID into the form below as a fallback.
+          {loadError} — try refreshing, or contact your admin if it persists.
         </p>
       )}
       {value && destinations !== null && destinations.find((d) => d.id === value) === undefined && (
         <p className="text-[10px] text-[var(--text-subtle)] font-mono">
-          Selected: {value} (not in your destination list — manual id)
+          Custom destination ID: {value}
         </p>
       )}
 
@@ -315,9 +313,8 @@ function CreateDestinationModal({ channels, onClose, onCreated }: ModalProps) {
         {activeChannels.length === 0 ? (
           <div className="px-4 py-6 space-y-3">
             <p className="text-xs text-[var(--text-muted)]">
-              You don't have any active messaging channels yet. Add a Slack workspace,
-              Telegram bot, or other channel first — then you can name destinations
-              inside it.
+              You don't have any active messaging channels yet. Add a Slack workspace, Telegram bot,
+              or other channel first — then you can name destinations inside it.
             </p>
             <a
               href="/library?tab=channels"
@@ -374,9 +371,7 @@ function CreateDestinationModal({ channels, onClose, onCreated }: ModalProps) {
             </label>
 
             <label className="block">
-              <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                Config JSON
-              </span>
+              <span className="block text-xs font-medium text-[var(--text)] mb-1">Config JSON</span>
               <textarea
                 rows={3}
                 value={configText}
@@ -385,21 +380,17 @@ function CreateDestinationModal({ channels, onClose, onCreated }: ModalProps) {
                 className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
               />
               <span className="mt-1 block text-[10px] text-[var(--text-subtle)]">
-                Address fields (chat_id, thread_id, email_address, webhook_url, …) for
-                the gateway adapter. Optional for some kinds.
+                Address fields (chat_id, thread_id, email_address, webhook_url, …) for the gateway
+                adapter. Optional for some kinds.
               </span>
             </label>
 
             <label className="block">
-              <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                Formatting
-              </span>
+              <span className="block text-xs font-medium text-[var(--text)] mb-1">Formatting</span>
               <select
                 value={formattingPolicy}
                 onChange={(e) =>
-                  setFormattingPolicy(
-                    e.target.value as CommunicationDestinationFormattingPolicy
-                  )
+                  setFormattingPolicy(e.target.value as CommunicationDestinationFormattingPolicy)
                 }
                 className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
               >
@@ -412,19 +403,10 @@ function CreateDestinationModal({ channels, onClose, onCreated }: ModalProps) {
             </label>
 
             <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn btn-sm"
-                disabled={submitting}
-              >
+              <button type="button" onClick={onClose} className="btn btn-sm" disabled={submitting}>
                 Cancel
               </button>
-              <button
-                type="submit"
-                className="btn btn-sm btn-filled"
-                disabled={!canSubmit}
-              >
+              <button type="submit" className="btn btn-sm btn-filled" disabled={!canSubmit}>
                 {submitting ? 'Creating…' : 'Create destination'}
               </button>
             </div>

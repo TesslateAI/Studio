@@ -3,10 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ArrowLeft } from '@phosphor-icons/react';
 import { automationsApi } from '../../lib/api';
-import {
-  APPLY_STORAGE_KEY,
-  type ApplyHandoff,
-} from '../marketplace/ContractTemplates';
+import { APPLY_STORAGE_KEY, type ApplyHandoff } from '../marketplace/ContractTemplates';
 import type {
   AutomationActionIn,
   AutomationDefinitionIn,
@@ -16,8 +13,9 @@ import type {
 } from '../../types/automations';
 import { TriggerEditor } from './components/TriggerEditor';
 import { ActionEditor } from './components/ActionEditor';
-import { ContractEditor } from './components/ContractEditor';
 import { DestinationPicker } from './components/DestinationPicker';
+import { WorkspacePicker } from './components/WorkspacePicker';
+import { LimitsForm } from './components/LimitsForm';
 
 const DEFAULT_CONTRACT = `{
   "allowed_tools": ["read", "write", "bash"],
@@ -25,31 +23,9 @@ const DEFAULT_CONTRACT = `{
   "max_iterations": 25
 }`;
 
-const SCOPES: Array<{ value: AutomationWorkspaceScope; label: string; help: string }> = [
-  { value: 'none', label: 'No workspace', help: 'Action runs without a project workspace.' },
-  {
-    value: 'user_automation_workspace',
-    label: 'User workspace',
-    help: 'Use the per-user automation workspace volume.',
-  },
-  {
-    value: 'team_automation_workspace',
-    label: 'Team workspace',
-    help: 'Use the team-shared automation workspace volume.',
-  },
-  {
-    value: 'target_project',
-    label: 'Target project',
-    help: 'Run inside an existing project (target_project_id required).',
-  },
-];
-
 /**
- * /automations/new — single-form create page.
- *
- * No wizard, no fancy validation — just the fields the backend requires
- * + the optional ones a user might reasonably want to set on day one.
- * Submits to POST /api/automations and redirects to the detail page.
+ * /automations/new — single-form create page. Submits to
+ * POST /api/automations and redirects to the detail page.
  */
 export default function AutomationCreatePage() {
   const navigate = useNavigate();
@@ -70,9 +46,7 @@ export default function AutomationCreatePage() {
     ordinal: 0,
   });
   const [contractText, setContractText] = useState<string>(DEFAULT_CONTRACT);
-  const [appliedTemplateName, setAppliedTemplateName] = useState<string | null>(
-    null
-  );
+  const [appliedTemplateName, setAppliedTemplateName] = useState<string | null>(null);
 
   // Phase 5: marketplace ContractTemplates page hands the contract over via
   // sessionStorage (URL stays human-readable). Read once on mount; clear
@@ -96,9 +70,7 @@ export default function AutomationCreatePage() {
       ) {
         setContractText(JSON.stringify(handoff.contract, null, 2));
         setAppliedTemplateName(handoff.template_name ?? null);
-        toast.success(
-          `Applied template: ${handoff.template_name ?? 'contract template'}`
-        );
+        toast.success(`Applied template: ${handoff.template_name ?? 'contract template'}`);
       }
     } catch {
       // Stale/malformed handoff — silently ignore.
@@ -135,10 +107,7 @@ export default function AutomationCreatePage() {
     // dispatcher receives a real object. The ActionEditor already does this
     // best-effort but keeps strings for partial typing.
     const finalAction: AutomationActionIn = { ...action };
-    if (
-      finalAction.action_type === 'app.invoke' &&
-      typeof finalAction.config.input === 'string'
-    ) {
+    if (finalAction.action_type === 'app.invoke' && typeof finalAction.config.input === 'string') {
       try {
         finalAction.config = {
           ...finalAction.config,
@@ -217,7 +186,7 @@ export default function AutomationCreatePage() {
       {/* Form */}
       <div className="flex-1 overflow-y-auto">
         <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-6 py-6 space-y-6">
-          <Section title="Basics" description="Name + workspace scope.">
+          <Section title="Basics" description="Name your automation and pick where it should run.">
             <label className="block">
               <span className="block text-xs font-medium text-[var(--text)] mb-1">Name</span>
               <input
@@ -230,115 +199,41 @@ export default function AutomationCreatePage() {
               />
             </label>
 
-            <fieldset className="space-y-1.5">
-              <legend className="text-xs font-medium text-[var(--text)] mb-1">
-                Workspace scope
-              </legend>
-              {SCOPES.map((opt) => (
-                <label key={opt.value} className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="scope"
-                    value={opt.value}
-                    checked={scope === opt.value}
-                    onChange={() => setScope(opt.value)}
-                    className="mt-0.5"
-                  />
-                  <span className="flex-1">
-                    <span className="block text-xs text-[var(--text)]">{opt.label}</span>
-                    <span className="block text-[10px] text-[var(--text-subtle)]">
-                      {opt.help}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-
-            {scope === 'target_project' && (
-              <label className="block">
-                <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Target project ID
-                </span>
-                <input
-                  type="text"
-                  value={targetProjectId}
-                  onChange={(e) => setTargetProjectId(e.target.value)}
-                  placeholder="project UUID"
-                  className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                />
-              </label>
-            )}
+            <WorkspacePicker
+              scope={scope}
+              targetProjectId={targetProjectId}
+              onChange={({ scope: nextScope, targetProjectId: nextProjectId }) => {
+                setScope(nextScope);
+                setTargetProjectId(nextProjectId);
+              }}
+            />
           </Section>
 
-          <Section title="Trigger" description="When the automation should fire.">
+          <Section title="When" description="Pick the trigger that should start each run.">
             <TriggerEditor value={trigger} onChange={setTrigger} />
           </Section>
 
-          <Section title="Action" description="Phase 1 supports exactly one action.">
+          <Section
+            title="What it does"
+            description="Pick exactly one thing the automation should do."
+          >
             <ActionEditor value={action} onChange={setAction} />
           </Section>
 
           <Section
-            title="Delivery target (optional)"
-            description="Pick a saved CommunicationDestination — or create a new one inline. Leave empty to skip delivery."
+            title="Where to send the result (optional)"
+            description="Pick a saved destination — Slack, Telegram, email, webhook, etc. — or create a new one. Leave empty to just keep results in the run history."
           >
             <DestinationPicker
               value={deliveryDestinationId}
               onChange={setDeliveryDestinationId}
-              placeholder="No delivery target"
+              placeholder="Don't send anywhere"
             />
           </Section>
 
           <Section
-            title="Limits (optional)"
-            description="Compute tier and per-run / per-day spend caps."
-          >
-            <div className="grid grid-cols-3 gap-3">
-              <label className="block">
-                <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Max compute tier
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={maxComputeTier}
-                  onChange={(e) => setMaxComputeTier(e.target.value)}
-                  className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                />
-              </label>
-              <label className="block">
-                <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Max $/run
-                </span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={maxSpendPerRun}
-                  onChange={(e) => setMaxSpendPerRun(e.target.value)}
-                  placeholder="e.g. 0.50"
-                  className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                />
-              </label>
-              <label className="block">
-                <span className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Max $/day
-                </span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={maxSpendPerDay}
-                  onChange={(e) => setMaxSpendPerDay(e.target.value)}
-                  placeholder="e.g. 5.00"
-                  className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
-                />
-              </label>
-            </div>
-          </Section>
-
-          <Section
-            title="Contract"
-            description="Required guard rails. Dispatcher refuses to run without a contract."
+            title="Permissions & limits"
+            description="Cap what this automation can do and how much it can spend."
           >
             {appliedTemplateName && (
               <div
@@ -359,7 +254,16 @@ export default function AutomationCreatePage() {
                 </button>
               </div>
             )}
-            <ContractEditor value={contractText} onChange={setContractText} />
+            <LimitsForm
+              contractText={contractText}
+              onContractTextChange={setContractText}
+              maxComputeTier={maxComputeTier}
+              onMaxComputeTierChange={setMaxComputeTier}
+              maxSpendPerRun={maxSpendPerRun}
+              onMaxSpendPerRunChange={setMaxSpendPerRun}
+              maxSpendPerDay={maxSpendPerDay}
+              onMaxSpendPerDayChange={setMaxSpendPerDay}
+            />
           </Section>
 
           <div className="flex items-center justify-end gap-2 pt-2">

@@ -95,7 +95,19 @@ SAFE_COMMAND_PREFIXES = [
     "while",
     "test",
     "[",  # Shell control flow
+    "sh",
+    "bash",  # Shell wrappers — used by app manifests that need first-run
+    # ``install && start`` patterns that don't fit a single binary invocation.
+    # Manifests still pass through the federated marketplace's stage1 scanner
+    # which catches dangerous patterns; this whitelist is defence-in-depth at
+    # the orchestrator boundary, not the primary gate.
+    "make",  # Many seed images use ``make dev`` / ``make build`` as the
+    # canonical build/run entrypoint (e.g. deer-flow). Same risk profile
+    # as npm/cargo (project-defined targets).
 ]
+
+
+_SHELL_WRAPPER_RE = re.compile(r"""^\s*(?:sh|bash)\s+-c\s+['"]""")
 
 
 def validate_startup_command(command: str) -> tuple[bool, str | None]:
@@ -110,11 +122,28 @@ def validate_startup_command(command: str) -> tuple[bool, str | None]:
         - (True, None) if command is safe
         - (False, "reason") if command is dangerous
     """
-    # Check for dangerous patterns
+    # Check for dangerous patterns — these run on the whole command string
+    # so a `sh -c '...'` wrapper can't smuggle past by hiding inside quotes.
     for pattern in DANGEROUS_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
             logger.error(f"[SECURITY] Dangerous pattern detected: {pattern}")
             return False, f"Command contains dangerous pattern: {pattern}"
+
+    # ``sh -c '...'`` / ``bash -c '...'`` wrappers are common for first-run
+    # install-then-start patterns. The naive ``re.split(r'[;&|]+', cmd)``
+    # below DOES NOT respect shell quoting — it would split inside the
+    # quoted body and reject legitimate constructs like
+    # ``sh -c 'cd /app && (test -x ./bin || install) && start'`` because the
+    # second segment starts with ``(test`` which isn't in the whitelist.
+    #
+    # For shell-wrapper commands we trust the wrapper itself (sh/bash are
+    # whitelisted) and skip the per-piece check on the quoted body. The
+    # dangerous-pattern scan above already vetted the entire string.
+    if _SHELL_WRAPPER_RE.match(command):
+        if len(command) > 10000:
+            return False, "Command is too long (max 10000 characters)"
+        logger.info("[SECURITY] ✅ Shell-wrapper command validated (dangerous-pattern only)")
+        return True, None
 
     # Check that all commands start with safe prefixes
     # Split command by &&, ||, ;, and | to get individual commands
@@ -176,12 +205,39 @@ def _install_deps_if_missing_command() -> str:
 @dataclass
 class AppConfig:
     """Configuration for a single app in .tesslate/config.json."""
+
     directory: str = "."
     port: int | None = 3000
     start: str = ""
     build: str | None = None
     output: str | None = None
     framework: str | None = None
+    # Container image override. Apps that ship a pre-built image (e.g.
+    # ``ghcr.io/owner/app:tag`` or short ECR-resolvable name like
+    # ``tesslate-markitdown:latest``) populate this so the orchestrator's
+    # K8s deployer renders the right image instead of falling back to
+    # ``tesslate-devserver:latest``. ``framework`` is just a UI label and
+    # MUST NOT be reused as the deploy image (compute_manager reads
+    # ``Container.image`` directly).
+    image: str | None = None
+    # Where the runnable code lives. ``'bundle'`` (default; PVC at /app
+    # holds the source) OR ``'image'`` (image is self-contained; PVC
+    # mounts at ``state_mount_path`` only and image's WORKDIR remains
+    # authoritative). When unset, the publish layer infers ``'image'``
+    # iff the manifest sets a non-default ``image`` field.
+    source_strategy: str | None = None
+    # When ``source_strategy='image'`` and ``state.model='per-install-volume'``,
+    # this is where the per-install PVC mounts inside the container.
+    # E.g. ``/data``, ``/var/lib/app``. Ignored for stateless apps and for
+    # bundle-strategy apps (which always mount at /app).
+    state_mount_path: str | None = None
+    # Per-container resource overrides. Keys: ``memory_request``,
+    # ``memory_limit``, ``cpu_request``, ``cpu_limit`` — values are
+    # Kubernetes resource-quantity strings (e.g. ``"2Gi"``, ``"500m"``).
+    # The K8s pod renderer merges these onto the platform defaults so a
+    # heavy app can opt into more memory without forking the runtime.
+    # Empty / None → platform defaults apply.
+    resources: dict[str, str] | None = None
     env: dict[str, str] = field(default_factory=dict)
     exports: dict[str, str] = field(default_factory=dict)
     x: float | None = None
@@ -191,6 +247,7 @@ class AppConfig:
 @dataclass
 class InfraConfig:
     """Configuration for an infrastructure service in .tesslate/config.json."""
+
     image: str = ""
     port: int = 5432
     env: dict[str, str] = field(default_factory=dict)
@@ -205,6 +262,7 @@ class InfraConfig:
 @dataclass
 class ConnectionConfig:
     """A connection between two nodes in the config."""
+
     from_node: str = ""
     to_node: str = ""
 
@@ -212,6 +270,7 @@ class ConnectionConfig:
 @dataclass
 class DeploymentConfig:
     """A deployment target in the config."""
+
     provider: str = ""
     targets: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -222,6 +281,7 @@ class DeploymentConfig:
 @dataclass
 class PreviewConfig:
     """A browser preview node in the config."""
+
     target: str = ""
     x: float | None = None
     y: float | None = None
@@ -230,6 +290,7 @@ class PreviewConfig:
 @dataclass(frozen=True)
 class HostedAgentConfig:
     """Hosted agent spec authored via canvas; mirrors HostedAgentSpec in app_manifest."""
+
     id: str = ""
     system_prompt_ref: str = ""
     model_pref: str | None = None
@@ -279,6 +340,7 @@ class HostedAgentConfig:
 @dataclass
 class TesslateProjectConfig:
     """Parsed .tesslate/config.json configuration."""
+
     apps: dict[str, AppConfig] = field(default_factory=dict)
     infrastructure: dict[str, InfraConfig] = field(default_factory=dict)
     connections: list[ConnectionConfig] = field(default_factory=list)
@@ -316,6 +378,9 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             if not is_valid:
                 raise ValueError(f"App '{name}' has invalid start command: {error}")
 
+        resources_raw = app_data.get("resources")
+        resources = resources_raw if isinstance(resources_raw, dict) and resources_raw else None
+
         config.apps[name] = AppConfig(
             directory=app_data.get("directory", "."),
             port=app_data.get("port", 3000),
@@ -323,6 +388,10 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             build=app_data.get("build") or None,
             output=app_data.get("output") or None,
             framework=app_data.get("framework") or None,
+            image=app_data.get("image") or None,
+            source_strategy=app_data.get("source_strategy") or None,
+            state_mount_path=app_data.get("state_mount_path") or None,
+            resources=resources,
             env=app_data.get("env", {}),
             exports=app_data.get("exports", {}),
             x=app_data.get("x"),
@@ -346,10 +415,12 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
 
     # Parse connections
     for conn_data in data.get("connections", []):
-        config.connections.append(ConnectionConfig(
-            from_node=conn_data.get("from", ""),
-            to_node=conn_data.get("to", ""),
-        ))
+        config.connections.append(
+            ConnectionConfig(
+                from_node=conn_data.get("from", ""),
+                to_node=conn_data.get("to", ""),
+            )
+        )
 
     # Parse deployments
     for name, deploy_data in data.get("deployments", {}).items():
@@ -386,7 +457,9 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
 
     # Validate primaryApp exists in apps (if specified)
     if config.primaryApp and config.primaryApp not in config.apps:
-        logger.warning(f"[CONFIG] primaryApp '{config.primaryApp}' not found in apps, will use first app")
+        logger.warning(
+            f"[CONFIG] primaryApp '{config.primaryApp}' not found in apps, will use first app"
+        )
         if config.apps:
             config.primaryApp = next(iter(config.apps))
 
@@ -442,6 +515,14 @@ def _config_to_dict(config: TesslateProjectConfig) -> dict[str, Any]:
             app_data["output"] = app.output
         if app.framework:
             app_data["framework"] = app.framework
+        if app.image:
+            app_data["image"] = app.image
+        if app.source_strategy:
+            app_data["source_strategy"] = app.source_strategy
+        if app.state_mount_path:
+            app_data["state_mount_path"] = app.state_mount_path
+        if app.resources:
+            app_data["resources"] = app.resources
         if app.exports:
             app_data["exports"] = app.exports
         if app.x is not None:
@@ -472,10 +553,7 @@ def _config_to_dict(config: TesslateProjectConfig) -> dict[str, Any]:
         data["infrastructure"][name] = infra_data
 
     if config.connections:
-        data["connections"] = [
-            {"from": c.from_node, "to": c.to_node}
-            for c in config.connections
-        ]
+        data["connections"] = [{"from": c.from_node, "to": c.to_node} for c in config.connections]
 
     if config.deployments:
         deployments: dict[str, Any] = {}

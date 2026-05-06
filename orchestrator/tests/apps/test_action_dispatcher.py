@@ -20,12 +20,13 @@ import json
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import httpx
 import pytest
 import respx
 
+from app.models_automations import AutomationRunArtifact
 from app.services.apps import action_dispatcher
 from app.services.apps.action_dispatcher import (
     ActionDispatchFailed,
@@ -36,7 +37,6 @@ from app.services.apps.action_dispatcher import (
     AppInstanceNotFound,
     dispatch_app_action,
 )
-
 
 # ---------------------------------------------------------------------------
 # Scripted AsyncSession — same pattern used by tests/apps/test_hosted_agent_runtime.
@@ -154,6 +154,7 @@ def _mk_container(*, name="api", directory="api", image="ghcr.io/hello/api:1") -
     container.base = None
     container.port = 3000
     container.internal_port = 3000
+    container.effective_port = 3000
     return container
 
 
@@ -209,6 +210,7 @@ def _patch_settings(monkeypatch, *, mode: str = "kubernetes", domain: str = "tes
 
 def _patch_billing_noop(monkeypatch) -> None:
     """Stub billing_dispatcher.record_spend so DB plumbing isn't required."""
+
     async def _noop(*args, **kwargs):
         outcome = MagicMock()
         outcome.spend_record_id = uuid4()
@@ -238,14 +240,22 @@ async def test_http_post_happy_path(monkeypatch) -> None:
 
     action = _mk_action(
         handler={"kind": "http_post", "container": "api", "path": "/actions/do"},
-        input_schema={"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
-        output_schema={"type": "object", "required": ["greeting"], "properties": {"greeting": {"type": "string"}}},
+        input_schema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}},
+        },
+        output_schema={
+            "type": "object",
+            "required": ["greeting"],
+            "properties": {"greeting": {"type": "string"}},
+        },
     )
 
     db = FakeDb(
         results=[
-            _Result(scalar=instance),   # _load_app_instance
-            _Result(scalar=action),     # _load_app_action
+            _Result(scalar=instance),  # _load_app_instance
+            _Result(scalar=action),  # _load_app_action
             _Result(scalar=container),  # _resolve_handler_container by name
         ],
         objects={
@@ -257,7 +267,7 @@ async def test_http_post_happy_path(monkeypatch) -> None:
     _patch_settings(monkeypatch, mode="kubernetes", domain="test.local")
     _patch_billing_noop(monkeypatch)
 
-    route = respx.post("http://hello-app-api.test.local/actions/do").mock(
+    route = respx.post(f"http://dev-api.proj-{project.id}.svc.cluster.local:3000/actions/do").mock(
         return_value=httpx.Response(200, json={"greeting": "hi alice"})
     )
 
@@ -340,7 +350,7 @@ async def test_http_post_output_schema_rejects_bad_output(monkeypatch) -> None:
     _patch_settings(monkeypatch, domain="test.local")
     _patch_billing_noop(monkeypatch)
 
-    respx.post("http://hello-app-api.test.local/do").mock(
+    respx.post(f"http://dev-api.proj-{project.id}.svc.cluster.local:3000/do").mock(
         return_value=httpx.Response(200, json={"unexpected_field": "oops"})
     )
 
@@ -378,7 +388,7 @@ async def test_http_post_5xx_raises_dispatch_failed(monkeypatch) -> None:
     _patch_settings(monkeypatch, domain="test.local")
     _patch_billing_noop(monkeypatch)
 
-    respx.post("http://hello-app-api.test.local/do").mock(
+    respx.post(f"http://dev-api.proj-{project.id}.svc.cluster.local:3000/do").mock(
         return_value=httpx.Response(503, text="upstream unavailable")
     )
 
@@ -456,7 +466,9 @@ async def test_hosted_agent_routes_through_hosted_agent_runtime(monkeypatch) -> 
 
     captured: dict[str, Any] = {}
 
-    async def fake_begin(db_, *, app_instance_id, agent_id, installer_user_id, delegate, ttl_seconds):
+    async def fake_begin(
+        db_, *, app_instance_id, agent_id, installer_user_id, delegate, ttl_seconds
+    ):
         captured["agent_id"] = agent_id
         captured["app_instance_id"] = app_instance_id
         captured["installer_user_id"] = installer_user_id
@@ -472,9 +484,7 @@ async def test_hosted_agent_routes_through_hosted_agent_runtime(monkeypatch) -> 
     monkeypatch.setattr(
         "app.services.apps.hosted_agent_runtime.begin_hosted_invocation", fake_begin
     )
-    monkeypatch.setattr(
-        "app.services.apps.hosted_agent_runtime.end_hosted_invocation", end_called
-    )
+    monkeypatch.setattr("app.services.apps.hosted_agent_runtime.end_hosted_invocation", end_called)
     # Stub LiteLLMService so importing it doesn't try to talk to the real
     # service.
     monkeypatch.setattr(
@@ -529,7 +539,7 @@ async def test_artifacts_persisted_when_run_id_given(monkeypatch) -> None:
     _patch_settings(monkeypatch, domain="test.local")
     _patch_billing_noop(monkeypatch)
 
-    respx.post("http://hello-app-api.test.local/do").mock(
+    respx.post(f"http://dev-api.proj-{project.id}.svc.cluster.local:3000/do").mock(
         return_value=httpx.Response(200, json={"summary": "everything is fine"})
     )
 
@@ -543,7 +553,7 @@ async def test_artifacts_persisted_when_run_id_given(monkeypatch) -> None:
     )
 
     assert len(result.artifacts) == 1
-    artifact_rows = [a for a in db.added if isinstance(a, action_dispatcher.AutomationRunArtifact)]
+    artifact_rows = [a for a in db.added if isinstance(a, AutomationRunArtifact)]
     assert len(artifact_rows) == 1
     persisted = artifact_rows[0]
     assert persisted.run_id == run_id
@@ -554,10 +564,7 @@ async def test_artifacts_persisted_when_run_id_given(monkeypatch) -> None:
     # binary payloads verbatim — see services/automations/artifacts.py.
     import base64
 
-    assert (
-        base64.b64decode(persisted.storage_ref).decode("utf-8")
-        == "everything is fine"
-    )
+    assert base64.b64decode(persisted.storage_ref).decode("utf-8") == "everything is fine"
 
 
 @pytest.mark.asyncio
@@ -588,7 +595,7 @@ async def test_artifacts_skipped_without_run_id(monkeypatch) -> None:
     _patch_settings(monkeypatch, domain="test.local")
     _patch_billing_noop(monkeypatch)
 
-    respx.post("http://hello-app-api.test.local/do").mock(
+    respx.post(f"http://dev-api.proj-{project.id}.svc.cluster.local:3000/do").mock(
         return_value=httpx.Response(200, json={"summary": "ok"})
     )
 
@@ -600,7 +607,7 @@ async def test_artifacts_skipped_without_run_id(monkeypatch) -> None:
         run_id=None,
     )
     assert result.artifacts == []
-    assert not [a for a in db.added if isinstance(a, action_dispatcher.AutomationRunArtifact)]
+    assert not [a for a in db.added if isinstance(a, AutomationRunArtifact)]
 
 
 # ---------------------------------------------------------------------------
@@ -658,9 +665,7 @@ async def test_shared_singleton_tenancy_dispatches_via_shared_handler(
     """
     instance = _mk_instance()
     action = _mk_action()
-    version = _mk_version(
-        manifest_json={"runtime": {"tenancy_model": "shared_singleton"}}
-    )
+    version = _mk_version(manifest_json={"runtime": {"tenancy_model": "shared_singleton"}})
     db = FakeDb(
         results=[
             _Result(scalar=instance),

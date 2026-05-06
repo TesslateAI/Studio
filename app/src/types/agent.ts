@@ -128,6 +128,31 @@ export interface ApprovalMessage {
   toolDescription: string;
 }
 
+export interface WorkspaceCandidate {
+  id: string;
+  name: string;
+  slug: string;
+  compute_tier: string;
+  created_via?: string | null;
+  project_kind?: string;
+  environment_status?: string | null;
+}
+
+export interface WorkspaceAttachRequestData {
+  input_id: string;
+  chat_id: string;
+  reason?: string;
+  candidate_workspaces: WorkspaceCandidate[];
+}
+
+export interface WorkspaceAttachMessage {
+  id: string;
+  type: 'workspace_attach_request';
+  inputId: string;
+  reason?: string;
+  candidateWorkspaces: WorkspaceCandidate[];
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -166,6 +191,12 @@ export interface ChatAttachment {
   lineCount?: number;
   filePath?: string;
   fileName?: string;
+  // Set when this attachment was produced by a `chatAttachmentsApi.upload`
+  // call. Round-trips through `serializeForSend` into
+  // `SerializedAttachment.attachment_id` so the orchestrator's chat-send
+  // handler can bind the ChatAttachment row to the saved message.
+  attachmentId?: string;
+  sizeBytes?: number;
 }
 
 export interface SerializedAttachment {
@@ -174,4 +205,9 @@ export interface SerializedAttachment {
   mime_type?: string;
   file_path?: string;
   label?: string;
+  // Optional pointer to a ChatAttachment row when this serialized attachment
+  // came from a `POST /api/chats/{chat_id}/attachments` upload. The
+  // orchestrator's chat-send handler binds the row to the saved message so
+  // orphan GC leaves it alone.
+  attachment_id?: string;
 }

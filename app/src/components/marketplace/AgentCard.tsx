@@ -49,6 +49,17 @@ export interface MarketplaceItem {
     background?: string;
     surface?: string;
   };
+  // Federated source attribution (Wave 5). Present on rows synced from a
+  // non-default marketplace source; missing/null for legacy local rows
+  // (which are implicitly tesslate-official and need no chip).
+  source_handle?: string | null;
+  source_trust_level?:
+    | 'official'
+    | 'admin_trusted'
+    | 'local'
+    | 'private'
+    | 'untrusted'
+    | null;
 }
 
 interface AgentCardProps {
@@ -160,6 +171,27 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
       ? `@${item.creator_username}`
       : item.creator_name || 'Unknown';
 
+  // Federated source chip + trust dot (Wave 5). Only rendered for rows
+  // synced from a non-default source — items without source_handle are
+  // implicitly tesslate-official and would just clutter the card.
+  const showSourceChip = Boolean(item.source_handle) && item.source_handle !== 'tesslate-official';
+  const trustDotColor = (() => {
+    switch (item.source_trust_level) {
+      case 'official':
+        return 'var(--status-success)';
+      case 'admin_trusted':
+        return 'var(--status-info)';
+      case 'local':
+        return 'var(--text-subtle)';
+      case 'private':
+        return 'var(--status-warning)';
+      case 'untrusted':
+        return 'var(--status-error)';
+      default:
+        return 'var(--text-subtle)';
+    }
+  })();
+
   return (
     <CardSurface onClick={handleClick} isDisabled={!item.is_active}>
       {/* Header: Icon + Name + Creator */}
@@ -197,6 +229,21 @@ export function AgentCard({ item, onInstall, isAuthenticated = true }: AgentCard
 
       {/* Metadata Pills */}
       <div className="flex flex-wrap gap-1.5 mb-3">
+        {showSourceChip && (
+          <Badge
+            intent="muted"
+            icon={
+              <span
+                aria-hidden="true"
+                className="inline-block w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: trustDotColor }}
+              />
+            }
+            className="font-mono"
+          >
+            {item.source_handle}
+          </Badge>
+        )}
         {(item.source_type === 'open' || (item.source_type === 'git' && item.git_repo_url)) && (
           <Badge intent="success" icon={<GitFork size={10} weight="bold" />}>Open Source</Badge>
         )}

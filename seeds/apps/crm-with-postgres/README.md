@@ -8,14 +8,25 @@ End-to-end verification seed for the Tesslate Apps platform. Demonstrates:
 - **env_injection ContainerConnection**: `db -> api` injects `DATABASE_URL` into the API pod, resolved from the connection's `config.env_mapping`.
 - **Manifest schema 2025-02**.
 
-## Required cluster secret
+## Per-install `pg-creds` secret
 
-Before the app starts, create a `pg-creds` secret in the project namespace with a `password` key. The installer does not auto-create declared secrets today — set it via the per-container "encrypted secrets" UI/PATCH endpoint, or directly:
+`db` references `${secret:pg-creds/password}` and the connector's
+`DATABASE_URL` template references the same secret. The orchestrator's
+per-install secret materializer auto-creates `pg-creds` in the project
+namespace at first `/start` with a random `password` value, so no manual
+step is required.
+
+To override the generated value (e.g. to point Postgres at an existing
+password), delete the auto-created Secret and re-create it before
+starting the app:
 
 ```
+kubectl --context=tesslate -n proj-<uuid> delete secret pg-creds
 kubectl --context=tesslate -n proj-<uuid> create secret generic pg-creds \
   --from-literal=password='<choose-a-password>'
 ```
+
+Subsequent restarts reuse the Secret you put there.
 
 ## Install on minikube
 

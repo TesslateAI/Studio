@@ -129,6 +129,9 @@ await orchestrator.start_project(project, containers, connections, user_id, db)
 | `MCP_TOOL_CACHE_TTL` | MCP schema cache TTL (seconds) | `300` |
 | `MCP_TOOL_TIMEOUT` | MCP tool call timeout (seconds) | `30` |
 | `MCP_MAX_SERVERS_PER_USER` | Max MCP servers per user | `20` |
+| `MARKETPLACE_HUB_ENTITLEMENT_SECRET` | Wave-9 HMAC shared secret for hub→orchestrator entitlement-grant webhook | `random hex string` |
+| `MARKETPLACE_ADMIN_TOKEN` | Wave-8 bearer token Tesslate Official's orchestrator presents to the marketplace service for governance writes (force-approve / force-reject / override-yank). Required only on Tesslate Official's deployment; the marketplace's static-token table maps it to the `admin.write` scope. | `tok-...` |
+| `MARKETPLACE_SUBMISSION_WEBHOOK_SECRET` | Wave-8 HMAC shared secret for hub→orchestrator submission state-change webhook (`POST /api/marketplace/sources/{id}/submissions/{id}/state-change`). | `random hex string` |
 
 ### Key Routers
 

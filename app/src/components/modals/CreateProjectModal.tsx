@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, type KeyboardEvent, type MouseEvent } from 'react';
-import { X, Folder, CaretDown, CaretRight } from '@phosphor-icons/react';
+import { X, Folder, CaretRight, FileDashed } from '@phosphor-icons/react';
 import { marketplaceApi, projectsApi } from '../../lib/api';
 import { useTeam } from '../../contexts/TeamContext';
 
@@ -22,13 +22,30 @@ interface SiblingFolder {
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Called with the chosen name. ``baseId === ''`` (empty string) signals
+   * an empty-workspace creation; the caller should branch and call
+   * ``projectsApi.create(name, '', 'empty')``. ``undefined`` falls back to
+   * the user's selected template. */
   onConfirm: (projectName: string, baseId?: string, baseVersion?: string) => void;
   isLoading?: boolean;
   initialBaseId?: string;
   baseVersion?: string;
+  /** Pre-toggle the modal into "empty workspace" mode. Used by the
+   * dashboard's "New empty workspace" button. */
+  initialEmptyMode?: boolean;
 }
 
 const FEATURED_SLUGS = ['nextjs-16', 'vite-react-fastapi', 'vite-react-go', 'expo-default'];
+
+// Synthetic "empty" tile that sits alongside the featured templates. Selected
+// by reference equality (id === EMPTY_TILE.id), so the rest of the picker
+// stays uniform.
+const EMPTY_TILE: MarketplaceBase = {
+  id: '__empty__',
+  name: 'Empty',
+  slug: '__empty__',
+  description: 'No template — start from scratch',
+};
 
 function formatRelative(iso: string): string {
   if (!iso) return '';
@@ -49,6 +66,7 @@ export function CreateProjectModal({
   isLoading = false,
   initialBaseId,
   baseVersion,
+  initialEmptyMode = false,
 }: CreateProjectModalProps) {
   const { activeTeam } = useTeam();
 
@@ -56,13 +74,17 @@ export function CreateProjectModal({
   const [selectedBase, setSelectedBase] = useState<MarketplaceBase | null>(null);
   const [allBases, setAllBases] = useState<MarketplaceBase[]>([]);
   const [userBases, setUserBases] = useState<MarketplaceBase[]>([]);
-  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
-
   const [siblings, setSiblings] = useState<SiblingFolder[]>([]);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const templateBtnRef = useRef<HTMLButtonElement>(null);
-  const templatePanelRef = useRef<HTMLDivElement>(null);
+
+  // Reset selection on open. If parent asked for empty mode, pin EMPTY_TILE.
+  // Otherwise leave selectedBase null until the bases finish loading.
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedBase(initialEmptyMode ? EMPTY_TILE : null);
+    setProjectName('');
+  }, [isOpen, initialEmptyMode]);
 
   // Load templates
   useEffect(() => {
@@ -84,10 +106,10 @@ export function CreateProjectModal({
             const preselected = bases.find((b) => b.id === initialBaseId);
             if (preselected) return preselected;
           }
-          const defaultBase = FEATURED_SLUGS.map((slug) =>
-            bases.find((b) => b.slug === slug)
-          ).find(Boolean);
-          return defaultBase || null;
+          const defaultBase = FEATURED_SLUGS.map((slug) => bases.find((b) => b.slug === slug)).find(
+            Boolean
+          );
+          return defaultBase || EMPTY_TILE;
         });
       })
       .catch((error) => console.error('Failed to load bases:', error));
@@ -96,7 +118,7 @@ export function CreateProjectModal({
     };
   }, [isOpen, initialBaseId]);
 
-  // Load existing sibling folders
+  // Load existing sibling folders (used in the breadcrumb subtitle).
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
@@ -125,7 +147,6 @@ export function CreateProjectModal({
     };
   }, [isOpen, activeTeam?.slug]);
 
-  // Autofocus inline cursor
   useEffect(() => {
     if (isOpen) {
       const t = setTimeout(() => inputRef.current?.focus(), 40);
@@ -133,35 +154,25 @@ export function CreateProjectModal({
     }
   }, [isOpen]);
 
-  // Close template picker on outside click
-  useEffect(() => {
-    if (!templatePickerOpen) return;
-    const onClick = (e: globalThis.MouseEvent) => {
-      const target = e.target as Node;
-      if (
-        !templatePanelRef.current?.contains(target) &&
-        !templateBtnRef.current?.contains(target)
-      ) {
-        setTemplatePickerOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [templatePickerOpen]);
-
-  const displayBases = useMemo(() => {
+  // Tiles in render order: Empty first, then the 4 featured templates we have
+  // resolved IDs for, then any extras from the user's library.
+  const tiles = useMemo<MarketplaceBase[]>(() => {
     const featured = FEATURED_SLUGS.map((slug) => allBases.find((b) => b.slug === slug)).filter(
       Boolean
     ) as MarketplaceBase[];
     const featuredIds = new Set(featured.map((b) => b.id));
     const userOnly = userBases.filter((b) => !featuredIds.has(b.id));
-    return [...featured, ...userOnly];
+    return [EMPTY_TILE, ...featured, ...userOnly];
   }, [allBases, userBases]);
 
   const isInLibrary = (baseId: string) => userBases.some((b) => b.id === baseId);
 
-  const handleBaseClick = async (base: MarketplaceBase) => {
-    setTemplatePickerOpen(false);
+  const handleTileClick = async (base: MarketplaceBase) => {
+    if (base.id === EMPTY_TILE.id) {
+      setSelectedBase(EMPTY_TILE);
+      inputRef.current?.focus();
+      return;
+    }
     if (isInLibrary(base.id)) {
       setSelectedBase(base);
       inputRef.current?.focus();
@@ -182,17 +193,30 @@ export function CreateProjectModal({
     if (isLoading) return;
     setProjectName('');
     setSelectedBase(null);
-    setTemplatePickerOpen(false);
     onClose();
   };
 
+  const isEmptyMode = selectedBase?.id === EMPTY_TILE.id;
+  const trimmedName = projectName.trim();
+  const canSubmit = !isLoading && !!trimmedName && !!selectedBase;
+
+  const disabledReason = !trimmedName
+    ? 'Enter a workspace name'
+    : !selectedBase
+      ? 'Pick a template'
+      : '';
+
   const handleConfirm = () => {
-    if (isLoading || !projectName.trim() || !selectedBase) return;
-    onConfirm(projectName.trim(), selectedBase.id, baseVersion || undefined);
+    if (!canSubmit) return;
+    if (isEmptyMode) {
+      onConfirm(trimmedName, '', undefined);
+      return;
+    }
+    onConfirm(trimmedName, selectedBase!.id, baseVersion || undefined);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter' && projectName.trim() && selectedBase && !isLoading) {
+    if (e.key === 'Enter' && canSubmit) {
       e.preventDefault();
       handleConfirm();
     } else if (e.key === 'Escape' && !isLoading) {
@@ -206,6 +230,7 @@ export function CreateProjectModal({
   if (!isOpen) return null;
 
   const teamSlug = activeTeam?.slug || 'team';
+  const recent = siblings.slice(0, 3);
 
   return (
     <div
@@ -218,150 +243,191 @@ export function CreateProjectModal({
     >
       <div
         onClick={stopPropagation}
-        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-[460px] flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-large)] sm:max-h-[calc(100dvh-2rem)]"
+        className="flex max-h-[calc(100dvh-1rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-large)] sm:max-h-[calc(100dvh-2rem)]"
       >
-        {/* Path header */}
-        <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--sidebar-bg)] px-3 py-2">
-          <div
-            id="create-workspace-title"
-            className="flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-muted)]"
-          >
-            <Folder
-              size={12}
-              weight="fill"
-              className="flex-shrink-0 text-[var(--primary)]"
-            />
-            <span className="truncate">{teamSlug}</span>
-            <CaretRight size={9} className="flex-shrink-0 text-[var(--text-subtle)]" />
-            <span className="truncate text-[var(--text)]">New folder</span>
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] bg-[var(--sidebar-bg)] px-4 py-3">
+          <div className="min-w-0">
+            <h2
+              id="create-workspace-title"
+              className="text-[14px] font-semibold text-[var(--text)]"
+            >
+              New workspace
+            </h2>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-muted)]">
+              <Folder size={11} weight="fill" className="flex-shrink-0 text-[var(--primary)]" />
+              <span className="truncate">{teamSlug}</span>
+              <CaretRight size={9} className="flex-shrink-0 text-[var(--text-subtle)]" />
+              <span className="truncate text-[var(--text-muted)]">
+                {recent.length > 0
+                  ? `${siblings.length} workspace${siblings.length === 1 ? '' : 's'}`
+                  : 'No workspaces yet'}
+              </span>
+            </div>
           </div>
           <button
             type="button"
             onClick={resetAndClose}
             disabled={isLoading}
             aria-label="Close"
-            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-50 motion-safe:transition-colors"
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-50 motion-safe:transition-colors"
           >
-            <X size={13} />
+            <X size={14} />
           </button>
         </div>
 
-        {/* Folder list — siblings + inline "new folder" row with cursor */}
-        <div className="flex-1 overflow-y-auto bg-[var(--bg)] px-1.5 py-1.5">
-          {siblings.slice(0, 50).map((s) => (
-            <div
-              key={s.id}
-              className="flex items-center gap-2 rounded-[var(--radius-small)] px-2 py-1.5"
-            >
-              <Folder
-                size={14}
-                weight="duotone"
-                className="flex-shrink-0 text-[var(--text-subtle)]"
-              />
-              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--text-muted)]">
-                {s.name}
-              </span>
-              <span className="flex-shrink-0 text-[10px] text-[var(--text-subtle)]">
-                {formatRelative(s.updatedAt)}
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto bg-[var(--bg)] px-4 py-4">
+          {/* Name field */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label
+                htmlFor="cw-name"
+                className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]"
+              >
+                Workspace name
+              </label>
+              <span
+                className={`text-[10px] tabular-nums ${
+                  projectName.length > 90
+                    ? 'text-[var(--status-warning)]'
+                    : 'text-[var(--text-subtle)]'
+                }`}
+              >
+                {projectName.length}/100
               </span>
             </div>
-          ))}
-
-          {/* The new folder row — this is where the cursor lives */}
-          <div className="flex items-center gap-2 rounded-[var(--radius-small)] bg-[rgba(var(--primary-rgb),0.08)] px-2 py-1.5 ring-1 ring-[var(--primary)]">
-            <Folder
-              size={14}
-              weight="fill"
-              className="flex-shrink-0 text-[var(--primary)]"
-            />
             <input
               ref={inputRef}
+              id="cw-name"
               type="text"
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
-              placeholder="new folder"
+              placeholder="my-awesome-app"
               disabled={isLoading}
               maxLength={100}
               autoComplete="off"
               spellCheck={false}
-              aria-label="Folder name"
-              className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[12px] text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:outline-none disabled:opacity-50 caret-[var(--primary)]"
+              className="w-full rounded-[var(--radius-small)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:border-[var(--primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]/30 disabled:opacity-50"
             />
           </div>
+
+          {/* Template grid */}
+          <div className="mt-4">
+            <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+              Starting point
+            </label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {tiles.map((base) => {
+                const isSelected = selectedBase?.id === base.id;
+                const isEmpty = base.id === EMPTY_TILE.id;
+                const inLib = isEmpty || isInLibrary(base.id);
+                return (
+                  <button
+                    key={base.id}
+                    type="button"
+                    onClick={() => handleTileClick(base)}
+                    disabled={isLoading}
+                    aria-pressed={isSelected}
+                    className={[
+                      'group flex h-[78px] flex-col items-start gap-1 rounded-[var(--radius-small)] border px-3 py-2 text-left motion-safe:transition-all',
+                      isSelected
+                        ? 'border-[var(--primary)] bg-[rgba(var(--primary-rgb),0.10)] ring-1 ring-[var(--primary)]/30'
+                        : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-hover)]',
+                      isLoading ? 'cursor-not-allowed opacity-50' : '',
+                    ].join(' ')}
+                  >
+                    <div className="flex w-full items-center gap-1.5">
+                      {isEmpty ? (
+                        <FileDashed
+                          size={13}
+                          weight={isSelected ? 'fill' : 'regular'}
+                          className={
+                            isSelected ? 'text-[var(--primary)]' : 'text-[var(--text-muted)]'
+                          }
+                        />
+                      ) : (
+                        <Folder
+                          size={13}
+                          weight={isSelected ? 'fill' : 'duotone'}
+                          className={
+                            isSelected ? 'text-[var(--primary)]' : 'text-[var(--text-muted)]'
+                          }
+                        />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--text)]">
+                        {base.name}
+                      </span>
+                      {!inLib && (
+                        <span className="flex-shrink-0 text-[9px] uppercase tracking-wide text-[var(--text-subtle)]">
+                          add
+                        </span>
+                      )}
+                    </div>
+                    <p className="line-clamp-2 text-[10px] leading-snug text-[var(--text-subtle)]">
+                      {base.description || (isEmpty ? 'Blank repo, no scaffolding.' : base.slug)}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {recent.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-subtle)]">
+                Recent in {teamSlug}
+              </div>
+              <ul className="space-y-0.5">
+                {recent.map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex items-center gap-2 rounded-[var(--radius-small)] px-2 py-1 text-[11px] text-[var(--text-muted)]"
+                  >
+                    <Folder
+                      size={11}
+                      weight="duotone"
+                      className="flex-shrink-0 text-[var(--text-subtle)]"
+                    />
+                    <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                    <span className="flex-shrink-0 text-[10px] text-[var(--text-subtle)]">
+                      {formatRelative(s.updatedAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
-        {/* Footer — template + keyboard hint + primary action */}
-        <div className="relative flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--sidebar-bg)] px-3 py-2">
-          {/* Template picker — tiny affordance */}
-          <button
-            type="button"
-            ref={templateBtnRef}
-            onClick={() => setTemplatePickerOpen((v) => !v)}
-            disabled={isLoading}
-            className="flex min-w-0 items-center gap-1 rounded-[var(--radius-small)] px-1.5 py-1 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-50"
-          >
-            <span className="text-[var(--text-subtle)]">as</span>
-            <span className="truncate text-[var(--text)]">
-              {selectedBase?.name || 'template'}
-            </span>
-            <CaretDown
-              size={9}
-              className={`flex-shrink-0 text-[var(--text-subtle)] motion-safe:transition-transform ${
-                templatePickerOpen ? 'rotate-180' : ''
-              }`}
-            />
-          </button>
-
-          <div className="flex flex-shrink-0 items-center gap-2">
-            <span className="hidden text-[10px] text-[var(--text-subtle)] sm:inline">
-              <kbd className="font-mono">esc</kbd> cancel ·{' '}
-              <kbd className="font-mono">↵</kbd> create
-            </span>
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--sidebar-bg)] px-4 py-2.5">
+          <span className="hidden text-[10px] text-[var(--text-subtle)] sm:inline">
+            <kbd className="font-mono">esc</kbd> cancel · <kbd className="font-mono">↵</kbd> create
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {!canSubmit && disabledReason && (
+              <span className="text-[10px] text-[var(--text-subtle)]">{disabledReason}</span>
+            )}
+            <button
+              type="button"
+              onClick={resetAndClose}
+              disabled={isLoading}
+              className="btn btn-sm btn-ghost"
+            >
+              Cancel
+            </button>
             <button
               type="button"
               onClick={handleConfirm}
-              disabled={!projectName.trim() || !selectedBase || isLoading}
+              disabled={!canSubmit}
+              aria-disabled={!canSubmit}
+              title={!canSubmit ? disabledReason : undefined}
               className="btn btn-sm btn-filled"
             >
-              {isLoading ? 'Creating…' : 'Create'}
+              {isLoading ? 'Creating…' : 'Create workspace'}
             </button>
           </div>
-
-          {/* Template dropdown */}
-          {templatePickerOpen && (
-            <div
-              ref={templatePanelRef}
-              className="absolute bottom-full left-2 mb-1 max-h-[240px] w-[220px] overflow-y-auto rounded-[var(--radius-small)] border border-[var(--border-hover)] bg-[var(--surface)] p-1 shadow-[var(--shadow-large)]"
-            >
-              {displayBases.length === 0 ? (
-                <div className="px-2 py-1.5 text-[11px] text-[var(--text-subtle)]">
-                  Loading…
-                </div>
-              ) : (
-                displayBases.map((base) => {
-                  const isSelected = selectedBase?.id === base.id;
-                  return (
-                    <button
-                      key={base.id}
-                      type="button"
-                      onClick={() => handleBaseClick(base)}
-                      className={[
-                        'flex w-full items-center gap-2 rounded-[var(--radius-small)] px-2 py-1.5 text-left text-[11px] motion-safe:transition-colors',
-                        isSelected
-                          ? 'bg-[rgba(var(--primary-rgb),0.12)] text-[var(--text)]'
-                          : 'text-[var(--text-muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]',
-                      ].join(' ')}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{base.name}</span>
-                      {isSelected && (
-                        <span className="flex-shrink-0 text-[var(--primary)]">•</span>
-                      )}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>

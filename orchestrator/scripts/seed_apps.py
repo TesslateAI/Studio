@@ -44,6 +44,7 @@ _SLUG_TO_MODULE: dict[str, str] = {
     "mirofish": "scripts.seed_mirofish_app",
     "damian-app": "scripts.seed_damian_app",
     "law-onboarding": "scripts.seed_law_onboarding_app",
+    "geopin": "scripts.seed_geopin_app",
 }
 
 

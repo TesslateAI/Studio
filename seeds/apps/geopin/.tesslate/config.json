@@ -1,0 +1,15 @@
+{
+  "apps": {
+    "web": {
+      "directory": ".",
+      "port": 3000,
+      "start": "node /app/server.js",
+      "framework": "tesslate-devserver:latest",
+      "env": {
+        "PORT": "3000",
+        "NODE_ENV": "production"
+      }
+    }
+  },
+  "primaryApp": "web"
+}

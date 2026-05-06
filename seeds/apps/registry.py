@@ -85,6 +85,41 @@ SEED_APPS: list[SeedApp] = [
             "dashboard with a built-in demo-data layer (no database required)."
         ),
     ),
+    SeedApp(
+        slug="geopin",
+        assets_dir=SEEDS_ROOT / "geopin",
+        description=(
+            "Interactive GeoJSON map editor: add pins, lines, and polygons with "
+            "labels and colors. Leaflet + OpenStreetMap, per-install volume storage."
+        ),
+    ),
+    SeedApp(
+        slug="markitdown",
+        assets_dir=SEEDS_ROOT / "markitdown",
+        description=(
+            "Microsoft MarkItDown wrapped in a minimal FastAPI uploader — "
+            "converts PDF, Office docs, audio, YouTube URLs and more to "
+            "Markdown. Image-based seed (tesslate-markitdown:latest)."
+        ),
+    ),
+    SeedApp(
+        slug="deer-flow",
+        assets_dir=SEEDS_ROOT / "deer-flow",
+        description=(
+            "ByteDance DeerFlow 2.0 — open-source super-agent harness "
+            "orchestrating sub-agents, memory, and sandboxes for deep "
+            "research. Image-based seed (tesslate-deerflow:latest)."
+        ),
+    ),
+    SeedApp(
+        slug="mirofish",
+        assets_dir=SEEDS_ROOT / "mirofish",
+        description=(
+            "Swarm-intelligence multi-agent prediction engine. Uploads a "
+            "seed report or novel and runs persona-driven agents in a "
+            "simulated world. Image-based seed (ghcr.io/666ghj/mirofish:latest)."
+        ),
+    ),
 ]
 
 

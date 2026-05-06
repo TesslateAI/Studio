@@ -131,9 +131,7 @@ class _FakeOrchestrator:
 def _patch_orchestrator(monkeypatch: pytest.MonkeyPatch, fake: _FakeOrchestrator) -> None:
     import app.services.orchestration as orchestration_module
 
-    monkeypatch.setattr(
-        orchestration_module, "get_orchestrator", lambda *a, **kw: fake
-    )
+    monkeypatch.setattr(orchestration_module, "get_orchestrator", lambda *a, **kw: fake)
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +228,7 @@ async def test_materializes_apps_infra_and_connections(
     conns = (
         (
             await db.execute(
-                select(ContainerConnection).where(
-                    ContainerConnection.project_id == project.id
-                )
+                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
             )
         )
         .scalars()
@@ -338,6 +334,57 @@ async def test_raises_bundle_config_missing_when_config_has_no_apps(
         )
 
 
+async def test_app_image_propagates_to_container_image_column(
+    db: AsyncSession,
+    runtime_project: tuple[Project, uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Image-based apps (e.g. ``tesslate-markitdown:latest``) declare an image
+    in their manifest. The federated publish path mirrors that into
+    ``apps[name].image`` of ``.tesslate/config.json``. This test pins that
+    the materializer copies it through to ``Container.image`` so the K8s
+    deployer doesn't silently fall back to ``tesslate-devserver:latest``.
+
+    Regression: prior versions only set ``framework`` (a UI label), leaving
+    ``Container.image`` NULL and every image-based app deploying with the
+    devserver image.
+    """
+    project, installer_user_id = runtime_project
+    payload = json.dumps(
+        {
+            "primaryApp": "web",
+            "apps": {
+                "web": {
+                    "directory": ".",
+                    "port": 3000,
+                    "start": "uvicorn server:app --host 0.0.0.0 --port 3000",
+                    "image": "tesslate-markitdown:latest",
+                    "framework": "tesslate-markitdown:latest",
+                },
+            },
+            "infrastructure": {},
+            "connections": [],
+        }
+    )
+    fake = _FakeOrchestrator({".tesslate/config.json": payload})
+    _patch_orchestrator(monkeypatch, fake)
+
+    containers, _primary = await materialize_compute_from_volume(
+        db,
+        project=project,
+        installer_user_id=installer_user_id,
+        volume_id=project.volume_id,
+        cache_node=None,
+    )
+
+    web = containers["web"]
+    assert web.image == "tesslate-markitdown:latest", (
+        "manifest image must populate Container.image so K8s renders it"
+    )
+    # Framework label is preserved alongside.
+    assert web.framework == "tesslate-markitdown:latest"
+
+
 async def test_unknown_connection_names_skipped_with_warning(
     db: AsyncSession,
     runtime_project: tuple[Project, uuid.UUID],
@@ -372,9 +419,7 @@ async def test_unknown_connection_names_skipped_with_warning(
     conns = (
         (
             await db.execute(
-                select(ContainerConnection).where(
-                    ContainerConnection.project_id == project.id
-                )
+                select(ContainerConnection).where(ContainerConnection.project_id == project.id)
             )
         )
         .scalars()

@@ -29,20 +29,30 @@ export function useAttachments() {
     setAttachments((prev) => (prev.length >= 10 ? prev : [...prev, attachment]));
   }, []);
 
-  const addFileReference = useCallback((filePath: string, fileName: string) => {
-    setAttachments((prev) => {
-      if (prev.length >= 10) return prev;
-      // Don't add duplicate file references
-      if (prev.some((a) => a.type === 'file_reference' && a.filePath === filePath)) return prev;
-      const attachment: ChatAttachment = {
-        id: crypto.randomUUID(),
-        type: 'file_reference',
-        filePath,
-        fileName,
-      };
-      return [...prev, attachment];
-    });
-  }, []);
+  const addFileReference = useCallback(
+    (
+      filePath: string,
+      fileName: string,
+      opts?: { attachmentId?: string; mimeType?: string; sizeBytes?: number }
+    ) => {
+      setAttachments((prev) => {
+        if (prev.length >= 10) return prev;
+        // Don't add duplicate file references
+        if (prev.some((a) => a.type === 'file_reference' && a.filePath === filePath)) return prev;
+        const attachment: ChatAttachment = {
+          id: crypto.randomUUID(),
+          type: 'file_reference',
+          filePath,
+          fileName,
+          attachmentId: opts?.attachmentId,
+          mimeType: opts?.mimeType,
+          sizeBytes: opts?.sizeBytes,
+        };
+        return [...prev, attachment];
+      });
+    },
+    []
+  );
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
@@ -90,6 +100,8 @@ export function useAttachments() {
           type: 'file_reference',
           file_path: att.filePath,
           label: att.fileName,
+          mime_type: att.mimeType,
+          attachment_id: att.attachmentId,
         });
       }
     }

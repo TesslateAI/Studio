@@ -4,13 +4,15 @@
     "id": "com.bytedance.deer-flow",
     "slug": "deer-flow",
     "name": "DeerFlow",
-    "version": "0.1.0",
-    "description": "ByteDance DeerFlow 2.0 — open-source super-agent harness orchestrating sub-agents, memory, and sandboxes for deep research. Requires an OpenAI-compatible LLM API key.",
+    "version": "0.1.4",
+    "description": "ByteDance DeerFlow 2.0 \u2014 open-source super-agent harness orchestrating sub-agents, memory, and sandboxes for deep research. Requires an OpenAI-compatible LLM API key.",
     "category": "research",
     "forkable": "restricted"
   },
   "compatibility": {
-    "studio": {"min": "0.0.0"},
+    "studio": {
+      "min": "0.0.0"
+    },
     "manifest_schema": "2025-02",
     "runtime_api": "^1.0",
     "required_features": []
@@ -24,7 +26,12 @@
         "name": "web",
         "primary": true,
         "image": "tesslate-deerflow:latest",
-        "ports": [3000, 8001, 2024],
+        "source_strategy": "image",
+        "ports": [
+          3000,
+          8001,
+          2024
+        ],
         "startup_command": "make dev",
         "env": {
           "LLM_API_KEY": "${secret:llama-api-credentials/api_key}",
@@ -38,13 +45,29 @@
     "connections": []
   },
   "surfaces": [
-    {"kind": "ui", "entrypoint": "/"}
+    {
+      "kind": "ui",
+      "entrypoint": "/"
+    }
   ],
-  "state": {"model": "per-install-volume", "volume_size": "4Gi"},
-  "billing": {
-    "ai_compute": {"payer": "installer", "markup_pct": 0},
-    "general_compute": {"payer": "installer"},
-    "platform_fee": {"model": "free"}
+  "state": {
+    "model": "per-install-volume",
+    "volume_size": "4Gi",
+    "mount_path": "/data"
   },
-  "listing": {"visibility": "public"}
+  "billing": {
+    "ai_compute": {
+      "payer": "installer",
+      "markup_pct": 0
+    },
+    "general_compute": {
+      "payer": "installer"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "listing": {
+    "visibility": "public"
+  }
 }

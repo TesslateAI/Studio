@@ -24,6 +24,10 @@ from arq.connections import RedisSettings
 
 from .services.apps.app_invocations import invoke_app_instance_task
 from .services.apps.settlement_worker import settle_spend_batch as settle_spend_batch_cron
+from .services.marketplace_sync import (
+    marketplace_sync_periodic_cron,
+    marketplace_yanks_fast_cron,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -444,9 +448,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
         UserPurchasedAgent,
     )
     from .services.agent_context import (
-        _build_architecture_context,
         _build_cross_platform_context,
-        _build_git_context,
         _build_tesslate_context,
         _get_chat_history,
         _resolve_container_name,
@@ -891,21 +893,6 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     "project_name": project.name,
                     "project_description": project.description,
                 }
-                tesslate_context = await _build_tesslate_context(
-                    project,
-                    UUID(payload.user_id),
-                    db,
-                    container_name=container_name,
-                    container_directory=container_directory,
-                )
-                if tesslate_context:
-                    project_context["tesslate_context"] = tesslate_context
-                git_context = await _build_git_context(project, UUID(payload.user_id), db)
-                if git_context:
-                    project_context["git_context"] = git_context
-                architecture_context = await _build_architecture_context(project, db)
-                if architecture_context:
-                    project_context["architecture_context"] = architecture_context
             else:
                 project_context = payload.project_context or {}
 
@@ -919,6 +906,20 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     project_context["mcp_resource_catalog"] = mcp_context["resource_catalog"]
                 if mcp_context.get("prompt_catalog"):
                     project_context["mcp_prompt_catalog"] = mcp_context["prompt_catalog"]
+
+            # Inject TESSLATE.md into the system prompt via project_context.
+            # Guard prevents a double-read when chat.py already populated it
+            # for inline (non-queued) execution paths.
+            if project and not project_context.get("tesslate_context"):
+                tesslate_ctx = await _build_tesslate_context(
+                    project,
+                    UUID(payload.user_id),
+                    db,
+                    container_name=container_name,
+                    container_directory=container_directory,
+                )
+                if tesslate_ctx:
+                    project_context["tesslate_context"] = tesslate_ctx
 
             # Warm the local plan mirror from Redis before the agent builds its prompt.
             from .services.plan_manager import PlanManager
@@ -2476,6 +2477,33 @@ def _build_cron_jobs():
         )
     )
 
+    # Federated marketplace (Wave 3): periodic sync against every active
+    # MarketplaceSource. Drains /v1/changes per source every 5 minutes and
+    # applies upsert/delete/deactivate/yank/version_remove/pricing_change
+    # tombstones. Failures per source are logged but never raised.
+    jobs.append(
+        cron(
+            marketplace_sync_periodic_cron,
+            minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+            timeout=300,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
+    # Federated marketplace (Wave 3): fast yank propagation. Polls each
+    # source's /v1/yanks every minute so a critical yank reaches the
+    # orchestrator's cache within ~1 minute of being published upstream.
+    jobs.append(
+        cron(
+            marketplace_yanks_fast_cron,
+            minute=set(range(0, 60)),
+            timeout=120,
+            unique=True,
+            run_at_startup=False,
+        )
+    )
+
     return jobs
 
 
@@ -2504,6 +2532,8 @@ class WorkerSettings:
         db_event_dispatcher_cron,
         reap_orphaned_install_attempts_cron,
         invoke_app_instance_task,
+        marketplace_sync_periodic_cron,
+        marketplace_yanks_fast_cron,
     ]
     cron_jobs = _build_cron_jobs()
     redis_settings = _get_redis_settings()

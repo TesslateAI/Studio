@@ -4,13 +4,15 @@
     "id": "com.tesslate.crm",
     "slug": "crm-demo",
     "name": "Tesslate CRM",
-    "version": "0.1.0",
+    "version": "0.2.1",
     "description": "A minimal CRM demo with a chat-drawer agent running on the Tesslate Apps runtime.",
     "category": "productivity",
     "forkable": "true"
   },
   "compatibility": {
-    "studio": {"min": "0.0.0"},
+    "studio": {
+      "min": "0.0.0"
+    },
     "manifest_schema": "2025-02",
     "runtime_api": "^1.0",
     "required_features": []
@@ -23,10 +25,15 @@
         "name": "web",
         "primary": true,
         "image": "tesslate-devserver:latest",
-        "ports": [3000],
-        "startup_command": "sh -c 'cd /app && (test -d node_modules || npm install) && npx prisma migrate deploy || npx prisma db push --skip-generate --accept-data-loss; npm run build && node .next/standalone/server.js'",
+        "ports": [
+          3000
+        ],
+        "startup_command": "sh -c 'cd /app && mkdir -p data && (test -d node_modules || npm install) && npx prisma db push --skip-generate --accept-data-loss && npm run dev'",
+        "resources": {
+          "memory_limit": "2Gi"
+        },
         "env": {
-          "NODE_ENV": "production",
+          "NODE_ENV": "development",
           "DATABASE_URL": "file:/app/data/crm.db",
           "LLAMA_API_BASE": "https://api.llama.com/compat/v1/",
           "LLAMA_MODEL": "Llama-4-Maverick-17B-128E-Instruct-FP8",
@@ -37,13 +44,28 @@
     "connections": []
   },
   "surfaces": [
-    {"kind": "ui", "entrypoint": "/"}
+    {
+      "kind": "ui",
+      "entrypoint": "/"
+    }
   ],
-  "state": {"model": "per-install-volume", "volume_size": "2Gi"},
-  "billing": {
-    "ai_compute": {"payer": "installer", "markup_pct": 0},
-    "general_compute": {"payer": "platform"},
-    "platform_fee": {"model": "free"}
+  "state": {
+    "model": "per-install-volume",
+    "volume_size": "2Gi"
   },
-  "listing": {"visibility": "public"}
+  "billing": {
+    "ai_compute": {
+      "payer": "installer",
+      "markup_pct": 0
+    },
+    "general_compute": {
+      "payer": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "listing": {
+    "visibility": "public"
+  }
 }

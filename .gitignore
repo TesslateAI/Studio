@@ -6,6 +6,11 @@ TODO/
 # Agent-run trajectories (local debug artifacts, never commit)
 .tesslate/
 orchestrator/.tesslate/
+# Exception: seed app asset trees ship .tesslate/config.json as part of
+# the bundle so the install path can derive container shape. Override the
+# broad rule above so these are tracked.
+!seeds/apps/*/.tesslate/
+!seeds/apps/*/.tesslate/**
 
 # Desktop PRD scratch / planning (local-only, never committed)
 desktop-todo/

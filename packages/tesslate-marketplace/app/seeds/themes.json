@@ -1,0 +1,4303 @@
+[
+  {
+    "kind": "theme",
+    "slug": "andromeda",
+    "name": "Andromeda",
+    "description": "Dark theme with vivid red-orange and green accents inspired by the cosmos",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "red",
+      "orange",
+      "space"
+    ],
+    "icon": "planet",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Eliver Lara",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#ee5d43",
+          "primaryHover": "#f27c66",
+          "primaryRgb": "238, 93, 67",
+          "accent": "#96e072",
+          "background": "#23262e",
+          "surface": "#1e2027",
+          "surfaceHover": "#2a2d36",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#181a20",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(238, 93, 67, 0.08)",
+            "active": "rgba(238, 93, 67, 0.15)"
+          },
+          "input": {
+            "background": "#1e2027",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#ee5d43",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(238, 93, 67, 0.3)",
+            "thumbHover": "rgba(238, 93, 67, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(238, 93, 67, 0.15)",
+            "inlineText": "#f4a292",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(238, 93, 67, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "atom-one-dark",
+    "name": "Atom One Dark",
+    "description": "The original Atom One Dark theme faithfully adapted with blue and purple tones",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "blue",
+      "atom",
+      "classic"
+    ],
+    "icon": "atom",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Mahmoud Ali",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#61afef",
+          "primaryHover": "#7ec4ff",
+          "primaryRgb": "97, 175, 239",
+          "accent": "#c678dd",
+          "background": "#282c34",
+          "surface": "#21252b",
+          "surfaceHover": "#2c313a",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#1e2127",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(97, 175, 239, 0.08)",
+            "active": "rgba(97, 175, 239, 0.15)"
+          },
+          "input": {
+            "background": "#21252b",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#61afef",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(97, 175, 239, 0.3)",
+            "thumbHover": "rgba(97, 175, 239, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(97, 175, 239, 0.15)",
+            "inlineText": "#8fd0ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(97, 175, 239, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "aura",
+    "name": "Aura Theme",
+    "description": "Beautiful dark theme with soft purple glow and warm peach accents",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "purple",
+      "peach",
+      "aura"
+    ],
+    "icon": "shooting-star",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Dalton Menezes",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#a277ff",
+          "primaryHover": "#b899ff",
+          "primaryRgb": "162, 119, 255",
+          "accent": "#ffca85",
+          "background": "#15141b",
+          "surface": "#1c1b22",
+          "surfaceHover": "#26252e",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#0f0e14",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(162, 119, 255, 0.08)",
+            "active": "rgba(162, 119, 255, 0.15)"
+          },
+          "input": {
+            "background": "#1c1b22",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#a277ff",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(162, 119, 255, 0.3)",
+            "thumbHover": "rgba(162, 119, 255, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(162, 119, 255, 0.15)",
+            "inlineText": "#c0a0ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(162, 119, 255, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "ayu-dark",
+    "name": "Ayu Dark",
+    "description": "Warm dark theme with orange highlights inspired by Ayu",
+    "category": "minimal",
+    "tags": [
+      "dark",
+      "orange",
+      "ayu",
+      "warm"
+    ],
+    "icon": "sun-dim",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Ike Ku",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#ffb454",
+          "primaryHover": "#ffc97a",
+          "primaryRgb": "255, 180, 84",
+          "accent": "#f07178",
+          "background": "#0b0e14",
+          "surface": "#131721",
+          "surfaceHover": "#1a1f2b",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#070a0f",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(255, 180, 84, 0.08)",
+            "active": "rgba(255, 180, 84, 0.15)"
+          },
+          "input": {
+            "background": "#131721",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#ffb454",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(255, 180, 84, 0.3)",
+            "thumbHover": "rgba(255, 180, 84, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(255, 180, 84, 0.15)",
+            "inlineText": "#ffcb8a",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(255, 180, 84, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "bearded-theme",
+    "name": "Bearded Theme Arc",
+    "description": "Clean geometric dark theme with crisp sky blue and lavender accents",
+    "category": "minimal",
+    "tags": [
+      "dark",
+      "blue",
+      "arc",
+      "lavender"
+    ],
+    "icon": "palette",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "BeardedBear",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#69c3ff",
+          "primaryHover": "#8dd3ff",
+          "primaryRgb": "105, 195, 255",
+          "accent": "#cba6f7",
+          "background": "#1c1e26",
+          "surface": "#23262e",
+          "surfaceHover": "#2c303a",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#171921",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(105, 195, 255, 0.08)",
+            "active": "rgba(105, 195, 255, 0.15)"
+          },
+          "input": {
+            "background": "#23262e",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#69c3ff",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(105, 195, 255, 0.3)",
+            "thumbHover": "rgba(105, 195, 255, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(105, 195, 255, 0.15)",
+            "inlineText": "#96d6ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(105, 195, 255, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "c-cpp-themes",
+    "name": "C/C++ Themes",
+    "description": "Microsoft's official C/C++ dark theme with cyan blue and gold syntax highlights",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "cyan",
+      "microsoft",
+      "systems"
+    ],
+    "icon": "brackets-curly",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Microsoft",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#4fc1ff",
+          "primaryHover": "#74d0ff",
+          "primaryRgb": "79, 193, 255",
+          "accent": "#dcdcaa",
+          "background": "#1e1e1e",
+          "surface": "#252526",
+          "surfaceHover": "#2d2d30",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#181818",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(79, 193, 255, 0.08)",
+            "active": "rgba(79, 193, 255, 0.15)"
+          },
+          "input": {
+            "background": "#252526",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#4fc1ff",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(79, 193, 255, 0.3)",
+            "thumbHover": "rgba(79, 193, 255, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(79, 193, 255, 0.15)",
+            "inlineText": "#7fd4ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(79, 193, 255, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "catppuccin-mocha",
+    "name": "Catppuccin Mocha",
+    "description": "Soothing pastel theme with warm mauve and pink tones",
+    "category": "minimal",
+    "tags": [
+      "dark",
+      "pastel",
+      "mauve",
+      "catppuccin"
+    ],
+    "icon": "coffee",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Catppuccin",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#cba6f7",
+          "primaryHover": "#dbbfff",
+          "primaryRgb": "203, 166, 247",
+          "accent": "#f5c2e7",
+          "background": "#1e1e2e",
+          "surface": "#181825",
+          "surfaceHover": "#262637",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#11111b",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(203, 166, 247, 0.08)",
+            "active": "rgba(203, 166, 247, 0.15)"
+          },
+          "input": {
+            "background": "#181825",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#cba6f7",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(203, 166, 247, 0.3)",
+            "thumbHover": "rgba(203, 166, 247, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(203, 166, 247, 0.15)",
+            "inlineText": "#dcc0ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(203, 166, 247, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "cobalt2",
+    "name": "Cobalt2",
+    "description": "Bold cobalt blue theme with vibrant yellow accents by Wes Bos",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "yellow",
+      "blue",
+      "cobalt"
+    ],
+    "icon": "lightning",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Wes Bos",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#ffc600",
+          "primaryHover": "#ffd740",
+          "primaryRgb": "255, 198, 0",
+          "accent": "#fb94ff",
+          "background": "#193549",
+          "surface": "#15232d",
+          "surfaceHover": "#1c3a50",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#0d1f2d",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(255, 198, 0, 0.08)",
+            "active": "rgba(255, 198, 0, 0.15)"
+          },
+          "input": {
+            "background": "#15232d",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#ffc600",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(255, 198, 0, 0.3)",
+            "thumbHover": "rgba(255, 198, 0, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(255, 198, 0, 0.15)",
+            "inlineText": "#ffe066",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(255, 198, 0, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "copilot",
+    "name": "Copilot Theme",
+    "description": "GitHub Copilot-inspired dark theme with cool sky blue and teal tones",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "blue",
+      "github",
+      "copilot"
+    ],
+    "icon": "robot",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "GitHub",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#79c0ff",
+          "primaryHover": "#9ad0ff",
+          "primaryRgb": "121, 192, 255",
+          "accent": "#56d4dd",
+          "background": "#1c2128",
+          "surface": "#22272e",
+          "surfaceHover": "#2d333b",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#161b22",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(121, 192, 255, 0.08)",
+            "active": "rgba(121, 192, 255, 0.15)"
+          },
+          "input": {
+            "background": "#22272e",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#79c0ff",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(121, 192, 255, 0.3)",
+            "thumbHover": "rgba(121, 192, 255, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(121, 192, 255, 0.15)",
+            "inlineText": "#a1d4ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(121, 192, 255, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "darcula",
+    "name": "Darcula",
+    "description": "Classic IntelliJ Darcula theme with steel blue and warm orange tones",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "blue",
+      "jetbrains",
+      "intellij"
+    ],
+    "icon": "brackets-curly",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "JetBrains",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#6897bb",
+          "primaryHover": "#88b0cc",
+          "primaryRgb": "104, 151, 187",
+          "accent": "#cc7832",
+          "background": "#2b2b2b",
+          "surface": "#3c3f41",
+          "surfaceHover": "#45494a",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#222324",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(104, 151, 187, 0.08)",
+            "active": "rgba(104, 151, 187, 0.15)"
+          },
+          "input": {
+            "background": "#3c3f41",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#6897bb",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(104, 151, 187, 0.3)",
+            "thumbHover": "rgba(104, 151, 187, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(104, 151, 187, 0.15)",
+            "inlineText": "#93b8d4",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(104, 151, 187, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "default-dark",
+    "name": "Default Dark",
+    "description": "The default Tesslate dark theme with orange accents",
+    "category": "general",
+    "tags": [
+      "dark",
+      "default",
+      "neutral"
+    ],
+    "icon": "moon",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Tesslate",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#F89521",
+          "primaryHover": "#fa9f35",
+          "primaryRgb": "248, 149, 33",
+          "accent": "#00D9FF",
+          "background": "#111113",
+          "surface": "#0a0a0a",
+          "surfaceHover": "#1a1a1a",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.1)",
+          "borderHover": "rgba(255, 255, 255, 0.2)",
+          "sidebar": {
+            "background": "#0a0a0a",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(255, 255, 255, 0.05)",
+            "active": "rgba(248, 149, 33, 0.15)"
+          },
+          "input": {
+            "background": "#1a1a1a",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#F89521",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(255, 255, 255, 0.2)",
+            "thumbHover": "rgba(255, 255, 255, 0.3)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(248, 149, 33, 0.1)",
+            "inlineText": "#F89521",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(255, 255, 255, 0.1)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#ef4444",
+            "errorRgb": "239, 68, 68",
+            "success": "#22c55e",
+            "successRgb": "34, 197, 94",
+            "warning": "#f59e0b",
+            "warningRgb": "245, 158, 11",
+            "info": "#3b82f6",
+            "infoRgb": "59, 130, 246"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.3)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.3)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.3)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": true
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "default-light",
+    "name": "Default Light",
+    "description": "The default Tesslate light theme with orange accents",
+    "category": "general",
+    "tags": [
+      "light",
+      "default",
+      "clean"
+    ],
+    "icon": "sun",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "light",
+      "author": "Tesslate",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#F89521",
+          "primaryHover": "#e88a1d",
+          "primaryRgb": "248, 149, 33",
+          "accent": "#0891b2",
+          "background": "#F5F6F7",
+          "surface": "#ffffff",
+          "surfaceHover": "#e8ebef",
+          "text": "#1a1a1a",
+          "textMuted": "#4b5563",
+          "textSubtle": "#6b7280",
+          "border": "#e5e7eb",
+          "borderHover": "#d1d5db",
+          "sidebar": {
+            "background": "#ffffff",
+            "text": "#1a1a1a",
+            "border": "#e5e7eb",
+            "hover": "#f3f4f6",
+            "active": "rgba(248, 149, 33, 0.15)"
+          },
+          "input": {
+            "background": "#ffffff",
+            "border": "#d1d5db",
+            "borderFocus": "#F89521",
+            "text": "#1a1a1a",
+            "placeholder": "#9ca3af"
+          },
+          "scrollbar": {
+            "thumb": "#d1d5db",
+            "thumbHover": "#9ca3af",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(248, 149, 33, 0.1)",
+            "inlineText": "#c2570b",
+            "blockBackground": "#f3f4f6",
+            "blockBorder": "#e5e7eb",
+            "blockText": "#374151"
+          },
+          "status": {
+            "error": "#b91c1c",
+            "errorRgb": "185, 28, 28",
+            "success": "#15803d",
+            "successRgb": "21, 128, 61",
+            "warning": "#b45309",
+            "warningRgb": "180, 83, 9",
+            "info": "#1d4ed8",
+            "infoRgb": "29, 78, 216"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.05)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.07)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.1)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": true
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "doki-theme",
+    "name": "Doki Theme",
+    "description": "Anime-inspired dark theme with sakura pink and soft lavender tones",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "pink",
+      "anime",
+      "cute"
+    ],
+    "icon": "heart",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Unthrottled",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#f06292",
+          "primaryHover": "#f48baf",
+          "primaryRgb": "240, 98, 146",
+          "accent": "#ba68c8",
+          "background": "#1a1a2e",
+          "surface": "#212140",
+          "surfaceHover": "#2a2a50",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#141428",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(240, 98, 146, 0.08)",
+            "active": "rgba(240, 98, 146, 0.15)"
+          },
+          "input": {
+            "background": "#212140",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#f06292",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(240, 98, 146, 0.3)",
+            "thumbHover": "rgba(240, 98, 146, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(240, 98, 146, 0.15)",
+            "inlineText": "#f79cba",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(240, 98, 146, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "dracula-at-night",
+    "name": "Dracula At Night",
+    "description": "Ultra-dark Dracula variant with deeper backgrounds and rich purple accents",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "purple",
+      "dracula",
+      "deep"
+    ],
+    "icon": "ghost",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "bceskavern",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#bd93f9",
+          "primaryHover": "#d1afff",
+          "primaryRgb": "189, 147, 249",
+          "accent": "#ff79c6",
+          "background": "#0e0e12",
+          "surface": "#18182a",
+          "surfaceHover": "#222238",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#0a0a0f",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(189, 147, 249, 0.08)",
+            "active": "rgba(189, 147, 249, 0.15)"
+          },
+          "input": {
+            "background": "#18182a",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#bd93f9",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(189, 147, 249, 0.3)",
+            "thumbHover": "rgba(189, 147, 249, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(189, 147, 249, 0.15)",
+            "inlineText": "#d4b8ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(189, 147, 249, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "dracula",
+    "name": "Dracula",
+    "description": "A dark theme with vibrant purple and pink accents",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "purple",
+      "dracula",
+      "popular"
+    ],
+    "icon": "ghost",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Zeno Rocha",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#bd93f9",
+          "primaryHover": "#d4b3ff",
+          "primaryRgb": "189, 147, 249",
+          "accent": "#ff79c6",
+          "background": "#282a36",
+          "surface": "#21222c",
+          "surfaceHover": "#2d2f3d",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#1a1b25",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(189, 147, 249, 0.08)",
+            "active": "rgba(189, 147, 249, 0.15)"
+          },
+          "input": {
+            "background": "#21222c",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#bd93f9",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(189, 147, 249, 0.3)",
+            "thumbHover": "rgba(189, 147, 249, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(189, 147, 249, 0.15)",
+            "inlineText": "#d6bcff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(189, 147, 249, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "eva-dark",
+    "name": "Eva Dark",
+    "description": "Semantic dark theme with rich blue and purple highlights for comfortable reading",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "blue",
+      "purple",
+      "eva"
+    ],
+    "icon": "eye",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "fisheva",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#6495ee",
+          "primaryHover": "#85adf3",
+          "primaryRgb": "100, 149, 238",
+          "accent": "#c57bdb",
+          "background": "#1f2233",
+          "surface": "#282b3c",
+          "surfaceHover": "#2f3346",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#181a2a",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(100, 149, 238, 0.08)",
+            "active": "rgba(100, 149, 238, 0.15)"
+          },
+          "input": {
+            "background": "#282b3c",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#6495ee",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(100, 149, 238, 0.3)",
+            "thumbHover": "rgba(100, 149, 238, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(100, 149, 238, 0.15)",
+            "inlineText": "#92b8f4",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(100, 149, 238, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "forest",
+    "name": "Forest",
+    "description": "Natural green theme for eco-friendly vibes",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "green",
+      "nature",
+      "forest"
+    ],
+    "icon": "tree",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Tesslate",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#22c55e",
+          "primaryHover": "#4ade80",
+          "primaryRgb": "34, 197, 94",
+          "accent": "#84cc16",
+          "background": "#0f1410",
+          "surface": "#1a201a",
+          "surfaceHover": "#242c24",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#0a0f0a",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(34, 197, 94, 0.08)",
+            "active": "rgba(34, 197, 94, 0.15)"
+          },
+          "input": {
+            "background": "#1a201a",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#22c55e",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(34, 197, 94, 0.3)",
+            "thumbHover": "rgba(34, 197, 94, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(34, 197, 94, 0.15)",
+            "inlineText": "#86efac",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(34, 197, 94, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "github-dark",
+    "name": "GitHub Dark",
+    "description": "GitHub's official dark theme with cool blue accents",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "github",
+      "blue",
+      "professional"
+    ],
+    "icon": "github-logo",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "GitHub",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#58a6ff",
+          "primaryHover": "#79b8ff",
+          "primaryRgb": "88, 166, 255",
+          "accent": "#3fb950",
+          "background": "#0d1117",
+          "surface": "#161b22",
+          "surfaceHover": "#1c2128",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#010409",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(88, 166, 255, 0.08)",
+            "active": "rgba(88, 166, 255, 0.15)"
+          },
+          "input": {
+            "background": "#161b22",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#58a6ff",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(88, 166, 255, 0.3)",
+            "thumbHover": "rgba(88, 166, 255, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(88, 166, 255, 0.15)",
+            "inlineText": "#a5d6ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(88, 166, 255, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "github-light",
+    "name": "GitHub Light",
+    "description": "GitHub's official light theme with clean blue accents",
+    "category": "professional",
+    "tags": [
+      "light",
+      "github",
+      "blue",
+      "clean"
+    ],
+    "icon": "github-logo",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "light",
+      "author": "GitHub",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#0969da",
+          "primaryHover": "#0550ae",
+          "primaryRgb": "9, 105, 218",
+          "accent": "#1a7f37",
+          "background": "#ffffff",
+          "surface": "#f6f8fa",
+          "surfaceHover": "#eaeef2",
+          "text": "#1f2328",
+          "textMuted": "rgba(31, 35, 40, 0.6)",
+          "textSubtle": "rgba(31, 35, 40, 0.4)",
+          "border": "rgba(31, 35, 40, 0.15)",
+          "borderHover": "rgba(31, 35, 40, 0.25)",
+          "sidebar": {
+            "background": "#f6f8fa",
+            "text": "#1f2328",
+            "border": "rgba(31, 35, 40, 0.1)",
+            "hover": "rgba(9, 105, 218, 0.06)",
+            "active": "rgba(9, 105, 218, 0.12)"
+          },
+          "input": {
+            "background": "#ffffff",
+            "border": "rgba(31, 35, 40, 0.15)",
+            "borderFocus": "#0969da",
+            "text": "#1f2328",
+            "placeholder": "rgba(31, 35, 40, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(31, 35, 40, 0.2)",
+            "thumbHover": "rgba(31, 35, 40, 0.35)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(9, 105, 218, 0.1)",
+            "inlineText": "#0550ae",
+            "blockBackground": "rgba(0, 0, 0, 0.04)",
+            "blockBorder": "rgba(31, 35, 40, 0.1)",
+            "blockText": "#374151"
+          },
+          "status": {
+            "error": "#dc2626",
+            "errorRgb": "220, 38, 38",
+            "success": "#16a34a",
+            "successRgb": "22, 163, 74",
+            "warning": "#d97706",
+            "warningRgb": "217, 119, 6",
+            "info": "#2563eb",
+            "infoRgb": "37, 99, 235"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.06)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.08)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.1)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "gruvbox-dark",
+    "name": "Gruvbox Dark",
+    "description": "Retro groove color scheme with warm earthy tones and high contrast",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "orange",
+      "retro",
+      "gruvbox"
+    ],
+    "icon": "squares-four",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Pavel Pertsev",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#fe8019",
+          "primaryHover": "#fea04d",
+          "primaryRgb": "254, 128, 25",
+          "accent": "#b8bb26",
+          "background": "#282828",
+          "surface": "#1d2021",
+          "surfaceHover": "#32302f",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#171819",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(254, 128, 25, 0.08)",
+            "active": "rgba(254, 128, 25, 0.15)"
+          },
+          "input": {
+            "background": "#1d2021",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#fe8019",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(254, 128, 25, 0.3)",
+            "thumbHover": "rgba(254, 128, 25, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(254, 128, 25, 0.15)",
+            "inlineText": "#feb354",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(254, 128, 25, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "jellyfish",
+    "name": "JellyFish Theme",
+    "description": "Deep ocean-inspired theme with hot pink and sky blue highlights",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "pink",
+      "blue",
+      "ocean"
+    ],
+    "icon": "waves",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "PawelBorkar",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#e83d84",
+          "primaryHover": "#f06098",
+          "primaryRgb": "232, 61, 132",
+          "accent": "#48c6ef",
+          "background": "#161b22",
+          "surface": "#1c222b",
+          "surfaceHover": "#242c37",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#11151c",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(232, 61, 132, 0.08)",
+            "active": "rgba(232, 61, 132, 0.15)"
+          },
+          "input": {
+            "background": "#1c222b",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#e83d84",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(232, 61, 132, 0.3)",
+            "thumbHover": "rgba(232, 61, 132, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(232, 61, 132, 0.15)",
+            "inlineText": "#f07aa6",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(232, 61, 132, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "material-theme",
+    "name": "Material Theme Ocean",
+    "description": "Material Theme Ocean with deep blue tones and soft highlights",
+    "category": "minimal",
+    "tags": [
+      "dark",
+      "blue",
+      "material",
+      "minimal"
+    ],
+    "icon": "diamond",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Mattia Astorino",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#82aaff",
+          "primaryHover": "#a3c1ff",
+          "primaryRgb": "130, 170, 255",
+          "accent": "#c3e88d",
+          "background": "#0f111a",
+          "surface": "#1a1c25",
+          "surfaceHover": "#222531",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#090b12",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(130, 170, 255, 0.08)",
+            "active": "rgba(130, 170, 255, 0.15)"
+          },
+          "input": {
+            "background": "#1a1c25",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#82aaff",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(130, 170, 255, 0.3)",
+            "thumbHover": "rgba(130, 170, 255, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(130, 170, 255, 0.15)",
+            "inlineText": "#b0ccff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(130, 170, 255, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "midnight",
+    "name": "Midnight",
+    "description": "Deep indigo theme for late night coding",
+    "category": "minimal",
+    "tags": [
+      "dark",
+      "deep",
+      "blue",
+      "minimal"
+    ],
+    "icon": "moon-stars",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Tesslate",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#6366f1",
+          "primaryHover": "#818cf8",
+          "primaryRgb": "99, 102, 241",
+          "accent": "#a78bfa",
+          "background": "#0f0f14",
+          "surface": "#1a1a24",
+          "surfaceHover": "#252532",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#0a0a0f",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(99, 102, 241, 0.08)",
+            "active": "rgba(99, 102, 241, 0.15)"
+          },
+          "input": {
+            "background": "#1a1a24",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#6366f1",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(99, 102, 241, 0.3)",
+            "thumbHover": "rgba(99, 102, 241, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(99, 102, 241, 0.15)",
+            "inlineText": "#a5b4fc",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(99, 102, 241, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "min-dark",
+    "name": "Min Dark",
+    "description": "Minimal dark theme with subtle light purple accents and clean aesthetics",
+    "category": "minimal",
+    "tags": [
+      "dark",
+      "purple",
+      "minimal",
+      "clean"
+    ],
+    "icon": "minus",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Miguel Solorio",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#b392f0",
+          "primaryHover": "#c5adf5",
+          "primaryRgb": "179, 146, 240",
+          "accent": "#f97583",
+          "background": "#1f1f1f",
+          "surface": "#252526",
+          "surfaceHover": "#2d2d2e",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#181818",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(179, 146, 240, 0.08)",
+            "active": "rgba(179, 146, 240, 0.15)"
+          },
+          "input": {
+            "background": "#252526",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#b392f0",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(179, 146, 240, 0.3)",
+            "thumbHover": "rgba(179, 146, 240, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(179, 146, 240, 0.15)",
+            "inlineText": "#ccb8f5",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(179, 146, 240, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "monokai-night",
+    "name": "Monokai Night",
+    "description": "Classic Monokai with deep night tones featuring bold magenta and vivid green",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "magenta",
+      "green",
+      "monokai"
+    ],
+    "icon": "paint-brush",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "fabiospampinato",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#f92672",
+          "primaryHover": "#fb5590",
+          "primaryRgb": "249, 38, 114",
+          "accent": "#a6e22e",
+          "background": "#1e1e1e",
+          "surface": "#272822",
+          "surfaceHover": "#30312b",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#181818",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(249, 38, 114, 0.08)",
+            "active": "rgba(249, 38, 114, 0.15)"
+          },
+          "input": {
+            "background": "#272822",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#f92672",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(249, 38, 114, 0.3)",
+            "thumbHover": "rgba(249, 38, 114, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(249, 38, 114, 0.15)",
+            "inlineText": "#fb6d9d",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(249, 38, 114, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "monokai-pro",
+    "name": "Monokai Pro",
+    "description": "Classic Monokai Pro with warm yellows and greens on a brown-tinted base",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "yellow",
+      "monokai",
+      "classic"
+    ],
+    "icon": "paint-brush",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Monokai",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#ffd866",
+          "primaryHover": "#ffe599",
+          "primaryRgb": "255, 216, 102",
+          "accent": "#a9dc76",
+          "background": "#2d2a2e",
+          "surface": "#221f22",
+          "surfaceHover": "#363237",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#1b191b",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(255, 216, 102, 0.08)",
+            "active": "rgba(255, 216, 102, 0.15)"
+          },
+          "input": {
+            "background": "#221f22",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#ffd866",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(255, 216, 102, 0.3)",
+            "thumbHover": "rgba(255, 216, 102, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(255, 216, 102, 0.15)",
+            "inlineText": "#ffe599",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(255, 216, 102, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "night-owl",
+    "name": "Night Owl",
+    "description": "A deep blue theme designed for night coders and accessibility",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "teal",
+      "night",
+      "accessible"
+    ],
+    "icon": "bird",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Sarah Drasner",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#7fdbca",
+          "primaryHover": "#a5e8d9",
+          "primaryRgb": "127, 219, 202",
+          "accent": "#c792ea",
+          "background": "#011627",
+          "surface": "#01121f",
+          "surfaceHover": "#0b2942",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#010e1a",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(127, 219, 202, 0.08)",
+            "active": "rgba(127, 219, 202, 0.15)"
+          },
+          "input": {
+            "background": "#01121f",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#7fdbca",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(127, 219, 202, 0.3)",
+            "thumbHover": "rgba(127, 219, 202, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(127, 219, 202, 0.15)",
+            "inlineText": "#a5e8d9",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(127, 219, 202, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "noctis",
+    "name": "Noctis",
+    "description": "Balanced dark theme with refreshing mint green and teal tones",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "green",
+      "mint",
+      "noctis"
+    ],
+    "icon": "leaf",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Liviu Schera",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#49e9a6",
+          "primaryHover": "#6ef0bb",
+          "primaryRgb": "73, 233, 166",
+          "accent": "#16b673",
+          "background": "#1b2932",
+          "surface": "#1e2e3a",
+          "surfaceHover": "#253a48",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#162029",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(73, 233, 166, 0.08)",
+            "active": "rgba(73, 233, 166, 0.15)"
+          },
+          "input": {
+            "background": "#1e2e3a",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#49e9a6",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(73, 233, 166, 0.3)",
+            "thumbHover": "rgba(73, 233, 166, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(73, 233, 166, 0.15)",
+            "inlineText": "#7df0c3",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(73, 233, 166, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "nord",
+    "name": "Nord",
+    "description": "Arctic, north-bluish color palette with frost-inspired accents",
+    "category": "minimal",
+    "tags": [
+      "dark",
+      "blue",
+      "arctic",
+      "minimal",
+      "nord"
+    ],
+    "icon": "snowflake",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Arctic Ice Studio",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#88c0d0",
+          "primaryHover": "#a3d4e0",
+          "primaryRgb": "136, 192, 208",
+          "accent": "#81a1c1",
+          "background": "#2e3440",
+          "surface": "#3b4252",
+          "surfaceHover": "#434c5e",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#272c36",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(136, 192, 208, 0.08)",
+            "active": "rgba(136, 192, 208, 0.15)"
+          },
+          "input": {
+            "background": "#3b4252",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#88c0d0",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(136, 192, 208, 0.3)",
+            "thumbHover": "rgba(136, 192, 208, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(136, 192, 208, 0.15)",
+            "inlineText": "#a3d4e0",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(136, 192, 208, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "ocean",
+    "name": "Ocean",
+    "description": "Calm teal theme inspired by the sea",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "blue",
+      "ocean",
+      "teal"
+    ],
+    "icon": "waves",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Tesslate",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#14b8a6",
+          "primaryHover": "#2dd4bf",
+          "primaryRgb": "20, 184, 166",
+          "accent": "#06b6d4",
+          "background": "#0f1419",
+          "surface": "#1a2027",
+          "surfaceHover": "#242c35",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#0a0f12",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(20, 184, 166, 0.08)",
+            "active": "rgba(20, 184, 166, 0.15)"
+          },
+          "input": {
+            "background": "#1a2027",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#14b8a6",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(20, 184, 166, 0.3)",
+            "thumbHover": "rgba(20, 184, 166, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(20, 184, 166, 0.15)",
+            "inlineText": "#5eead4",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(20, 184, 166, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#38bdf8",
+            "infoRgb": "56, 189, 248"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "omni",
+    "name": "Omni",
+    "description": "Vibrant dark theme by Rocketseat with bold pink and cyan accents",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "pink",
+      "cyan",
+      "rocketseat"
+    ],
+    "icon": "rocket",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Rocketseat",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#ff79c6",
+          "primaryHover": "#ff9ad5",
+          "primaryRgb": "255, 121, 198",
+          "accent": "#78d1e1",
+          "background": "#191622",
+          "surface": "#21202e",
+          "surfaceHover": "#2a293a",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#13111e",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(255, 121, 198, 0.08)",
+            "active": "rgba(255, 121, 198, 0.15)"
+          },
+          "input": {
+            "background": "#21202e",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#ff79c6",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(255, 121, 198, 0.3)",
+            "thumbHover": "rgba(255, 121, 198, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(255, 121, 198, 0.15)",
+            "inlineText": "#ffa3d7",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(255, 121, 198, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "one-dark-pro",
+    "name": "One Dark Pro",
+    "description": "Atom One Dark inspired theme with vibrant syntax colors",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "atom",
+      "blue",
+      "popular"
+    ],
+    "icon": "code",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "binaryify",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#61afef",
+          "primaryHover": "#7ec4ff",
+          "primaryRgb": "97, 175, 239",
+          "accent": "#c678dd",
+          "background": "#282c34",
+          "surface": "#21252b",
+          "surfaceHover": "#2c313a",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#1e2127",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(97, 175, 239, 0.08)",
+            "active": "rgba(97, 175, 239, 0.15)"
+          },
+          "input": {
+            "background": "#21252b",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#61afef",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(97, 175, 239, 0.3)",
+            "thumbHover": "rgba(97, 175, 239, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(97, 175, 239, 0.15)",
+            "inlineText": "#8fd0ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(97, 175, 239, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "one-monokai",
+    "name": "One Monokai",
+    "description": "A cross between Monokai and One Dark with warm gold and purple tones",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "gold",
+      "monokai",
+      "atom"
+    ],
+    "icon": "code",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "azemoh",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#e5c07b",
+          "primaryHover": "#f0d090",
+          "primaryRgb": "229, 192, 123",
+          "accent": "#c678dd",
+          "background": "#282c34",
+          "surface": "#21252b",
+          "surfaceHover": "#2c313a",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#1e2127",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(229, 192, 123, 0.08)",
+            "active": "rgba(229, 192, 123, 0.15)"
+          },
+          "input": {
+            "background": "#21252b",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#e5c07b",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(229, 192, 123, 0.3)",
+            "thumbHover": "rgba(229, 192, 123, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(229, 192, 123, 0.15)",
+            "inlineText": "#f0d49b",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(229, 192, 123, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "palenight",
+    "name": "Palenight",
+    "description": "Elegant Material Palenight theme with soft purple and cyan tones",
+    "category": "minimal",
+    "tags": [
+      "dark",
+      "purple",
+      "palenight",
+      "material"
+    ],
+    "icon": "moon",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Mattia Astorino",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#c792ea",
+          "primaryHover": "#d4a8f0",
+          "primaryRgb": "199, 146, 234",
+          "accent": "#89ddff",
+          "background": "#292d3e",
+          "surface": "#242837",
+          "surfaceHover": "#313548",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#1e2130",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(199, 146, 234, 0.08)",
+            "active": "rgba(199, 146, 234, 0.15)"
+          },
+          "input": {
+            "background": "#242837",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#c792ea",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(199, 146, 234, 0.3)",
+            "thumbHover": "rgba(199, 146, 234, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(199, 146, 234, 0.15)",
+            "inlineText": "#dbb6f5",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(199, 146, 234, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "panda",
+    "name": "Panda Theme",
+    "description": "Superminimal dark theme with playful pink and teal highlights",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "pink",
+      "teal",
+      "panda"
+    ],
+    "icon": "paw-print",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Siamak Mokhtari",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#ff75b5",
+          "primaryHover": "#ff9aca",
+          "primaryRgb": "255, 117, 181",
+          "accent": "#19f9d8",
+          "background": "#292a2b",
+          "surface": "#242526",
+          "surfaceHover": "#333435",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#1c1d1e",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(255, 117, 181, 0.08)",
+            "active": "rgba(255, 117, 181, 0.15)"
+          },
+          "input": {
+            "background": "#242526",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#ff75b5",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(255, 117, 181, 0.3)",
+            "thumbHover": "rgba(255, 117, 181, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(255, 117, 181, 0.15)",
+            "inlineText": "#ffa3cf",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(255, 117, 181, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "rose",
+    "name": "Rose",
+    "description": "Elegant pink theme for a softer aesthetic",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "pink",
+      "rose",
+      "warm"
+    ],
+    "icon": "flower-lotus",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Tesslate",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#f43f5e",
+          "primaryHover": "#fb7185",
+          "primaryRgb": "244, 63, 94",
+          "accent": "#ec4899",
+          "background": "#140f11",
+          "surface": "#201a1c",
+          "surfaceHover": "#2c2426",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#0f0a0b",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(244, 63, 94, 0.08)",
+            "active": "rgba(244, 63, 94, 0.15)"
+          },
+          "input": {
+            "background": "#201a1c",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#f43f5e",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(244, 63, 94, 0.3)",
+            "thumbHover": "rgba(244, 63, 94, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(244, 63, 94, 0.15)",
+            "inlineText": "#fda4af",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(244, 63, 94, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "ruby",
+    "name": "Ruby",
+    "description": "Clean and modern dark theme by Shopify with bold ruby red and green accents",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "red",
+      "shopify",
+      "ruby"
+    ],
+    "icon": "diamond",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Shopify",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#e5484d",
+          "primaryHover": "#ee6b6e",
+          "primaryRgb": "229, 72, 77",
+          "accent": "#46a758",
+          "background": "#16181a",
+          "surface": "#1c1e21",
+          "surfaceHover": "#25282c",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#111315",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(229, 72, 77, 0.08)",
+            "active": "rgba(229, 72, 77, 0.15)"
+          },
+          "input": {
+            "background": "#1c1e21",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#e5484d",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(229, 72, 77, 0.3)",
+            "thumbHover": "rgba(229, 72, 77, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(229, 72, 77, 0.15)",
+            "inlineText": "#f08082",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(229, 72, 77, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "shades-of-purple",
+    "name": "Shades of Purple",
+    "description": "Bold purple theme with gold and orange highlights for a professional look",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "purple",
+      "gold",
+      "bold"
+    ],
+    "icon": "sparkle",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Ahmad Awais",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#fad000",
+          "primaryHover": "#fce14d",
+          "primaryRgb": "250, 208, 0",
+          "accent": "#ff7200",
+          "background": "#2d2b55",
+          "surface": "#1e1d40",
+          "surfaceHover": "#38365f",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#171535",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(250, 208, 0, 0.08)",
+            "active": "rgba(250, 208, 0, 0.15)"
+          },
+          "input": {
+            "background": "#1e1d40",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#fad000",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(250, 208, 0, 0.3)",
+            "thumbHover": "rgba(250, 208, 0, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(250, 208, 0, 0.15)",
+            "inlineText": "#fce566",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(250, 208, 0, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "sunset",
+    "name": "Sunset",
+    "description": "Warm amber theme like a golden hour",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "orange",
+      "warm",
+      "sunset"
+    ],
+    "icon": "sun-horizon",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Tesslate",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#f97316",
+          "primaryHover": "#fb923c",
+          "primaryRgb": "249, 115, 22",
+          "accent": "#eab308",
+          "background": "#14100f",
+          "surface": "#201a18",
+          "surfaceHover": "#2c2420",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#0f0b0a",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(249, 115, 22, 0.08)",
+            "active": "rgba(249, 115, 22, 0.15)"
+          },
+          "input": {
+            "background": "#201a18",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#f97316",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(249, 115, 22, 0.3)",
+            "thumbHover": "rgba(249, 115, 22, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(249, 115, 22, 0.15)",
+            "inlineText": "#fdba74",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(249, 115, 22, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "synthwave-84",
+    "name": "SynthWave '84",
+    "description": "Neon-drenched retrowave theme with vivid pink and cyan glow",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "pink",
+      "retro",
+      "neon",
+      "synthwave"
+    ],
+    "icon": "music-notes",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "Robb Owen",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#ff7edb",
+          "primaryHover": "#ff9fe5",
+          "primaryRgb": "255, 126, 219",
+          "accent": "#36f9f6",
+          "background": "#262335",
+          "surface": "#1e1a2e",
+          "surfaceHover": "#2e2a3e",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#171526",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(255, 126, 219, 0.08)",
+            "active": "rgba(255, 126, 219, 0.15)"
+          },
+          "input": {
+            "background": "#1e1a2e",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#ff7edb",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(255, 126, 219, 0.3)",
+            "thumbHover": "rgba(255, 126, 219, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(255, 126, 219, 0.15)",
+            "inlineText": "#ffa5e5",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(255, 126, 219, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "tokyo-night",
+    "name": "Tokyo Night",
+    "description": "A clean dark theme inspired by the lights of Tokyo at night",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "blue",
+      "purple",
+      "tokyo",
+      "neon"
+    ],
+    "icon": "moon-stars",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "enkia",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#7aa2f7",
+          "primaryHover": "#9bb8ff",
+          "primaryRgb": "122, 162, 247",
+          "accent": "#bb9af7",
+          "background": "#1a1b26",
+          "surface": "#16161e",
+          "surfaceHover": "#22232e",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#111119",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(122, 162, 247, 0.08)",
+            "active": "rgba(122, 162, 247, 0.15)"
+          },
+          "input": {
+            "background": "#16161e",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#7aa2f7",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(122, 162, 247, 0.3)",
+            "thumbHover": "rgba(122, 162, 247, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(122, 162, 247, 0.15)",
+            "inlineText": "#a3c4ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(122, 162, 247, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "vue-theme",
+    "name": "Vue Theme",
+    "description": "Official Vue.js inspired dark theme with signature green and deep blue",
+    "category": "professional",
+    "tags": [
+      "dark",
+      "green",
+      "vue",
+      "framework"
+    ],
+    "icon": "code",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "mariorodeghiero",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#42b883",
+          "primaryHover": "#5fcf9c",
+          "primaryRgb": "66, 184, 131",
+          "accent": "#35495e",
+          "background": "#1e1e1e",
+          "surface": "#252526",
+          "surfaceHover": "#2d2d30",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#181818",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(66, 184, 131, 0.08)",
+            "active": "rgba(66, 184, 131, 0.15)"
+          },
+          "input": {
+            "background": "#252526",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#42b883",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(66, 184, 131, 0.3)",
+            "thumbHover": "rgba(66, 184, 131, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(66, 184, 131, 0.15)",
+            "inlineText": "#6fd4a5",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(66, 184, 131, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  },
+  {
+    "kind": "theme",
+    "slug": "winter-is-coming",
+    "name": "Winter is Coming",
+    "description": "Deep dark blue theme with icy light blue and lavender accents",
+    "category": "vibrant",
+    "tags": [
+      "dark",
+      "blue",
+      "winter",
+      "ice"
+    ],
+    "icon": "snowflake",
+    "is_active": true,
+    "is_published": true,
+    "is_featured": false,
+    "pricing_type": "free",
+    "price": 0,
+    "extra_metadata": {
+      "mode": "dark",
+      "author": "John Papa",
+      "version": "1.0.0",
+      "theme_json": {
+        "colors": {
+          "primary": "#89ddff",
+          "primaryHover": "#a8e7ff",
+          "primaryRgb": "137, 221, 255",
+          "accent": "#c792ea",
+          "background": "#011627",
+          "surface": "#0b2942",
+          "surfaceHover": "#133b56",
+          "text": "#ffffff",
+          "textMuted": "rgba(255, 255, 255, 0.6)",
+          "textSubtle": "rgba(255, 255, 255, 0.4)",
+          "border": "rgba(255, 255, 255, 0.08)",
+          "borderHover": "rgba(255, 255, 255, 0.15)",
+          "sidebar": {
+            "background": "#00101e",
+            "text": "#ffffff",
+            "border": "rgba(255, 255, 255, 0.06)",
+            "hover": "rgba(137, 221, 255, 0.08)",
+            "active": "rgba(137, 221, 255, 0.15)"
+          },
+          "input": {
+            "background": "#0b2942",
+            "border": "rgba(255, 255, 255, 0.1)",
+            "borderFocus": "#89ddff",
+            "text": "#ffffff",
+            "placeholder": "rgba(255, 255, 255, 0.4)"
+          },
+          "scrollbar": {
+            "thumb": "rgba(137, 221, 255, 0.3)",
+            "thumbHover": "rgba(137, 221, 255, 0.5)",
+            "track": "transparent"
+          },
+          "code": {
+            "inlineBackground": "rgba(137, 221, 255, 0.15)",
+            "inlineText": "#b0e8ff",
+            "blockBackground": "rgba(0, 0, 0, 0.4)",
+            "blockBorder": "rgba(137, 221, 255, 0.2)",
+            "blockText": "#e2e2e2"
+          },
+          "status": {
+            "error": "#f87171",
+            "errorRgb": "248, 113, 113",
+            "success": "#4ade80",
+            "successRgb": "74, 222, 128",
+            "warning": "#fbbf24",
+            "warningRgb": "251, 191, 36",
+            "info": "#60a5fa",
+            "infoRgb": "96, 165, 250"
+          },
+          "shadow": {
+            "small": "0 1px 2px rgba(0, 0, 0, 0.4)",
+            "medium": "0 4px 6px rgba(0, 0, 0, 0.4)",
+            "large": "0 10px 15px rgba(0, 0, 0, 0.4)"
+          }
+        },
+        "typography": {
+          "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          "fontFamilyMono": "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+          "fontSizeBase": "14px",
+          "lineHeight": "1.5"
+        },
+        "spacing": {
+          "radiusSmall": "4px",
+          "radiusMedium": "6px",
+          "radiusLarge": "8px",
+          "radiusXl": "12px"
+        },
+        "animation": {
+          "durationFast": "150ms",
+          "durationNormal": "200ms",
+          "durationSlow": "300ms",
+          "easing": "cubic-bezier(0.4, 0, 0.2, 1)"
+        },
+        "borderless": false
+      }
+    }
+  }
+]

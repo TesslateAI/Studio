@@ -5,8 +5,10 @@ Marketplace API endpoints for browsing, purchasing, and managing agents.
 import asyncio
 import logging
 import re
+import uuid
 from datetime import UTC, datetime
 from typing import Any
+from typing import cast as type_cast
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
@@ -22,6 +24,7 @@ from ..models import (
     BaseReview,
     MarketplaceAgent,
     MarketplaceBase,
+    MarketplaceSource,
     ProjectAgent,
     Theme,
     User,
@@ -31,6 +34,20 @@ from ..models import (
 )
 from ..schemas import BaseSubmitRequest, BaseUpdateRequest, SkillInstallRequest
 from ..services.cache_service import cache
+from ..services.marketplace_constants import LOCAL_SOURCE_ID
+from ..services.marketplace_federation import install_guard
+from ..services.marketplace_source_cache import (
+    bulk_load_sources as _bulk_load_sources,
+)
+from ..services.marketplace_source_cache import (
+    load_source as _load_source,
+)
+from ..services.marketplace_source_cache import (
+    lookup_source as _lookup_source,
+)
+from ..services.marketplace_source_cache import (
+    resolve_source_filter as _resolve_source_filter,
+)
 from ..services.recommendations import get_related_agents, update_co_install_counts
 from ..username_validation import resolve_display_name
 from ..users import current_active_user, current_optional_user
@@ -48,11 +65,13 @@ def _resolve_display_name(user: User) -> str:
 def _reject_if_builtin(agent: MarketplaceAgent) -> None:
     """Guard — refuse to mutate built-in skill rows via user/admin endpoints.
 
-    Built-in skills (``is_builtin=True``) are managed exclusively by seed
-    code (``orchestrator/app/seeds/skills.py``). Any edit to a built-in via
-    the UI would (a) be silently overwritten on the next orchestrator
-    startup when the idempotent seed reruns, or (b) drift the deployed
-    state away from what the seed template + live marker renderers produce.
+    Built-in skills (``is_builtin=True``) are managed by the upstream
+    marketplace service (after Wave 10 the orchestrator's catalog rows are
+    the cached output of ``services/marketplace_sync.py`` pulling from
+    ``packages/tesslate-marketplace/app/seeds/skills_*.json``). Any edit to
+    a built-in via the UI would either (a) be silently overwritten on the
+    next federation sync poll, or (b) drift the deployed state away from
+    the canonical seed.
 
     Callers that allow forking (which creates a NEW row with
     ``is_builtin=False``) should still call this on the *source* row before
@@ -63,12 +82,244 @@ def _reject_if_builtin(agent: MarketplaceAgent) -> None:
         raise HTTPException(
             status_code=403,
             detail=(
-                "Built-in skills are managed in seed code "
-                "(orchestrator/app/seeds/skills.py). Edit the seed and "
-                "redeploy. Users can fork built-in skills to create editable "
-                "copies."
+                "Built-in skills are managed upstream by the federated "
+                "marketplace (packages/tesslate-marketplace/app/seeds/). "
+                "Edit the upstream seed and let the next sync poll propagate. "
+                "Users can fork built-in skills to create editable copies."
             ),
         )
+
+
+async def _resolve_theme_by_identifier(db: AsyncSession, identifier: str) -> Theme | None:
+    """Resolve a Theme row given a path identifier.
+
+    Wave 1.5: ``Theme.id`` is now a GUID. Pre-Wave-1.5 the id was the
+    slug string itself (e.g. ``"midnight-dark"``); the desktop apps,
+    URL bookmarks, and existing API clients all keep sending the slug
+    in the ``{theme_id}`` path slot. Accept both forms so legacy
+    callers keep working:
+
+      - if ``identifier`` parses as a UUID, look up by ``Theme.id``;
+      - otherwise look up by ``Theme.slug``.
+
+    Returns ``None`` if no theme matches; the router maps that to a
+    404. Active vs inactive filtering is left to the caller because
+    different mutation routes have different semantics there.
+    """
+    try:
+        guid_id = UUID(identifier)
+    except (ValueError, AttributeError):
+        guid_id = None
+
+    if guid_id is not None:
+        row = await db.execute(select(Theme).where(Theme.id == guid_id))
+        theme = row.scalar_one_or_none()
+        if theme is not None:
+            return theme
+    row = await db.execute(select(Theme).where(Theme.slug == identifier))
+    return row.scalar_one_or_none()
+
+
+def _is_official_source(source: MarketplaceSource | None) -> bool:
+    """True iff the row was synced from a hub with ``trust_level='official'``.
+
+    This replaces the legacy ``created_by_user_id IS NULL`` check that the
+    pre-federation seed code used to mean "Tesslate-owned". Backfilled
+    rows in Wave 1 with ``created_by_user_id IS NULL`` were assigned to
+    Tesslate Official, so the two predicates are equivalent on existing
+    data; new federated rows from community hubs deviate, which is the
+    whole point of federation.
+    """
+    return bool(source and source.trust_level == "official")
+
+
+def _source_display_name(source: MarketplaceSource | None) -> str:
+    """Display label for the source's hub.
+
+    Defaults to ``"Community"`` when no source is attached — that maps
+    to legacy user-authored rows that haven't been backfilled to a hub.
+    Tesslate Official's seeded ``display_name`` is ``"Tesslate Official"``;
+    a self-hosted rebrand picks up the new name without code changes.
+    """
+    if source is None:
+        return "Community"
+    name = type_cast(str | None, source.display_name)
+    if name:
+        return name
+    return type_cast(str, source.handle)
+
+
+def _resolve_creator_meta(
+    *,
+    forked_by_user: User | None,
+    source: MarketplaceSource | None,
+) -> tuple[str, str, str | None, str | None]:
+    """Compute (creator_type, creator_name, creator_username, creator_avatar_url).
+
+    Wave 4 source-aware logic:
+      - When the row has a ``forked_by_user``, the creator is community.
+      - Otherwise the creator is the *source* — we use its ``display_name``
+        instead of a hardcoded ``"Tesslate"``.
+    """
+    if forked_by_user is not None:
+        return (
+            "community",
+            resolve_display_name(
+                forked_by_user.name, forked_by_user.username, forked_by_user.email
+            ),
+            forked_by_user.username,
+            forked_by_user.avatar_url,
+        )
+    if _is_official_source(source):
+        return ("official", _source_display_name(source), None, None)
+    is_community_source = source is not None and source.trust_level != "official"
+    return (
+        "community" if is_community_source else "official",
+        _source_display_name(source),
+        None,
+        None,
+    )
+
+
+def _ensure_install_allowed(
+    source: MarketplaceSource | None,
+    kind: str,
+    *,
+    requester_user_id: UUID,
+    confirmed: bool = False,
+    version_meta: dict[str, Any] | None = None,
+) -> None:
+    """Server-enforced install gate.
+
+    Calls ``install_guard`` for the (source, kind) cell; raises a typed
+    HTTP error when the install is blocked or requires confirmation.
+
+    Routers MUST call this BEFORE mutating any state (creating purchase
+    rows, assignments, library entries, etc). The guard surfaces:
+
+      - 403 ``install_blocked`` — trust level + kind matrix says no.
+      - 409 ``install_requires_confirmation`` — private hub, mcp/app
+        install requires the per-install scope/tool prompt; the response
+        body carries ``scope_tool_list`` so the UI can render the modal,
+        and the caller re-submits with ``confirmed=true``.
+
+    When ``source`` is ``None`` (a row never backfilled to any source),
+    we treat it as the local sentinel — these are user-authored rows
+    pre-federation and were always installable by their creator. The
+    install is allowed; the caller's own ownership checks are the
+    relevant authorization.
+    """
+    if source is None:
+        # Pre-Wave-1 backfill safety: treat as local-system installable.
+        return
+
+    decision = install_guard(
+        source,
+        kind,
+        version_meta=version_meta,
+        requester_user_id=requester_user_id,
+    )
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "install_blocked",
+                "reason": decision.reason,
+                "source_handle": source.handle,
+                "kind": kind,
+            },
+        )
+    if decision.requires_confirmation and not confirmed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "install_requires_confirmation",
+                "reason": decision.reason,
+                "source_handle": source.handle,
+                "kind": kind,
+                "scope_tool_list": decision.scope_tool_list or [],
+                "destructive_tools": decision.destructive_tools,
+            },
+        )
+
+
+async def _void_paid_purchase_for_gate_failure(
+    *,
+    db: AsyncSession,
+    user: User,
+    agent: MarketplaceAgent,
+    gate_exc: HTTPException,
+    stripe_session_id: str,
+) -> None:
+    """Void any active ``UserPurchasedAgent`` row for ``user``+``agent`` and
+    record the source-trust failure.
+
+    Mirrors the subscription-cancel path in
+    ``services/stripe_service.py::_handle_subscription_deleted`` (sets
+    ``is_active=False`` and stamps ``expires_at=now``). When no row exists
+    the function is a no-op — a row may not have been written yet because
+    we re-check the gate BEFORE inserting on the new-purchase path. The
+    audit entry is non-blocking and never raises.
+    """
+    try:
+        existing_result = await db.execute(
+            select(UserPurchasedAgent).where(
+                and_(
+                    UserPurchasedAgent.user_id == user.id,
+                    UserPurchasedAgent.agent_id == agent.id,
+                )
+            )
+        )
+        existing_purchase = existing_result.scalar_one_or_none()
+        if existing_purchase is not None and existing_purchase.is_active:
+            existing_purchase.is_active = False
+            existing_purchase.expires_at = datetime.now(UTC)
+
+        await db.commit()
+    except Exception:
+        logger.exception(
+            "verify_purchase: failed to void existing purchase for user=%s agent=%s",
+            user.id,
+            agent.id,
+        )
+
+    # Non-blocking audit log keyed on the user's default team.
+    try:
+        if user.default_team_id is not None:
+            from ..services.audit_service import log_event
+
+            await log_event(
+                db=db,
+                team_id=user.default_team_id,
+                user_id=user.id,
+                action="marketplace.purchase.voided_trust_failure",
+                resource_type="agent",
+                resource_id=agent.id,
+                details={
+                    "stripe_session_id": stripe_session_id,
+                    "agent_slug": agent.slug,
+                    "source_id": str(agent.source_id) if agent.source_id else None,
+                    "gate_status": gate_exc.status_code,
+                    "gate_detail": gate_exc.detail,
+                },
+            )
+            await db.commit()
+    except Exception:
+        logger.debug(
+            "verify_purchase: audit_log failed for trust-voided purchase user=%s agent=%s",
+            user.id,
+            agent.id,
+            exc_info=True,
+        )
+
+    logger.warning(
+        "verify_purchase: voided paid purchase due to install_guard failure "
+        "user=%s agent=%s source=%s detail=%s",
+        user.id,
+        agent.id,
+        agent.source_id,
+        gate_exc.detail,
+    )
 
 
 # Cache TTL for LiteLLM models (5 minutes - models rarely change)
@@ -441,17 +692,29 @@ async def get_marketplace_agents(
     ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle (e.g. tesslate-official).",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
     """
     Browse marketplace agents with filtering and sorting.
-    Shows official Tesslate agents and published community agents.
+    Shows official agents from any active source plus published community agents.
+
+    When ``?source=<handle>`` is supplied, results are restricted to that
+    source. Without ``source``, every active source contributes rows
+    (the federation dropdown's "All sources" mode); the frontend handles
+    UI-level grouping. Hub-id pinning and trust enforcement happen at
+    sync/install time, not on browse.
 
     Public endpoint - authentication is optional:
     - Authenticated: Shows purchase status (is_purchased) for each item
     - Unauthenticated: Shows catalog without purchase status
     """
+    source_id_filter = await _resolve_source_filter(db, source)
+
     # Base query - show official agents AND published community agents (exclude skills/subagents)
     query = (
         select(MarketplaceAgent)
@@ -459,6 +722,7 @@ async def get_marketplace_agents(
         .where(
             MarketplaceAgent.is_active.is_(True),
             MarketplaceAgent.is_system.isnot(True),
+            MarketplaceAgent.deleted_upstream.is_(False),
             MarketplaceAgent.item_type.notin_(
                 ["skill", "subagent", "mcp_server", "deployment_target"]
             ),
@@ -466,6 +730,9 @@ async def get_marketplace_agents(
             | (MarketplaceAgent.is_published.is_(True)),
         )
     )
+
+    if source_id_filter is not None:
+        query = query.where(MarketplaceAgent.source_id == source_id_filter)
 
     # Apply filters
     if category:
@@ -531,24 +798,20 @@ async def get_marketplace_agents(
         )
         purchased_agent_ids = [row[0] for row in purchased_result.fetchall()]
 
+    # Bulk-load every distinct source row referenced by the result set so the
+    # response serializer can include the source's display name + handle
+    # without N+1 selects.
+    source_rows = await _bulk_load_sources(
+        db, {a.source_id for a in agents if a.source_id is not None}
+    )
+
     # Format response
     response = []
     for agent in agents:
-        # Determine creator info
-        creator_type = "official"  # Tesslate
-        creator_name = "Tesslate"
-
-        creator_username = None
-        if agent.forked_by_user_id:
-            creator_type = "community"
-            if agent.forked_by_user:
-                creator_name = _resolve_display_name(agent.forked_by_user)
-                creator_username = agent.forked_by_user.username
-
-        # Get creator avatar URL
-        creator_avatar_url = None
-        if agent.forked_by_user:
-            creator_avatar_url = agent.forked_by_user.avatar_url
+        agent_source = _lookup_source(source_rows, agent.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=agent.forked_by_user, source=agent_source
+        )
 
         agent_dict = {
             "id": agent.id,
@@ -577,13 +840,15 @@ async def get_marketplace_agents(
             "is_featured": agent.is_featured,
             "is_purchased": agent.id in purchased_agent_ids,
             "creator_type": creator_type,  # "official" or "community"
-            "creator_name": creator_name,  # "Tesslate" or display name
+            "creator_name": creator_name,  # source.display_name or community user
             "creator_username": creator_username,
             "created_by_user_id": str(agent.created_by_user_id)
             if agent.created_by_user_id
             else None,
             "forked_by_user_id": str(agent.forked_by_user_id) if agent.forked_by_user_id else None,
             "creator_avatar_url": creator_avatar_url,
+            "source_handle": agent_source.handle if agent_source else None,
+            "source_trust_level": agent_source.trust_level if agent_source else None,
         }
         response.append(agent_dict)
 
@@ -600,6 +865,15 @@ async def get_marketplace_agents(
 @router.get("/agents/{slug}")
 async def get_agent_details(
     slug: str,
+    source: str | None = Query(
+        default=None,
+        description=(
+            "Wave 5: source handle disambiguates same-slug-different-source "
+            "rows (e.g. tesslate-official's 'coder' vs a community hub's). "
+            "Omitted slug requests resolve to Tesslate Official by default "
+            "for backwards compatibility with pre-Wave-5 bare-slug URLs."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
@@ -607,14 +881,46 @@ async def get_agent_details(
     Get detailed information about a specific agent.
 
     Public endpoint - authentication is optional.
+
+    Wave 5 — same-slug-different-source resolution:
+      - If ``?source=<handle>`` is supplied, the lookup is restricted to
+        that source.
+      - If omitted, the lookup defaults to Tesslate Official to preserve
+        legacy bare-slug URL semantics. If no Tesslate Official row
+        exists for the slug, we fall back to the first row found by
+        ``(slug, is_active=true)`` so legacy community-only slugs still
+        resolve.
     """
-    # Get agent with forked_by_user relationship
-    result = await db.execute(
+    source_id_filter = await _resolve_source_filter(db, source)
+
+    # Wave 5 lookup priority: explicit source filter > Tesslate Official
+    # > any matching row. The legacy global slug uniqueness was dropped
+    # in alembic 0091, so an unfiltered lookup that returned multiple
+    # rows would non-deterministically pick one. Resolving via the
+    # default-source fallback is the documented Wave-5 behavior.
+    base_query = (
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(MarketplaceAgent.slug == slug)
     )
-    agent = result.scalar_one_or_none()
+    if source_id_filter is not None:
+        result = await db.execute(base_query.where(MarketplaceAgent.source_id == source_id_filter))
+        agent = result.scalar_one_or_none()
+    else:
+        # Default to Tesslate Official (the well-known seeded UUID).
+        TESSLATE_OFFICIAL_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+        result = await db.execute(
+            base_query.where(MarketplaceAgent.source_id == TESSLATE_OFFICIAL_ID)
+        )
+        agent = result.scalar_one_or_none()
+        if agent is None:
+            # Legacy fallback: bare-slug URLs that don't exist on
+            # Tesslate Official may still resolve to a community row
+            # (especially for forks the user authored locally pre-Wave-5).
+            # Order by source_id so the same row wins on every request
+            # rather than relying on PG's unspecified row order.
+            result = await db.execute(base_query.order_by(MarketplaceAgent.source_id).limit(1))
+            agent = result.scalar_one_or_none()
 
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -654,17 +960,11 @@ async def get_agent_details(
     )
     reviews = reviews_result.scalars().all()
 
-    # Determine creator info
-    creator_type = "official"
-    creator_name = "Tesslate"
-    creator_avatar_url = None
-    creator_username = None
-    if agent.forked_by_user_id:
-        creator_type = "community"
-        if agent.forked_by_user:
-            creator_name = _resolve_display_name(agent.forked_by_user)
-            creator_avatar_url = agent.forked_by_user.avatar_url
-            creator_username = agent.forked_by_user.username
+    # Determine creator info from joined source row.
+    agent_source = await _load_source(db, agent.source_id)
+    creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+        forked_by_user=agent.forked_by_user, source=agent_source
+    )
 
     # Format response
     return {
@@ -702,6 +1002,8 @@ async def get_agent_details(
         "creator_name": creator_name,
         "creator_username": creator_username,
         "creator_avatar_url": creator_avatar_url,
+        "source_handle": agent_source.handle if agent_source else None,
+        "source_trust_level": agent_source.trust_level if agent_source else None,
         "reviews": [
             {
                 "id": review.id,
@@ -761,6 +1063,7 @@ async def purchase_agent(
     agent_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -774,6 +1077,15 @@ async def purchase_agent(
 
     if not agent or not agent.is_active:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Trust-level enforcement (Wave 4 federation guard).
+    agent_source = await _load_source(db, agent.source_id)
+    _ensure_install_allowed(
+        agent_source,
+        "agent",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
@@ -830,7 +1142,11 @@ async def purchase_agent(
             "success": True,
         }
 
-    # For paid agents, create Stripe checkout session
+    # For paid agents, route through the federation dispatch_purchase facade
+    # so Wave 9 hub-checkout / orchestrator-Stripe / refused branches all
+    # share the same code path. The orchestrator-Stripe branch (rule 2)
+    # remains the safety fallback for the entire wave.
+    from ..services.marketplace_federation import dispatch_purchase
     from ..services.stripe_service import stripe_service
 
     # Create checkout session with origin-based URLs to preserve user's domain
@@ -845,6 +1161,109 @@ async def purchase_agent(
     )
     cancel_url = f"{origin}/marketplace/agent/{agent.slug}"
 
+    # Project the cached row's pricing into the dispatch_purchase shape.
+    item_payload: dict[str, Any] = {
+        "kind": "agent",
+        "slug": agent.slug,
+        "pricing": {
+            "pricing_type": agent.pricing_type,
+            "price_cents": agent.price or 0,
+            "stripe_price_id": agent.stripe_price_id,
+            "currency": "usd",
+        },
+    }
+
+    # Decrypt the source token so the federation client can call the hub
+    # if the dispatcher picks the HUB_CHECKOUT branch. The orchestrator-
+    # Stripe branch never needs it.
+    decrypted_token: str | None = None
+    if agent_source is not None and agent_source.encrypted_token:
+        try:
+            from ..services.credential_manager import get_credential_manager
+
+            decrypted_token = (
+                get_credential_manager().decrypt_token(agent_source.encrypted_token) or None
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "purchase_agent: failed to decrypt source token for source=%s",
+                agent_source.handle,
+            )
+
+    if agent_source is None:
+        # Pre-Wave-1 backfill safety: pre-federation rows with no source
+        # cannot route through dispatch_purchase (no source object). Fall
+        # back to the orchestrator-Stripe path directly.
+        action: dict[str, Any] = {
+            "action": "orchestrator_stripe",
+            "stripe_price_id": agent.stripe_price_id,
+        }
+    else:
+        try:
+            action = await dispatch_purchase(
+                agent_source,
+                kind="agent",
+                slug=agent.slug,
+                version=None,
+                requester=current_user,
+                item=item_payload,
+                success_url=success_url,
+                cancel_url=cancel_url,
+                decrypted_token=decrypted_token,
+            )
+        except Exception as e:
+            logger.error(f"dispatch_purchase failed for agent={agent.id}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to dispatch purchase") from e
+
+    if action["action"] == "refused":
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "pricing_not_supported",
+                "reason": action.get("reason", "pricing_not_supported"),
+                "source_handle": agent_source.handle if agent_source else None,
+                "kind": "agent",
+                "slug": agent.slug,
+            },
+        )
+
+    if action["action"] == "free_install":
+        # Should be unreachable — free items branched above — but defend
+        # against pricing-payload drift between cache and live state.
+        if existing_purchase:
+            existing_purchase.is_active = True
+            existing_purchase.purchase_date = datetime.now(UTC)
+        else:
+            db.add(
+                UserPurchasedAgent(
+                    user_id=current_user.id,
+                    team_id=team_id,
+                    agent_id=agent_id,
+                    purchase_type="free",
+                    is_active=True,
+                )
+            )
+        agent.downloads += 1
+        await db.commit()
+        return {
+            "message": "Agent added to your library",
+            "agent_id": agent_id,
+            "success": True,
+        }
+
+    if action["action"] == "hub_checkout":
+        # Hub Connect-Stripe owns the session; orchestrator just relays
+        # the URL. Webhook reconciliation lands later on the per-source
+        # entitlements/grant endpoint.
+        return {
+            "checkout_url": action["checkout_url"],
+            "session_id": action["session_id"],
+            "agent_id": agent_id,
+            "via": "hub_checkout",
+            "source_handle": action.get("source_handle"),
+        }
+
+    # action["action"] == "orchestrator_stripe" — Wave 9 safety fallback
     try:
         session = await stripe_service.create_agent_purchase_checkout(
             user=current_user, agent=agent, success_url=success_url, cancel_url=cancel_url, db=db
@@ -859,6 +1278,7 @@ async def purchase_agent(
             "checkout_url": session["url"] if isinstance(session, dict) else session.url,
             "session_id": session["id"] if isinstance(session, dict) else session.id,
             "agent_id": agent_id,
+            "via": "orchestrator_stripe",
         }
     except HTTPException:
         raise
@@ -896,11 +1316,21 @@ async def verify_agent_purchase(
         if session.payment_status != "paid":
             raise HTTPException(status_code=400, detail="Payment not completed")
 
-        # Verify the customer matches the current user
+        # Verify the customer matches the user's billing team
+        from ..models_team import Team as _BillingTeam
+
         user_billing = await db.execute(select(User).where(User.id == current_user.id))
         user = user_billing.scalar_one()
+        team_customer_id = None
+        if user.default_team_id:
+            team_res = await db.execute(
+                select(_BillingTeam).where(_BillingTeam.id == user.default_team_id)
+            )
+            billing_team = team_res.scalar_one_or_none()
+            if billing_team:
+                team_customer_id = billing_team.stripe_customer_id
 
-        if not user.stripe_customer_id or user.stripe_customer_id != session.customer:
+        if not team_customer_id or team_customer_id != session.customer:
             raise HTTPException(status_code=403, detail="Session customer does not match user")
 
         # Get agent from metadata or slug parameter
@@ -920,6 +1350,43 @@ async def verify_agent_purchase(
 
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
+
+        # Re-check the install gate at fulfillment time. The trust state can
+        # change between checkout-creation and Stripe's redirect (admin marks
+        # the source ``is_active=False``, the source's ``trust_level`` drops,
+        # the hub_id drifts). We treat the user as already-confirmed
+        # because they actually paid; we only need the trust-matrix gate
+        # to still hold. On a deny we void the purchase row (idempotent on
+        # the existing row, never persists a new row), log an audit
+        # entry, and return 200 with a structured failure body so the
+        # client surfaces "your source dropped trust, refund initiated"
+        # without Stripe retrying the redirect.
+        agent_source_for_gate = await _load_source(db, agent.source_id)
+        try:
+            _ensure_install_allowed(
+                agent_source_for_gate,
+                "agent",
+                requester_user_id=current_user.id,
+                confirmed=True,
+            )
+        except HTTPException as gate_exc:
+            await _void_paid_purchase_for_gate_failure(
+                db=db,
+                user=current_user,
+                agent=agent,
+                gate_exc=gate_exc,
+                stripe_session_id=session_id,
+            )
+            return {
+                "success": False,
+                "message": "Source trust check failed at fulfillment",
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "install_blocked": gate_exc.detail
+                if isinstance(gate_exc.detail, dict)
+                else {"error": "install_blocked", "reason": str(gate_exc.detail)},
+                "refund_status": "pending",
+            }
 
         # Check if user already has this agent
         existing_query = select(UserPurchasedAgent).where(
@@ -1241,6 +1708,7 @@ async def fork_agent(
     description: str | None = None,
     system_prompt: str | None = None,
     model: str | None = None,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -1256,6 +1724,17 @@ async def fork_agent(
 
     if not parent_agent.is_forkable:
         raise HTTPException(status_code=403, detail="This agent cannot be forked")
+
+    # Forking is an install of the parent into the user's library; the
+    # trust gate applies (e.g. an untrusted source that lets agents fork
+    # would still be allowed; mcp_server / app remain blocked elsewhere).
+    parent_source = await _load_source(db, parent_agent.source_id)
+    _ensure_install_allowed(
+        parent_source,
+        "agent",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Create a forked agent
     forked_slug = f"{parent_agent.slug}-fork-{current_user.id}-{datetime.now(UTC).timestamp()}"
@@ -1281,6 +1760,7 @@ async def fork_agent(
         pricing_type="free",
         price=0,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         requires_user_keys=parent_agent.requires_user_keys,
         downloads=0,
         rating=5.0,
@@ -1335,9 +1815,7 @@ def _is_tool_driven_request(request: Request | None) -> bool:
     if (request.headers.get("X-Tool-Created") or "").lower() == "true":
         return True
     scope_header = request.headers.get("X-API-Scope") or ""
-    if "marketplace.author" in scope_header.split():
-        return True
-    return False
+    return "marketplace.author" in scope_header.split()
 
 
 @router.post("/agents/create")
@@ -1404,6 +1882,7 @@ async def create_custom_agent(
         pricing_type="free",
         price=0,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         requires_user_keys=False,
         downloads=0,
         rating=5.0,
@@ -1465,9 +1944,7 @@ async def update_custom_agent(
         # Tool-driven calls require explicit ownership: no fork-on-edit
         # for open-source agents (that's an interactive flow).
         agent_lookup = (
-            await db.execute(
-                select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
-            )
+            await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
         ).scalar_one_or_none()
         if agent_lookup is None:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -1541,6 +2018,7 @@ async def update_custom_agent(
                 pricing_type="free",
                 price=0,
                 source_type="open",
+                source_id=LOCAL_SOURCE_ID,
                 requires_user_keys=agent.requires_user_keys,
                 downloads=0,
                 rating=5.0,
@@ -1676,19 +2154,16 @@ async def get_user_agents(
 
     agents_data = result.fetchall()
 
+    source_rows = await _bulk_load_sources(
+        db, {a.source_id for a, _ in agents_data if a.source_id is not None}
+    )
+
     response = []
     for agent, purchase in agents_data:
-        # Resolve creator info
-        creator_type = "official"
-        creator_name = "Tesslate"
-        creator_username = None
-        creator_avatar_url = None
-        if agent.forked_by_user_id:
-            creator_type = "community"
-            if agent.forked_by_user:
-                creator_name = _resolve_display_name(agent.forked_by_user)
-                creator_username = agent.forked_by_user.username
-                creator_avatar_url = agent.forked_by_user.avatar_url
+        agent_source = _lookup_source(source_rows, agent.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=agent.forked_by_user, source=agent_source
+        )
 
         response.append(
             {
@@ -1874,6 +2349,7 @@ async def create_subagent(
         pricing_type="free",
         price=0,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         is_active=True,
         is_published=False,
     )
@@ -1940,6 +2416,7 @@ async def update_subagent(
             pricing_type="free",
             price=0,
             source_type="open",
+            source_id=LOCAL_SOURCE_ID,
             is_active=True,
             is_published=False,
         )
@@ -2656,23 +3133,45 @@ async def get_marketplace_bases(
     ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
     """
     Browse marketplace bases with filtering and sorting.
 
+    When ``?source=<handle>`` is supplied, results are restricted to a
+    single source. Without it, every active source contributes rows.
+
     Public endpoint - authentication is optional:
     - Authenticated: Shows purchase status (is_purchased) for each item
     - Unauthenticated: Shows catalog without purchase status
     """
+    source_id_filter = await _resolve_source_filter(db, source)
+
+    # Wave 4: a base is browseable when its source is `official`/`admin_trusted`
+    # (always visible; the cache is the source of truth) OR it's a user-authored
+    # row marked `public`. The legacy `created_by_user_id IS NULL` check meant
+    # the same thing pre-federation — official rows were always seeded with
+    # `created_by_user_id=NULL`. We replace it with a source-aware test joined
+    # via ``MarketplaceSource.trust_level``.
+    official_subq = select(MarketplaceSource.id).where(
+        MarketplaceSource.trust_level.in_(("official", "admin_trusted"))
+    )
     query = select(MarketplaceBase).where(
         MarketplaceBase.is_active.is_(True),
+        MarketplaceBase.deleted_upstream.is_(False),
         or_(
-            MarketplaceBase.created_by_user_id.is_(None),  # seeded bases always visible
-            MarketplaceBase.visibility == "public",  # user bases only when public
+            MarketplaceBase.source_id.in_(official_subq),  # synced from a trusted hub
+            MarketplaceBase.visibility == "public",  # community bases when public
         ),
     )
+
+    if source_id_filter is not None:
+        query = query.where(MarketplaceBase.source_id == source_id_filter)
 
     # Apply filters
     if category:
@@ -2738,19 +3237,33 @@ async def get_marketplace_bases(
         creator_result = await db.execute(select(User).where(User.id.in_(creator_ids)))
         creator_info = {u.id: u for u in creator_result.scalars().all()}
 
+    # Bulk-load source rows for the result set so we can attach
+    # display_name + handle + trust_level without N+1 selects.
+    base_source_rows = await _bulk_load_sources(
+        db, {b.source_id for b in bases if b.source_id is not None}
+    )
+
     # Format response
     response = []
     for base in bases:
-        # Resolve creator info
-        is_community = base.created_by_user_id is not None
-        creator_user = creator_info.get(base.created_by_user_id) if is_community else None
-        creator_name = (
-            _resolve_display_name(creator_user)
-            if creator_user
-            else ("Tesslate" if not is_community else "Community")
+        # Resolve creator info: a base authored by a user wins over the
+        # source's display_name (community-creator branding); otherwise
+        # fall back to the source's display_name (no more "Tesslate"
+        # hardcode).
+        creator_user = (
+            creator_info.get(base.created_by_user_id) if base.created_by_user_id else None
         )
-        creator_username = creator_user.username if creator_user else None
-        creator_avatar_url = creator_user.avatar_url if creator_user else None
+        base_source = _lookup_source(base_source_rows, base.source_id)
+        if creator_user is not None:
+            creator_type = "community"
+            creator_name = _resolve_display_name(creator_user)
+            creator_username = creator_user.username
+            creator_avatar_url = creator_user.avatar_url
+        else:
+            creator_type = "official" if _is_official_source(base_source) else "community"
+            creator_name = _source_display_name(base_source)
+            creator_username = None
+            creator_avatar_url = None
 
         response.append(
             {
@@ -2778,7 +3291,7 @@ async def get_marketplace_bases(
                 "source_type": base.source_type or "git",
                 "is_forkable": False,  # Bases can't be forked
                 "usage_count": base.downloads,
-                "creator_type": "community" if is_community else "official",
+                "creator_type": creator_type,
                 "creator_name": creator_name,
                 "creator_username": creator_username,
                 "creator_avatar_url": creator_avatar_url,
@@ -2786,6 +3299,8 @@ async def get_marketplace_bases(
                 if base.created_by_user_id
                 else None,
                 "visibility": base.visibility or "private",
+                "source_handle": base_source.handle if base_source else None,
+                "source_trust_level": base_source.trust_level if base_source else None,
             }
         )
 
@@ -2851,19 +3366,22 @@ async def get_base_details(
     reviews = reviews_result.scalars().all()
 
     # Resolve creator info
-    is_community = base.created_by_user_id is not None
     creator_user = None
-    if is_community:
+    if base.created_by_user_id is not None:
         creator_result = await db.execute(select(User).where(User.id == base.created_by_user_id))
         creator_user = creator_result.scalar_one_or_none()
 
-    creator_name = (
-        _resolve_display_name(creator_user)
-        if creator_user
-        else ("Tesslate" if not is_community else "Community")
-    )
-    creator_username = creator_user.username if creator_user else None
-    creator_avatar_url = creator_user.avatar_url if creator_user else None
+    base_source = await _load_source(db, base.source_id)
+    if creator_user is not None:
+        creator_type = "community"
+        creator_name = _resolve_display_name(creator_user)
+        creator_username = creator_user.username
+        creator_avatar_url = creator_user.avatar_url
+    else:
+        creator_type = "official" if _is_official_source(base_source) else "community"
+        creator_name = _source_display_name(base_source)
+        creator_username = None
+        creator_avatar_url = None
 
     return {
         "id": base.id,
@@ -2891,12 +3409,14 @@ async def get_base_details(
         "is_forkable": False,
         "usage_count": base.downloads,
         "archive_size_bytes": base.archive_size_bytes,
-        "creator_type": "community" if is_community else "official",
+        "creator_type": creator_type,
         "creator_name": creator_name,
         "creator_username": creator_username,
         "creator_avatar_url": creator_avatar_url,
         "created_by_user_id": str(base.created_by_user_id) if base.created_by_user_id else None,
         "visibility": base.visibility or "private",
+        "source_handle": base_source.handle if base_source else None,
+        "source_trust_level": base_source.trust_level if base_source else None,
         "reviews": [
             {
                 "id": review.id,
@@ -3007,6 +3527,7 @@ async def get_base_versions(
 @router.post("/bases/{base_id}/purchase")
 async def purchase_base(
     base_id: str,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -3020,6 +3541,15 @@ async def purchase_base(
 
     if not base or not base.is_active:
         raise HTTPException(status_code=404, detail="Base not found")
+
+    # Wave 4 install gate.
+    base_source = await _load_source(db, base.source_id)
+    _ensure_install_allowed(
+        base_source,
+        "base",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Check if already purchased (scoped to team when available)
     ownership_filter = (
@@ -3306,6 +3836,7 @@ async def submit_base(
         created_by_user_id=current_user.id,
         visibility=request.visibility,
         is_active=True,
+        source_id=LOCAL_SOURCE_ID,
     )
     db.add(new_base)
     await db.flush()
@@ -3759,13 +4290,24 @@ async def list_workflows(
     category: str | None = None,
     is_featured: bool | None = None,
     search: str | None = None,
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """List all workflow templates with optional filtering."""
     from ..models import WorkflowTemplate
 
-    query = select(WorkflowTemplate).where(WorkflowTemplate.is_active)
+    source_id_filter = await _resolve_source_filter(db, source)
 
+    query = select(WorkflowTemplate).where(
+        WorkflowTemplate.is_active,
+        WorkflowTemplate.deleted_upstream.is_(False),
+    )
+
+    if source_id_filter is not None:
+        query = query.where(WorkflowTemplate.source_id == source_id_filter)
     if category:
         query = query.where(WorkflowTemplate.category == category)
     if is_featured is not None:
@@ -3781,8 +4323,14 @@ async def list_workflows(
     result = await db.execute(query)
     workflows = result.scalars().all()
 
-    return {
-        "workflows": [
+    workflow_source_rows = await _bulk_load_sources(
+        db, {w.source_id for w in workflows if w.source_id is not None}
+    )
+
+    workflow_dicts = []
+    for w in workflows:
+        w_source = _lookup_source(workflow_source_rows, w.source_id)
+        workflow_dicts.append(
             {
                 "id": str(w.id),
                 "name": w.name,
@@ -3798,10 +4346,12 @@ async def list_workflows(
                 "downloads": w.downloads,
                 "rating": w.rating,
                 "is_featured": w.is_featured,
+                "source_handle": w_source.handle if w_source else None,
+                "source_trust_level": w_source.trust_level if w_source else None,
             }
-            for w in workflows
-        ]
-    }
+        )
+
+    return {"workflows": workflow_dicts}
 
 
 @router.get("/workflows/{slug}")
@@ -3881,8 +4431,15 @@ def _theme_to_dict(
     theme: Theme,
     is_in_library: bool = False,
     creator_avatar_url: str | None = None,
+    source: MarketplaceSource | None = None,
 ) -> dict:
-    """Convert a Theme model to a marketplace-compatible dict."""
+    """Convert a Theme model to a marketplace-compatible dict.
+
+    Wave 4: ``source`` is the joined ``MarketplaceSource`` row (or
+    ``None`` for unbackfilled themes). When the row was synced from a
+    federated hub, the source's ``display_name`` overrides the legacy
+    ``"Tesslate"`` author fallback.
+    """
     colors = {}
     if theme.theme_json and isinstance(theme.theme_json, dict):
         raw_colors = theme.theme_json.get("colors", {})
@@ -3900,14 +4457,24 @@ def _theme_to_dict(
         resolved_username = creator_user.username
         resolved_avatar = creator_avatar_url or creator_user.avatar_url
     else:
-        resolved_name = theme.author or "Tesslate"
+        # Source's display_name is the federation-aware fallback; the
+        # row's own ``theme.author`` field still wins when set (so a
+        # creator who set a custom author label is honored).
+        resolved_name = theme.author or _source_display_name(source)
         resolved_username = None
         resolved_avatar = creator_avatar_url
 
+    # Wave 1.5: theme.id is now a GUID; the slug remains the
+    # human-readable identifier the frontend / desktop sidecar / external
+    # API consumers all key on. Continue serializing the slug as ``id``
+    # in the marketplace browse payload so this migration is non-breaking
+    # for the frontend (Wave 5 introduces source-aware URLs and lets us
+    # safely flip to the GUID at the public API layer).
+    public_id = theme.slug or str(theme.id)
     return {
-        "id": theme.id,
+        "id": public_id,
         "name": theme.name,
-        "slug": theme.slug or theme.id,
+        "slug": theme.slug or str(theme.id),
         "description": theme.description or "",
         "long_description": theme.long_description or "",
         "category": theme.category or "general",
@@ -3931,19 +4498,28 @@ def _theme_to_dict(
         "is_purchased": is_in_library,
         "is_in_library": is_in_library,
         "is_published": theme.is_published if theme.is_published is not None else True,
-        "creator_type": "community" if theme.created_by_user_id else "official",
+        # creator_type prefers an explicit user creator, then falls back
+        # to the source's trust level so a community-hub theme reads as
+        # "community" even without a created_by_user_id.
+        "creator_type": (
+            "community"
+            if theme.created_by_user_id
+            else ("official" if _is_official_source(source) else "community")
+        ),
         "creator_name": resolved_name,
         "creator_username": resolved_username,
         "creator_avatar_url": resolved_avatar,
         "created_by_user_id": str(theme.created_by_user_id) if theme.created_by_user_id else None,
         "forked_by_user_id": None,  # Themes don't track forked_by separately
-        "parent_theme_id": theme.parent_theme_id,
+        "parent_theme_id": str(theme.parent_theme_id) if theme.parent_theme_id else None,
         "color_swatches": colors,
         "theme_mode": theme.mode,
         "theme_json": None,  # Excluded from browse listings for size
         "author": resolved_name,
         "version": theme.version or "1.0.0",
         "sort_order": theme.sort_order or 0,
+        "source_handle": source.handle if source else None,
+        "source_trust_level": source.trust_level if source else None,
     }
 
 
@@ -3956,19 +4532,42 @@ async def browse_themes(
     sort: str = Query("featured"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     current_user: User | None = Depends(current_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Browse marketplace themes with filtering, search, and pagination."""
-    query = select(Theme).where(Theme.is_active.is_(True))
+    """Browse marketplace themes with filtering, search, and pagination.
 
-    # Only show official themes + published community themes
+    When ``?source=<handle>`` is supplied, results are restricted to a
+    single source. Otherwise, every active source contributes themes.
+    """
+    source_id_filter = await _resolve_source_filter(db, source)
+
+    query = select(Theme).where(
+        Theme.is_active.is_(True),
+        Theme.deleted_upstream.is_(False),
+    )
+
+    # Wave 4: visible themes are those synced from a trusted hub OR
+    # community-authored themes that have been published. The trusted-source
+    # subquery replaces the legacy ``created_by_user_id IS NULL`` predicate
+    # which meant the same thing pre-federation (Wave 1 backfilled all
+    # NULL-creator rows to Tesslate Official).
+    trusted_source_subq = select(MarketplaceSource.id).where(
+        MarketplaceSource.trust_level.in_(("official", "admin_trusted"))
+    )
     query = query.where(
         or_(
-            Theme.created_by_user_id.is_(None),
+            Theme.source_id.in_(trusted_source_subq),
             Theme.is_published.is_(True),
         )
     )
+
+    if source_id_filter is not None:
+        query = query.where(Theme.source_id == source_id_filter)
 
     if category and category != "all":
         query = query.where(Theme.category == category)
@@ -4015,8 +4614,9 @@ async def browse_themes(
     result = await db.execute(query)
     themes = result.scalars().all()
 
-    # Check which themes are in user's library (scoped to active team)
-    user_theme_ids: set[str] = set()
+    # Check which themes are in user's library (scoped to active team).
+    # Wave 1.5: theme_id is now a GUID, not a string.
+    user_theme_ids: set[UUID] = set()
     if current_user:
         team_id = current_user.default_team_id
         theme_filter = (
@@ -4039,6 +4639,10 @@ async def browse_themes(
         creator_result = await db.execute(select(User).where(User.id.in_(creator_ids)))
         creator_info = {u.id: u for u in creator_result.scalars().all()}
 
+    theme_source_rows = await _bulk_load_sources(
+        db, {t.source_id for t in themes if t.source_id is not None}
+    )
+
     items = []
     for theme in themes:
         # Attach creator user object so _theme_to_dict can resolve name dynamically
@@ -4049,8 +4653,12 @@ async def browse_themes(
             if theme.created_by_user_id and theme.created_by_user_id in creator_info
             else None
         )
+        theme_source = _lookup_source(theme_source_rows, theme.source_id)
         item = _theme_to_dict(
-            theme, is_in_library=theme.id in user_theme_ids, creator_avatar_url=avatar
+            theme,
+            is_in_library=theme.id in user_theme_ids,
+            creator_avatar_url=avatar,
+            source=theme_source,
         )
         items.append(item)
 
@@ -4063,15 +4671,63 @@ async def browse_themes(
     }
 
 
+@router.get("/themes/legacy/{theme_id}", include_in_schema=False)
+async def legacy_theme_detail_redirect(theme_id: str):
+    """Wave 1.5: 301 redirect for legacy theme-detail bookmarks.
+
+    Pre-Wave-1.5 the canonical theme-detail URL was
+    ``/marketplace/themes/{old_string_id}`` where ``old_string_id`` was
+    the slug-as-PK. The post-1.5 canonical shape ships in Wave 5 as
+    ``/marketplace/{source_handle}/{kind}/{slug}``. Until that route
+    exists, redirect to the closest stable URL we have today —
+    ``/marketplace/themes/{slug}`` — which now resolves themes by slug
+    or by GUID via ``_resolve_theme_by_identifier``. The redirect target
+    will move to the Wave-5 source-prefixed form in a follow-up commit
+    so external bookmarks remain stable.
+
+    Mounting under ``/themes/legacy/`` (rather than reusing
+    ``/themes/{theme_id}`` itself) keeps the live route 200-OK for
+    callers that already pass a slug while still giving us a typed
+    redirect surface that integration tests can lock in. The new
+    forward-stable target is documented inside the redirect URL
+    template; updating it is a one-line change once Wave 5 lands.
+    """
+    from fastapi.responses import RedirectResponse
+
+    target = f"/api/marketplace/tesslate-official/theme/{theme_id}"
+    return RedirectResponse(url=target, status_code=301)
+
+
+@router.get("/tesslate-official/theme/{slug}", include_in_schema=False)
+async def get_theme_detail_source_prefixed(
+    slug: str,
+    current_user: User | None = Depends(current_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Wave 1.5: forward-stable source-prefixed alias for theme detail.
+
+    The Wave 5 source-aware URL pattern is
+    ``/marketplace/{source_handle}/{kind}/{slug}``. We hardcode the
+    ``tesslate-official`` source here so that the
+    ``/themes/legacy/{theme_id}`` 301 has a real target today; Wave 5
+    promotes this into a generic ``/{source_handle}/{kind}/{slug}``
+    route. Behaviour is identical to ``GET /marketplace/themes/{slug}``.
+    """
+    return await get_theme_detail(slug=slug, current_user=current_user, db=db)
+
+
 @router.get("/themes/{slug}")
 async def get_theme_detail(
     slug: str,
     current_user: User | None = Depends(current_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get full theme detail by slug."""
-    result = await db.execute(select(Theme).where(or_(Theme.slug == slug, Theme.id == slug)))
-    theme = result.scalar_one_or_none()
+    """Get full theme detail by slug.
+
+    Wave 1.5: Theme.id is now a GUID. We accept either the slug or the
+    GUID PK in the path slot — see ``_resolve_theme_by_identifier``.
+    """
+    theme = await _resolve_theme_by_identifier(db, slug)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4100,7 +4756,8 @@ async def get_theme_detail(
         if creator_user:
             theme.creator = creator_user
 
-    item = _theme_to_dict(theme, is_in_library=is_in_library)
+    theme_source = await _load_source(db, theme.source_id)
+    item = _theme_to_dict(theme, is_in_library=is_in_library, source=theme_source)
     # Include full theme_json for detail view
     item["theme_json"] = theme.theme_json
 
@@ -4139,9 +4796,14 @@ async def get_user_library_themes(
             if theme.created_by_user_id and theme.created_by_user_id in creator_map:
                 theme.creator = creator_map[theme.created_by_user_id]
 
+    theme_source_rows = await _bulk_load_sources(
+        db, {t.source_id for t in theme_list if t.source_id is not None}
+    )
+
     themes = []
     for theme, lib_entry in rows:
-        item = _theme_to_dict(theme, is_in_library=True)
+        theme_source = _lookup_source(theme_source_rows, theme.source_id)
+        item = _theme_to_dict(theme, is_in_library=True, source=theme_source)
         item["theme_json"] = theme.theme_json
         item["is_enabled"] = lib_entry.is_active
         item["is_custom"] = theme.created_by_user_id is not None
@@ -4154,15 +4816,29 @@ async def get_user_library_themes(
 @router.post("/themes/{theme_id}/add")
 async def add_theme_to_library(
     theme_id: str,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
-    """Add a free theme to user's library."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    """Add a free theme to user's library.
+
+    ``{theme_id}`` accepts either the GUID PK or the legacy slug-form
+    identifier (``"midnight-dark"`` etc) — see
+    ``_resolve_theme_by_identifier`` for why.
+    """
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme or not theme.is_active:
         raise HTTPException(status_code=404, detail="Theme not found")
+
+    # Wave 4 install gate.
+    theme_source = await _load_source(db, theme.source_id)
+    _ensure_install_allowed(
+        theme_source,
+        "theme",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
@@ -4176,13 +4852,13 @@ async def add_theme_to_library(
     existing_result = await db.execute(
         select(UserLibraryTheme).where(
             ownership_filter,
-            UserLibraryTheme.theme_id == theme_id,
+            UserLibraryTheme.theme_id == theme.id,
         )
     )
     existing = existing_result.scalar_one_or_none()
 
     if existing and existing.is_active:
-        return {"message": "Theme already in your library", "theme_id": theme_id}
+        return {"message": "Theme already in your library", "theme_id": str(theme.id)}
 
     if existing:
         # Reactivate
@@ -4192,7 +4868,7 @@ async def add_theme_to_library(
         lib_entry = UserLibraryTheme(
             user_id=current_user.id,
             team_id=team_id,
-            theme_id=theme_id,
+            theme_id=theme.id,
             purchase_type="free",
             is_active=True,
         )
@@ -4203,7 +4879,7 @@ async def add_theme_to_library(
 
     return {
         "message": "Theme added to your library",
-        "theme_id": theme_id,
+        "theme_id": str(theme.id),
         "success": True,
     }
 
@@ -4214,8 +4890,16 @@ async def remove_theme_from_library(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
-    """Remove a theme from user's library. Cannot remove default-dark or default-light."""
-    if theme_id in ("default-dark", "default-light"):
+    """Remove a theme from user's library. Cannot remove default-dark or default-light.
+
+    Wave 1.5 note: ``user.theme_preset`` is the slug string (not the
+    GUID). Compare on slug, reset on slug.
+    """
+    theme = await _resolve_theme_by_identifier(db, theme_id)
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    if theme.slug in ("default-dark", "default-light"):
         raise HTTPException(
             status_code=400,
             detail="Cannot remove default themes from your library",
@@ -4232,7 +4916,7 @@ async def remove_theme_from_library(
     result = await db.execute(
         select(UserLibraryTheme).where(
             ownership_filter,
-            UserLibraryTheme.theme_id == theme_id,
+            UserLibraryTheme.theme_id == theme.id,
         )
     )
     lib_entry = result.scalar_one_or_none()
@@ -4242,15 +4926,17 @@ async def remove_theme_from_library(
 
     lib_entry.is_active = False
 
-    # If user is currently using this theme, reset to default-dark
-    if current_user.theme_preset == theme_id:
+    # If user is currently using this theme, reset to default-dark.
+    # ``theme_preset`` stores the slug (the user-facing identifier),
+    # not the GUID PK.
+    if current_user.theme_preset == theme.slug:
         current_user.theme_preset = "default-dark"
 
     await db.commit()
 
     return {
         "message": "Theme removed from library",
-        "theme_id": theme_id,
+        "theme_id": str(theme.id),
         "success": True,
         "reset_theme": current_user.theme_preset == "default-dark",
     }
@@ -4264,6 +4950,10 @@ async def toggle_library_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Toggle a theme enabled/disabled in user's library."""
+    theme = await _resolve_theme_by_identifier(db, theme_id)
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
     ownership_filter = (
@@ -4275,7 +4965,7 @@ async def toggle_library_theme(
     result = await db.execute(
         select(UserLibraryTheme).where(
             ownership_filter,
-            UserLibraryTheme.theme_id == theme_id,
+            UserLibraryTheme.theme_id == theme.id,
         )
     )
     lib_entry = result.scalar_one_or_none()
@@ -4288,7 +4978,7 @@ async def toggle_library_theme(
 
     return {
         "message": f"Theme {'enabled' if enabled else 'disabled'} successfully",
-        "theme_id": theme_id,
+        "theme_id": str(theme.id),
         "enabled": enabled,
         "success": True,
     }
@@ -4309,15 +4999,13 @@ async def create_custom_theme(
     """Create a custom theme and add it to user's library."""
     import time
 
-    # Generate a slug from name + user + timestamp
+    # Generate a slug from name + user + timestamp. Wave 1.5: the row's
+    # PK is now an auto-generated GUID; the slug is the user-facing
+    # identifier. Both are persisted independently.
     slug_base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     slug = f"{slug_base}-{int(time.time())}"
 
-    # Use slug as the theme ID (String PK)
-    theme_id = slug
-
     theme = Theme(
-        id=theme_id,
         name=name,
         slug=slug,
         mode=mode,
@@ -4328,17 +5016,21 @@ async def create_custom_theme(
         category=category,
         tags=tags,
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         pricing_type="free",
         is_published=False,
         is_active=True,
         created_by_user_id=current_user.id,
     )
     db.add(theme)
+    # Flush so the GUID PK is populated before we FK from
+    # UserLibraryTheme.theme_id below.
+    await db.flush()
 
     # Auto-add to user's library
     lib_entry = UserLibraryTheme(
         user_id=current_user.id,
-        theme_id=theme_id,
+        theme_id=theme.id,
         purchase_type="free",
         is_active=True,
     )
@@ -4370,8 +5062,7 @@ async def update_theme(
 ):
     """Update a custom theme. Only the creator can edit their themes.
     If the user edits an open-source theme they don't own, auto-fork it."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4429,8 +5120,7 @@ async def delete_custom_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Delete a custom theme. Only unpublished themes owned by the creator can be deleted."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4457,8 +5147,7 @@ async def publish_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Publish a custom theme to the marketplace."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4479,8 +5168,7 @@ async def unpublish_theme(
     current_user: User = Depends(current_active_user),
 ):
     """Unpublish a theme from the marketplace."""
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    theme = result.scalar_one_or_none()
+    theme = await _resolve_theme_by_identifier(db, theme_id)
 
     if not theme:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4506,12 +5194,12 @@ async def fork_theme(
     icon: str | None = None,
     category: str | None = None,
     tags: list[str] | None = None,
+    confirmed: bool = Query(default=False),
 ):
     """Fork an open-source theme. Creates a copy owned by the current user."""
     import time
 
-    result = await db.execute(select(Theme).where(Theme.id == theme_id))
-    original = result.scalar_one_or_none()
+    original = await _resolve_theme_by_identifier(db, theme_id)
 
     if not original:
         raise HTTPException(status_code=404, detail="Theme not found")
@@ -4519,13 +5207,22 @@ async def fork_theme(
     if original.source_type != "open":
         raise HTTPException(status_code=400, detail="Cannot fork a closed-source theme")
 
+    # Forking copies the theme into the user's library; install gate applies.
+    original_source = await _load_source(db, original.source_id)
+    _ensure_install_allowed(
+        original_source,
+        "theme",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
+
     fork_name = name or f"{original.name} (Fork)"
     slug_base = re.sub(r"[^a-z0-9]+", "-", fork_name.lower()).strip("-")
     slug = f"{slug_base}-{int(time.time())}"
-    fork_id = slug
 
     forked = Theme(
-        id=fork_id,
+        # Wave 1.5: id is auto-generated GUID; the human-readable
+        # identifier moves to slug.
         name=fork_name,
         slug=slug,
         mode=mode or original.mode,
@@ -4536,6 +5233,7 @@ async def fork_theme(
         category=category or original.category or "general",
         tags=tags or original.tags or [],
         source_type="open",
+        source_id=LOCAL_SOURCE_ID,
         pricing_type="free",
         is_published=False,
         is_active=True,
@@ -4543,11 +5241,12 @@ async def fork_theme(
         parent_theme_id=original.id,
     )
     db.add(forked)
+    await db.flush()  # populate forked.id GUID
 
     # Auto-add to user's library
     lib_entry = UserLibraryTheme(
         user_id=current_user.id,
-        theme_id=fork_id,
+        theme_id=forked.id,
         purchase_type="free",
         is_active=True,
     )
@@ -4557,7 +5256,8 @@ async def fork_theme(
     await db.refresh(forked)
     forked.creator = current_user
 
-    item = _theme_to_dict(forked, is_in_library=True)
+    forked_source = await _load_source(db, forked.source_id)
+    item = _theme_to_dict(forked, is_in_library=True, source=forked_source)
     item["theme_json"] = forked.theme_json
 
     return {"message": "Theme forked successfully", "theme": item, "success": True}
@@ -4578,6 +5278,10 @@ async def get_marketplace_skills(
     ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
@@ -4588,17 +5292,23 @@ async def get_marketplace_skills(
     - Authenticated: Shows purchase status (is_purchased) for each skill
     - Unauthenticated: Shows catalog without purchase status
     """
+    source_id_filter = await _resolve_source_filter(db, source)
+
     # Base query – only active, published skills
     query = (
         select(MarketplaceAgent)
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.deleted_upstream.is_(False),
             MarketplaceAgent.item_type == "skill",
             (MarketplaceAgent.forked_by_user_id.is_(None))
             | (MarketplaceAgent.is_published.is_(True)),
         )
     )
+
+    if source_id_filter is not None:
+        query = query.where(MarketplaceAgent.source_id == source_id_filter)
 
     # Apply filters
     if category:
@@ -4666,18 +5376,16 @@ async def get_marketplace_skills(
         )
         purchased_skill_ids = [row[0] for row in purchased_result.fetchall()]
 
+    skill_source_rows = await _bulk_load_sources(
+        db, {s.source_id for s in skills if s.source_id is not None}
+    )
+
     response = []
     for skill in skills:
-        creator_type = "official"
-        creator_name = "Tesslate"
-        creator_username = None
-        creator_avatar_url = None
-        if skill.forked_by_user_id:
-            creator_type = "community"
-            if skill.forked_by_user:
-                creator_name = _resolve_display_name(skill.forked_by_user)
-                creator_username = skill.forked_by_user.username
-                creator_avatar_url = skill.forked_by_user.avatar_url
+        skill_source = _lookup_source(skill_source_rows, skill.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=skill.forked_by_user, source=skill_source
+        )
 
         response.append(
             {
@@ -4717,6 +5425,8 @@ async def get_marketplace_skills(
                 if skill.forked_by_user_id
                 else None,
                 "creator_avatar_url": creator_avatar_url,
+                "source_handle": skill_source.handle if skill_source else None,
+                "source_trust_level": skill_source.trust_level if skill_source else None,
             }
         )
 
@@ -4772,16 +5482,10 @@ async def get_skill_details(
         )
         is_purchased = purchased_result.scalar_one_or_none() is not None
 
-    creator_type = "official"
-    creator_name = "Tesslate"
-    creator_username = None
-    creator_avatar_url = None
-    if skill.forked_by_user_id:
-        creator_type = "community"
-        if skill.forked_by_user:
-            creator_name = _resolve_display_name(skill.forked_by_user)
-            creator_username = skill.forked_by_user.username
-            creator_avatar_url = skill.forked_by_user.avatar_url
+    skill_source = await _load_source(db, skill.source_id)
+    creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+        forked_by_user=skill.forked_by_user, source=skill_source
+    )
 
     return {
         "id": skill.id,
@@ -4816,6 +5520,8 @@ async def get_skill_details(
         "created_by_user_id": str(skill.created_by_user_id) if skill.created_by_user_id else None,
         "forked_by_user_id": str(skill.forked_by_user_id) if skill.forked_by_user_id else None,
         "creator_avatar_url": creator_avatar_url,
+        "source_handle": skill_source.handle if skill_source else None,
+        "source_trust_level": skill_source.trust_level if skill_source else None,
     }
 
 
@@ -4824,6 +5530,7 @@ async def purchase_skill(
     skill_id: UUID,
     request: Request,
     background_tasks: BackgroundTasks,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -4841,6 +5548,15 @@ async def purchase_skill(
 
     if not skill or not skill.is_active:
         raise HTTPException(status_code=404, detail="Skill not found")
+
+    # Wave 4 install gate.
+    skill_source = await _load_source(db, skill.source_id)
+    _ensure_install_allowed(
+        skill_source,
+        "skill",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
@@ -4925,6 +5641,7 @@ async def purchase_skill(
 async def install_skill_on_agent(
     skill_id: UUID,
     body: SkillInstallRequest,
+    confirmed: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(current_active_user),
 ):
@@ -4943,6 +5660,15 @@ async def install_skill_on_agent(
     skill = skill_result.scalar_one_or_none()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
+
+    # Wave 4: server-enforced install gate (per source trust level).
+    skill_source = await _load_source(db, skill.source_id)
+    _ensure_install_allowed(
+        skill_source,
+        "skill",
+        requester_user_id=current_user.id,
+        confirmed=confirmed,
+    )
 
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
@@ -5085,22 +5811,19 @@ async def get_agent_skills(
     )
     assignments = result.scalars().all()
 
+    skill_ids = [a.skill.source_id for a in assignments if a.skill and a.skill.source_id]
+    assigned_source_rows = await _bulk_load_sources(db, set(skill_ids))
+
     skills = []
     for assignment in assignments:
         skill = assignment.skill
         if not skill or not skill.is_active:
             continue
 
-        creator_type = "official"
-        creator_name = "Tesslate"
-        creator_username = None
-        creator_avatar_url = None
-        if skill.forked_by_user_id:
-            creator_type = "community"
-            if skill.forked_by_user:
-                creator_name = _resolve_display_name(skill.forked_by_user)
-                creator_username = skill.forked_by_user.username
-                creator_avatar_url = skill.forked_by_user.avatar_url
+        skill_source = _lookup_source(assigned_source_rows, skill.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=skill.forked_by_user, source=skill_source
+        )
 
         skills.append(
             {
@@ -5161,6 +5884,10 @@ async def get_marketplace_mcp_servers(
     ),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
+    source: str | None = Query(
+        default=None,
+        description="Filter results to a single marketplace source by handle.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(current_optional_user),
 ):
@@ -5171,10 +5898,12 @@ async def get_marketplace_mcp_servers(
     - Authenticated: Shows purchase status (is_purchased) for each MCP server
     - Unauthenticated: Shows catalog without purchase status
     """
+    source_id_filter = await _resolve_source_filter(db, source)
+
     # Base query – only active, published MCP servers.
     # NOTE: unlike other marketplace item types (which keep the
     # "official-or-published" OR for backward compat), Connectors require
-    # is_published=True even for Tesslate-owned rows. This is what lets us
+    # is_published=True even for trusted-source rows. This is what lets us
     # unpublish the pre-OAuth MCPs (Brave / Slack stdio / Postgres / …) in
     # #307 without deleting them.
     query = (
@@ -5182,10 +5911,14 @@ async def get_marketplace_mcp_servers(
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .where(
             MarketplaceAgent.is_active.is_(True),
+            MarketplaceAgent.deleted_upstream.is_(False),
             MarketplaceAgent.item_type == "mcp_server",
             MarketplaceAgent.is_published.is_(True),
         )
     )
+
+    if source_id_filter is not None:
+        query = query.where(MarketplaceAgent.source_id == source_id_filter)
 
     # Apply filters
     if category:
@@ -5263,18 +5996,16 @@ async def get_marketplace_mcp_servers(
         )
         purchased_mcp_server_ids = [row[0] for row in installed_result.fetchall()]
 
+    mcp_source_rows = await _bulk_load_sources(
+        db, {m.source_id for m in mcp_servers if m.source_id is not None}
+    )
+
     response = []
     for mcp_server in mcp_servers:
-        creator_type = "official"
-        creator_name = "Tesslate"
-        creator_username = None
-        creator_avatar_url = None
-        if mcp_server.forked_by_user_id:
-            creator_type = "community"
-            if mcp_server.forked_by_user:
-                creator_name = _resolve_display_name(mcp_server.forked_by_user)
-                creator_username = mcp_server.forked_by_user.username
-                creator_avatar_url = mcp_server.forked_by_user.avatar_url
+        mcp_source = _lookup_source(mcp_source_rows, mcp_server.source_id)
+        creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+            forked_by_user=mcp_server.forked_by_user, source=mcp_source
+        )
 
         response.append(
             {
@@ -5320,6 +6051,8 @@ async def get_marketplace_mcp_servers(
                 if mcp_server.forked_by_user_id
                 else None,
                 "creator_avatar_url": creator_avatar_url,
+                "source_handle": mcp_source.handle if mcp_source else None,
+                "source_trust_level": mcp_source.trust_level if mcp_source else None,
             }
         )
 
@@ -5382,16 +6115,10 @@ async def get_mcp_server_details(
         )
         is_purchased = installed_result.scalar_one_or_none() is not None
 
-    creator_type = "official"
-    creator_name = "Tesslate"
-    creator_username = None
-    creator_avatar_url = None
-    if mcp_server.forked_by_user_id:
-        creator_type = "community"
-        if mcp_server.forked_by_user:
-            creator_name = _resolve_display_name(mcp_server.forked_by_user)
-            creator_username = mcp_server.forked_by_user.username
-            creator_avatar_url = mcp_server.forked_by_user.avatar_url
+    mcp_source = await _load_source(db, mcp_server.source_id)
+    creator_type, creator_name, creator_username, creator_avatar_url = _resolve_creator_meta(
+        forked_by_user=mcp_server.forked_by_user, source=mcp_source
+    )
 
     return {
         "id": mcp_server.id,
@@ -5430,4 +6157,7 @@ async def get_mcp_server_details(
         if mcp_server.forked_by_user_id
         else None,
         "creator_avatar_url": creator_avatar_url,
+        "config": mcp_server.config or {},
+        "source_handle": mcp_source.handle if mcp_source else None,
+        "source_trust_level": mcp_source.trust_level if mcp_source else None,
     }

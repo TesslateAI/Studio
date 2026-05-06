@@ -264,6 +264,59 @@ class TestCreateModelAdapterDbBackedRegression:
             assert adapter.model_name == "gpt-4o"
             mock_get_client.assert_called_once_with(user_id, "gpt-4o", mock_db)
 
+    @pytest.mark.asyncio
+    async def test_db_backed_anthropic_prefix_no_longer_raises(self) -> None:
+        """Bug #212 regression: anthropic/ prefix with a DB session must NOT
+        raise ValueError('Unsupported provider: anthropic').
+
+        The DB-backed path sets provider from BUILTIN_PROVIDERS[slug]['api_type']
+        which is 'anthropic' for the 'anthropic/' prefix.  Before the fix that
+        fell into the else-branch and raised.  After the fix it routes through
+        the same OpenAI-compatible path as provider='openai'.
+        """
+        from unittest.mock import AsyncMock
+        from uuid import uuid4
+
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.api_key = "sk-ant-test"
+            mock_get_client.return_value = mock_client
+            user_id = uuid4()
+            mock_db = AsyncMock()
+
+            adapter = await create_model_adapter(
+                "anthropic/claude-3-5-sonnet-20241022",
+                user_id=user_id,
+                db=mock_db,
+            )
+
+            assert isinstance(adapter, OpenAIAdapter)
+            # Provider prefix is stripped; bare model name reaches the API
+            assert adapter.model_name == "claude-3-5-sonnet-20241022"
+            mock_get_client.assert_called_once_with(
+                user_id, "anthropic/claude-3-5-sonnet-20241022", mock_db
+            )
+
+    @pytest.mark.asyncio
+    async def test_db_backed_anthropic_model_name_stripped_correctly(self) -> None:
+        """anthropic/claude-opus-4-7 → model_name='claude-opus-4-7' (no prefix)."""
+        from unittest.mock import AsyncMock
+        from uuid import uuid4
+
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
+            mock_get_client.return_value = AsyncMock()
+            user_id = uuid4()
+            mock_db = AsyncMock()
+
+            adapter = await create_model_adapter(
+                "anthropic/claude-opus-4-7",
+                user_id=user_id,
+                db=mock_db,
+            )
+
+            assert isinstance(adapter, OpenAIAdapter)
+            assert adapter.model_name == "claude-opus-4-7"
+
 
 @pytest.mark.unit
 class TestBareNameRouting:

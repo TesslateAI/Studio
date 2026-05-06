@@ -8,7 +8,6 @@ for the LiteLLM proxy, mirroring `tests/integration/test_litellm_keys_integratio
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -21,9 +20,7 @@ from app.services.apps.source_view import (
     HARDCODED_EXCLUSIONS,
     InstallerOnlySourceError,
     PrivateSourceError,
-    SourceAccessError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -213,6 +210,7 @@ async def test_fork_not_forkable_raises() -> None:
     parent.icon_ref = None
     version = MagicMock()
     version.id = uuid4()
+
     # db.execute().one_or_none() must return (version, parent)
     class _R:
         def one_or_none(self):
@@ -276,6 +274,46 @@ async def test_audit_write_logger_only_when_no_team() -> None:
 
 
 # ---------------------------------------------------------------------------
+# runtime unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_begin_session_raises_on_empty_api_key() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.apps.runtime import ApiKeyExtractionError
+
+    inst = MagicMock()
+    inst.id = uuid4()
+    inst.state = "installed"
+    app_obj = MagicMock()
+    app_obj.id = uuid4()
+    app_obj.state = "approved"
+
+    class _EmptyKeyDelegate:
+        async def create_scoped_key(self, *, tier, budget_usd, ttl_seconds, metadata):
+            return {"key_id": "k1", "api_key": ""}
+
+        async def revoke_key(self, key_id):
+            pass
+
+    db = FakeDb([])
+    with patch(
+        "app.services.apps.runtime._load_runnable_instance",
+        new=AsyncMock(return_value=(inst, app_obj)),
+    ):
+        with pytest.raises(ApiKeyExtractionError):
+            await runtime.begin_session(
+                db,  # type: ignore[arg-type]
+                app_instance_id=inst.id,
+                installer_user_id=uuid4(),
+                delegate=_EmptyKeyDelegate(),
+                budget_usd=Decimal("1.00"),
+            )
+
+
+# ---------------------------------------------------------------------------
 # Integration tests (live Postgres + FakeDelegate)
 # ---------------------------------------------------------------------------
 
@@ -301,7 +339,13 @@ class FakeDelegate:
         key_id = f"rt-key-{self._counter}-{uuid.uuid4().hex[:8]}"
         api_key = f"sk-fake-{key_id}"
         self.minted.append(
-            {"key_id": key_id, "api_key": api_key, "tier": tier, "budget_usd": Decimal(budget_usd), "metadata": metadata}
+            {
+                "key_id": key_id,
+                "api_key": api_key,
+                "tier": tier,
+                "budget_usd": Decimal(budget_usd),
+                "metadata": metadata,
+            }
         )
         return {"key_id": key_id, "api_key": api_key}
 
@@ -317,10 +361,38 @@ async def test_begin_session_mints_session_key() -> None:
 
     delegate = FakeDelegate()
     async with AsyncSessionLocal() as db:
-        user = User(id=uuid4(), email=f"rt-{uuid.uuid4().hex[:6]}@example.com", username=f"rt{uuid.uuid4().hex[:6]}", hashed_password="x")
-        app = MarketplaceApp(id=uuid4(), slug=f"rt-app-{uuid.uuid4().hex[:6]}", name="rt", creator_user_id=user.id, state="approved", forkable="restricted", visibility="private")
-        av = AppVersion(id=uuid4(), app_id=app.id, version="1.0.0", manifest_schema_version="2025-01", manifest_json={}, manifest_hash="h", feature_set_hash="f", approval_state="stage2_approved")
-        inst = AppInstance(id=uuid4(), app_id=app.id, app_version_id=av.id, installer_user_id=user.id, state="installed")
+        user = User(
+            id=uuid4(),
+            email=f"rt-{uuid.uuid4().hex[:6]}@example.com",
+            username=f"rt{uuid.uuid4().hex[:6]}",
+            hashed_password="x",
+        )
+        app = MarketplaceApp(
+            id=uuid4(),
+            slug=f"rt-app-{uuid.uuid4().hex[:6]}",
+            name="rt",
+            creator_user_id=user.id,
+            state="approved",
+            forkable="restricted",
+            visibility="private",
+        )
+        av = AppVersion(
+            id=uuid4(),
+            app_id=app.id,
+            version="1.0.0",
+            manifest_schema_version="2025-01",
+            manifest_json={},
+            manifest_hash="h",
+            feature_set_hash="f",
+            approval_state="stage2_approved",
+        )
+        inst = AppInstance(
+            id=uuid4(),
+            app_id=app.id,
+            app_version_id=av.id,
+            installer_user_id=user.id,
+            state="installed",
+        )
         db.add_all([user, app, av, inst])
         await db.flush()
 
@@ -333,9 +405,13 @@ async def test_begin_session_mints_session_key() -> None:
             ttl_seconds=3600,
         )
         assert handle.litellm_key_id in [m["key_id"] for m in delegate.minted]
-        row = (await db.execute(
-            __import__("sqlalchemy").select(LiteLLMKeyLedger).where(LiteLLMKeyLedger.key_id == handle.litellm_key_id)
-        )).scalar_one()
+        row = (
+            await db.execute(
+                __import__("sqlalchemy")
+                .select(LiteLLMKeyLedger)
+                .where(LiteLLMKeyLedger.key_id == handle.litellm_key_id)
+            )
+        ).scalar_one()
         assert row.state == "active"
         assert row.tier == "session"
         await db.rollback()
@@ -349,10 +425,38 @@ async def test_begin_session_rejects_yanked_app() -> None:
 
     delegate = FakeDelegate()
     async with AsyncSessionLocal() as db:
-        user = User(id=uuid4(), email=f"rt-{uuid.uuid4().hex[:6]}@example.com", username=f"rt{uuid.uuid4().hex[:6]}", hashed_password="x")
-        app = MarketplaceApp(id=uuid4(), slug=f"rt-app-{uuid.uuid4().hex[:6]}", name="rt", creator_user_id=user.id, state="yanked", forkable="restricted", visibility="private")
-        av = AppVersion(id=uuid4(), app_id=app.id, version="1.0.0", manifest_schema_version="2025-01", manifest_json={}, manifest_hash="h", feature_set_hash="f", approval_state="stage2_approved")
-        inst = AppInstance(id=uuid4(), app_id=app.id, app_version_id=av.id, installer_user_id=user.id, state="installed")
+        user = User(
+            id=uuid4(),
+            email=f"rt-{uuid.uuid4().hex[:6]}@example.com",
+            username=f"rt{uuid.uuid4().hex[:6]}",
+            hashed_password="x",
+        )
+        app = MarketplaceApp(
+            id=uuid4(),
+            slug=f"rt-app-{uuid.uuid4().hex[:6]}",
+            name="rt",
+            creator_user_id=user.id,
+            state="yanked",
+            forkable="restricted",
+            visibility="private",
+        )
+        av = AppVersion(
+            id=uuid4(),
+            app_id=app.id,
+            version="1.0.0",
+            manifest_schema_version="2025-01",
+            manifest_json={},
+            manifest_hash="h",
+            feature_set_hash="f",
+            approval_state="stage2_approved",
+        )
+        inst = AppInstance(
+            id=uuid4(),
+            app_id=app.id,
+            app_version_id=av.id,
+            installer_user_id=user.id,
+            state="installed",
+        )
         db.add_all([user, app, av, inst])
         await db.flush()
 
@@ -369,14 +473,37 @@ async def test_begin_session_rejects_yanked_app() -> None:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_fork_creates_new_app_row() -> None:
-    from app.database import AsyncSessionLocal
-    from app.models import AppVersion, MarketplaceApp, User
     from sqlalchemy import select
 
+    from app.database import AsyncSessionLocal
+    from app.models import AppVersion, MarketplaceApp, User
+
     async with AsyncSessionLocal() as db:
-        user = User(id=uuid4(), email=f"fk-{uuid.uuid4().hex[:6]}@example.com", username=f"fk{uuid.uuid4().hex[:6]}", hashed_password="x")
-        app = MarketplaceApp(id=uuid4(), slug=f"fk-app-{uuid.uuid4().hex[:6]}", name="orig", creator_user_id=user.id, state="approved", forkable="true", visibility="public")
-        av = AppVersion(id=uuid4(), app_id=app.id, version="1.0.0", manifest_schema_version="2025-01", manifest_json={}, manifest_hash="h", feature_set_hash="f", approval_state="stage2_approved")
+        user = User(
+            id=uuid4(),
+            email=f"fk-{uuid.uuid4().hex[:6]}@example.com",
+            username=f"fk{uuid.uuid4().hex[:6]}",
+            hashed_password="x",
+        )
+        app = MarketplaceApp(
+            id=uuid4(),
+            slug=f"fk-app-{uuid.uuid4().hex[:6]}",
+            name="orig",
+            creator_user_id=user.id,
+            state="approved",
+            forkable="true",
+            visibility="public",
+        )
+        av = AppVersion(
+            id=uuid4(),
+            app_id=app.id,
+            version="1.0.0",
+            manifest_schema_version="2025-01",
+            manifest_json={},
+            manifest_hash="h",
+            feature_set_hash="f",
+            approval_state="stage2_approved",
+        )
         db.add_all([user, app, av])
         await db.flush()
 
@@ -388,7 +515,9 @@ async def test_fork_creates_new_app_row() -> None:
             new_slug=new_slug,
             new_name="Forked",
         )
-        row = (await db.execute(select(MarketplaceApp).where(MarketplaceApp.id == result.new_app_id))).scalar_one()
+        row = (
+            await db.execute(select(MarketplaceApp).where(MarketplaceApp.id == result.new_app_id))
+        ).scalar_one()
         assert row.forked_from == app.id
         assert row.creator_user_id == user.id
         assert row.state == "draft"

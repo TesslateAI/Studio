@@ -1,0 +1,308 @@
+{
+  "manifest_schema_version": "2026-05",
+  "app": {
+    "id": "com.tesslate.geopin",
+    "slug": "geopin",
+    "name": "GeoPin",
+    "version": "0.1.4",
+    "description": "Interactive GeoJSON map editor \u2014 add pins, lines, and polygons with labels. Built on Leaflet + OpenStreetMap. Per-install persistent storage, full REST API.",
+    "category": "productivity",
+    "forkable": true
+  },
+  "runtime": {
+    "tenancy_model": "per_install",
+    "state_model": "per_install_volume",
+    "scaling": {
+      "min_replicas": 1,
+      "max_replicas": 1,
+      "target_concurrency": 4,
+      "idle_timeout_seconds": 600
+    },
+    "storage": {
+      "write_scope": [
+        "/app/data"
+      ]
+    }
+  },
+  "billing": {
+    "ai_compute": {
+      "payer_default": "platform"
+    },
+    "general_compute": {
+      "payer_default": "platform"
+    },
+    "platform_fee": {
+      "model": "free"
+    }
+  },
+  "surfaces": [
+    {
+      "kind": "ui",
+      "entrypoint": "/",
+      "container": "web"
+    }
+  ],
+  "actions": [
+    {
+      "name": "add_feature",
+      "description": "Add a GeoJSON feature (Point, LineString, or Polygon) with a label and optional color/description.",
+      "handler": {
+        "kind": "http_post",
+        "container": "web",
+        "path": "/actions/add_feature"
+      },
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "label",
+          "geometry"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "geometry": {
+            "type": "object",
+            "required": [
+              "type",
+              "coordinates"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Point",
+                  "LineString",
+                  "Polygon"
+                ]
+              },
+              "coordinates": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{3,6}$"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "feature",
+          "feature_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "feature": {
+            "type": "object"
+          },
+          "feature_id": {
+            "type": "string"
+          }
+        }
+      },
+      "idempotency": {
+        "kind": "input_hash",
+        "ttl_seconds": 30
+      },
+      "timeout_seconds": 15
+    },
+    {
+      "name": "list_features",
+      "description": "Return all stored GeoJSON features as a FeatureCollection, with optional type or label filters.",
+      "handler": {
+        "kind": "http_post",
+        "container": "web",
+        "path": "/actions/list_features"
+      },
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "geometry_type": {
+            "type": "string",
+            "enum": [
+              "Point",
+              "LineString",
+              "Polygon"
+            ]
+          },
+          "label_contains": {
+            "type": "string",
+            "maxLength": 120
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "feature_collection",
+          "count"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "feature_collection": {
+            "type": "object"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "timeout_seconds": 10
+    },
+    {
+      "name": "update_feature",
+      "description": "Update a feature's label, color, description, or geometry by feature_id.",
+      "handler": {
+        "kind": "http_post",
+        "container": "web",
+        "path": "/actions/update_feature"
+      },
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "feature_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{3,6}$"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "geometry": {
+            "type": "object",
+            "required": [
+              "type",
+              "coordinates"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Point",
+                  "LineString",
+                  "Polygon"
+                ]
+              },
+              "coordinates": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "feature"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "feature": {
+            "type": "object"
+          }
+        }
+      },
+      "timeout_seconds": 15
+    },
+    {
+      "name": "delete_feature",
+      "description": "Permanently delete a feature by its feature_id.",
+      "handler": {
+        "kind": "http_post",
+        "container": "web",
+        "path": "/actions/delete_feature"
+      },
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "feature_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": [
+          "deleted",
+          "feature_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "feature_id": {
+            "type": "string"
+          }
+        }
+      },
+      "idempotency": {
+        "kind": "input_hash",
+        "ttl_seconds": 60
+      },
+      "timeout_seconds": 10
+    }
+  ],
+  "views": [
+    {
+      "name": "map_editor",
+      "kind": "full_page",
+      "entrypoint": "/"
+    }
+  ],
+  "data_resources": [
+    {
+      "name": "all_features",
+      "backed_by_action": "list_features",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "feature_collection": {
+            "type": "object"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "cache_ttl_seconds": 30
+    }
+  ],
+  "dependencies": [],
+  "connectors": [],
+  "automation_templates": []
+}

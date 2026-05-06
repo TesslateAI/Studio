@@ -216,14 +216,14 @@ class TestBundledCreditReset:
 
     @pytest.mark.asyncio
     async def test_resets_expired_bundled_credits(self):
-        """Users with past credits_reset_date get their bundled credits refreshed."""
-        user = Mock()
-        user.subscription_tier = "pro"
-        user.credits_reset_date = datetime.now(UTC) - timedelta(days=1)
-        user.bundled_credits = 100
+        """Teams with past credits_reset_date get their bundled credits refreshed."""
+        team = Mock()
+        team.subscription_tier = "pro"
+        team.credits_reset_date = datetime.now(UTC) - timedelta(days=1)
+        team.bundled_credits = 100
 
         mock_result = Mock()
-        mock_result.scalars.return_value.all.return_value = [user]
+        mock_result.scalars.return_value.all.return_value = [team]
 
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=mock_result)
@@ -239,18 +239,18 @@ class TestBundledCreditReset:
         ):
             mock_settings.get_tier_bundled_credits = Mock(return_value=2000)
 
-            from app.services.daily_credit_reset import _reset_bundled_credits
+            from app.services.daily_credit_reset import _reset_team_bundled_credits
 
-            await _reset_bundled_credits()
+            await _reset_team_bundled_credits()
 
-        assert user.bundled_credits == 2000
+        assert team.bundled_credits == 2000
         # credits_reset_date should be approximately 30 days from now
-        assert user.credits_reset_date > datetime.now(UTC) + timedelta(days=29)
+        assert team.credits_reset_date > datetime.now(UTC) + timedelta(days=29)
         mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_skips_free_tier_users(self):
-        """Free-tier users are excluded by the query; no commit should happen."""
+    async def test_skips_free_tier_teams(self):
+        """Free-tier teams are excluded by the query; no commit should happen."""
         mock_result = Mock()
         mock_result.scalars.return_value.all.return_value = []
 
@@ -263,15 +263,15 @@ class TestBundledCreditReset:
             yield mock_session
 
         with patch("app.services.daily_credit_reset.AsyncSessionLocal", mock_session_factory):
-            from app.services.daily_credit_reset import _reset_bundled_credits
+            from app.services.daily_credit_reset import _reset_team_bundled_credits
 
-            await _reset_bundled_credits()
+            await _reset_team_bundled_credits()
 
         mock_session.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_skips_users_with_future_reset_date(self):
-        """Users whose credits_reset_date is in the future are not returned by query."""
+    async def test_skips_teams_with_future_reset_date(self):
+        """Teams whose credits_reset_date is in the future are not returned by query."""
         mock_result = Mock()
         mock_result.scalars.return_value.all.return_value = []
 
@@ -284,9 +284,9 @@ class TestBundledCreditReset:
             yield mock_session
 
         with patch("app.services.daily_credit_reset.AsyncSessionLocal", mock_session_factory):
-            from app.services.daily_credit_reset import _reset_bundled_credits
+            from app.services.daily_credit_reset import _reset_team_bundled_credits
 
-            await _reset_bundled_credits()
+            await _reset_team_bundled_credits()
 
         mock_session.commit.assert_not_awaited()
 
@@ -302,7 +302,7 @@ class TestStripeSubscriptionRenewal:
 
     @pytest.mark.asyncio
     async def test_subscription_cycle_resets_credits(self):
-        """billing_reason='subscription_cycle' resets bundled credits for the user."""
+        """billing_reason='subscription_cycle' resets bundled credits for the team."""
         from app.services.stripe_service import StripeService
 
         service = StripeService.__new__(StripeService)
@@ -318,26 +318,26 @@ class TestStripeSubscriptionRenewal:
             "metadata": {},
         }
 
-        user = Mock()
-        user.id = uuid4()
-        user.subscription_tier = "pro"
-        user.stripe_subscription_id = "sub_abc"
-        user.bundled_credits = 100
-        user.credits_reset_date = None
+        team = Mock()
+        team.id = uuid4()
+        team.subscription_tier = "pro"
+        team.stripe_subscription_id = "sub_abc"
+        team.bundled_credits = 100
+        team.credits_reset_date = None
 
-        mock_user_result = Mock()
-        mock_user_result.scalar_one_or_none.return_value = user
+        mock_team_result = Mock()
+        mock_team_result.scalar_one_or_none.return_value = team
 
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=mock_user_result)
+        db.execute = AsyncMock(return_value=mock_team_result)
         db.commit = AsyncMock()
 
         with patch("app.services.stripe_service.settings") as mock_settings:
             mock_settings.get_tier_bundled_credits = Mock(return_value=2000)
             await service._handle_invoice_payment_succeeded(invoice, db)
 
-        assert user.bundled_credits == 2000
-        assert user.credits_reset_date is not None
+        assert team.bundled_credits == 2000
+        assert team.credits_reset_date is not None
         db.commit.assert_awaited()
 
     @pytest.mark.asyncio
@@ -358,18 +358,14 @@ class TestStripeSubscriptionRenewal:
             "metadata": {},
         }
 
-        user = Mock()
-        user.subscription_tier = "pro"
-        user.bundled_credits = 500
-
         db = AsyncMock()
         db.execute = AsyncMock()
         db.commit = AsyncMock()
 
         await service._handle_invoice_payment_succeeded(invoice, db)
 
-        # bundled_credits should remain untouched
-        assert user.bundled_credits == 500
+        # non-cycle invoices must not trigger any DB write
+        db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_usage_invoice_marks_logs_paid(self):

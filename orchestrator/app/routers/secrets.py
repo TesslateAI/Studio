@@ -24,9 +24,22 @@ router = APIRouter()
 settings = get_settings()
 
 
-def _require_byok(user: User) -> None:
-    """Raise 403 if user's tier does not support BYOK."""
-    tier = user.subscription_tier or "free"
+async def _require_byok(user: User, db: AsyncSession) -> None:
+    """Raise 403 if the user's active team tier does not support BYOK.
+
+    Billing is team-scoped — Stripe updates team.subscription_tier, not
+    user.subscription_tier. Checking the team tier here keeps this consistent
+    with GET /subscription, which is the source of truth for the frontend gate.
+    """
+    from ..models_team import Team
+
+    tier = "free"
+    if user.default_team_id:
+        result = await db.execute(select(Team).where(Team.id == user.default_team_id))
+        team = result.scalar_one_or_none()
+        if team:
+            tier = team.subscription_tier or "free"
+
     if tier not in settings.byok_tiers_list:
         raise HTTPException(
             status_code=403,
@@ -119,7 +132,7 @@ async def add_api_key(
     """
     Add a new API key for a provider.
     """
-    _require_byok(current_user)
+    await _require_byok(current_user, db)
 
     # Default key_name to provider display name if not provided
     if not key_name:
@@ -415,7 +428,7 @@ async def create_custom_provider(
     Custom providers allow users to connect their own OpenAI-compatible or
     Anthropic-compatible API endpoints (e.g., local Ollama, vLLM, etc.)
     """
-    _require_byok(current_user)
+    await _require_byok(current_user, db)
 
     import re
 

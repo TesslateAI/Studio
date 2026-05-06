@@ -27,6 +27,17 @@
 #   ./scripts/aws-deploy.sh build beta compute               # Build compute image, deploy + restart
 #   ./scripts/aws-deploy.sh deploy-compute beta              # Apply compute manifests (CSI + Volume Hub)
 #   ./scripts/aws-deploy.sh build beta backend --cached      # Build only backend with cache
+#   ./scripts/aws-deploy.sh build production marketplace --cached  # Build only marketplace
+#
+# Role selection (kubectl-using commands only):
+#   Default role is `team-admin` for the target environment so cluster-mutating
+#   ops (deploy-k8s, deploy-compute) work out of the box. Override per-call:
+#     --role observer   # read-only (logs, get, describe)
+#     --role deployer   # rollouts + ECR push (least-privilege for `build`/`reload`)
+#     --role debugger   # deployer + exec / debug containers
+#     --role admin      # default — RBAC, ServiceAccounts, NetworkPolicies, secrets
+#     --role eks-deployer  # legacy admin role (gated by eks_admin_iam_arns)
+#   Or set AWS_EKS_ROLE_ARN=<full ARN> for cross-account / non-team roles.
 # =============================================================================
 
 set -e
@@ -71,16 +82,34 @@ ensure_kubectl_context() {
     fi
     ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
 
-    # Default to team-deployer (group-based RBAC, usable by anyone in tesslate-{env}-deployers
-    # or higher). Override with AWS_EKS_ROLE_ARN for legacy eks-deployer, observer, or debugger.
+    # Role precedence: AWS_EKS_ROLE_ARN (full ARN) > --role short name > default "admin".
+    # Default is admin so cluster-mutating ops (deploy-k8s, deploy-compute) work
+    # out of the box; pass --role deployer for least-privilege image rollouts.
     # See docs/guides/eks-cluster-access.md for the full role matrix.
-    ROLE_ARN="${AWS_EKS_ROLE_ARN:-arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER_NAME}-team-deployer}"
+    if [ -n "$AWS_EKS_ROLE_ARN" ]; then
+        ROLE_ARN="$AWS_EKS_ROLE_ARN"
+    else
+        local short_role="${EXPLICIT_ROLE:-admin}"
+        case "$short_role" in
+            observer|deployer|debugger|admin)
+                ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER_NAME}-team-${short_role}"
+                ;;
+            eks-deployer)
+                # Legacy admin role gated by eks_admin_iam_arns. Use only if
+                # you are explicitly listed there (terraform, bigboss).
+                ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER_NAME}-eks-deployer"
+                ;;
+            *)
+                error "Invalid --role: '$short_role'. Use one of: observer, deployer, debugger, admin (or 'eks-deployer' for the legacy admin role)."
+                ;;
+        esac
+    fi
     ROLE_NAME="${ROLE_ARN##*/}"
 
     info "Configuring kubectl for $CLUSTER_NAME (via role: ${ROLE_NAME})..."
     aws eks update-kubeconfig --region us-east-1 --name "$CLUSTER_NAME" --alias "$CLUSTER_NAME" \
         --role-arn "$ROLE_ARN" >/dev/null 2>&1 \
-        || error "Failed to configure kubectl. Does cluster '$CLUSTER_NAME' exist? Can you assume role '$ROLE_ARN'? (Override with AWS_EKS_ROLE_ARN=...)"
+        || error "Failed to configure kubectl. Does cluster '$CLUSTER_NAME' exist? Can you assume role '$ROLE_ARN'? (Try a different --role or set AWS_EKS_ROLE_ARN to a full ARN.)"
     success "✓ kubectl context set to $CLUSTER_NAME (role: ${ROLE_NAME})"
 
     if ! kubectl cluster-info --request-timeout=10s >/dev/null 2>&1; then
@@ -178,12 +207,41 @@ verify_pods() {
 COMMAND="${1:-}"
 ENVIRONMENT="${2:-}"
 
+# Strip --role {observer|deployer|debugger|admin|eks-deployer} from the
+# remaining args before the per-command parsers (build/reload) consume
+# ${@:3}. Resolved later in ensure_kubectl_context.
+EXPLICIT_ROLE=""
+if [ $# -ge 2 ]; then
+    POSITIONAL=("$1" "$2")
+    shift 2
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --role)
+                if [ $# -lt 2 ]; then
+                    error "--role requires a value: observer|deployer|debugger|admin|eks-deployer"
+                fi
+                EXPLICIT_ROLE="$2"
+                shift 2
+                ;;
+            --role=*)
+                EXPLICIT_ROLE="${1#--role=}"
+                shift
+                ;;
+            *)
+                POSITIONAL+=("$1")
+                shift
+                ;;
+        esac
+    done
+    set -- "${POSITIONAL[@]}"
+fi
+
 # Validate command
 case "$COMMAND" in
     init|plan|apply|destroy|output|state|terraform|deploy-k8s|deploy-compute|build|reload)
         ;;
     *)
-        error "Invalid command: $COMMAND\n\nUsage: ./scripts/aws-deploy.sh {init|plan|apply|terraform|destroy|output|state|deploy-k8s|deploy-compute|build|reload} {production|beta|shared}"
+        error "Invalid command: $COMMAND\n\nUsage: ./scripts/aws-deploy.sh {init|plan|apply|terraform|destroy|output|state|deploy-k8s|deploy-compute|build|reload} {production|beta|shared} [--role observer|deployer|debugger|admin]"
         ;;
 esac
 
@@ -401,6 +459,9 @@ case "$COMMAND" in
             [devserver]="orchestrator/Dockerfile.devserver"
             [compute]="services/btrfs-csi/Dockerfile"
             [ast]="services/ast/Dockerfile"
+            # Federated /v1 marketplace service. Built from its own
+            # subtree so the orchestrator image stays small.
+            [marketplace]="packages/tesslate-marketplace/Dockerfile"
             # Seeded Tesslate Apps — external images mirrored to ECR so EKS
             # nodes can pull (short names in manifests get prefixed via
             # APP_IMAGE_REGISTRY_PREFIX at install time). mirofish is pulled
@@ -414,6 +475,7 @@ case "$COMMAND" in
             [devserver]="."
             [compute]="services/btrfs-csi/"
             [ast]="services/ast/"
+            [marketplace]="packages/tesslate-marketplace/"
             [markitdown]="seeds/apps/markitdown/"
             [deerflow]="seeds/apps/deer-flow/"
         )
@@ -423,6 +485,7 @@ case "$COMMAND" in
             # AST rides as a sidecar in the backend pod — rolling the
             # backend deployment is what picks up a new tesslate-ast image.
             [ast]="app=tesslate-backend"
+            [marketplace]="app=tesslate-marketplace"
         )
         # Additional deployments to restart when a given image is built
         # (e.g., worker uses the same image as backend)
@@ -451,12 +514,21 @@ case "$COMMAND" in
             [markitdown]="latest"
             [deerflow]="latest"
         )
+        # Extra tags — seed app manifests reference
+        # ``image: tesslate-devserver:latest`` (the platform's generic
+        # runtime base, pinned to a stable tag). Without an extra ``:latest``
+        # push, dev pods pulling the seed-declared tag get a stale image and
+        # the env-specific ``:beta``/``:production`` tag goes unused. Push
+        # both so existing pods catch up on the next pull.
+        declare -A EXTRA_TAGS=(
+            [devserver]="latest"
+        )
 
         # Validate image names
         for img in $IMAGES; do
             case "$img" in
-                backend|frontend|devserver|compute|ast|markitdown|deerflow) ;;
-                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute, ast, markitdown, deerflow" ;;
+                backend|frontend|devserver|compute|ast|marketplace|markitdown|deerflow) ;;
+                *) error "Unknown image: $img. Valid: backend, frontend, devserver, compute, ast, marketplace, markitdown, deerflow" ;;
             esac
         done
 
@@ -519,9 +591,16 @@ case "$COMMAND" in
                     CACHE_FLAG=""
                 fi
 
-                info "[$img] Starting build ${FULL_TAG}..."
+                # Pass every additional tag via -t so a single buildx push lays
+                # down all aliases atomically (see EXTRA_TAGS above).
+                EXTRA_TAG_FLAGS=""
+                if [ -n "${EXTRA_TAGS[$img]}" ] && [ "${EXTRA_TAGS[$img]}" != "$TAG" ]; then
+                    EXTRA_TAG_FLAGS="-t ${ECR_REGISTRY}/${REPO_NAME}:${EXTRA_TAGS[$img]}"
+                fi
+
+                info "[$img] Starting build ${FULL_TAG}${EXTRA_TAG_FLAGS:+ + extra tags}..."
                 (
-                    docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" \
+                    docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" $EXTRA_TAG_FLAGS \
                         -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" --push >>"$LOG_FILE" 2>&1
                 ) &
                 BUILD_PIDS+=($!)
@@ -563,8 +642,13 @@ case "$COMMAND" in
                     CACHE_FLAG=""
                 fi
 
-                info "[$img] Building ${FULL_TAG}..."
-                docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" \
+                EXTRA_TAG_FLAGS=""
+                if [ -n "${EXTRA_TAGS[$img]}" ] && [ "${EXTRA_TAGS[$img]}" != "$TAG" ]; then
+                    EXTRA_TAG_FLAGS="-t ${ECR_REGISTRY}/${REPO_NAME}:${EXTRA_TAGS[$img]}"
+                fi
+
+                info "[$img] Building ${FULL_TAG}${EXTRA_TAG_FLAGS:+ + extra tags}..."
+                docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" $EXTRA_TAG_FLAGS \
                     -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" --push
                 success "[$img] ✓ Build & push complete"
                 echo

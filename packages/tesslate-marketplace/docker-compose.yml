@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tesslate-marketplace-postgres
+    environment:
+      POSTGRES_DB: marketplace
+      POSTGRES_USER: marketplace
+      POSTGRES_PASSWORD: marketplace_dev_pass
+    ports:
+      - "5436:5432"
+    volumes:
+      - marketplace-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketplace -d marketplace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  marketplace:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tesslate-marketplace
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://marketplace:marketplace_dev_pass@postgres:5432/marketplace
+      BUNDLE_STORAGE_DIR: /data/bundles
+      BUNDLE_BASE_URL: http://localhost:8800
+      OPENSAIL_ENV: dev
+      HUB_DISPLAY_NAME: "Tesslate Marketplace (local)"
+    ports:
+      - "8800:8800"
+    volumes:
+      - marketplace-data:/data
+    command: >
+      sh -c "python scripts/init_db.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8800"
+
+volumes:
+  marketplace-postgres-data:
+  marketplace-data:

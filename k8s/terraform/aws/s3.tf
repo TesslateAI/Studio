@@ -262,3 +262,116 @@ resource "aws_s3_bucket_policy" "btrfs_snapshots" {
     ]
   })
 }
+
+# =============================================================================
+# S3 Bucket for Tesslate Marketplace Bundle Storage
+# =============================================================================
+# Holds the .tar.zst archives published by `tesslate-marketplace`. Each object
+# is keyed `{kind}/{slug}/{version}.tar.zst` (see
+# packages/tesslate-marketplace/app/services/cas.py:S3BundleStorage._key_for).
+# Bundles are immutable per (kind, slug, version): a republish under the same
+# triple overwrites in place but versioning keeps the prior bytes recoverable.
+# Install clients fetch via S3 presigned URLs minted by the marketplace pod —
+# the marketplace pod itself is out of the data path.
+# =============================================================================
+
+resource "aws_s3_bucket" "tesslate_marketplace_bundles" {
+  bucket        = "${var.project_name}-marketplace-bundles-${var.environment}-${random_id.suffix.hex}"
+  force_destroy = var.s3_force_destroy
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-${var.environment}-marketplace-bundles"
+  })
+}
+
+resource "aws_s3_bucket_versioning" "tesslate_marketplace_bundles" {
+  bucket = aws_s3_bucket.tesslate_marketplace_bundles.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "tesslate_marketplace_bundles" {
+  bucket = aws_s3_bucket.tesslate_marketplace_bundles.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "tesslate_marketplace_bundles" {
+  bucket = aws_s3_bucket.tesslate_marketplace_bundles.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "tesslate_marketplace_bundles" {
+  bucket = aws_s3_bucket.tesslate_marketplace_bundles.id
+
+  # Retire previous bundle bytes a month after a republish so versioning
+  # gives recovery without unbounded $ growth.
+  rule {
+    id     = "archive-old-bundle-versions"
+    status = "Enabled"
+
+    filter {} # Apply to all objects
+
+    noncurrent_version_transition {
+      noncurrent_days = 30
+      storage_class   = "STANDARD_IA"
+    }
+
+    noncurrent_version_transition {
+      noncurrent_days = 90
+      storage_class   = "GLACIER"
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 365
+    }
+  }
+
+  # Clean up incomplete multipart uploads (large bundles use multipart).
+  rule {
+    id     = "abort-incomplete-multipart"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "tesslate_marketplace_bundles" {
+  bucket = aws_s3_bucket.tesslate_marketplace_bundles.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnforceTLS"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.tesslate_marketplace_bundles.arn,
+          "${aws_s3_bucket.tesslate_marketplace_bundles.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}

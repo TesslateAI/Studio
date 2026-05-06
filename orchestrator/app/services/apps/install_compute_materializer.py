@@ -119,9 +119,7 @@ async def materialize_compute_from_volume(
     containers_by_name: dict[str, Container] = {}
 
     # primaryApp wins; otherwise first inserted base container is primary.
-    primary_app_name = config.primaryApp or (
-        next(iter(config.apps)) if config.apps else None
-    )
+    primary_app_name = config.primaryApp or (next(iter(config.apps)) if config.apps else None)
 
     for app_name, app_cfg in config.apps.items():
         env: dict[str, str] = dict(app_cfg.env or {})
@@ -140,6 +138,23 @@ async def materialize_compute_from_volume(
             build_command=app_cfg.build or None,
             output_directory=app_cfg.output or None,
             framework=app_cfg.framework or None,
+            # Image-based apps (e.g. ghcr.io/owner/app:tag, tesslate-markitdown:latest)
+            # ship a pre-built image in their manifest. compute_manager renders
+            # ``Container.image or settings.k8s_devserver_image``, so omitting
+            # this would silently boot every app on the default devserver.
+            image=app_cfg.image or None,
+            # 2026-05 App Runtime Contract — see migration 0097.
+            # ``source_strategy='image'`` means the image is self-contained:
+            # the deployer skips the bundle PVC mount at /app and (if
+            # ``state_mount_path`` is also set) mounts the per-install
+            # volume at that path instead. NULL = bundle (legacy default).
+            source_strategy=app_cfg.source_strategy or None,
+            state_mount_path=app_cfg.state_mount_path or None,
+            # 2026-05 — per-container resource overrides. NULL → platform
+            # defaults apply in the K8s renderer; non-null dict is a
+            # whitelist-filtered subset of {memory_request, memory_limit,
+            # cpu_request, cpu_limit} from the manifest.
+            resources=app_cfg.resources or None,
             exports=app_cfg.exports or None,
             container_type="base",
             status="stopped",
@@ -167,9 +182,7 @@ async def materialize_compute_from_volume(
             container_type="service",
             service_slug=infra_name,
             image=infra_cfg.image or None,
-            deployment_mode=(
-                "external" if infra_cfg.infra_type == "external" else "container"
-            ),
+            deployment_mode=("external" if infra_cfg.infra_type == "external" else "container"),
             external_endpoint=infra_cfg.endpoint,
             status="stopped",
             position_x=infra_cfg.x if infra_cfg.x is not None else 400,

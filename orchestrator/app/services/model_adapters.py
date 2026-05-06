@@ -1139,7 +1139,12 @@ async def create_model_adapter(
         else:
             provider = "openai"
 
-    if provider == "openai":
+    # Both "openai" and "anthropic" providers are served via OpenAI-compatible
+    # endpoints. Anthropic exposes an OpenAI-compatible /v1 surface (Bearer
+    # token auth, chat.completions format) that works with AsyncOpenAI.
+    # get_llm_client() already configures the client with the right base URL
+    # and API key for each provider, so we use the same adapter for both.
+    if provider in ("openai", "anthropic"):
         # Get configured client using centralized routing
         client = await get_llm_client(user_id, model_name, db)
 
@@ -1147,6 +1152,7 @@ async def create_model_adapter(
         # builtin/gpt-4o → gpt-4o (LiteLLM models)
         # custom/my-ollama/neural-7b → neural-7b (custom provider)
         # openai/gpt-5.2 → gpt-5.2, openrouter/anthropic/claude → anthropic/claude (BYOK)
+        # anthropic/claude-3.5-sonnet → claude-3.5-sonnet
         api_model_name = model_name
         if model_name.startswith(BUILTIN_PREFIX):
             api_model_name = model_name[len(BUILTIN_PREFIX) :]

@@ -31,6 +31,7 @@ from ...models import (
 )
 from ...utils.slug_generator import slugify
 from ..hub_client import HubClient
+from ..marketplace_constants import LOCAL_SOURCE_ID
 from . import compatibility
 from .manifest_parser import ManifestValidationError
 from .manifest_parser import parse as parse_manifest
@@ -212,6 +213,7 @@ async def publish_version(
             # explicitly, which lands here unchanged.
             visibility=listing_dict.get("visibility", "private"),
             state="draft",
+            source_id=LOCAL_SOURCE_ID,
         )
         db.add(new_app)
         try:
@@ -261,6 +263,7 @@ async def publish_version(
         required_features=required_features,
         approval_state="pending_stage1",
         published_at=now,
+        source_id=app_row.source_id,
     )
     from ._auto_approve_flag import is_auto_approve_enabled
 

@@ -14,6 +14,7 @@ resources:
   - secrets/postgres-secret.yaml
   - secrets/s3-credentials.yaml
   - secrets/app-secrets.yaml
+  - secrets/marketplace-secret.yaml
   - frontend-config.yaml
   # Storage class
   - storage-class.yaml
@@ -28,6 +29,8 @@ patches:
   # CronJob patches for Minikube (imagePullPolicy: Never for local images)
   - path: snapshot-cleanup-cronjob-patch.yaml
   - path: namespace-reaper-cronjob-patch.yaml
+  # Marketplace patches for Minikube (imagePullPolicy: Never for local image)
+  - path: marketplace-patch.yaml
 
 images:
   # Use latest tag everywhere (same as production)
@@ -43,6 +46,9 @@ images:
     newTag: latest
   - name: tesslate-ast
     newName: tesslate-ast
+    newTag: latest
+  - name: tesslate-marketplace
+    newName: tesslate-marketplace
     newTag: latest
 
 labels:

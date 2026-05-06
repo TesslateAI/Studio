@@ -40,6 +40,28 @@ spec:
           # public immediately. The HTTPS guard in config.py blocks this in prod.
           - name: TSL_APPS_DEV_AUTO_APPROVE
             value: "1"
+          # Federated marketplace (Wave 10): point Tesslate Official's
+          # base_url at the in-cluster marketplace pod. The seed worker
+          # refreshes this on every boot so an env flip is enough to
+          # repoint reads — no manual SQL UPDATE needed.
+          - name: TESSLATE_OFFICIAL_BASE_URL
+            value: "http://tesslate-marketplace:8800"
+          # Wave 8 admin governance writes (publish, yank, force-approve,
+          # override-yank). MUST match a STATIC_TOKENS entry in the
+          # marketplace pod's secret with the admin.write scope.
+          - name: MARKETPLACE_ADMIN_TOKEN
+            value: "dev-orchestrator-admin"
+          # Wave 8 state-change webhook (marketplace -> orchestrator). HMAC
+          # secret keyed on (secret + ":" + hub_id, raw_body). Same value
+          # must be configured on the marketplace side per source.
+          - name: MARKETPLACE_SUBMISSION_WEBHOOK_SECRET
+            value: "dev-submission-webhook-secret"
+          # Wave 9 entitlement-grant webhook (hub -> orchestrator) for
+          # admin_trusted Stripe Connect. Off by default in dev (the
+          # global flag is false), but the secret is still required so
+          # the endpoint can validate signatures.
+          - name: MARKETPLACE_HUB_ENTITLEMENT_SECRET
+            value: "dev-entitlement-secret"
         resources:
           requests:
             memory: "512Mi"

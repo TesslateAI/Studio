@@ -12,3 +12,58 @@ spec:
           env:
             - name: DEPLOYMENT_ENV
               value: "production"
+            # Use the standalone opensail-runtime pod (added by the 2026-04
+            # automation runtime) for connector-proxy traffic instead of the
+            # embedded in-process router. Keeps the proxy on its own
+            # NetworkPolicy and frees the orchestrator from connector load.
+            - name: CONNECTOR_PROXY_MODE
+              value: "dedicated"
+---
+# Marketplace pod — flip OPENSAIL_ENV to prod, replace the dev-flavoured
+# HUB_DISPLAY_NAME from the base manifest, and disable on-startup seed
+# loading so a pod restart never re-seeds the live catalog.
+#
+# Bundle storage uses S3 (tesslate-marketplace-bundles-{env}-{suffix}).
+# The marketplace pod reuses tesslate-backend-sa for IRSA, which now
+# carries marketplace_s3_policy granting GetObject/PutObject/DeleteObject
+# on the bucket only. Install clients hit the S3 presigned URLs directly
+# — the marketplace pod is out of the bundle data path.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-marketplace
+  namespace: tesslate
+spec:
+  template:
+    spec:
+      containers:
+        - name: marketplace
+          env:
+            - name: OPENSAIL_ENV
+              value: "prod"
+            - name: HUB_DISPLAY_NAME
+              value: "Tesslate Official"
+            - name: MARKETPLACE_LOAD_SEEDS_ON_STARTUP
+              value: "false"
+            - name: BUNDLE_STORAGE_BACKEND
+              value: "s3"
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: marketplace-secret
+                  key: S3_BUCKET
+            - name: S3_REGION
+              value: "us-east-1"
+      initContainers:
+        # IMPORTANT: list both initContainers here in the desired execution
+        # order. Kustomize's strategic merge of initContainers reorders by
+        # the patch sequence — if we only mention `alembic-migrate`,
+        # `create-database` ends up after it and never runs (alembic fails
+        # on missing DB). create-database must run first.
+        - name: create-database
+        - name: alembic-migrate
+          env:
+            # Keep alembic-migrate's OPENSAIL_ENV in sync with the runtime
+            # container so any alembic env() reads pick the same code path.
+            - name: OPENSAIL_ENV
+              value: "prod"

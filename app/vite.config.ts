@@ -17,6 +17,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    // Transformers.js v3 ships ONNX Runtime Web (.wasm + .mjs) and large model files;
+    // letting Vite pre-bundle it breaks the worker import and bloats the dev server.
+    exclude: ['@huggingface/transformers'],
+  },
+  worker: {
+    format: 'es',
+  },
   // Expose DEPLOYMENT_MODE to the browser as import.meta.env.DEPLOYMENT_MODE
   define: {
     'import.meta.env.DEPLOYMENT_MODE': JSON.stringify(process.env.DEPLOYMENT_MODE || 'docker'),

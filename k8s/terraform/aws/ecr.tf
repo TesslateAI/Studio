@@ -9,9 +9,10 @@
 # =============================================================================
 
 locals {
-  ecr_registry_url  = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
-  ecr_backend_url   = "${local.ecr_registry_url}/${var.project_name}-backend"
-  ecr_frontend_url  = "${local.ecr_registry_url}/${var.project_name}-frontend"
-  ecr_devserver_url = "${local.ecr_registry_url}/${var.project_name}-devserver"
-  ecr_ast_url       = "${local.ecr_registry_url}/${var.project_name}-ast"
+  ecr_registry_url    = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+  ecr_backend_url     = "${local.ecr_registry_url}/${var.project_name}-backend"
+  ecr_frontend_url    = "${local.ecr_registry_url}/${var.project_name}-frontend"
+  ecr_devserver_url   = "${local.ecr_registry_url}/${var.project_name}-devserver"
+  ecr_ast_url         = "${local.ecr_registry_url}/${var.project_name}-ast"
+  ecr_marketplace_url = "${local.ecr_registry_url}/${var.project_name}-marketplace"
 }

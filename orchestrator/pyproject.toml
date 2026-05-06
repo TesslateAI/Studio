@@ -60,8 +60,10 @@ dependencies = [
     "arq>=0.26.0",
     # MCP (Model Context Protocol) SDK
     "mcp>=1.9.2",
-    # Ed25519 verification for Discord webhooks
+    # Ed25519 verification for Discord webhooks + marketplace bundle attestations
     "PyNaCl>=1.5.0",
+    # tar.zst marketplace bundle (de)compression
+    "zstandard>=0.21.0",
     # gRPC client for btrfs CSI NodeOps service
     "grpcio>=1.60.0",
     # Gateway: cron scheduling

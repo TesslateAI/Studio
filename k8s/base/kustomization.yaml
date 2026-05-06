@@ -27,6 +27,11 @@ resources:
   - core/snapshot-cleanup-cronjob.yaml
   - core/namespace-reaper-cronjob.yaml
 
+  # Federated Marketplace (/v1 protocol service). Hosts the catalog the
+  # orchestrator's federation sync worker pulls from. See
+  # packages/tesslate-marketplace/ for the source.
+  - marketplace
+
   # Controller plane (Phase 4 — leader-elected cron + reconciler).
   # Replicas=2 active/passive via lease backend
   # (CONTROLLER_LEASE_BACKEND=db|redis|k8s, default db).

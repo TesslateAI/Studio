@@ -107,9 +107,9 @@ async def get_installer_wallet(
 async def get_creator_wallet(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(current_active_user),
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     if not getattr(user, "creator_stripe_account_id", None):
-        raise HTTPException(status_code=403, detail="not a registered creator (no stripe account)")
+        return None
     w = await find_or_create_wallet(db, owner_type="creator", owner_user_id=user.id)
     return _wallet_view(w)
 

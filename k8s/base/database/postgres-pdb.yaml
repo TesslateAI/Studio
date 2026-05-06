@@ -1,3 +1,18 @@
+# Use maxUnavailable, NOT minAvailable, for single-replica Deployments.
+#
+# minAvailable: 1 with replicas: 1 makes the only pod permanently
+# un-evictable — any voluntary disruption (kubectl drain, EKS managed
+# node group rolling update, cluster-autoscaler scale-down, spot
+# reclamation) will hang on PodEvictionFailure forever. This bit us in
+# May 2026 when an EKS node group launch-template version bump
+# couldn't drain the postgres pod.
+#
+# maxUnavailable: 1 says "at most one replica can be unavailable at a
+# time", which:
+#   - allows the single pod to be evicted (one unavailable = at most
+#     one → constraint satisfied), so node lifecycle works;
+#   - if anyone ever scales replicas to 2+ with proper replication,
+#     still caps simultaneous outage at one — the original intent.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,7 +22,7 @@ metadata:
     app: postgres
     component: database
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app: postgres

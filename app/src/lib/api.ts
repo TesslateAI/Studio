@@ -527,7 +527,7 @@ export const projectsApi = {
   create: async (
     name: string,
     description?: string,
-    sourceType?: 'template' | 'github' | 'gitlab' | 'bitbucket' | 'base',
+    sourceType?: 'template' | 'github' | 'gitlab' | 'bitbucket' | 'base' | 'empty',
     repoUrl?: string,
     branch?: string,
     baseId?: string,
@@ -1019,7 +1019,27 @@ export const chatApi = {
     }
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const cloned = response.clone();
+      let detail: string | undefined;
+      try {
+        const body = await response.json();
+        if (typeof body?.detail === 'string') {
+          detail = body.detail;
+        } else if (Array.isArray(body?.detail) && body.detail.length > 0) {
+          const first = body.detail[0];
+          const loc = Array.isArray(first?.loc) ? first.loc.join('.') : '';
+          detail = loc ? `${loc}: ${first?.msg ?? ''}` : (first?.msg ?? '');
+        } else if (typeof body?.message === 'string') {
+          detail = body.message;
+        }
+      } catch {
+        try {
+          detail = (await cloned.text()).slice(0, 500);
+        } catch {
+          /* both attempts failed; fall back to status code */
+        }
+      }
+      throw new Error(detail || `HTTP ${response.status}`);
     }
 
     const reader = response.body?.getReader();
@@ -1309,7 +1329,7 @@ export const mentionApi = {
    * are small and a single fetch primes all three sections at once.
    */
   search: async (): Promise<MentionSearchResponse> => {
-    const safeGet = async <T,>(url: string, params?: Record<string, unknown>) => {
+    const safeGet = async <T>(url: string, params?: Record<string, unknown>) => {
       try {
         const r = await api.get(url, { params });
         return r.data as T;
@@ -1400,7 +1420,8 @@ export const mentionApi = {
         slug: a.app_slug ?? '',
         name: a.app_name ?? a.app_slug ?? 'App',
         enabled: (a.state ?? 'installed') === 'installed' || (a.state ?? '') === 'running',
-        state_label: a.state && a.state !== 'installed' && a.state !== 'running' ? a.state : undefined,
+        state_label:
+          a.state && a.state !== 'installed' && a.state !== 'running' ? a.state : undefined,
       }));
 
     return { agents, mcps, apps };
@@ -1495,6 +1516,50 @@ export const nodeConfigApi = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Standalone-chat file uploads + on-demand workspace attach
+// ---------------------------------------------------------------------------
+
+export interface ChatAttachmentUploadResult {
+  attachment_id: string;
+  file_path: string;
+  filename: string;
+  mime_type: string | null;
+  size_bytes: number;
+  sha256: string;
+}
+
+export const chatAttachmentsApi = {
+  /** Upload a single file into the chat's attached workspace. Server enforces
+   * a 25 MiB hard cap and accepts any mime type. */
+  upload: async (chatId: string, file: File): Promise<ChatAttachmentUploadResult> => {
+    const form = new FormData();
+    form.append('file', file);
+    const response = await api.post(`/api/chats/${chatId}/attachments`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+  cancel: async (chatId: string, attachmentId: string): Promise<void> => {
+    await api.delete(`/api/chats/${chatId}/attachments/${attachmentId}`);
+  },
+};
+
+export interface WorkspaceAttachSubmit {
+  action: 'attach' | 'create_empty' | 'cancel';
+  project_id?: string;
+  name?: string;
+}
+
+export const workspaceAttachApi = {
+  submit: async (inputId: string, body: WorkspaceAttachSubmit): Promise<void> => {
+    await api.post(`/api/chat/workspace-attach/${inputId}/submit`, body);
+  },
+  cancel: async (inputId: string): Promise<void> => {
+    await api.post(`/api/chat/workspace-attach/${inputId}/cancel`);
+  },
+};
+
 export interface ScopeOption {
   value: string;
   label: string;
@@ -1530,7 +1595,9 @@ export const externalApi = {
 };
 
 export const marketplaceApi = {
-  // Get all marketplace agents with optional filtering and request cancellation
+  // Get all marketplace agents with optional filtering and request cancellation.
+  // Wave 4: ``source`` filters results to a single federated marketplace
+  // source (handle, e.g. "tesslate-official"). Omit for "all sources" mode.
   getAllAgents: async (
     params?: {
       category?: string;
@@ -1539,6 +1606,7 @@ export const marketplaceApi = {
       sort?: string;
       page?: number;
       limit?: number;
+      source?: string;
     },
     options?: { signal?: AbortSignal }
   ) => {
@@ -1549,6 +1617,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
 
     const queryString = queryParams.toString();
     const response = await api.get(
@@ -1570,9 +1639,18 @@ export const marketplaceApi = {
     return response.data.agents || [];
   },
 
-  // Purchase/add agent to account
-  purchaseAgent: async (agentId: string) => {
-    const response = await api.post(`/api/marketplace/agents/${agentId}/purchase`);
+  // Purchase/add agent to account. ``confirmed`` carries through the
+  // Wave-4 install_guard confirmation flow when the source's trust level
+  // requires the per-install scope/tool prompt (mostly mcp_server/app —
+  // agents from `private` sources install without confirmation, but the
+  // flag is wired through here so future kinds can re-use the same UX).
+  purchaseAgent: async (agentId: string, opts?: { confirmed?: boolean }) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/agents/${agentId}/purchase${query ? `?${query}` : ''}`
+    );
     return response.data;
   },
 
@@ -1590,7 +1668,8 @@ export const marketplaceApi = {
     return response.data.related_agents || [];
   },
 
-  // Fork an open source agent
+  // Fork an open source agent. ``confirmed`` mirrors purchase semantics —
+  // forks are copies-into-library, so the install gate applies.
   forkAgent: async (
     agentId: string,
     customizations?: {
@@ -1598,10 +1677,14 @@ export const marketplaceApi = {
       description?: string;
       system_prompt?: string;
       model?: string;
-    }
+    },
+    opts?: { confirmed?: boolean }
   ) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
     const response = await api.post(
-      `/api/marketplace/agents/${agentId}/fork`,
+      `/api/marketplace/agents/${agentId}/fork${query ? `?${query}` : ''}`,
       customizations || {}
     );
     return response.data;
@@ -1716,6 +1799,7 @@ export const marketplaceApi = {
       sort?: string;
       page?: number;
       limit?: number;
+      source?: string;
     },
     options?: { signal?: AbortSignal }
   ) => {
@@ -1726,6 +1810,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
 
     const response = await api.get(`/api/marketplace/bases?${queryParams}`, {
       signal: options?.signal,
@@ -1743,8 +1828,13 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  purchaseBase: async (baseId: string) => {
-    const response = await api.post(`/api/marketplace/bases/${baseId}/purchase`);
+  purchaseBase: async (baseId: string, opts?: { confirmed?: boolean }) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/bases/${baseId}/purchase${query ? `?${query}` : ''}`
+    );
     return response.data;
   },
 
@@ -1908,6 +1998,7 @@ export const marketplaceApi = {
     sort?: string;
     page?: number;
     limit?: number;
+    source?: string;
   }) => {
     const queryParams = new URLSearchParams();
     if (params?.category) queryParams.append('category', params.category);
@@ -1917,6 +2008,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
     const response = await api.get(`/api/marketplace/themes?${queryParams}`);
     return response.data;
   },
@@ -1931,8 +2023,13 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  addThemeToLibrary: async (themeId: string) => {
-    const response = await api.post(`/api/marketplace/themes/${themeId}/add`);
+  addThemeToLibrary: async (themeId: string, opts?: { confirmed?: boolean }) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/themes/${themeId}/add${query ? `?${query}` : ''}`
+    );
     return response.data;
   },
 
@@ -1979,8 +2076,18 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  forkTheme: async (themeId: string, data?: Record<string, unknown>) => {
-    const response = await api.post(`/api/marketplace/themes/${themeId}/fork`, data || {});
+  forkTheme: async (
+    themeId: string,
+    data?: Record<string, unknown>,
+    opts?: { confirmed?: boolean }
+  ) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/themes/${themeId}/fork${query ? `?${query}` : ''}`,
+      data || {}
+    );
     return response.data;
   },
 
@@ -1993,6 +2100,7 @@ export const marketplaceApi = {
       sort?: string;
       page?: number;
       limit?: number;
+      source?: string;
     },
     options?: { signal?: AbortSignal }
   ) => {
@@ -2003,6 +2111,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
 
     const queryString = queryParams.toString();
     const response = await api.get(
@@ -2021,6 +2130,7 @@ export const marketplaceApi = {
       sort?: string;
       page?: number;
       limit?: number;
+      source?: string;
     },
     options?: { signal?: AbortSignal }
   ) => {
@@ -2031,6 +2141,7 @@ export const marketplaceApi = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.page) queryParams.append('page', params.page.toString());
     if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.source) queryParams.append('source', params.source);
     const query = queryParams.toString();
     const response = await api.get(`/api/marketplace/mcp-servers${query ? `?${query}` : ''}`, {
       signal: options?.signal,
@@ -2043,17 +2154,27 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  // MCP install/manage (separate from marketplace browse)
+  // MCP install/manage (separate from marketplace browse).
+  //
+  // Wave 4: ``confirmed`` carries the per-install confirmation flag for
+  // MCP installs from `private` sources (the install_guard returns 409
+  // with a scope/tool prompt when this is false; UI re-submits with
+  // ``confirmed=true`` after the user accepts the prompt).
   installMcpServer: async (
     marketplaceAgentId: string,
     credentials?: Record<string, string>,
-    opts?: { scope_level?: 'user' | 'project'; project_id?: string }
+    opts?: {
+      scope_level?: 'user' | 'project';
+      project_id?: string;
+      confirmed?: boolean;
+    }
   ) => {
     const response = await api.post('/api/mcp/install', {
       marketplace_agent_id: marketplaceAgentId,
       credentials: credentials || {},
       scope_level: opts?.scope_level ?? 'user',
       project_id: opts?.project_id,
+      confirmed: opts?.confirmed ?? false,
     });
     return response.data;
   },
@@ -2189,15 +2310,28 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  purchaseSkill: async (skillId: string) => {
-    const response = await api.post(`/api/marketplace/skills/${skillId}/purchase`);
+  purchaseSkill: async (skillId: string, opts?: { confirmed?: boolean }) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/skills/${skillId}/purchase${query ? `?${query}` : ''}`
+    );
     return response.data;
   },
 
-  installSkillOnAgent: async (skillId: string, agentId: string) => {
-    const response = await api.post(`/api/marketplace/skills/${skillId}/install`, {
-      agent_id: agentId,
-    });
+  installSkillOnAgent: async (
+    skillId: string,
+    agentId: string,
+    opts?: { confirmed?: boolean }
+  ) => {
+    const queryParams = new URLSearchParams();
+    if (opts?.confirmed) queryParams.append('confirmed', 'true');
+    const query = queryParams.toString();
+    const response = await api.post(
+      `/api/marketplace/skills/${skillId}/install${query ? `?${query}` : ''}`,
+      { agent_id: agentId }
+    );
     return response.data;
   },
 
@@ -2208,6 +2342,184 @@ export const marketplaceApi = {
 
   getAgentSkills: async (agentId: string) => {
     const response = await api.get(`/api/marketplace/agents/${agentId}/skills`);
+    return response.data;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Federated Marketplace Sources (Wave 5)
+// ---------------------------------------------------------------------------
+// Mirrors the Pydantic schemas in
+// orchestrator/app/routers/marketplace_sources.py — keep these in sync when
+// the backend contract changes.
+
+/** Trust classification for a federated source row. */
+export type MarketplaceSourceTrustLevel =
+  | 'official'       // tesslate-official seed; never user-editable
+  | 'admin_trusted'  // promoted by superuser via /promote
+  | 'local'          // local:// system source (filesystem-backed)
+  | 'private'        // user/team source with bearer token
+  | 'untrusted';     // user/team source with no token (installs blocked)
+
+/** Visibility scope for a marketplace source. */
+export type MarketplaceSourceScope = 'system' | 'user' | 'team';
+
+/** Public projection of a MarketplaceSource row. Encrypted token is never returned. */
+export interface MarketplaceSourceResponse {
+  id: string;
+  handle: string;
+  display_name: string;
+  base_url: string;
+  scope: MarketplaceSourceScope;
+  user_id: string | null;
+  team_id: string | null;
+  trust_level: MarketplaceSourceTrustLevel;
+  is_system: boolean;
+  is_active: boolean;
+  has_token: boolean;
+  pinned_hub_id: string | null;
+  capabilities: string[];
+  policies: Record<string, unknown>;
+  last_synced_at: string | null;
+  last_sync_error: string | null;
+  sync_etag: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Body for POST /api/marketplace/sources. */
+export interface MarketplaceSourceCreate {
+  handle: string;
+  display_name: string;
+  base_url: string;
+  /**
+   * Plaintext bearer token. Despite the field name, the server encrypts it
+   * before persistence — naming matches the existing token endpoints for
+   * API symmetry. Omit or leave blank for an anonymous (untrusted) source.
+   */
+  encrypted_token?: string | null;
+  scope: 'user' | 'team';
+}
+
+/** Body for PATCH /api/marketplace/sources/{id}. All fields optional. */
+export interface MarketplaceSourceUpdate {
+  display_name?: string;
+  encrypted_token?: string | null;
+  is_active?: boolean;
+  /** Explicitly remove the stored token (encrypted_token=null means "leave unchanged"). */
+  clear_token?: boolean;
+}
+
+/** Result of POST /api/marketplace/sources/{id}/test. */
+export interface SourceTestResponse {
+  hub_id: string;
+  api_version: string | null;
+  display_name: string | null;
+  capabilities: string[];
+  policies: Record<string, unknown>;
+  auto_trust_level: MarketplaceSourceTrustLevel;
+  pinned_hub_id_changed: boolean;
+}
+
+/** Result of POST /api/marketplace/sources/{id}/sync. */
+export interface SourceSyncResponse {
+  source_id: string;
+  source_handle: string;
+  events_processed: number;
+  items_upserted: number;
+  items_deleted: number;
+  items_deactivated: number;
+  versions_yanked: number;
+  versions_removed: number;
+  pricing_changes: number;
+  etag_advanced_to: string | null;
+  error: string | null;
+  skipped_reason: string | null;
+  last_sync_error: string | null;
+  last_synced_at: string | null;
+}
+
+/** Body for POST /api/marketplace/sources/{id}/promote (superuser-only). */
+export interface SourcePromotePayload {
+  trust_level: 'admin_trusted' | 'private' | 'untrusted';
+}
+
+export const marketplaceSourcesApi = {
+  /**
+   * List the marketplace sources visible to the requester. Always includes
+   * system rows (tesslate-official, local) plus user and team scoped rows
+   * for the requester's active memberships. Inactive non-system rows are
+   * hidden by default.
+   */
+  list: async (
+    options?: { include_inactive?: boolean; signal?: AbortSignal }
+  ): Promise<MarketplaceSourceResponse[]> => {
+    const params = new URLSearchParams();
+    if (options?.include_inactive) params.append('include_inactive', 'true');
+    const query = params.toString();
+    const response = await api.get(
+      `/api/marketplace/sources${query ? `?${query}` : ''}`,
+      { signal: options?.signal }
+    );
+    return response.data;
+  },
+
+  /** Create a new federated marketplace source (user or team scope). */
+  create: async (data: MarketplaceSourceCreate): Promise<MarketplaceSourceResponse> => {
+    const response = await api.post('/api/marketplace/sources', data);
+    return response.data;
+  },
+
+  /** Update display name, token, or active flag. System rows return 403. */
+  update: async (
+    sourceId: string,
+    data: MarketplaceSourceUpdate
+  ): Promise<MarketplaceSourceResponse> => {
+    const response = await api.patch(`/api/marketplace/sources/${sourceId}`, data);
+    return response.data;
+  },
+
+  /**
+   * Soft-delete (default) sets is_active=false. Passing hard=true requests
+   * a cascade delete of catalog rows but only succeeds when no user-state
+   * rows reference them.
+   */
+  delete: async (sourceId: string, options?: { hard?: boolean }): Promise<void> => {
+    const params = new URLSearchParams();
+    if (options?.hard) params.append('hard', 'true');
+    const query = params.toString();
+    await api.delete(
+      `/api/marketplace/sources/${sourceId}${query ? `?${query}` : ''}`
+    );
+  },
+
+  /**
+   * Hit the source's /v1/manifest endpoint, pin its hub_id, and snapshot
+   * advertised capabilities + policies. Auto-classifies trust based on
+   * whether a token is stored.
+   */
+  test: async (sourceId: string): Promise<SourceTestResponse> => {
+    const response = await api.post(`/api/marketplace/sources/${sourceId}/test`);
+    return response.data;
+  },
+
+  /** Run a one-shot sync against this source and return the result envelope. */
+  sync: async (sourceId: string): Promise<SourceSyncResponse> => {
+    const response = await api.post(`/api/marketplace/sources/${sourceId}/sync`);
+    return response.data;
+  },
+
+  /**
+   * Superuser-only trust promotion/demotion. Only valid on non-system rows.
+   * UI must hide the affordance unless the current user has is_superuser=true.
+   */
+  promote: async (
+    sourceId: string,
+    trustLevel: SourcePromotePayload['trust_level']
+  ): Promise<MarketplaceSourceResponse> => {
+    const response = await api.post(`/api/marketplace/sources/${sourceId}/promote`, {
+      trust_level: trustLevel,
+    });
     return response.data;
   },
 };
@@ -4187,11 +4499,7 @@ export const appVersionsApi = {
 // /api/app-versions/publish endpoint with project-slug ergonomics + an
 // inferrer that produces a draft manifest from project structure.
 
-import type {
-  PublishDraftResponse,
-  PublishAppRequest,
-  PublishAppResponse,
-} from '../types/publish';
+import type { PublishDraftResponse, PublishAppRequest, PublishAppResponse } from '../types/publish';
 
 export const publishApi = {
   async draft(projectSlug: string): Promise<PublishDraftResponse> {
@@ -4892,9 +5200,7 @@ export const automationsApi = {
     if (params?.limit !== undefined) qs.append('limit', String(params.limit));
     if (params?.offset !== undefined) qs.append('offset', String(params.offset));
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    const response = await api.get(
-      `/api/automations/runs/by-install/${appInstanceId}${suffix}`
-    );
+    const response = await api.get(`/api/automations/runs/by-install/${appInstanceId}${suffix}`);
     return response.data;
   },
 
@@ -4908,10 +5214,7 @@ export const automationsApi = {
     return response.data;
   },
 
-  async update(
-    id: string,
-    payload: AutomationDefinitionUpdate
-  ): Promise<AutomationDefinitionOut> {
+  async update(id: string, payload: AutomationDefinitionUpdate): Promise<AutomationDefinitionOut> {
     const response = await api.patch(`/api/automations/${id}`, payload);
     return response.data;
   },
@@ -4932,10 +5235,7 @@ export const automationsApi = {
     return response.data;
   },
 
-  async listRuns(
-    id: string,
-    params?: ListRunsParams
-  ): Promise<AutomationRunSummary[]> {
+  async listRuns(id: string, params?: ListRunsParams): Promise<AutomationRunSummary[]> {
     const qs = new URLSearchParams();
     if (params?.status) qs.append('status', params.status);
     if (params?.limit !== undefined) qs.append('limit', String(params.limit));
@@ -5026,13 +5326,11 @@ export const automationsApi = {
    *   submit a resolution. Owned by Wave 2A; this client just calls it.
    */
   approvals: {
-    /** Cross-automation pending list. Used by the badge + ApprovalsPage. */
+    /** Cross-automation pending list. Used by the badge + ApprovalsPage.
+     * TODO(Phase 2): replace stub with real GET /api/automations/approvals/pending
+     * once the backend endpoint is implemented. Until then we return [] without
+     * making a network request so the browser console stays clean. */
     async listPending(): Promise<ApprovalRequest[]> {
-      const response = await api.get('/api/automations/approvals/pending');
-      // Backend may shape this as either a bare list or { items: [...] }.
-      const data = response.data;
-      if (Array.isArray(data)) return data as ApprovalRequest[];
-      if (Array.isArray(data?.items)) return data.items as ApprovalRequest[];
       return [];
     },
 
@@ -5048,9 +5346,7 @@ export const automationsApi = {
 
     /** Single approval fetch — drawer hydration. */
     async get(automationId: string, requestId: string): Promise<ApprovalRequest> {
-      const response = await api.get(
-        `/api/automations/${automationId}/approvals/${requestId}`
-      );
+      const response = await api.get(`/api/automations/${automationId}/approvals/${requestId}`);
       return response.data;
     },
 
@@ -5099,9 +5395,7 @@ export interface AppCompositionLink {
 export const appCompositionApi = {
   async listLinks(installId: string): Promise<AppCompositionLink[]> {
     try {
-      const response = await api.get(
-        `/api/v1/composition/installs/${installId}/links`
-      );
+      const response = await api.get(`/api/v1/composition/installs/${installId}/links`);
       return Array.isArray(response.data) ? response.data : [];
     } catch {
       // Endpoint is wired in Phase 5; defensive empty-list fallback so
@@ -5155,10 +5449,7 @@ export const communicationDestinationsApi = {
    * Delete a destination. Server returns 409 if the destination is
    * referenced by active automations — pass ``force=true`` to override.
    */
-  async remove(
-    id: string,
-    force = false
-  ): Promise<{ status: string; id: string }> {
+  async remove(id: string, force = false): Promise<{ status: string; id: string }> {
     const suffix = force ? '?force=true' : '';
     const response = await api.delete(`/api/destinations/${id}${suffix}`);
     return response.data;
@@ -5247,11 +5538,13 @@ export interface SpendRollupResponse {
 }
 
 export const adminSpendApi = {
-  async rollup(params: {
-    start?: string;
-    end?: string;
-    group_by?: SpendRollupGroupBy;
-  } = {}): Promise<SpendRollupResponse> {
+  async rollup(
+    params: {
+      start?: string;
+      end?: string;
+      group_by?: SpendRollupGroupBy;
+    } = {}
+  ): Promise<SpendRollupResponse> {
     const response = await api.get('/api/admin/spend/rollup', { params });
     return response.data;
   },

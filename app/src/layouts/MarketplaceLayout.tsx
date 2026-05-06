@@ -1,5 +1,5 @@
-import { Outlet, useLocation } from 'react-router-dom';
-import { useState, useEffect, useMemo } from 'react';
+import { Outlet, useLocation, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { NavigationSidebar } from '../components/ui';
@@ -7,6 +7,7 @@ import { MobileWarning } from '../components/MobileWarning';
 import { PublicMarketplaceHeader } from './PublicMarketplaceHeader';
 import { PublicMarketplaceFooter } from './PublicMarketplaceFooter';
 import { MarketplaceAuthContext } from '../contexts/MarketplaceAuthContext';
+import { marketplaceSourcesApi, type MarketplaceSourceResponse } from '../lib/api';
 import { config } from '../config';
 
 const API_URL = config.API_URL;
@@ -26,6 +27,7 @@ type AuthState = 'loading' | 'authenticated' | 'unauthenticated';
  */
 export function MarketplaceLayout() {
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   // Fast synchronous check: if a JWT token exists, render authenticated immediately
   // This avoids the public marketplace flash for logged-in users
   const [authState, setAuthState] = useState<AuthState>(() =>
@@ -58,7 +60,7 @@ export function MarketplaceLayout() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authState]);
 
   // Determine active page for sidebar
   const activePage = useMemo((): 'dashboard' | 'marketplace' | 'library' | 'feedback' => {
@@ -69,13 +71,91 @@ export function MarketplaceLayout() {
     return 'dashboard';
   }, [location.pathname]);
 
+  // -------------------------------------------------------------------------
+  // Federated source state (Wave 5)
+  // -------------------------------------------------------------------------
+  // Cached list of sources visible to this user — fetched once when auth
+  // settles, refreshed only on explicit settings-page changes. The selected
+  // source is mirrored to the URL so deep links and refreshes preserve it.
+
+  const [sources, setSources] = useState<MarketplaceSourceResponse[]>([]);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
+  const sourcesAbortRef = useRef<AbortController | null>(null);
+
+  const refreshSources = useCallback(async () => {
+    if (authState !== 'authenticated') {
+      setSources([]);
+      setSourcesError(null);
+      return;
+    }
+    sourcesAbortRef.current?.abort();
+    const controller = new AbortController();
+    sourcesAbortRef.current = controller;
+    setSourcesLoading(true);
+    try {
+      const data = await marketplaceSourcesApi.list({ signal: controller.signal });
+      if (!controller.signal.aborted) {
+        setSources(data);
+        setSourcesError(null);
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      // Cancel from axios shows up as code 'ERR_CANCELED' — treat as no-op.
+      const e = err as { code?: string; response?: { data?: { detail?: string } }; message?: string };
+      if (e?.code === 'ERR_CANCELED') return;
+      setSourcesError(e?.response?.data?.detail ?? e?.message ?? 'Failed to load marketplace sources');
+    } finally {
+      if (!controller.signal.aborted) {
+        setSourcesLoading(false);
+      }
+    }
+  }, [authState]);
+
+  useEffect(() => {
+    void refreshSources();
+    return () => {
+      sourcesAbortRef.current?.abort();
+    };
+  }, [refreshSources]);
+
+  // Selected source is URL-driven so the marketplace page's filter UI is
+  // bookmarkable. ``null`` (no ``source`` param) means "All sources".
+  const selectedSource = searchParams.get('source');
+  const setSelectedSource = useCallback(
+    (handle: string | null) => {
+      const next = new URLSearchParams(searchParams);
+      if (handle) {
+        next.set('source', handle);
+      } else {
+        next.delete('source');
+      }
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
+
   // Context value - shared with all marketplace pages/components
   const authContextValue = useMemo(
     () => ({
       isAuthenticated: authState === 'authenticated',
       isLoading: authState === 'loading',
+      sources,
+      sourcesLoading,
+      sourcesError,
+      selectedSource,
+      setSelectedSource,
+      refreshSources,
     }),
-    [authState]
+    [
+      authState,
+      sources,
+      sourcesLoading,
+      sourcesError,
+      selectedSource,
+      setSelectedSource,
+      refreshSources,
+    ]
   );
 
   // Loading state: show a neutral shell that won't flash the wrong layout

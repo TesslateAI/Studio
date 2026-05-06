@@ -8,6 +8,7 @@ const settingsTabs = [
   { label: 'Security', path: '/settings/security' },
   { label: 'Deployment', path: '/settings/deployment' },
   { label: 'API Keys', path: '/settings/api-keys' },
+  { label: 'Marketplace Sources', path: '/settings/marketplace-sources' },
 ];
 // Connectors moved to Library → Connectors (#307).
 // The /settings/connectors route is aliased to a redirect in App.tsx so

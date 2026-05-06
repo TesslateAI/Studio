@@ -181,20 +181,43 @@ def test_is_system_false_by_default(db_setup) -> None:
     assert result is False
 
 
-def test_seed_sets_is_system_on_librarian() -> None:
-    """The Librarian entry in DEFAULT_AGENTS has is_system=True."""
-    from app.seeds.marketplace_agents import DEFAULT_AGENTS
+def _load_marketplace_agent_seeds() -> list[dict]:
+    """Read the canonical agent seed list from the federated marketplace.
 
-    librarian = next((a for a in DEFAULT_AGENTS if a["slug"] == "librarian"), None)
-    assert librarian is not None, "Librarian agent not found in DEFAULT_AGENTS"
+    After Wave 10 the orchestrator no longer carries seed Python modules;
+    catalog content lives in
+    ``packages/tesslate-marketplace/app/seeds/agents.json`` and arrives via
+    the federation sync worker. The contract these tests guard (system
+    flag set on Librarian and only Librarian) is enforced upstream now.
+    """
+    import json
+    from pathlib import Path
+
+    seed_path = (
+        Path(__file__).resolve().parents[3]
+        / "packages"
+        / "tesslate-marketplace"
+        / "app"
+        / "seeds"
+        / "agents.json"
+    )
+    return json.loads(seed_path.read_text(encoding="utf-8"))
+
+
+def test_seed_sets_is_system_on_librarian() -> None:
+    """The Librarian entry in the marketplace seed has is_system=True."""
+    agents = _load_marketplace_agent_seeds()
+
+    librarian = next((a for a in agents if a["slug"] == "librarian"), None)
+    assert librarian is not None, "Librarian agent not found in marketplace agents.json"
     assert librarian.get("is_system") is True
 
 
 def test_regular_agents_in_seed_have_no_is_system_flag() -> None:
-    """Non-system agents in DEFAULT_AGENTS must not set is_system=True."""
-    from app.seeds.marketplace_agents import DEFAULT_AGENTS
+    """Non-system agents in the marketplace seed must not set is_system=True."""
+    agents = _load_marketplace_agent_seeds()
 
     violations = [
-        a["slug"] for a in DEFAULT_AGENTS if a.get("is_system") and a["slug"] != "librarian"
+        a["slug"] for a in agents if a.get("is_system") and a["slug"] != "librarian"
     ]
     assert violations == [], f"Unexpected is_system=True on: {violations}"

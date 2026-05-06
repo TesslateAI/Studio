@@ -101,10 +101,12 @@ async def discover_skills(
 async def _discover_builtin_skills(db: AsyncSession) -> list[SkillCatalogEntry]:
     """Discover every skill seeded with ``is_builtin=True``.
 
-    Safe by construction: the column is only written by ``seeds/skills.py``.
-    No user-facing Pydantic request schema exposes the field, so user payloads
-    can't flip it, and mutation endpoints reject attempts to edit built-in
-    rows via ``_reject_if_builtin``.
+    Safe by construction: the column is only written by the federation
+    sync worker (``services/marketplace_sync.py``) when it upserts
+    upstream rows that carry ``is_builtin=True`` in their seed manifest.
+    No user-facing Pydantic request schema exposes the field, so user
+    payloads can't flip it, and mutation endpoints reject attempts to edit
+    built-in rows via ``_reject_if_builtin``.
     """
     try:
         from ..models import MarketplaceAgent
