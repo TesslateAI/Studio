@@ -150,6 +150,11 @@ async def materialize_compute_from_volume(
             # volume at that path instead. NULL = bundle (legacy default).
             source_strategy=app_cfg.source_strategy or None,
             state_mount_path=app_cfg.state_mount_path or None,
+            # 2026-05 — per-container resource overrides. NULL → platform
+            # defaults apply in the K8s renderer; non-null dict is a
+            # whitelist-filtered subset of {memory_request, memory_limit,
+            # cpu_request, cpu_limit} from the manifest.
+            resources=app_cfg.resources or None,
             exports=app_cfg.exports or None,
             container_type="base",
             status="stopped",

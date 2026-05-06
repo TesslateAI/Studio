@@ -327,6 +327,14 @@ class Container(Base):
     # ``state.model='per-install-volume'``. NULL = no extra mount.
     state_mount_path = Column(String, nullable=True)
 
+    # 2026-05 — per-container resource overrides. Free-form JSON keyed by
+    # ``memory_request`` / ``memory_limit`` / ``cpu_request`` / ``cpu_limit``
+    # (Kubernetes resource-quantity strings, e.g. ``"2Gi"``, ``"500m"``).
+    # The pod renderer merges these onto the platform defaults so heavy
+    # apps (e.g. crm-demo's prod build) can declare 2Gi without an
+    # operator post-install patch. NULL → defaults. See migration 0098.
+    resources = Column(JSON, nullable=True)
+
     # Container type: 'base' (user app from marketplace base) or 'service' (infra service like postgres)
     container_type = Column(String, default="base", nullable=False)
     service_slug = Column(

@@ -160,7 +160,7 @@ _EPHEMERAL_HEADROOM_MEM = "512Mi"
 SPEC_HASH_ANNOTATION = "tesslate.io/spec-hash"
 
 
-_POD_TEMPLATE_REVISION = "v4"
+_POD_TEMPLATE_REVISION = "v5"
 """Bump when the rendered Deployment pod template gains structural elements
 (initContainers, volumes, additional containers) that the per-field inputs
 below don't already capture. Acts as a dimension in the spec hash so
@@ -171,6 +171,7 @@ History:
   v2 — added install-tsinit initContainer + tsinit-bin emptyDir
   v3 — branched mounts on source_strategy (image vs bundle)
   v4 — empty tsinit --dir for image strategy (inherit image WORKDIR)
+  v5 — per-container resources override merged onto platform defaults
 """
 
 
@@ -181,6 +182,7 @@ def compute_dev_container_spec_hash(
     port: int,
     working_directory: str,
     extra_env: dict[str, str] | None,
+    resources: dict[str, str] | None = None,
 ) -> str:
     """Deterministic short hash of the runtime-affecting Container spec.
 
@@ -197,6 +199,9 @@ def compute_dev_container_spec_hash(
         "port": int(port) if port is not None else 0,
         "working_directory": working_directory or "",
         "env": sorted((extra_env or {}).items()),
+        # Per-container resource overrides also affect the rendered pod.
+        # Sorted items so dict ordering doesn't trip false drift.
+        "resources": sorted((resources or {}).items()),
         # Pod-template version: bump to invalidate cached Deployments when
         # the helper structurally changes (e.g. tsinit sideloader added).
         "pod_template_revision": _POD_TEMPLATE_REVISION,
@@ -1217,6 +1222,7 @@ class ComputeManager:
                 port=port,
                 working_directory=working_dir,
                 extra_env=extra_env,
+                resources=container.resources,
             )
         return out
 
@@ -1775,6 +1781,7 @@ class ComputeManager:
                 port=port,
                 working_directory=working_directory,
                 extra_env=extra_env,
+                resources=container.resources,
             )
 
             # App runtimes have no live agent to fix a crashed dev server, so
@@ -1817,6 +1824,10 @@ class ComputeManager:
                 # the app manifest's compute.containers[].source_strategy.
                 source_strategy=container.source_strategy,
                 state_mount_path=container.state_mount_path,
+                # 2026-05 — per-container resource overrides from the
+                # manifest. NULL → renderer applies platform defaults
+                # (256Mi req / 1Gi limit / 50m req / 1000m limit).
+                resources=container.resources,
             )
             await k8s.create_deployment(deployment, namespace)
 

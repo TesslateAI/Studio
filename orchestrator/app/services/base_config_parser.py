@@ -231,6 +231,13 @@ class AppConfig:
     # E.g. ``/data``, ``/var/lib/app``. Ignored for stateless apps and for
     # bundle-strategy apps (which always mount at /app).
     state_mount_path: str | None = None
+    # Per-container resource overrides. Keys: ``memory_request``,
+    # ``memory_limit``, ``cpu_request``, ``cpu_limit`` — values are
+    # Kubernetes resource-quantity strings (e.g. ``"2Gi"``, ``"500m"``).
+    # The K8s pod renderer merges these onto the platform defaults so a
+    # heavy app can opt into more memory without forking the runtime.
+    # Empty / None → platform defaults apply.
+    resources: dict[str, str] | None = None
     env: dict[str, str] = field(default_factory=dict)
     exports: dict[str, str] = field(default_factory=dict)
     x: float | None = None
@@ -371,6 +378,9 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             if not is_valid:
                 raise ValueError(f"App '{name}' has invalid start command: {error}")
 
+        resources_raw = app_data.get("resources")
+        resources = resources_raw if isinstance(resources_raw, dict) and resources_raw else None
+
         config.apps[name] = AppConfig(
             directory=app_data.get("directory", "."),
             port=app_data.get("port", 3000),
@@ -381,6 +391,7 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             image=app_data.get("image") or None,
             source_strategy=app_data.get("source_strategy") or None,
             state_mount_path=app_data.get("state_mount_path") or None,
+            resources=resources,
             env=app_data.get("env", {}),
             exports=app_data.get("exports", {}),
             x=app_data.get("x"),
@@ -510,6 +521,8 @@ def _config_to_dict(config: TesslateProjectConfig) -> dict[str, Any]:
             app_data["source_strategy"] = app.source_strategy
         if app.state_mount_path:
             app_data["state_mount_path"] = app.state_mount_path
+        if app.resources:
+            app_data["resources"] = app.resources
         if app.exports:
             app_data["exports"] = app.exports
         if app.x is not None:

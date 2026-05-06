@@ -1239,6 +1239,53 @@ class TestCreateV2DevDeployment:
         # No /app prefix — the cd is relative to image WORKDIR.
         assert "cd /app/services/web" not in process_arg
 
+    # ---------------------------------------------------------------------
+    # resources — per-container manifest overrides merged onto platform
+    # defaults (256Mi req / 1Gi limit / 50m req / 1000m limit).
+    # ---------------------------------------------------------------------
+
+    def test_resources_default_when_no_override(self):
+        dep = self._make()
+        res = dep.spec.template.spec.containers[0].resources
+        assert res.requests == {"memory": "256Mi", "cpu": "50m"}
+        assert res.limits == {"memory": "1Gi", "cpu": "1000m"}
+
+    def test_resources_memory_limit_override(self):
+        """Apps that need more headroom (e.g. crm-demo's prod build that OOMs
+        at 1Gi) declare ``compute.containers[].resources.memory_limit: "2Gi"``
+        in the manifest. The renderer merges onto defaults; cpu/memory_request
+        stay at platform default."""
+        dep = self._make(resources={"memory_limit": "2Gi"})
+        res = dep.spec.template.spec.containers[0].resources
+        assert res.limits["memory"] == "2Gi"
+        # Untouched fields stay at default.
+        assert res.limits["cpu"] == "1000m"
+        assert res.requests == {"memory": "256Mi", "cpu": "50m"}
+
+    def test_resources_full_override(self):
+        dep = self._make(
+            resources={
+                "memory_request": "512Mi",
+                "memory_limit": "4Gi",
+                "cpu_request": "200m",
+                "cpu_limit": "2000m",
+            }
+        )
+        res = dep.spec.template.spec.containers[0].resources
+        assert res.requests == {"memory": "512Mi", "cpu": "200m"}
+        assert res.limits == {"memory": "4Gi", "cpu": "2000m"}
+
+    def test_resources_unknown_keys_ignored(self):
+        """The federated converter whitelists keys before they reach this
+        layer, but defence-in-depth: unknown keys must not crash the
+        renderer or leak into the pod spec."""
+        dep = self._make(resources={"gpu": "1", "memory_limit": "2Gi"})
+        res = dep.spec.template.spec.containers[0].resources
+        assert res.limits["memory"] == "2Gi"
+        # ``gpu`` is silently dropped — kubelet would reject it anyway.
+        assert "gpu" not in res.limits
+        assert "gpu" not in res.requests
+
     def test_deployment_name(self):
         dep = self._make(container_directory="frontend")
         assert dep.metadata.name == "dev-frontend"

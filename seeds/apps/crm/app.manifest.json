@@ -4,7 +4,7 @@
     "id": "com.tesslate.crm",
     "slug": "crm-demo",
     "name": "Tesslate CRM",
-    "version": "0.1.2",
+    "version": "0.2.1",
     "description": "A minimal CRM demo with a chat-drawer agent running on the Tesslate Apps runtime.",
     "category": "productivity",
     "forkable": "true"
@@ -28,9 +28,12 @@
         "ports": [
           3000
         ],
-        "startup_command": "sh -c 'cd /app && (test -d node_modules || npm install) && npx prisma migrate deploy || npx prisma db push --skip-generate --accept-data-loss; npm run build && node .next/standalone/server.js'",
+        "startup_command": "sh -c 'cd /app && mkdir -p data && (test -d node_modules || npm install) && npx prisma db push --skip-generate --accept-data-loss && npm run dev'",
+        "resources": {
+          "memory_limit": "2Gi"
+        },
         "env": {
-          "NODE_ENV": "production",
+          "NODE_ENV": "development",
           "DATABASE_URL": "file:/app/data/crm.db",
           "LLAMA_API_BASE": "https://api.llama.com/compat/v1/",
           "LLAMA_MODEL": "Llama-4-Maverick-17B-128E-Instruct-FP8",

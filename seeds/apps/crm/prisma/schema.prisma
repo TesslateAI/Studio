@@ -1,5 +1,18 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // node:24-alpine ships OpenSSL 3.x. Prisma 5.x's runtime auto-detect
+  // picks the legacy ``linux-musl`` engine (which links libssl 1.1) even
+  // when the openssl-3.0 engine is on disk — and Alpine doesn't carry
+  // libssl 1.1, so the first request fails with
+  // ``Error loading shared library libssl.so.1.1``.
+  //
+  // We download BOTH engines (a singleton list silently no-ops the engine
+  // download for unknown / new target names in 5.22.0) and the manifest
+  // sets ``PRISMA_QUERY_ENGINE_LIBRARY`` to the openssl-3.0 binary so the
+  // runtime bypasses detection entirely. ``native`` resolves to the
+  // postinstall machine's target — in our container that's ``linux-musl``,
+  // which is what triggers the download of the openssl-3.0 sibling target.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {

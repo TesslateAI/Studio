@@ -66,6 +66,24 @@ DEFAULT_SKIP_DIR_NAMES = frozenset(
 )
 
 
+def _is_platform_devserver_image(image: str) -> bool:
+    """Return True if ``image`` is the platform's generic devserver runtime.
+
+    We treat ``tesslate-devserver*`` as bundle-strategy regardless of any
+    ECR / GHCR registry prefix the manifest carries — declaring the
+    platform's own base image isn't a creator opting out of bundle mounts;
+    it's just being explicit about the default base. The bundle still
+    holds the source.
+    """
+    if not image:
+        return False
+    # Strip any registry/path prefix (e.g.
+    # "<ECR_REGISTRY>/tesslate-devserver:beta"
+    # → "tesslate-devserver:beta") then check the bare image name.
+    bare = image.rsplit("/", 1)[-1]
+    return bare.startswith("tesslate-devserver")
+
+
 def build_app_bundle(
     assets_dir: Path,
     *,
@@ -204,10 +222,18 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
         # Contract treats a docker image as self-contained source unless
         # the creator says otherwise). No image → ``'bundle'`` (devserver
         # generic runtime; bundle is the source of truth at /app).
+        #
+        # Exception: the platform's own ``tesslate-devserver*`` image IS
+        # the generic runtime — declaring it in the manifest is just an
+        # explicit form of "use the default base", not a signal that the
+        # image carries the app source. Treat it as bundle so /app stays
+        # mounted from the bundle PVC. Without this, any seed that pins
+        # the devserver image (e.g. crm-demo) silently regresses to image
+        # strategy and the npm-run-dev startup can't find package.json.
         explicit_strategy = container.get("source_strategy")
         if isinstance(explicit_strategy, str) and explicit_strategy in ("bundle", "image"):
             source_strategy = explicit_strategy
-        elif image:
+        elif image and not _is_platform_devserver_image(image):
             source_strategy = "image"
         else:
             source_strategy = "bundle"
@@ -238,6 +264,19 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
         }
         if state_mount_path:
             app_entry["state_mount_path"] = state_mount_path
+        # Per-container resource overrides. Manifest shape:
+        # ``compute.containers[].resources = {memory_limit: "2Gi", ...}``.
+        # Keys we recognize: ``memory_request``, ``memory_limit``,
+        # ``cpu_request``, ``cpu_limit``. Anything else is dropped here so
+        # we don't leak unbounded creator-defined keys into the K8s renderer.
+        raw_resources = container.get("resources")
+        if isinstance(raw_resources, dict):
+            allowed = {"memory_request", "memory_limit", "cpu_request", "cpu_limit"}
+            filtered = {
+                k: str(v) for k, v in raw_resources.items() if k in allowed and v is not None
+            }
+            if filtered:
+                app_entry["resources"] = filtered
         apps[name] = app_entry
 
         if container.get("primary") is True and primary_name is None:

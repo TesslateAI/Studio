@@ -514,6 +514,15 @@ case "$COMMAND" in
             [markitdown]="latest"
             [deerflow]="latest"
         )
+        # Extra tags — seed app manifests reference
+        # ``image: tesslate-devserver:latest`` (the platform's generic
+        # runtime base, pinned to a stable tag). Without an extra ``:latest``
+        # push, dev pods pulling the seed-declared tag get a stale image and
+        # the env-specific ``:beta``/``:production`` tag goes unused. Push
+        # both so existing pods catch up on the next pull.
+        declare -A EXTRA_TAGS=(
+            [devserver]="latest"
+        )
 
         # Validate image names
         for img in $IMAGES; do
@@ -582,9 +591,16 @@ case "$COMMAND" in
                     CACHE_FLAG=""
                 fi
 
-                info "[$img] Starting build ${FULL_TAG}..."
+                # Pass every additional tag via -t so a single buildx push lays
+                # down all aliases atomically (see EXTRA_TAGS above).
+                EXTRA_TAG_FLAGS=""
+                if [ -n "${EXTRA_TAGS[$img]}" ] && [ "${EXTRA_TAGS[$img]}" != "$TAG" ]; then
+                    EXTRA_TAG_FLAGS="-t ${ECR_REGISTRY}/${REPO_NAME}:${EXTRA_TAGS[$img]}"
+                fi
+
+                info "[$img] Starting build ${FULL_TAG}${EXTRA_TAG_FLAGS:+ + extra tags}..."
                 (
-                    docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" \
+                    docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" $EXTRA_TAG_FLAGS \
                         -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" --push >>"$LOG_FILE" 2>&1
                 ) &
                 BUILD_PIDS+=($!)
@@ -626,8 +642,13 @@ case "$COMMAND" in
                     CACHE_FLAG=""
                 fi
 
-                info "[$img] Building ${FULL_TAG}..."
-                docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" \
+                EXTRA_TAG_FLAGS=""
+                if [ -n "${EXTRA_TAGS[$img]}" ] && [ "${EXTRA_TAGS[$img]}" != "$TAG" ]; then
+                    EXTRA_TAG_FLAGS="-t ${ECR_REGISTRY}/${REPO_NAME}:${EXTRA_TAGS[$img]}"
+                fi
+
+                info "[$img] Building ${FULL_TAG}${EXTRA_TAG_FLAGS:+ + extra tags}..."
+                docker buildx build $BUILD_PLATFORM $CACHE_FLAG -t "$FULL_TAG" $EXTRA_TAG_FLAGS \
                     -f "$PROJECT_ROOT/$DOCKERFILE" "$PROJECT_ROOT/$CONTEXT" --push
                 success "[$img] ✓ Build & push complete"
                 echo

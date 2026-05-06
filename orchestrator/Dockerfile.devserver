@@ -15,12 +15,17 @@ RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o /tsinit .
 
 FROM node:24-alpine
 
-# Install system dependencies for Node.js, Python, and Go development
-# zip/unzip needed for project archiving (S3 ops handled securely by backend)
+# Install system dependencies for Node.js, Python, and Go development.
+# - zip/unzip: project archiving (S3 ops handled securely by backend)
+# - openssl: Prisma 5.x's runtime probe execs ``openssl version`` to pick its
+#   query-engine binary; without it Prisma defaults to "openssl-1.1.x" and
+#   then crashes loading libssl 1.1 (which Alpine doesn't ship). Alpine 3.20+
+#   already has /usr/lib/libssl.so.3, but Prisma needs the CLI to detect it.
 RUN apk add --no-cache \
     git \
     git-lfs \
     curl \
+    openssl \
     python3 \
     py3-pip \
     make \

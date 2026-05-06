@@ -29,6 +29,50 @@ _K8S_NAME_MAX = 63
 _RESERVED_DEV_ENV_KEYS = frozenset({"HOST", "PORT", "NODE_ENV"})
 
 
+# Platform defaults applied to every dev-container pod when the manifest
+# doesn't override. Sized for a Next.js dev server with light agent activity.
+# Apps that need more (e.g. Next.js prod build) declare overrides via
+# ``compute.containers[].resources.{memory_limit, ...}`` in the manifest;
+# install_compute_materializer copies the dict onto Container.resources;
+# create_v2_dev_deployment merges via _merge_resource_overrides.
+_DEFAULT_DEV_CONTAINER_RESOURCES: dict[str, dict[str, str]] = {
+    "requests": {"memory": "256Mi", "cpu": "50m"},
+    "limits": {"memory": "1Gi", "cpu": "1000m"},
+}
+
+
+def _merge_resource_overrides(
+    overrides: dict[str, str] | None,
+) -> client.V1ResourceRequirements:
+    """Merge per-container manifest overrides onto the platform defaults.
+
+    Override keys (whitelisted upstream by the federated converter):
+
+      * ``memory_request`` → ``requests["memory"]``
+      * ``memory_limit``   → ``limits["memory"]``
+      * ``cpu_request``    → ``requests["cpu"]``
+      * ``cpu_limit``      → ``limits["cpu"]``
+
+    Missing keys keep the default. Malformed values are passed through
+    verbatim — kubelet rejects bad quantities at admission time, which
+    surfaces a clearer error to the operator than silent defaulting.
+    """
+    requests = dict(_DEFAULT_DEV_CONTAINER_RESOURCES["requests"])
+    limits = dict(_DEFAULT_DEV_CONTAINER_RESOURCES["limits"])
+    if overrides:
+        for key, target in (
+            ("memory_request", (requests, "memory")),
+            ("memory_limit", (limits, "memory")),
+            ("cpu_request", (requests, "cpu")),
+            ("cpu_limit", (limits, "cpu")),
+        ):
+            value = overrides.get(key)
+            if isinstance(value, str) and value:
+                bucket, k = target
+                bucket[k] = value
+    return client.V1ResourceRequirements(requests=requests, limits=limits)
+
+
 def _k8s_name(prefix: str, directory: str) -> str:
     """Build a K8s resource name like 'dev-{directory}', truncated to 63 chars."""
     name = f"{prefix}{directory}"
@@ -1333,6 +1377,7 @@ def create_v2_dev_deployment(
     tsinit_restart_policy: str = "never",
     source_strategy: str | None = None,
     state_mount_path: str | None = None,
+    resources: dict[str, str] | None = None,
 ) -> client.V1Deployment:
     """
     Create a v2 dev container deployment using CSI-backed PVC volumes.
@@ -1469,10 +1514,11 @@ def create_v2_dev_deployment(
         ports=[client.V1ContainerPort(container_port=port, name="http")],
         volume_mounts=container_mounts,
         env=env_vars,
-        resources=client.V1ResourceRequirements(
-            requests={"memory": "256Mi", "cpu": "50m"},
-            limits={"memory": "1Gi", "cpu": "1000m"},
-        ),
+        # Merge per-container manifest overrides onto platform defaults.
+        # Empty/missing keys keep the default; declared keys win. The
+        # ``resources`` shape was filtered upstream by the federated
+        # converter, so we trust the keys here.
+        resources=_merge_resource_overrides(resources),
         startup_probe=client.V1Probe(
             _exec=client.V1ExecAction(command=[tsinit_path, "health", "/tmp/tsinit.sock"]),
             initial_delay_seconds=2,
