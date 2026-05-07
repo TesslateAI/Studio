@@ -787,12 +787,20 @@ def test_app_invoke_without_action_dispatcher_marks_failed(
 
 
 @pytest.mark.unit
-def test_more_than_one_action_is_rejected(
+def test_multi_step_automation_runs_through_engine(
     session_maker,
     stub_queue: _StubQueue,
     stub_redis: _StubRedis,
 ) -> None:
-    """Phase 1 only supports a single action per automation."""
+    """Phase A: a 2-action automation delegates to the workflow engine.
+
+    Replaces the legacy "multi-action rejected" assertion now that the
+    dispatcher delegates to ``services/workflows/engine.py`` when the
+    action graph has more than one row. The engine walks the actions
+    in ordinal order and persists one ``automation_step_runs`` row per
+    step. See issue #470.
+    """
+    from app.models_automations import AutomationStepRun
     from app.services.automations import (
         DispatchStatus,
         dispatch_automation,
@@ -818,16 +826,32 @@ def test_more_than_one_action_is_rejected(
             await db.commit()
 
         async with session_maker() as db:
-            return await dispatch_automation(
+            result = await dispatch_automation(
                 db,
                 automation_id=automation_id,
                 event_id=event_id,
             )
 
-    result = asyncio.run(go())
-    assert result.status == DispatchStatus.FAILED
-    assert result.run_status == "failed_preflight"
-    assert "single action" in (result.reason or "")
+        async with session_maker() as db:
+            step_runs = (
+                (
+                    await db.execute(
+                        select(AutomationStepRun)
+                        .where(AutomationStepRun.automation_run_id == result.run_id)
+                        .order_by(AutomationStepRun.ordinal.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return result, step_runs
+
+    result, step_runs = asyncio.run(go())
+    assert result.status == DispatchStatus.SUCCEEDED
+    assert result.run_status == "succeeded"
+    assert len(step_runs) == 2
+    assert [s.ordinal for s in step_runs] == [0, 1]
+    assert all(s.status == "succeeded" for s in step_runs)
 
 
 @pytest.mark.unit

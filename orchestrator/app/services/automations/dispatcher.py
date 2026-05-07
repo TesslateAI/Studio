@@ -1065,17 +1065,17 @@ async def dispatch_automation(
             paused_status=DispatchStatus.FAILED,
         )
 
-    if len(actions) > 1:
-        # Phase 1 only supports a single action (ordinal=0). The DAG form
-        # ships in v2; until then we fail loudly rather than silently
-        # executing only the first row.
-        return await _mark_failed_preflight(
-            db,
-            run=run,
-            reason=(f"phase 1 supports a single action; got {len(actions)} (DAG form lands in v2)"),
-            paused_status=DispatchStatus.FAILED,
-        )
+    # Multi-step automations (more than one action) delegate to the
+    # workflow engine. Single-action stays on the legacy path so existing
+    # production workloads run unchanged. The engine still uses the same
+    # contract preflight, budget allocation, status transitions, and
+    # delivery / finalize at the tail of this function — it only owns
+    # the per-step walk and per-step persistence.
+    is_multi_step = len(actions) > 1
 
+    # The legacy single-action path uses ``action`` directly; for
+    # multi-step we keep it as a representative (the first action) so
+    # the budget allocation logic below stays correct without branching.
     action = actions[0]
 
     # ---- Phase B.5: budget allocation (Phase 2) ------------------------
@@ -1095,7 +1095,11 @@ async def dispatch_automation(
     # Skipped entirely when ``contract.max_spend_per_run_usd`` is unset
     # (e.g., Tier 0 control-plane runs configured with no caps).
     budget_allocation = None
-    if automation.contract.get("max_spend_per_run_usd") is not None:
+    needs_run_budget = (
+        any(a.action_type == "agent.run" for a in actions)
+        and automation.contract.get("max_spend_per_run_usd") is not None
+    )
+    if needs_run_budget:
         from . import budget as budget_mod
 
         try:
@@ -1173,7 +1177,20 @@ async def dispatch_automation(
     event_payload = await _load_event_payload(db, event_id)
 
     try:
-        if action.action_type == "agent.run":
+        if is_multi_step:
+            # Lazy import: the engine is independent of the dispatcher
+            # but the dispatcher is the only caller for multi-step. Lazy
+            # keeps the module-import graph one-way.
+            from ..workflows.engine import execute_workflow
+
+            action_result = await execute_workflow(
+                db,
+                run=run,
+                automation=automation,
+                event_payload=event_payload,
+                budget_allocation=budget_allocation,
+            )
+        elif action.action_type == "agent.run":
             # Tier-1 ephemeral pod path (Phase 4). Tier-0 stays on the
             # in-process worker enqueue; Tier-2+ goes through wake.py.
             # Dispatcher branches on ``automation.max_compute_tier`` (the

@@ -65,9 +65,7 @@ class AutomationDefinition(Base):
     owner_user_id = Column(
         GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    team_id = Column(
-        GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True, index=True
-    )
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True, index=True)
 
     # none | user_automation_workspace | team_automation_workspace | target_project
     workspace_scope = Column(String(48), nullable=False, server_default="none")
@@ -110,18 +108,12 @@ class AutomationDefinition(Base):
 
     # Shared-singleton billing: routes all runs of this definition to one
     # human's wallet/credits regardless of who triggered them.
-    attribution_user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    attribution_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
-    created_by_user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    created_by_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_by_automation_id = Column(GUID(), nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -178,9 +170,7 @@ class AutomationTrigger(Base):
 
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -226,9 +216,7 @@ class AutomationAction(Base):
     action_type = Column(String(32), nullable=False)
     config = Column(JSON, nullable=False)
 
-    app_action_id = Column(
-        GUID(), ForeignKey("app_actions.id", ondelete="SET NULL"), nullable=True
-    )
+    app_action_id = Column(GUID(), ForeignKey("app_actions.id", ondelete="SET NULL"), nullable=True)
 
     # Phase 5 DAG prep — Phase 6 dispatcher reads these. Today they are
     # nullable & unenforced.
@@ -240,14 +228,11 @@ class AutomationAction(Base):
     )
     branch_condition = Column(JSON, nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
-            "action_type IN ('agent.run', 'app.invoke', 'gateway.send', "
-            "'workflow.run')",
+            "action_type IN ('agent.run', 'app.invoke', 'gateway.send', 'workflow.run')",
             name="ck_automation_actions_action_type",
         ),
     )
@@ -273,9 +258,7 @@ class AutomationEvent(Base):
     payload = Column(JSON, nullable=False, default=dict, server_default="{}")
     idempotency_key = Column(Text, nullable=True)
 
-    received_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    received_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     dispatched_at = Column(DateTime(timezone=True), nullable=True)
     processed_at = Column(DateTime(timezone=True), nullable=True)
     failed_at = Column(DateTime(timezone=True), nullable=True)
@@ -319,9 +302,7 @@ class AutomationRun(Base):
 
     # queued | preflight | running | succeeded | failed | cancelled | expired
     # | waiting_approval | waiting_credentials | waiting_credits | failed_preflight
-    status = Column(
-        String(32), nullable=False, default="queued", server_default="queued"
-    )
+    status = Column(String(32), nullable=False, default="queued", server_default="queued")
 
     retry_count = Column(Integer, nullable=False, default=0, server_default="0")
     lease_term = Column(Integer, nullable=True)
@@ -332,9 +313,7 @@ class AutomationRun(Base):
     spend_by_source = Column(JSON, nullable=False, default=dict, server_default="{}")
     contract_breaches = Column(Integer, nullable=False, default=0, server_default="0")
 
-    approver_user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    approver_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     paused_reason = Column(Text, nullable=True)
 
     # Minimal output buffer; large outputs go to automation_run_artifacts.
@@ -346,14 +325,10 @@ class AutomationRun(Base):
 
     started_at = Column(DateTime(timezone=True), nullable=True)
     ended_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint(
-            "automation_id", "event_id", name="uq_automation_runs_automation_event"
-        ),
+        UniqueConstraint("automation_id", "event_id", name="uq_automation_runs_automation_event"),
         Index("ix_automation_runs_automation_status", "automation_id", "status"),
     )
 
@@ -382,8 +357,80 @@ class AutomationRunArtifact(Base):
     size_bytes = Column(BigInteger, nullable=True)
 
     meta = Column(JSON, nullable=False, default=dict, server_default="{}")
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AutomationStepRun(Base):
+    """Per-step execution record for the workflow engine (Phase A, issue #470).
+
+    A multi-step automation produces one row per ``AutomationAction`` that
+    the engine executes during a given ``AutomationRun``. Single-step
+    automations leave this table empty: the legacy dispatcher path in
+    ``services/automations/dispatcher.py`` only delegates to the engine
+    when the action graph has more than one row.
+
+    Each step's status mirrors the parent ``AutomationRun.status`` enum
+    plus ``skipped`` (for branches the Phase F DAG executor will not
+    take). Steps record their own ``spend_usd`` so cost rollup queries can
+    attribute LLM and action spend to the specific step that incurred it,
+    instead of only the run.
+    """
+
+    __tablename__ = "automation_step_runs"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    automation_run_id = Column(
+        GUID(),
+        ForeignKey("automation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    automation_action_id = Column(
+        GUID(),
+        ForeignKey("automation_actions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    ordinal = Column(Integer, nullable=False)
+
+    # Mirrors the action_type vocabulary: agent.run | app.invoke |
+    # gateway.send | workflow.run | approval.gate (Phase D) | deliver
+    # (Phase D) | branch | parallel | sub_workflow (Phase F).
+    kind = Column(String(32), nullable=False)
+
+    # queued | running | succeeded | failed | awaiting_approval | skipped | cancelled
+    status = Column(String(32), nullable=False, default="queued", server_default="queued")
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ``input`` is what the engine fed into this step (may include outputs
+    # of prior steps via templating). ``output`` is the action_result the
+    # handler returned.
+    input = Column(JSON, nullable=True)
+    output = Column(JSON, nullable=True)
+
+    error = Column(Text, nullable=True)
+    spend_usd = Column(Numeric(12, 4), nullable=True)
+    artifact_ids = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed', "
+            "'awaiting_approval', 'skipped', 'cancelled')",
+            name="ck_automation_step_runs_status",
+        ),
+        Index(
+            "ix_automation_step_runs_run_ordinal",
+            "automation_run_id",
+            "ordinal",
+        ),
+        Index("ix_automation_step_runs_status", "status"),
     )
 
 
@@ -415,9 +462,7 @@ class AutomationDeliveryTarget(Base):
 
     # {kind: drop|retry_n|escalate_to_destination_id, ...}
     on_failure = Column(JSON, nullable=False, default=dict, server_default="{}")
-    artifact_filter = Column(
-        Text, nullable=False, default="all", server_default="all"
-    )
+    artifact_filter = Column(Text, nullable=False, default="all", server_default="all")
 
 
 class CommunicationDestination(Base):
@@ -481,13 +526,9 @@ class CommunicationDestination(Base):
 
     # text | blocks | rich | code_block | inline_table | jinja_template.
     # Matches the CHECK in alembic 0079.
-    formatting_policy = Column(
-        String(32), nullable=False, default="text", server_default="text"
-    )
+    formatting_policy = Column(String(32), nullable=False, default="text", server_default="text")
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
@@ -518,14 +559,10 @@ class AutomationApprovalRequest(Base):
         index=True,
     )
 
-    requested_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    requested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
-    resolved_by_user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    resolved_by_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # contract_violation | budget_exhausted | tier_escalation | credential_missing | manual
     reason = Column(String(48), nullable=False)
@@ -575,9 +612,7 @@ class AppAction(Base):
     result_template = Column(Text, nullable=True)
     artifacts = Column(JSON, nullable=False, default=list, server_default="[]")
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("app_version_id", "name", name="uq_app_actions_version_name"),
@@ -605,9 +640,7 @@ class AppView(Base):
     output_schema = Column(JSON, nullable=True)
     cache_ttl_seconds = Column(Integer, nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("app_version_id", "name", name="uq_app_views_version_name"),
@@ -638,14 +671,10 @@ class AppDataResource(Base):
     schema = Column(JSON, nullable=True)
     cache_ttl_seconds = Column(Integer, nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint(
-            "app_version_id", "name", name="uq_app_data_resources_version_name"
-        ),
+        UniqueConstraint("app_version_id", "name", name="uq_app_data_resources_version_name"),
     )
 
 
@@ -672,18 +701,12 @@ class AppDependency(Base):
 
     needs_actions = Column(JSON, nullable=False, default=list, server_default="[]")
     needs_views = Column(JSON, nullable=False, default=list, server_default="[]")
-    needs_data_resources = Column(
-        JSON, nullable=False, default=list, server_default="[]"
-    )
+    needs_data_resources = Column(JSON, nullable=False, default=list, server_default="[]")
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint(
-            "app_version_id", "alias", name="uq_app_dependencies_version_alias"
-        ),
+        UniqueConstraint("app_version_id", "alias", name="uq_app_dependencies_version_alias"),
     )
 
 
@@ -708,9 +731,7 @@ class AppConnectorRequirement(Base):
     # proxy | env — REQUIRED in manifest, no implicit default.
     exposure = Column(String(8), nullable=False)
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint(
@@ -750,18 +771,12 @@ class AppAutomationTemplate(Base):
     delivery_config = Column(JSON, nullable=False, default=dict, server_default="{}")
     contract_template = Column(JSON, nullable=False, default=dict, server_default="{}")
 
-    is_default_enabled = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
+    is_default_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint(
-            "app_version_id", "name", name="uq_app_automation_templates_version_name"
-        ),
+        UniqueConstraint("app_version_id", "name", name="uq_app_automation_templates_version_name"),
     )
 
 
@@ -836,27 +851,17 @@ class AppRuntimeDeployment(Base):
     # works portably across Postgres + SQLite.
     min_replicas = Column(Integer, nullable=False, default=0, server_default="0")
     max_replicas = Column(Integer, nullable=False, default=1, server_default="1")
-    desired_replicas = Column(
-        Integer, nullable=False, default=1, server_default="1"
-    )
-    idle_timeout_seconds = Column(
-        Integer, nullable=False, default=600, server_default="600"
-    )
-    concurrency_target = Column(
-        Integer, nullable=False, default=10, server_default="10"
-    )
+    desired_replicas = Column(Integer, nullable=False, default=1, server_default="1")
+    idle_timeout_seconds = Column(Integer, nullable=False, default=600, server_default="600")
+    concurrency_target = Column(Integer, nullable=False, default=10, server_default="10")
 
     # HPA config, custom metrics, and other non-CHECK-enforced scaling
     # shape lives here.
-    scaling_config = Column(
-        JSON, nullable=False, default=dict, server_default="{}"
-    )
+    scaling_config = Column(JSON, nullable=False, default=dict, server_default="{}")
 
     scaled_to_zero_at = Column(DateTime(timezone=True), nullable=True)
     last_activity_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -912,20 +917,12 @@ class AppInstance(Base):
         ForeignKey("app_versions.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    installer_user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    project_id = Column(
-        GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
-    )
-    state = Column(
-        String(24), nullable=False, default="installing", server_default="installing"
-    )
+    installer_user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(GUID(), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    state = Column(String(24), nullable=False, default="installing", server_default="installing")
     consent_record = Column(JSON, nullable=False, default=dict, server_default="{}")
     wallet_mix = Column(JSON, nullable=False, default=dict, server_default="{}")
-    update_policy = Column(
-        String(16), nullable=False, default="manual", server_default="manual"
-    )
+    update_policy = Column(String(16), nullable=False, default="manual", server_default="manual")
     volume_id = Column(Text, nullable=True)
     feature_set_hash = Column(Text, nullable=True)
     primary_container_id = Column(
@@ -943,9 +940,7 @@ class AppInstance(Base):
 
     installed_at = Column(DateTime(timezone=True), nullable=True)
     uninstalled_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -958,7 +953,9 @@ class AppInstance(Base):
     # SQLAlchemy mapper config raises ArgumentError the first time models
     # are loaded.
     app = relationship("MarketplaceApp", back_populates="instances", foreign_keys=[app_id])
-    app_version = relationship("AppVersion", back_populates="instances", foreign_keys=[app_version_id])
+    app_version = relationship(
+        "AppVersion", back_populates="instances", foreign_keys=[app_version_id]
+    )
     installer = relationship("User", foreign_keys=[installer_user_id])
     project = relationship("Project", foreign_keys=[project_id])
     consents = relationship(
@@ -1022,9 +1019,7 @@ class InvocationSubject(Base):
         nullable=True,
         index=True,
     )
-    team_id = Column(
-        GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
-    )
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     app_instance_id = Column(
         GUID(),
         ForeignKey("app_instances.id", ondelete="SET NULL"),
@@ -1056,19 +1051,14 @@ class InvocationSubject(Base):
 
     # {max_usd_per_run, max_usd_per_day} — enforced by ContractGate / dispatcher.
     budget_envelope = Column(JSON, nullable=False, default=dict, server_default="{}")
-    spent_so_far_usd = Column(
-        Numeric(12, 4), nullable=False, default=0, server_default="0"
-    )
+    spent_so_far_usd = Column(Numeric(12, 4), nullable=False, default=0, server_default="0")
     litellm_key_id = Column(Text, nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
-            "payer_policy IN ('installer', 'creator', 'team', 'platform', "
-            "'byok', 'parent_run')",
+            "payer_policy IN ('installer', 'creator', 'team', 'platform', 'byok', 'parent_run')",
             name="ck_invocation_subjects_payer_policy",
         ),
         CheckConstraint(
@@ -1106,9 +1096,7 @@ class AppInstallAttempt(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
-    state = Column(
-        String(32), nullable=False, default="hub_created", server_default="hub_created"
-    )
+    state = Column(String(32), nullable=False, default="hub_created", server_default="hub_created")
     volume_id = Column(String, nullable=True)
     node_name = Column(String, nullable=True)
     bundle_hash = Column(String, nullable=True)
@@ -1117,9 +1105,7 @@ class AppInstallAttempt(Base):
         ForeignKey("app_instances.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     committed_at = Column(DateTime(timezone=True), nullable=True)
     reaped_at = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(Text, nullable=True)
@@ -1166,12 +1152,8 @@ class AppConnectorGrant(Base):
     resolved_ref = Column(JSON, nullable=False)
     # 'proxy' | 'env' — pinned at install time.
     exposure_at_grant = Column(String(8), nullable=False)
-    granted_by_user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    granted_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    granted_by_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
@@ -1217,9 +1199,7 @@ class ConnectorProxyCall(Base):
     bytes_in = Column(BigInteger, nullable=False, server_default="0")
     bytes_out = Column(BigInteger, nullable=False, server_default="0")
     duration_ms = Column(Integer, nullable=True)
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     error = Column(Text, nullable=True)
 
     __table_args__ = (
@@ -1281,13 +1261,9 @@ class AppInstanceLink(Base):
 
     granted_actions = Column(JSON, nullable=False, default=list, server_default="[]")
     granted_views = Column(JSON, nullable=False, default=list, server_default="[]")
-    granted_data_resources = Column(
-        JSON, nullable=False, default=list, server_default="[]"
-    )
+    granted_data_resources = Column(JSON, nullable=False, default=list, server_default="[]")
 
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
@@ -1338,16 +1314,10 @@ class AppEmbed(Base):
     # rendered without a saved layout (e.g., one-off ad-hoc).
     layout_position = Column(JSON, nullable=True)
 
-    created_by_user_id = Column(
-        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_by_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    __table_args__ = (
-        Index("ix_ae_parent_install_id", "parent_install_id"),
-    )
+    __table_args__ = (Index("ix_ae_parent_install_id", "parent_install_id"),)
 
 
 # ---------------------------------------------------------------------------
@@ -1427,9 +1397,7 @@ class ControllerIntent(Base):
     applied_by_term = Column(BigInteger, nullable=True)
     last_error = Column(Text, nullable=True)
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     applied_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
