@@ -444,6 +444,66 @@ class AutomationStepRun(Base):
     )
 
 
+class AutomationRunEvent(Base):
+    """Append-only run-event log for the workflow engine (Phase C, issue #472).
+
+    One row per state transition or notable boundary inside an
+    :class:`AutomationRun`: step started / finished, tool called,
+    connector touched, app invoked, approval requested / resolved,
+    artifact produced, delivery sent, budget consumed, error raised.
+
+    The table is append-only; rows are never updated. ``step_run_id``
+    is nullable for run-level events (``run.started`` / ``run.finished``)
+    that don't belong to a particular step. ``actor`` is a free-text
+    label (``"engine"``, ``"worker:<task_id>"``, ``"approver:<user_id>"``)
+    so the run-history UI can attribute each event without an extra
+    join. ``payload`` is whatever JSON the emitter wants to record
+    (tool name, app instance id, approval reason, spend amount, etc.).
+
+    Powers the run-history detail page, the audit trail, and cost
+    rollup from a single query: ``ORDER BY ts ASC`` is the canonical
+    timeline.
+    """
+
+    __tablename__ = "automation_run_events"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    automation_run_id = Column(
+        GUID(),
+        ForeignKey("automation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    step_run_id = Column(
+        GUID(),
+        ForeignKey("automation_step_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    ts = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # See ``app.services.workflows.event_log.EventKind`` for the canonical
+    # list. The CHECK constraint is permissive (string + IN) so future
+    # phases can extend without an ENUM ALTER round.
+    kind = Column(String(32), nullable=False)
+    actor = Column(String(64), nullable=True)
+    payload = Column(JSON, nullable=False, default=dict, server_default="{}")
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('run.started', 'run.finished', 'step.started', "
+            "'step.finished', 'tool.called', 'connector.touched', "
+            "'app.invoked', 'approval.requested', 'approval.resolved', "
+            "'artifact.produced', 'delivery.sent', 'budget.consumed', "
+            "'error.raised')",
+            name="ck_automation_run_events_kind",
+        ),
+        Index(
+            "ix_automation_run_events_run_ts",
+            "automation_run_id",
+            "ts",
+        ),
+        Index("ix_automation_run_events_kind", "kind"),
+    )
+
+
 class AutomationDeliveryTarget(Base):
     """Per-automation fan-out edge to a :class:`CommunicationDestination`.
 

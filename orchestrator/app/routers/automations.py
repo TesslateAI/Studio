@@ -305,6 +305,7 @@ async def _replace_triggers(
         ):
             existing_webhook_secrets = cfg["webhook_secrets"]
 
+
     await db.execute(
         delete(AutomationTrigger).where(AutomationTrigger.automation_id == automation_id)
     )
@@ -947,7 +948,7 @@ async def run_automation(
             event_id=event_id,
             worker_id=f"manual:{user_id}",
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "[AUTOMATIONS] manual dispatch failed automation=%s event=%s "
             "user=%s — event row persists; controller sweep will retry",
@@ -958,12 +959,14 @@ async def run_automation(
         # Best-effort rollback of any half-applied dispatcher state. The event
         # row is already committed above, so the missed-event drain
         # (``services.automations.missed_event_drain``) will pick it up.
-        with contextlib.suppress(Exception):  # pragma: no cover — defensive
+        import contextlib as _contextlib_local
+
+        with _contextlib_local.suppress(Exception):  # pragma: no cover - defensive
             await db.rollback()
         raise HTTPException(
             status_code=500,
             detail="dispatch failed — run will be retried by the controller",
-        ) from None
+        ) from exc
 
     logger.info(
         "[AUTOMATIONS] manual run automation=%s run=%s event=%s status=%s by user=%s",
@@ -1092,6 +1095,63 @@ async def get_run(
         agent_id=agent_id,
         agent_name=agent_name,
     )
+
+
+@router.get("/{automation_id}/runs/{run_id}/events")
+async def list_run_events(
+    automation_id: UUID,
+    run_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Append-only run-event timeline (Phase C, issue #472).
+
+    Returns the full event log for one run, ordered by timestamp.
+    Each row is one state transition or notable boundary
+    (step started / finished, tool called, connector touched,
+    approval requested / resolved, artifact produced, delivery sent,
+    budget consumed, error raised). The timeline is the single source
+    of truth for the run-history detail view, the audit trail, and
+    cost rollup.
+    """
+    from ..models_automations import AutomationRunEvent
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    run = (
+        await db.execute(
+            select(AutomationRun).where(
+                AutomationRun.id == run_id,
+                AutomationRun.automation_id == automation_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    events = (
+        (
+            await db.execute(
+                select(AutomationRunEvent)
+                .where(AutomationRunEvent.automation_run_id == run_id)
+                .order_by(AutomationRunEvent.ts.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "id": str(e.id),
+            "step_run_id": str(e.step_run_id) if e.step_run_id else None,
+            "ts": e.ts.isoformat() if e.ts else None,
+            "kind": e.kind,
+            "actor": e.actor,
+            "payload": e.payload or {},
+        }
+        for e in events
+    ]
 
 
 @router.get(

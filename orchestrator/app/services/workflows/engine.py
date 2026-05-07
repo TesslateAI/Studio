@@ -39,6 +39,7 @@ from ...models_automations import (
     AutomationRun,
     AutomationStepRun,
 )
+from . import event_log
 from .handlers import StepContext, registry  # noqa: F401  ensures handlers are imported
 from .handlers.base import get_handler
 
@@ -114,6 +115,13 @@ async def execute_workflow(
             raise UnknownStepKindError(str(exc)) from exc
 
         step_run = await _begin_step_run(db, run=run, action=action)
+        await event_log.emit_step_started(
+            db,
+            run_id=run.id,
+            step_run_id=step_run.id,
+            ordinal=action.ordinal,
+            kind=action.action_type,
+        )
         handler = handler_cls()
         ctx = StepContext(
             db=db,
@@ -127,11 +135,26 @@ async def execute_workflow(
 
         try:
             result = await handler.execute(ctx)
-        except ContractBreachException:
+        except ContractBreachException as exc:
             await _mark_step_status(
                 db,
                 step_run_id=step_run.id,
                 status="awaiting_approval",
+            )
+            await event_log.emit_step_finished(
+                db,
+                run_id=run.id,
+                step_run_id=step_run.id,
+                ordinal=action.ordinal,
+                kind=action.action_type,
+                status="awaiting_approval",
+            )
+            await event_log.emit_approval_requested(
+                db,
+                run_id=run.id,
+                step_run_id=step_run.id,
+                tool_name=getattr(exc, "tool_name", None),
+                reason=getattr(getattr(exc, "decision", None), "reason", None),
             )
             raise
         except Exception as exc:
@@ -147,6 +170,21 @@ async def execute_workflow(
                 status="failed",
                 error=repr(exc)[:1000],
             )
+            await event_log.emit_step_finished(
+                db,
+                run_id=run.id,
+                step_run_id=step_run.id,
+                ordinal=action.ordinal,
+                kind=action.action_type,
+                status="failed",
+            )
+            await event_log.emit_error(
+                db,
+                run_id=run.id,
+                step_run_id=step_run.id,
+                error_type=type(exc).__name__,
+                message=str(exc),
+            )
             raise
 
         if result.async_handoff:
@@ -160,6 +198,14 @@ async def execute_workflow(
                     "in phase B"
                 ),
             )
+            await event_log.emit_step_finished(
+                db,
+                run_id=run.id,
+                step_run_id=step_run.id,
+                ordinal=action.ordinal,
+                kind=action.action_type,
+                status="failed",
+            )
             raise AsyncStepInMultiStepError(
                 f"step ordinal={action.ordinal} kind={action.action_type!r} "
                 "returned an async handoff; phase A multi-step workflows "
@@ -171,6 +217,15 @@ async def execute_workflow(
             step_run_id=step_run.id,
             status="succeeded",
             output=result.output,
+        )
+        await event_log.emit_step_finished(
+            db,
+            run_id=run.id,
+            step_run_id=step_run.id,
+            ordinal=action.ordinal,
+            kind=action.action_type,
+            status="succeeded",
+            spend_usd=result.spend_usd,
         )
 
         prior_outputs.append(result.output)
