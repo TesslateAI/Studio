@@ -17,6 +17,7 @@ from __future__ import annotations
 from . import (
     agent_turn,  # noqa: F401
     app_action,  # noqa: F401
+    deliver,  # noqa: F401
     gateway_send,  # noqa: F401
 )
 from .base import StepContext, StepHandler, StepResult, registry

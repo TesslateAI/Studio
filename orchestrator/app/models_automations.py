@@ -242,7 +242,7 @@ class AutomationAction(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "action_type IN ('agent.run', 'app.invoke', 'gateway.send', 'workflow.run')",
+            "action_type IN ('agent.run', 'app.invoke', 'gateway.send', 'workflow.run', 'deliver')",
             name="ck_automation_actions_action_type",
         ),
     )
