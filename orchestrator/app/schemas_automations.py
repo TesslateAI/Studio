@@ -329,7 +329,10 @@ class AutomationDefinitionIn(BaseModel):
     max_spend_per_day_usd: Decimal | None = None
 
     triggers: list[AutomationTriggerIn] = Field(..., min_length=1)
-    actions: list[AutomationActionIn] = Field(..., min_length=1, max_length=1)
+    # Phase A (#470) lifted the 1-action cap. The workflow engine in
+    # services/workflows/ walks ordinal-ordered actions when there are
+    # more than one; single-action automations stay on the legacy path.
+    actions: list[AutomationActionIn] = Field(..., min_length=1, max_length=64)
     delivery_targets: list[AutomationDeliveryTargetIn] = Field(default_factory=list)
 
     @field_validator("contract")

@@ -95,6 +95,16 @@ class AutomationDefinition(Base):
     max_spend_per_run_usd = Column(Numeric(12, 4), nullable=True)
     max_spend_per_day_usd = Column(Numeric(12, 4), nullable=True)
 
+    # Workflow engine compute profile (Phase B, issue #471). Selects the
+    # runner: connector_only (shared pool, no project), ephemeral_workspace
+    # (throwaway PVC), persistent_workspace (today's behavior, default).
+    compute_profile = Column(
+        String(32),
+        nullable=False,
+        default="persistent_workspace",
+        server_default="persistent_workspace",
+    )
+
     # Provenance for the agent-builder skill (depth-1 cap).
     parent_automation_id = Column(
         GUID(),
