@@ -206,12 +206,17 @@ async def _seed_app_action_with_billing(
     from app.models import AppVersion, MarketplaceApp
     from app.models_automations import AppAction
 
+    # 0088_marketplace_sources made marketplace_apps/app_versions.source_id
+    # NOT NULL. The "local" sentinel source is seeded by 0088 with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     suffix = uuid.uuid4().hex[:8]
     app = MarketplaceApp(
         id=uuid.uuid4(),
         slug=f"app-{suffix}",
         name="Test App",
         creator_user_id=creator_user_id,
+        source_id=LOCAL_SOURCE_ID,
     )
     db.add(app)
     await db.flush()
@@ -224,6 +229,7 @@ async def _seed_app_action_with_billing(
         manifest_json={"manifest_version": "2026-05"},
         manifest_hash=f"hash-{suffix}",
         feature_set_hash=f"feat-{suffix}",
+        source_id=LOCAL_SOURCE_ID,
     )
     db.add(version)
     await db.flush()

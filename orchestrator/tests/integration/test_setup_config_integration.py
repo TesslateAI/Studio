@@ -296,13 +296,18 @@ def test_setup_config_rejects_bad_primary_app(
         "primaryApp": "nonexistent",
     }
 
-    # FastAPI's Pydantic validator fires and raises RequestValidationError
-    # before the handler runs. In this app's error-handler chain the
-    # TestClient ends up re-raising (a downstream TypeError while trying
-    # to serialize the inner ValueError). Either outcome proves the
-    # validator rejected the config — which is what we care about.
-    with pytest.raises(Exception):  # noqa: B017 — any rejection is fine
-        client.post(f"/api/projects/{project['slug']}/setup-config", json=config)
+    # FastAPI's Pydantic validator fires and rejects primaryApp that
+    # isn't in apps. Historically this re-raised through TestClient
+    # because of an error-handler quirk; now it returns a 4xx. Accept
+    # either signal — both prove the validator rejected the config.
+    try:
+        resp = client.post(f"/api/projects/{project['slug']}/setup-config", json=config)
+    except Exception:
+        # The legacy re-raise path — still a valid rejection.
+        return
+    assert resp.status_code >= 400, (
+        f"setup-config should reject bad primaryApp; got {resp.status_code}: {resp.text}"
+    )
 
 
 @pytest.mark.integration

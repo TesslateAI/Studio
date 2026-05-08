@@ -236,6 +236,10 @@ async def _seed_app_action_for_owner(
     from app.models import AppVersion, MarketplaceApp
     from app.models_automations import AppAction, AppInstance
 
+    # 0088_marketplace_sources made marketplace_apps/app_versions.source_id
+    # NOT NULL. The "local" sentinel source is seeded by 0088 with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     suffix = uuid.uuid4().hex[:6]
     app_id = uuid.uuid4()
     db.add(
@@ -248,6 +252,7 @@ async def _seed_app_action_for_owner(
             category="productivity",
             state="published",
             creator_user_id=owner_user_id,
+            source_id=LOCAL_SOURCE_ID,
         )
     )
 
@@ -263,6 +268,7 @@ async def _seed_app_action_for_owner(
             feature_set_hash=f"sha256:fs-{suffix}",
             bundle_hash=f"cas://test-{suffix}",
             approval_state="approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
 

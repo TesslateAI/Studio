@@ -24,6 +24,7 @@ import type {
 } from '../types/tesslateConfig';
 import type {
   ContainerConfigResponse,
+  FieldSchema,
   NodeConfigMode,
   ProjectConfigResponse,
   RevealSecretResponse,
@@ -1086,7 +1087,13 @@ export const chatApi = {
   },
   sendApprovalResponse: async (
     approvalId: string,
-    response: 'allow_once' | 'allow_all' | 'stop'
+    response:
+      | 'allow_once'
+      | 'allow_all'
+      | 'stop'
+      | 'publish_and_activate'
+      | 'save_draft'
+      | 'cancel'
   ): Promise<void> => {
     await api.post('/api/chat/agent/approval', {
       approval_id: approvalId,
@@ -1493,7 +1500,7 @@ export const nodeConfigApi = {
        * matches FieldSchema (key, label, type, required?, is_secret?, ...).
        * The backend merges these into the resolved schema so the value lands
        * in the right bucket (text → environment_vars, secret → encrypted). */
-      overrides?: Array<Record<string, unknown>>;
+      overrides?: FieldSchema[];
       preset?: string;
       mode?: NodeConfigMode;
     }

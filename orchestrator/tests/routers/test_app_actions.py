@@ -106,6 +106,10 @@ async def _seed_user(db) -> uuid.UUID:
 async def _seed_marketplace_app(db, *, owner_id: uuid.UUID) -> uuid.UUID:
     from app.models import MarketplaceApp
 
+    # 0088_marketplace_sources made marketplace_apps.source_id NOT NULL.
+    # The "local" sentinel source is seeded by that migration with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     app_id = uuid.uuid4()
     suffix = uuid.uuid4().hex[:6]
     db.add(
@@ -117,6 +121,7 @@ async def _seed_marketplace_app(db, *, owner_id: uuid.UUID) -> uuid.UUID:
             creator_user_id=owner_id,
             category="utility",
             state="approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     await db.flush()
@@ -126,6 +131,7 @@ async def _seed_marketplace_app(db, *, owner_id: uuid.UUID) -> uuid.UUID:
 async def _seed_app_version(db, *, app_id: uuid.UUID) -> uuid.UUID:
     from app.models import AppVersion
 
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
     version_id = uuid.uuid4()
     db.add(
         AppVersion(
@@ -142,6 +148,7 @@ async def _seed_app_version(db, *, app_id: uuid.UUID) -> uuid.UUID:
                 "billing": {},
             },
             approval_state="stage2_approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     await db.flush()

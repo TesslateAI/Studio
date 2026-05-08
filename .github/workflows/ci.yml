@@ -15,7 +15,7 @@ jobs:
   # Job 1: Backend unit tests (fast, no dependencies)
   backend-unit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4

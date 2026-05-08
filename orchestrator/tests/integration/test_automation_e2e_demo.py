@@ -228,6 +228,10 @@ async def _seed_app_action_for_owner(
     from app.models import AppVersion, MarketplaceApp
     from app.models_automations import AppAction, AppInstance
 
+    # 0088_marketplace_sources made marketplace_apps/app_versions.source_id
+    # NOT NULL. The "local" sentinel source is seeded by 0088 with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     suffix = uuid.uuid4().hex[:6]
     app_id = uuid.uuid4()
     db.add(
@@ -240,6 +244,7 @@ async def _seed_app_action_for_owner(
             category="productivity",
             state="published",
             creator_user_id=owner_user_id,
+            source_id=LOCAL_SOURCE_ID,
         )
     )
 
@@ -255,6 +260,7 @@ async def _seed_app_action_for_owner(
             feature_set_hash=f"sha256:fs-{suffix}",
             bundle_hash=f"cas://e2e-{suffix}",
             approval_state="approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
 
@@ -461,8 +467,14 @@ async def test_demo_recurring_report_end_to_end(
     # dispatcher only XADDs for gateway.send actions today; once the
     # action_dispatcher learns to fan out to delivery targets the count
     # will be >= 1.
-    if stub_redis.xadds:
-        stream, fields = stub_redis.xadds[0]
+    # Filter to gateway-shaped events (kind in {message, delivery}); the
+    # marketplace_sync catalog also XADDs to the same stub redis with
+    # `op`/`table` fields, which we don't care about here.
+    gateway_xadds = [
+        (s, f) for s, f in stub_redis.xadds if f.get("kind") in {"message", "delivery"}
+    ]
+    if gateway_xadds:
+        stream, fields = gateway_xadds[0]
         assert stream
         assert fields.get("kind") in {"message", "delivery"}
 

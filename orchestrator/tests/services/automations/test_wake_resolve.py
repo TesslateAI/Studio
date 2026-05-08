@@ -176,6 +176,11 @@ async def _seed_app_and_version(db, *, creator_user_id: uuid.UUID) -> tuple[uuid
     """Insert a MarketplaceApp + AppVersion via core insert (no relationships needed)."""
     from app.models import AppVersion, MarketplaceApp
 
+    # 0088_marketplace_sources made marketplace_apps.source_id NOT NULL
+    # (and 0092 the same on app_versions). The "local" sentinel source is
+    # seeded by 0088 with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     app_id = uuid.uuid4()
     suffix = uuid.uuid4().hex[:8]
     await db.execute(
@@ -186,6 +191,7 @@ async def _seed_app_and_version(db, *, creator_user_id: uuid.UUID) -> tuple[uuid
             creator_user_id=creator_user_id,
             state="draft",
             visibility="public",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     av_id = uuid.uuid4()
@@ -201,6 +207,7 @@ async def _seed_app_and_version(db, *, creator_user_id: uuid.UUID) -> tuple[uuid
             feature_set_hash="fs:test",
             required_features=[],
             approval_state="stage1_approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     await db.flush()

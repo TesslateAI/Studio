@@ -308,6 +308,7 @@ export function CreateProjectModal({
               maxLength={100}
               autoComplete="off"
               spellCheck={false}
+              aria-label="Workspace name"
               className="w-full rounded-[var(--radius-small)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)] placeholder:text-[var(--text-subtle)] focus:border-[var(--primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]/30 disabled:opacity-50"
             />
           </div>

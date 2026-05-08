@@ -184,6 +184,57 @@ def api_client(api_client_session):
     return api_client_session
 
 
+def _ensure_at_least_one_base(client) -> str:
+    """Return an existing base id, or seed a free one and return that.
+
+    The integration suite runs against a freshly-migrated Postgres with no
+    seed data. The /api/marketplace/bases endpoint is read-only and the
+    creator endpoint requires admin auth, so we insert directly via
+    asyncpg from a fresh event loop to avoid touching the running
+    asyncpg pool bound to the TestClient's loop.
+    """
+    response = client.get("/api/marketplace/bases")
+    assert response.status_code == 200
+    data = response.json()
+    if data.get("bases") and len(data["bases"]) > 0:
+        return data["bases"][0]["id"]
+
+    import asyncio
+    import uuid as _uuid
+
+    import asyncpg
+
+    base_id = _uuid.uuid4()
+    slug = f"test-base-{_uuid.uuid4().hex[:8]}"
+    sync_url = TEST_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+
+    async def _seed():
+        conn = await asyncpg.connect(sync_url)
+        try:
+            await conn.execute(
+                """
+                INSERT INTO marketplace_bases
+                    (id, name, slug, description, category, pricing_type,
+                     price, is_active, source_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                base_id,
+                "Test Base",
+                slug,
+                "Auto-seeded base for integration tests.",
+                "fullstack",
+                "free",
+                0,
+                True,
+                _uuid.UUID("00000000-0000-0000-0000-000000000002"),
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_seed())
+    return str(base_id)
+
+
 @pytest.fixture
 def default_base_id(api_client_session, authenticated_client):
     """
@@ -191,24 +242,11 @@ def default_base_id(api_client_session, authenticated_client):
 
     Project creation requires the base to be in the user's library first.
     """
-    client, user_data = authenticated_client
-
-    # Get available bases
-    response = client.get("/api/marketplace/bases")
-    assert response.status_code == 200
-    data = response.json()
-
-    if data.get("bases") and len(data["bases"]) > 0:
-        base_id = data["bases"][0]["id"]
-
-        # Add base to user's library (free bases can be added without purchase)
-        # This simulates clicking the "+ Add to Library" button
-        client.post(f"/api/marketplace/bases/{base_id}/purchase")
-        # If it's a free base or already purchased, this should succeed or return 200
-        # We don't assert here since it might already be in the library
-
-        return base_id
-    return None
+    client, _ = authenticated_client
+    base_id = _ensure_at_least_one_base(client)
+    # Add base to user's library (free bases can be added without purchase).
+    client.post(f"/api/marketplace/bases/{base_id}/purchase")
+    return base_id
 
 
 @pytest.fixture
@@ -318,6 +356,14 @@ def mock_external_services():
             "litellm_user_id": f"litellm-user-{unique_id}",
         }
 
+    def mock_create_stripe_customer(*args, **kwargs):
+        """Generate unique Stripe customer IDs per call.
+
+        Team.stripe_customer_id is UNIQUE; a constant fake id collides on
+        the second user registration in the same DB.
+        """
+        return {"id": f"cus_test_{uuid4().hex[:16]}"}
+
     with (
         patch("app.services.stripe_service.stripe_service.create_customer") as mock_stripe,
         patch("app.services.litellm_service.litellm_service.create_user_key") as mock_litellm,
@@ -328,8 +374,8 @@ def mock_external_services():
             "app.services.discord_service.discord_service.send_login_notification"
         ) as mock_discord_login,
     ):
-        # Stripe mock
-        mock_stripe.return_value = {"id": "cus_test123"}
+        # Stripe mock — unique id per call (UNIQUE constraint on Team).
+        mock_stripe.side_effect = mock_create_stripe_customer
 
         # LiteLLM mock - returns unique keys
         mock_litellm.side_effect = mock_create_user_key

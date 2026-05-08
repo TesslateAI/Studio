@@ -64,6 +64,34 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "docker: mark test as requiring Docker")
     config.addinivalue_line("markers", "kubernetes: mark test as requiring Kubernetes")
 
+    # 0088_marketplace_sources made marketplace_apps/app_versions/marketplace_agents
+    # /marketplace_bases/themes.source_id NOT NULL (and seeds a "local" sentinel
+    # source with a fixed UUID). Many test fixtures predate that migration and
+    # don't pass source_id. Default it to the sentinel via a before_insert hook
+    # so individual tests don't have to. Production code paths that actually
+    # care about source_id always set it explicitly, so the default never
+    # masks a real bug.
+    from sqlalchemy import event
+
+    from app import models, models_automations  # noqa: F401  ensure mappers configured
+
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
+    def _default_source_id(_mapper, _conn, target):
+        if getattr(target, "source_id", "_unset") is None:
+            target.source_id = LOCAL_SOURCE_ID
+
+    for cls_name in (
+        "MarketplaceApp",
+        "AppVersion",
+        "MarketplaceAgent",
+        "MarketplaceBase",
+        "Theme",
+    ):
+        cls = getattr(models, cls_name, None)
+        if cls is not None and hasattr(cls, "source_id"):
+            event.listen(cls, "before_insert", _default_source_id)
+
 
 @pytest.fixture(scope="session")
 def event_loop():

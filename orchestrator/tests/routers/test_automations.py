@@ -519,6 +519,10 @@ async def _seed_app_install(db, owner_id: uuid.UUID) -> uuid.UUID:
     from app.models import AppVersion, MarketplaceApp
     from app.models_automations import AppInstance
 
+    # 0088_marketplace_sources made marketplace_apps/app_versions.source_id
+    # NOT NULL. The "local" sentinel source is seeded by 0088 with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     app_id = uuid.uuid4()
     db.add(
         MarketplaceApp(
@@ -528,6 +532,7 @@ async def _seed_app_install(db, owner_id: uuid.UUID) -> uuid.UUID:
             category="utility",
             creator_user_id=owner_id,
             state="approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     version_id = uuid.uuid4()
@@ -541,6 +546,7 @@ async def _seed_app_install(db, owner_id: uuid.UUID) -> uuid.UUID:
             manifest_hash="x" * 64,
             feature_set_hash="y" * 64,
             approval_state="stage1_approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     install_id = uuid.uuid4()

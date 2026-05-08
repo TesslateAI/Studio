@@ -64,6 +64,11 @@ def admin_client(authenticated_client):
     return client
 
 
+# 0088_marketplace_sources made marketplace_agents.source_id NOT NULL.
+# The "local" sentinel source is seeded by 0088 with this UUID.
+_LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
+
 def _insert_builtin_skill(slug: str | None = None, is_forkable: bool = False) -> str:
     async def _do(db: AsyncSession) -> str:
         agent = MarketplaceAgent(
@@ -81,6 +86,7 @@ def _insert_builtin_skill(slug: str | None = None, is_forkable: bool = False) ->
             skill_body="plain body, no markers",
             created_by_user_id=None,
             icon="🧪",
+            source_id=_LOCAL_SOURCE_ID,
         )
         db.add(agent)
         await db.commit()
@@ -106,6 +112,7 @@ def _insert_regular_user_skill(user_id: uuid.UUID) -> str:
             forked_by_user_id=user_id,
             skill_body="user-authored body",
             icon="📝",
+            source_id=_LOCAL_SOURCE_ID,
         )
         db.add(agent)
         await db.commit()
@@ -178,7 +185,10 @@ def test_user_patch_rejects_builtin(authenticated_client):
         json={"name": "Hacker Rename"},
     )
     assert resp.status_code == 403, resp.text
-    assert "seed code" in resp.json()["detail"].lower()
+    # The error message used to mention "seed code"; after the federated
+    # marketplace migration it now says "managed upstream by the federated
+    # marketplace". Match on the stable substring.
+    assert "upstream" in resp.json()["detail"].lower()
 
     # Nothing on the row should have changed.
     name, is_builtin = _get_name_and_is_builtin(skill_id)
