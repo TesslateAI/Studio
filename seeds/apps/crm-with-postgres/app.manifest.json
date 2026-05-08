@@ -1,10 +1,10 @@
 {
-  "manifest_schema_version": "2025-02",
+  "manifest_schema_version": "2026-06",
   "app": {
     "id": "com.tesslate.crm-with-postgres",
     "slug": "crm-with-postgres",
     "name": "Tesslate CRM with Postgres",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "Matrix demo app exercising the full platform container toolbox: Next.js web surface + Node API + Postgres service container with a CSI-backed volume, secrets, and env_injection wiring.",
     "category": "productivity",
     "forkable": "true"
@@ -13,7 +13,7 @@
     "studio": {
       "min": "0.0.0"
     },
-    "manifest_schema": "2025-02",
+    "manifest_schema": "2026-06",
     "runtime_api": "^1.0",
     "required_features": []
   },

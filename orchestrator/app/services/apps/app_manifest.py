@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 MANIFEST_SCHEMA_VERSION: Literal["2026-05"] = "2026-05"
 
 # Every manifest_schema_version the parser knows how to validate.
-SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = ("2025-01", "2025-02", "2026-05")
+SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = ("2025-01", "2025-02", "2026-05", "2026-06")
 
 
 class _StrictModel(BaseModel):

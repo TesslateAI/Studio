@@ -1,10 +1,10 @@
 {
-  "manifest_schema_version": "2025-02",
+  "manifest_schema_version": "2026-06",
   "app": {
     "id": "com.666ghj.mirofish",
     "slug": "mirofish",
     "name": "MiroFish",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "Swarm-intelligence multi-agent prediction engine. Uploads a seed report or novel, runs thousands of persona-driven agents in a simulated world, and returns a prediction report. Requires an OpenAI-compatible LLM API key.",
     "category": "research",
     "forkable": "restricted"
@@ -13,7 +13,7 @@
     "studio": {
       "min": "0.0.0"
     },
-    "manifest_schema": "2025-02",
+    "manifest_schema": "2026-06",
     "runtime_api": "^1.0",
     "required_features": []
   },

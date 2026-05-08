@@ -13,6 +13,9 @@ Supported schema versions:
               Validated structurally only — code paths that need new fields
               read from the raw dict.
   * 2026-05 — App Runtime Contract. Typed mirror: :class:`AppManifest2026_05`.
+  * 2026-06 — container-shape additive over 2025-02 (compute.credentials[],
+              compute.containers[].readiness_port, state.mount_path).
+              Validated structurally only.
 """
 
 from __future__ import annotations
@@ -40,12 +43,14 @@ from .template_render import RenderError, get_render_client
 _SCHEMA_PATH = Path(__file__).parent / "app_manifest_2025_01.schema.json"
 _SCHEMA_PATH_2025_02 = Path(__file__).parent / "app_manifest_2025_02.schema.json"
 _SCHEMA_PATH_2026_05 = Path(__file__).parent / "app_manifest_2026_05.schema.json"
+_SCHEMA_PATH_2026_06 = Path(__file__).parent / "app_manifest_2026_06.schema.json"
 
 # Registry of supported schema files keyed by manifest_schema_version.
 _SCHEMA_PATHS: dict[str, Path] = {
     "2025-01": _SCHEMA_PATH,
     "2025-02": _SCHEMA_PATH_2025_02,
     "2026-05": _SCHEMA_PATH_2026_05,
+    "2026-06": _SCHEMA_PATH_2026_06,
 }
 
 
@@ -86,11 +91,13 @@ def schema_hash(version: str = "2025-01") -> str:
 _validator = Draft202012Validator(load_schema("2025-01"))
 _validator_2025_02 = Draft202012Validator(load_schema("2025-02"))
 _validator_2026_05 = Draft202012Validator(load_schema("2026-05"))
+_validator_2026_06 = Draft202012Validator(load_schema("2026-06"))
 
 _VALIDATORS: dict[str, Any] = {
     "2025-01": _validator,
     "2025-02": _validator_2025_02,
     "2026-05": _validator_2026_05,
+    "2026-06": _validator_2026_06,
 }
 
 # Map of schema version -> typed Pydantic model. Versions absent from this
