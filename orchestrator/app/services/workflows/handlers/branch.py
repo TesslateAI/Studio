@@ -106,18 +106,22 @@ def _render(value: Any, ctx: StepContext) -> Any:
     if "{" not in value:
         return value
 
+    # ``str.format_map`` treats dots as attribute access (so ``{step.body}``
+    # tries ``getattr(step, "body")``). Pre-rewrite ``{step.body}`` to
+    # ``{step_body}`` and use the flat-name keys to dodge that.
     flat: dict[str, Any] = {}
     if isinstance(ctx.event_payload, dict):
         flat.update(ctx.event_payload)
     if ctx.prior_step_outputs:
         last = ctx.prior_step_outputs[-1]
         if isinstance(last, dict):
-            flat.update({f"step.{k}": v for k, v in last.items()})
+            flat.update({f"step_{k}": v for k, v in last.items()})
             flat["last_output"] = last
     flat["automation_name"] = ctx.automation.name
     flat["run_id"] = str(ctx.run.id)
+    rewritten = re.sub(r"\{step\.(\w+)\}", r"{step_\1}", value)
     try:
-        return value.format_map(_DefaultDict(flat))
+        return rewritten.format_map(_DefaultDict(flat))
     except (ValueError, IndexError, KeyError):
         return value
 
