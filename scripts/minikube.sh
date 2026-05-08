@@ -260,44 +260,69 @@ pull_and_load() {
 }
 
 # Walk seed app manifests and pre-load any container images that use
-# source_strategy=image. Builds locally when a Dockerfile exists in the
-# seed dir, otherwise pulls the remote image. Idempotent — skips images
-# already present in minikube.
+# source_strategy=image.
+#
+# DEFAULT: only pre-load images we can build locally (Dockerfile alongside
+# the manifest). Remote-only images (ghcr.io, docker.io) are skipped —
+# containerd inside minikube pulls them lazily on first install via
+# IfNotPresent (compute_manager.py forces this for image-strategy
+# containers). The lazy path avoids the host-level disk-pressure burst
+# that breaks WSL2 + Docker Desktop when multiple multi-GB images stream
+# through the kicbase loopback btrfs pool simultaneously.
+#
+# OPT-IN: set MINIKUBE_PRELOAD_REMOTE=1 to pre-load remote images too
+# (offline dev, slow registries). Be aware the load goes through the
+# kicbase container's vhdx with btrfs write amplification — only enable
+# if you have headroom.
+#
+# Idempotent — skips images already present in minikube.
 preload_seed_images() {
   header "Pre-loading seed app images"
+  local preload_remote="${MINIKUBE_PRELOAD_REMOTE:-0}"
   local manifest
   for manifest in "$PROJECT_ROOT"/seeds/apps/*/app.manifest.json; do
     [[ -f "$manifest" ]] || continue
     local app_dir
     app_dir="$(dirname "$manifest")"
     local images
-    images=$(python3 -c "
+    if ! images=$(python3 -c "
 import json, sys
 m = json.load(open(sys.argv[1]))
 for c in m.get('compute', {}).get('containers', []):
     if c.get('source_strategy') == 'image' and c.get('image'):
         print(c['image'])
-" "$manifest" 2>/dev/null) || continue
+" "$manifest" 2>&1); then
+      warn "Failed to parse $manifest — skipping ($images)"
+      continue
+    fi
     [[ -z "$images" ]] && continue
 
     local img
     while IFS= read -r img; do
       [[ -z "$img" ]] && continue
       # Skip if already in minikube
-      if minikube -p "$PROFILE" ssh -- docker image inspect "$img" &>/dev/null 2>&1; then
+      if minikube -p "$PROFILE" ssh -- docker image inspect "$img" &>/dev/null; then
         info "Image $img already loaded, skipping"
         continue
       fi
-      # Local Dockerfile → build, otherwise pull remote
+      # Local Dockerfile → build, otherwise remote pull (opt-in only).
       if [[ -f "$app_dir/Dockerfile" ]]; then
         info "Image $img not found — building from $app_dir/Dockerfile..."
-        docker buildx build --load -t "$img" -f "$app_dir/Dockerfile" "$app_dir" \
-          && load_image_to_minikube "$img" \
-          && success "$img built and loaded" \
-          || warn "Failed to build $img (non-fatal)"
-      else
+        if docker buildx build --load -t "$img" -f "$app_dir/Dockerfile" "$app_dir"; then
+          if load_image_to_minikube "$img"; then
+            success "$img built and loaded"
+          else
+            warn "Built $img but load to minikube failed (non-fatal)"
+          fi
+        else
+          warn "Failed to build $img (non-fatal)"
+        fi
+      elif [[ "$preload_remote" == "1" ]]; then
         pull_and_load "$img" \
           || warn "Failed to pull $img (non-fatal)"
+      else
+        info "Skipping remote image $img — containerd will pull on first install"
+        info "  (set MINIKUBE_PRELOAD_REMOTE=1 to preload remote images up-front)"
       fi
     done <<< "$images"
   done
