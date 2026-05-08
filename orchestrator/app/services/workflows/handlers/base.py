@@ -39,12 +39,17 @@ class StepResult:
     (e.g. tier-0 ``agent.run``). Phase A refuses async handoffs in
     multi-step workflows and surfaces a typed error; Phase B wires the
     worker callback so async steps can advance the engine.
+
+    ``next_ordinal`` is set by control-flow steps (Phase F ``branch``)
+    to redirect the engine. When None, the engine advances to the
+    next ordinal in the linear sweep.
     """
 
     output: dict[str, Any]
     async_handoff: bool = False
     spend_usd: Decimal | None = None
     artifact_ids: list[str] = field(default_factory=list)
+    next_ordinal: int | None = None
 
 
 @dataclass

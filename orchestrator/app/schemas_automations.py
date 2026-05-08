@@ -148,10 +148,18 @@ class AutomationActionIn(BaseModel):
     @field_validator("action_type")
     @classmethod
     def _validate_type(cls, v: str) -> str:
-        # Phase D (#473) added ``deliver`` for the workflow-engine
-        # delivery step; the dispatcher's legacy single-action path
-        # still ignores it (only multi-step engine path executes it).
-        allowed = {"agent.run", "app.invoke", "gateway.send", "deliver"}
+        # Phase D (#473) added ``deliver``. Phase F (#475) added
+        # ``sub_workflow`` and ``branch`` (engine wires them);
+        # ``parallel`` is reserved for a Phase F follow-up.
+        allowed = {
+            "agent.run",
+            "app.invoke",
+            "gateway.send",
+            "deliver",
+            "sub_workflow",
+            "branch",
+            "parallel",
+        }
         if v not in allowed:
             raise ValueError(f"action.action_type must be one of {sorted(allowed)!r}, got {v!r}")
         return v

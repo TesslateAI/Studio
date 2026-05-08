@@ -108,7 +108,22 @@ async def execute_workflow(
     prior_outputs: list[dict[str, Any]] = []
     last_output: dict[str, Any] = {}
 
-    for action in actions:
+    # Phase F: index by ordinal so ``branch`` / future ``goto`` can
+    # redirect the walker. The linear loop becomes an indexed loop;
+    # without a ``next_ordinal`` directive the engine still advances
+    # in the natural order of ``actions``.
+    by_ordinal = {action.ordinal: action for action in actions}
+    sorted_ordinals = sorted(by_ordinal.keys())
+    cursor = 0
+    skipped: set[int] = set()
+
+    while cursor < len(sorted_ordinals):
+        ordinal = sorted_ordinals[cursor]
+        if ordinal in skipped:
+            cursor += 1
+            continue
+        action = by_ordinal[ordinal]
+
         try:
             handler_cls = get_handler(action.action_type)
         except KeyError as exc:
@@ -230,6 +245,26 @@ async def execute_workflow(
 
         prior_outputs.append(result.output)
         last_output = result.output
+
+        # Phase F: a control-flow step (branch) can redirect the engine.
+        # When the target ordinal exists, mark every ordinal between
+        # the current cursor and the target as skipped (forward jumps
+        # only — backward jumps are rejected to avoid loops).
+        if result.next_ordinal is not None and result.next_ordinal in by_ordinal:
+            target = result.next_ordinal
+            if target > ordinal:
+                for skip_ord in sorted_ordinals:
+                    if ordinal < skip_ord < target:
+                        skipped.add(skip_ord)
+            else:
+                logger.warning(
+                    "workflow_engine.branch_backward_ignored run=%s ordinal=%s target=%s",
+                    run.id,
+                    ordinal,
+                    target,
+                )
+
+        cursor += 1
 
     return last_output
 
