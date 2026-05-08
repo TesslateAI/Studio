@@ -171,7 +171,8 @@ class AutomationTrigger(Base):
         index=True,
     )
 
-    # cron | webhook | app_invocation | manual
+    # cron | webhook | app_invocation | manual | slack_message | email_inbound
+    # (Phase E adds slack_message + email_inbound, see migration 0104.)
     kind = Column(String(16), nullable=False)
     config = Column(JSON, nullable=False)
 
@@ -184,7 +185,8 @@ class AutomationTrigger(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('cron', 'webhook', 'app_invocation', 'manual')",
+            "kind IN ('cron', 'webhook', 'app_invocation', 'manual', "
+            "'slack_message', 'email_inbound')",
             name="ck_automation_triggers_kind",
         ),
     )

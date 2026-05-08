@@ -59,7 +59,12 @@ class AutomationTriggerIn(BaseModel):
     @field_validator("kind")
     @classmethod
     def _validate_kind(cls, v: str) -> str:
-        allowed = {"cron", "webhook", "manual"}
+        # Phase E (#474) added slack_message + email_inbound as
+        # user-facing trigger kinds. Internally these will be wrapped on
+        # save into the canonical kind='webhook' with config.source so
+        # they ride on develop's per-automation /webhook/{token} +
+        # HMAC infrastructure (follow-up adapter refactor).
+        allowed = {"cron", "webhook", "manual", "slack_message", "email_inbound"}
         if v == "app_invocation":
             # See class docstring + TesslateAI/OpenSail-Enterprise#408.
             raise ValueError(
