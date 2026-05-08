@@ -28,7 +28,6 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-
 _TESSLATE_OFFICIAL_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _COMMUNITY_SOURCE_ID = uuid.UUID("ddccbbaa-9999-8888-7777-665544332211")
 _TESSLATE_AGENT_ID = uuid.UUID("11112222-aaaa-bbbb-cccc-ddddeeee0001")
@@ -54,9 +53,7 @@ def _run_db(coro_fn, *args, **kwargs):
     async def _inner():
         from sqlalchemy.pool import NullPool
 
-        engine = create_async_engine(
-            _ASYNC_DB_URL, pool_pre_ping=False, poolclass=NullPool
-        )
+        engine = create_async_engine(_ASYNC_DB_URL, pool_pre_ping=False, poolclass=NullPool)
         try:
             session_maker = async_sessionmaker(engine, expire_on_commit=False)
             async with session_maker() as db:
@@ -73,9 +70,7 @@ def _run_db(coro_fn, *args, **kwargs):
             for task in pending:
                 task.cancel()
             if pending:
-                loop.run_until_complete(
-                    asyncio.gather(*pending, return_exceptions=True)
-                )
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         except Exception:
             pass
         loop.close()
@@ -206,9 +201,7 @@ def test_explicit_source_param_returns_that_source_row(authenticated_client):
     Tesslate Official row with the same slug exists."""
     _seed_sync()
     client, _ = authenticated_client
-    resp = client.get(
-        f"/api/marketplace/agents/{_SHARED_SLUG}?source=wave5-redirect-hub"
-    )
+    resp = client.get(f"/api/marketplace/agents/{_SHARED_SLUG}?source=wave5-redirect-hub")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["slug"] == _SHARED_SLUG

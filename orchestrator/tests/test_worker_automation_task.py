@@ -34,7 +34,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # AgentTaskPayload field plumbing
 # ---------------------------------------------------------------------------
@@ -168,7 +167,7 @@ class _FakeAsyncSession:
     def __init__(self) -> None:
         self.rollback_called = False
 
-    async def __aenter__(self) -> "_FakeAsyncSession":
+    async def __aenter__(self) -> _FakeAsyncSession:
         return self
 
     async def __aexit__(self, *_exc: Any) -> None:

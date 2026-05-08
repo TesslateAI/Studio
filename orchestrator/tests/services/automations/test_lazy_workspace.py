@@ -24,9 +24,9 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, insert as core_insert, select
+from sqlalchemy import event, select
+from sqlalchemy import insert as core_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 # ---------------------------------------------------------------------------
 # Migration fixture (same shape as test_dispatcher.py / test_budget.py).
@@ -36,9 +36,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -203,11 +201,15 @@ async def test_only_one_workspace_in_table_after_double_call(session_maker):
         await db.commit()
 
         rows = (
-            await db.execute(
-                select(Project)
-                .where(Project.owner_id == user_id)
-                .where(Project.name == "~automations~")
-                .where(Project.project_kind == PROJECT_KIND_WORKSPACE)
+            (
+                await db.execute(
+                    select(Project)
+                    .where(Project.owner_id == user_id)
+                    .where(Project.name == "~automations~")
+                    .where(Project.project_kind == PROJECT_KIND_WORKSPACE)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1

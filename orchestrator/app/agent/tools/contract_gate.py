@@ -104,8 +104,7 @@ class ContractBreachException(Exception):
         self.decision = decision
         self.tool_name = tool_name
         super().__init__(
-            f"ContractGate denied tool '{tool_name}': "
-            f"{decision.breach_kind} — {decision.reason}"
+            f"ContractGate denied tool '{tool_name}': {decision.breach_kind} — {decision.reason}"
         )
 
 
@@ -144,7 +143,7 @@ class ContractGate:
         *,
         tool_name: str,
         tool_call_params: dict[str, Any],
-        tool: "Tool",
+        tool: Tool,
     ) -> ContractGateDecision:
         """Evaluate the contract against a single tool call.
 
@@ -184,7 +183,7 @@ class ContractGate:
         *,
         tool_name: str,
         tool_call_params: dict[str, Any],
-        tool: "Tool",
+        tool: Tool,
     ) -> ContractGateDecision | None:
         """Allow-list checks for tool, MCP server, and skill bundle.
 
@@ -274,9 +273,7 @@ class ContractGate:
 
         return None
 
-    def _check_compute_tier(
-        self, *, tool_name: str, tool: "Tool"
-    ) -> ContractGateDecision | None:
+    def _check_compute_tier(self, *, tool_name: str, tool: Tool) -> ContractGateDecision | None:
         """Reject tools that demand a higher compute tier than the contract allows.
 
         Most tools default to Tier 0 (control-plane only). Tools that need a
@@ -312,7 +309,7 @@ class ContractGate:
         *,
         tool_name: str,
         tool_call_params: dict[str, Any],
-        tool: "Tool",
+        tool: Tool,
     ) -> ContractGateDecision | None:
         """Estimate the spend for this call and compare against remaining budget.
 

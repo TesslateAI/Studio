@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from .base import AllowedEndpoint, AuthScheme, ProviderAdapter
 
-
 SLACK_ALLOWED_ENDPOINTS: tuple[AllowedEndpoint, ...] = (
     # ---- Messages ----
     AllowedEndpoint(method="POST", path="chat.postMessage"),

@@ -29,9 +29,9 @@ from typing import Any
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, insert as core_insert
+from sqlalchemy import event
+from sqlalchemy import insert as core_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 # ---------------------------------------------------------------------------
 # Shared SQLite migration fixtures
@@ -41,9 +41,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001 - SA event signature
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -128,9 +126,7 @@ def stub_queue(monkeypatch: pytest.MonkeyPatch):
             return f"job-{len(self.calls)}"
 
     queue = _StubQueue()
-    monkeypatch.setattr(
-        "app.services.task_queue.get_task_queue", lambda: queue, raising=True
-    )
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue, raising=True)
     return queue
 
 
@@ -503,9 +499,7 @@ def test_artifact_404_when_missing(app_client) -> None:
     created = client.post("/api/automations", json=_good_create_payload()).json()
     aid = created["id"]
     run = client.post(f"/api/automations/{aid}/run", json={}).json()
-    resp = client.get(
-        f"/api/automations/{aid}/runs/{run['run_id']}/artifacts/{uuid.uuid4()}"
-    )
+    resp = client.get(f"/api/automations/{aid}/runs/{run['run_id']}/artifacts/{uuid.uuid4()}")
     assert resp.status_code == 404
 
 
@@ -592,9 +586,7 @@ def test_list_filters_by_app_instance_id(app_client) -> None:
     assert unscoped.status_code == 201, unscoped.text
 
     # Filtered list returns only the scoped row.
-    resp = client.get(
-        f"/api/automations?app_instance_id={install_id}"
-    )
+    resp = client.get(f"/api/automations?app_instance_id={install_id}")
     assert resp.status_code == 200, resp.text
     names = [i["name"] for i in resp.json()]
     assert names == ["scoped"]
@@ -647,9 +639,7 @@ def test_runs_by_install_returns_runs_across_automations(app_client) -> None:
             "app_instance_id": str(install_id),
         },
     ).json()
-    other = client.post(
-        "/api/automations", json={**_good_create_payload(), "name": "other"}
-    ).json()
+    other = client.post("/api/automations", json={**_good_create_payload(), "name": "other"}).json()
 
     r1 = client.post(f"/api/automations/{a1['id']}/run", json={}).json()
     r2 = client.post(f"/api/automations/{a2['id']}/run", json={}).json()

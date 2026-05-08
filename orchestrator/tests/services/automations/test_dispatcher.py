@@ -33,7 +33,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # SQLite migration fixture (mirrors tests/migrations/test_0050_orchestration.py
 # pattern -- alembic head against a temp file)
@@ -45,9 +44,7 @@ def _install_sqlite_now(engine) -> None:
 
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001 - SA event signature
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -220,9 +217,7 @@ async def _seed_delivery_target(
 async def _load_run(db, run_id: uuid.UUID):
     from app.models_automations import AutomationRun
 
-    return (
-        await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
-    ).scalar_one()
+    return (await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))).scalar_one()
 
 
 async def _seed_app_action_for_owner(
@@ -301,12 +296,14 @@ async def _count_artifacts(db, run_id: uuid.UUID) -> int:
     from app.models_automations import AutomationRunArtifact
 
     rows = (
-        await db.execute(
-            select(AutomationRunArtifact).where(
-                AutomationRunArtifact.run_id == run_id
+        (
+            await db.execute(
+                select(AutomationRunArtifact).where(AutomationRunArtifact.run_id == run_id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return len(rows)
 
 
@@ -336,9 +333,7 @@ class _StubRedis:
 @pytest.fixture
 def stub_queue(monkeypatch: pytest.MonkeyPatch) -> _StubQueue:
     queue = _StubQueue()
-    monkeypatch.setattr(
-        "app.services.task_queue.get_task_queue", lambda: queue, raising=True
-    )
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue, raising=True)
     return queue
 
 
@@ -349,9 +344,7 @@ def stub_redis(monkeypatch: pytest.MonkeyPatch) -> _StubRedis:
     async def _get():
         return redis
 
-    monkeypatch.setattr(
-        "app.services.cache_service.get_redis_client", _get, raising=True
-    )
+    monkeypatch.setattr("app.services.cache_service.get_redis_client", _get, raising=True)
     return redis
 
 
@@ -419,7 +412,6 @@ def test_existing_paused_run_bumps_retry_count(
     stub_redis: _StubRedis,
 ) -> None:
     """Paused / cancelled runs are retryable -- second dispatch reruns."""
-    from app.models_automations import AutomationRun
     from app.services.automations import dispatch_automation
 
     async def go():
@@ -661,9 +653,9 @@ def test_agent_run_enqueues_execute_agent_task(
     payload = args[0]
     assert payload["task_id"] == str(result.run_id)
     assert payload["automation_run_id"] == str(result.run_id)
-    assert payload["automation_id"] == str(result.run_id) or payload[
-        "automation_id"
-    ]  # any non-empty UUID
+    assert (
+        payload["automation_id"] == str(result.run_id) or payload["automation_id"]
+    )  # any non-empty UUID
     # Contract is forwarded so the agent loop can enforce it Phase 2.
     assert payload["contract"]["max_compute_tier"] == 0
 
@@ -691,14 +683,10 @@ def test_app_invoke_calls_action_dispatcher_when_present(
     fake_module.dispatch_app_action = AsyncMock(
         return_value={"action_type": "app.invoke", "ok": True, "body": "done"}
     )
-    monkeypatch.setitem(
-        sys.modules, "app.services.apps.action_dispatcher", fake_module
-    )
+    monkeypatch.setitem(sys.modules, "app.services.apps.action_dispatcher", fake_module)
     import app.services.apps as apps_pkg
 
-    monkeypatch.setattr(
-        apps_pkg, "action_dispatcher", fake_module, raising=False
-    )
+    monkeypatch.setattr(apps_pkg, "action_dispatcher", fake_module, raising=False)
 
     async def go():
         async with session_maker() as db:
@@ -747,14 +735,13 @@ def test_app_invoke_without_action_dispatcher_marks_failed(
     """When the action_dispatcher module is unimportable, the run fails
     cleanly with a reason mentioning action_dispatcher (matches the Wave-2B
     stub path even now that the module exists for real)."""
+    # Force the lazy import to fail so we exercise the NotImplementedError
+    # branch without touching whatever happens to live in the package.
+    import app.services.apps as apps_pkg
     from app.services.automations import (
         DispatchStatus,
         dispatch_automation,
     )
-
-    # Force the lazy import to fail so we exercise the NotImplementedError
-    # branch without touching whatever happens to live in the package.
-    import app.services.apps as apps_pkg
 
     if hasattr(apps_pkg, "action_dispatcher"):
         monkeypatch.delattr(apps_pkg, "action_dispatcher", raising=False)
@@ -765,9 +752,7 @@ def test_app_invoke_without_action_dispatcher_marks_failed(
             user_id = await _seed_user(db)
             automation_id = await _seed_automation(db, owner_user_id=user_id)
             event_id = await _seed_event(db, automation_id=automation_id)
-            app_action_id, _ = await _seed_app_action_for_owner(
-                db, owner_user_id=user_id
-            )
+            app_action_id, _ = await _seed_app_action_for_owner(db, owner_user_id=user_id)
             await _seed_action(
                 db,
                 automation_id=automation_id,

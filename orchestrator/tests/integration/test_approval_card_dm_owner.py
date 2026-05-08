@@ -39,7 +39,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration fixtures (mirror the dispatcher unit-test pattern)
 # ---------------------------------------------------------------------------
@@ -48,9 +47,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -119,9 +116,7 @@ async def _seed_user(db) -> uuid.UUID:
     return user_id
 
 
-async def _seed_automation_with_run(
-    db, *, owner_user_id: uuid.UUID
-) -> tuple[uuid.UUID, uuid.UUID]:
+async def _seed_automation_with_run(db, *, owner_user_id: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
     from app.models_automations import (
         AutomationDefinition,
         AutomationEvent,
@@ -166,9 +161,7 @@ async def _seed_automation_with_run(
     return autom_id, run_id
 
 
-async def _seed_slack_identity(
-    db, *, user_id: uuid.UUID, slack_user_id: str
-) -> None:
+async def _seed_slack_identity(db, *, user_id: uuid.UUID, slack_user_id: str) -> None:
     """Insert a PlatformIdentity so delivery_fallback finds a Slack DM target."""
     try:
         from app.models import PlatformIdentity
@@ -287,9 +280,7 @@ def test_slack_block_action_id_routes_directly_to_resolve(
     action_id = f"{SLACK_ACTION_PREFIX}{input_id}:allow_once"
 
     parsed = parse_action_id(action_id)
-    assert parsed is not None, (
-        f"parse_action_id rejected its own format: {action_id!r}"
-    )
+    assert parsed is not None, f"parse_action_id rejected its own format: {action_id!r}"
 
     # The contract is parse_action_id returns a tuple/dict carrying the
     # input_id + the choice. Both shapes are accepted by callers; we
@@ -376,15 +367,11 @@ async def test_resolve_marks_approval_resolved_and_resumes_run(
     async with session_maker() as db:
         req = (
             await db.execute(
-                select(AutomationApprovalRequest).where(
-                    AutomationApprovalRequest.id == approval_id
-                )
+                select(AutomationApprovalRequest).where(AutomationApprovalRequest.id == approval_id)
             )
         ).scalar_one()
         run = (
-            await db.execute(
-                select(AutomationRun).where(AutomationRun.id == run_id)
-            )
+            await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
         ).scalar_one()
 
     assert req.resolved_at is not None

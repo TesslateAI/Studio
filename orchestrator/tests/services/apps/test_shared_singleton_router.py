@@ -26,7 +26,6 @@ from app.services.apps.shared_singleton_router import (
     verify_user_header,
 )
 
-
 _TEST_SECRET = "test-shared-singleton-router-secret"
 
 

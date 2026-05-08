@@ -413,8 +413,7 @@ async def _finalize_automation_run(
             await db.commit()
     except Exception:
         logger.exception(
-            "[WORKER] failed to write terminal automation_run state "
-            "(run=%s status=%s)",
+            "[WORKER] failed to write terminal automation_run state (run=%s status=%s)",
             automation_run_id,
             status,
         )
@@ -773,9 +772,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     already_loaded_ma_ids: set[str] = set()
                     if mcp_context and mcp_context.get("mcp_configs"):
                         for cfg in mcp_context["mcp_configs"].values():
-                            ma_id = (cfg.get("server") or {}).get(
-                                "marketplace_agent_id"
-                            )
+                            ma_id = (cfg.get("server") or {}).get("marketplace_agent_id")
                             if ma_id:
                                 already_loaded_ma_ids.add(str(ma_id))
 
@@ -797,9 +794,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         )
                     # Merge extra mcp_configs so executors can reconnect.
                     if extra_ctx.get("mcp_configs"):
-                        merged = dict(
-                            (mcp_context or {}).get("mcp_configs") or {}
-                        )
+                        merged = dict((mcp_context or {}).get("mcp_configs") or {})
                         merged.update(extra_ctx["mcp_configs"])
                         # Ensure context dict reflects the merge (built later
                         # may re-read mcp_context; keep both authoritative).
@@ -827,9 +822,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     authorized_agents: list[dict[str, str]] = []
                     if auth_uuids:
                         ag_result = await db.execute(
-                            _sa_select(MarketplaceAgent).where(
-                                MarketplaceAgent.id.in_(auth_uuids)
-                            )
+                            _sa_select(MarketplaceAgent).where(MarketplaceAgent.id.in_(auth_uuids))
                         )
                         for ag in ag_result.scalars().all():
                             authorized_agents.append(
@@ -1154,9 +1147,11 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
                     from .models import (
                         AppInstance,
-                        MarketplaceAgent as _MarketplaceAgent,
                         MarketplaceApp,
                         UserMcpConfig,
+                    )
+                    from .models import (
+                        MarketplaceAgent as _MarketplaceAgent,
                     )
                     from .models_automations import (
                         AppAction,
@@ -1248,8 +1243,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 _sa_select(AppInstance)
                                 .where(
                                     AppInstance.id.in_(app_uuids),
-                                    AppInstance.installer_user_id
-                                    == UUID(payload.user_id),
+                                    AppInstance.installer_user_id == UUID(payload.user_id),
                                 )
                                 .options(
                                     _selectinload(AppInstance.app).selectinload(
@@ -1258,9 +1252,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 )
                             )
                             instances = list(inst_result.scalars().all())
-                            version_ids = [
-                                i.app_version_id for i in instances if i.app_version_id
-                            ]
+                            version_ids = [i.app_version_id for i in instances if i.app_version_id]
                             actions_by_v: dict[UUID, list[AppAction]] = {}
                             views_by_v: dict[UUID, list[AppView]] = {}
                             dr_by_v: dict[UUID, list[AppDataResource]] = {}
@@ -1271,40 +1263,32 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                     )
                                 )
                                 for a in ar.scalars().all():
-                                    actions_by_v.setdefault(
-                                        a.app_version_id, []
-                                    ).append(a)
+                                    actions_by_v.setdefault(a.app_version_id, []).append(a)
                                 vr = await db.execute(
                                     _sa_select(AppView).where(
                                         AppView.app_version_id.in_(version_ids)
                                     )
                                 )
                                 for v in vr.scalars().all():
-                                    views_by_v.setdefault(
-                                        v.app_version_id, []
-                                    ).append(v)
+                                    views_by_v.setdefault(v.app_version_id, []).append(v)
                                 drr = await db.execute(
                                     _sa_select(AppDataResource).where(
                                         AppDataResource.app_version_id.in_(version_ids)
                                     )
                                 )
                                 for d in drr.scalars().all():
-                                    dr_by_v.setdefault(
-                                        d.app_version_id, []
-                                    ).append(d)
+                                    dr_by_v.setdefault(d.app_version_id, []).append(d)
 
                             for inst in instances:
                                 slug = (
-                                    getattr(inst.app, "slug", "")
-                                    if inst.app is not None
-                                    else ""
+                                    getattr(inst.app, "slug", "") if inst.app is not None else ""
                                 ) or "?"
-                                lines: list[str] = [
-                                    f"  - @{slug} app_instance_id={inst.id}"
-                                ]
+                                lines: list[str] = [f"  - @{slug} app_instance_id={inst.id}"]
                                 actions = actions_by_v.get(inst.app_version_id, [])
                                 if actions:
-                                    lines.append("    actions (call via invoke_app_action with this exact app_instance_id):")
+                                    lines.append(
+                                        "    actions (call via invoke_app_action with this exact app_instance_id):"
+                                    )
                                     for a in actions:
                                         # Pull the top-level input keys so the
                                         # agent sees the parameter shape
@@ -1313,28 +1297,22 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                         keys: list[str] = []
                                         try:
                                             schema = a.input_schema or {}
-                                            props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+                                            props = (
+                                                (schema.get("properties") or {})
+                                                if isinstance(schema, dict)
+                                                else {}
+                                            )
                                             keys = list(props.keys())
                                         except Exception:
                                             keys = []
                                         keys_str = (
-                                            f" input_keys=[{', '.join(keys)}]"
-                                            if keys
-                                            else ""
+                                            f" input_keys=[{', '.join(keys)}]" if keys else ""
                                         )
                                         rc = a.required_connectors or []
-                                        rc_str = (
-                                            f" needs_connectors={list(rc)}"
-                                            if rc
-                                            else ""
-                                        )
-                                        lines.append(
-                                            f"      - {a.name}{keys_str}{rc_str}"
-                                        )
+                                        rc_str = f" needs_connectors={list(rc)}" if rc else ""
+                                        lines.append(f"      - {a.name}{keys_str}{rc_str}")
                                 else:
-                                    lines.append(
-                                        "    actions: (none declared in manifest)"
-                                    )
+                                    lines.append("    actions: (none declared in manifest)")
                                 views = views_by_v.get(inst.app_version_id, [])
                                 if views:
                                     lines.append(
@@ -1344,8 +1322,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 drs = dr_by_v.get(inst.app_version_id, [])
                                 if drs:
                                     lines.append(
-                                        "    data_resources: "
-                                        + ", ".join(d.name for d in drs)
+                                        "    data_resources: " + ", ".join(d.name for d in drs)
                                     )
                                 sections.append("\n".join(lines))
 
@@ -1359,8 +1336,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                             "\n\n[mentions]\n"
                             "The user attached structured @-mentions to this "
                             "message. Treat them as authoritative — do not "
-                            "guess slugs or ids; use the values below.\n\n"
-                            + "\n\n".join(sections)
+                            "guess slugs or ids; use the values below.\n\n" + "\n\n".join(sections)
                         )
                         effective_message = effective_message + hint_block
                         logger.info(
@@ -1639,9 +1615,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             # successful. The WHERE-clause guard inside _finalize lets a
             # racing user-cancellation or contract-breach pause win.
             if auto_run_id is not None:
-                final_status = (
-                    "cancelled" if completion_reason == "cancelled" else "succeeded"
-                )
+                final_status = "cancelled" if completion_reason == "cancelled" else "succeeded"
                 await _finalize_automation_run(
                     auto_run_id,
                     status=final_status,
@@ -1700,9 +1674,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                             "approval_required": {
                                 "tool_name": e.tool_name,
                                 "ticket_id": (
-                                    str(e.ticket_id)
-                                    if getattr(e, "ticket_id", None)
-                                    else None
+                                    str(e.ticket_id) if getattr(e, "ticket_id", None) else None
                                 ),
                             },
                         },
@@ -1845,7 +1817,9 @@ async def dispatch_automation_task(
                 await db.rollback()
             raise
 
-        status_value = result.status.value if hasattr(result.status, "value") else str(result.status)
+        status_value = (
+            result.status.value if hasattr(result.status, "value") else str(result.status)
+        )
         return {
             "run_id": str(result.run_id),
             "status": status_value,
@@ -1898,9 +1872,7 @@ async def resume_automation_run(ctx: dict, run_id_str: str) -> dict:
             result = await resume_run(db, checkpoint=checkpoint)
             await db.commit()
         except Exception:
-            logger.exception(
-                "[WORKER] resume_automation_run failed run=%s", run_id_str
-            )
+            logger.exception("[WORKER] resume_automation_run failed run=%s", run_id_str)
             with contextlib.suppress(Exception):
                 await db.rollback()
             raise

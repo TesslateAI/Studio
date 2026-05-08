@@ -31,7 +31,6 @@ import pytest
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-
 # Stable UUIDs for the fake federated sources we insert in setup. Using
 # fixed values lets us re-run the suite without pollution between tests
 # (we delete-then-insert on every test that needs them).
@@ -321,9 +320,7 @@ def test_creator_name_uses_source_display_name(authenticated_client):
     agents = resp.json().get("agents", [])
     assert agents, "Expected at least the seeded tesslate-official agent"
     # Find at least one official-sourced row and assert the new label.
-    official_rows = [
-        a for a in agents if a.get("creator_type") == "official"
-    ]
+    official_rows = [a for a in agents if a.get("creator_type") == "official"]
     assert official_rows, "Expected at least one official-creator agent row"
     creator_names = {a["creator_name"] for a in official_rows}
     # The seed sets display_name="Tesslate Official" exactly. The legacy
@@ -450,8 +447,7 @@ def test_install_mcp_from_private_source_with_confirmation_proceeds(
         detail = resp.json().get("detail")
         assert not (
             isinstance(detail, dict)
-            and detail.get("error")
-            in ("install_blocked", "install_requires_confirmation")
+            and detail.get("error") in ("install_blocked", "install_requires_confirmation")
         ), f"install_guard rejected confirmed install: {detail!r}"
     # Any other outcome (201 success, 400 schema, 500 test-connect) is OK.
 

@@ -29,7 +29,6 @@ from .scopes import (
     reject_non_inheritable,
 )
 
-
 __all__ = [
     "ContractInheritanceError",
     "validate_child_contract",
@@ -139,9 +138,7 @@ def validate_child_contract(
     if bad:
         raise ContractInheritanceError(
             code="scope_not_inheritable",
-            message=(
-                f"child contract carries non-inheritable scopes: {sorted(bad)}"
-            ),
+            message=(f"child contract carries non-inheritable scopes: {sorted(bad)}"),
             detail={"offending_scopes": sorted(bad)},
         )
 
@@ -155,9 +152,7 @@ def validate_child_contract(
         if widened:
             raise ContractInheritanceError(
                 code="scope_not_inheritable",
-                message=(
-                    f"child contract widens parent scope set: {sorted(widened)}"
-                ),
+                message=(f"child contract widens parent scope set: {sorted(widened)}"),
                 detail={"offending_scopes": sorted(widened)},
             )
 
@@ -168,17 +163,14 @@ def validate_child_contract(
         if child_per_run is None:
             raise ContractInheritanceError(
                 code="per_run_cap_exceeded",
-                message=(
-                    "child contract must set max_spend_per_run_usd when parent has one"
-                ),
+                message=("child contract must set max_spend_per_run_usd when parent has one"),
                 detail={"parent_per_run_usd": str(parent_per_run)},
             )
         if child_per_run > parent_per_run:
             raise ContractInheritanceError(
                 code="per_run_cap_exceeded",
                 message=(
-                    f"child max_spend_per_run_usd={child_per_run} exceeds "
-                    f"parent {parent_per_run}"
+                    f"child max_spend_per_run_usd={child_per_run} exceeds parent {parent_per_run}"
                 ),
                 detail={
                     "parent_per_run_usd": str(parent_per_run),

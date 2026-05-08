@@ -36,7 +36,6 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-
 revision: str = "0092_appver_source_id"
 down_revision: str | Sequence[str] | None = "0091_drop_legacy_slug_uq"
 branch_labels: str | Sequence[str] | None = None

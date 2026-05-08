@@ -5,6 +5,7 @@ Uses TestClient with real PostgreSQL database on port 5433.
 Environment variables are set by tests/conftest.py before any imports.
 """
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -137,10 +138,8 @@ def _rebind_database_engine() -> None:
 
     from app import database as _db
 
-    try:
+    with contextlib.suppress(Exception):
         asyncio.new_event_loop().run_until_complete(_db.engine.dispose())
-    except Exception:
-        pass
 
     settings = _db.settings
     new_engine = create_async_engine(

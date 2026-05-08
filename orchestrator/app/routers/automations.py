@@ -31,6 +31,7 @@ Out of scope for Phase 1
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -57,9 +58,9 @@ from ..permissions import Permission, get_team_membership
 from ..schemas_automations import (
     ApprovalResponseIn,
     ApprovalResponseOut,
-    AutomationApprovalRequestOut,
     AutomationActionIn,
     AutomationActionOut,
+    AutomationApprovalRequestOut,
     AutomationDefinitionIn,
     AutomationDefinitionOut,
     AutomationDefinitionSummary,
@@ -124,9 +125,7 @@ async def _authorize_definition(
                     return
                 raise HTTPException(
                     status_code=403,
-                    detail=(
-                        f"Role '{membership.role}' may not edit this automation"
-                    ),
+                    detail=(f"Role '{membership.role}' may not edit this automation"),
                 )
             if membership.role in _TEAM_READ_ROLES:
                 return
@@ -200,9 +199,7 @@ async def _project_definition(
         updated_at=definition.updated_at,
         triggers=[AutomationTriggerOut.model_validate(t) for t in triggers],
         actions=[AutomationActionOut.model_validate(a) for a in actions],
-        delivery_targets=[
-            AutomationDeliveryTargetOut.model_validate(t) for t in targets
-        ],
+        delivery_targets=[AutomationDeliveryTargetOut.model_validate(t) for t in targets],
     )
 
 
@@ -217,9 +214,7 @@ async def _replace_triggers(
     triggers: list[AutomationTriggerIn],
 ) -> None:
     await db.execute(
-        delete(AutomationTrigger).where(
-            AutomationTrigger.automation_id == automation_id
-        )
+        delete(AutomationTrigger).where(AutomationTrigger.automation_id == automation_id)
     )
     for trig in triggers:
         db.add(
@@ -239,9 +234,7 @@ async def _replace_actions(
     actions: list[AutomationActionIn],
 ) -> None:
     await db.execute(
-        delete(AutomationAction).where(
-            AutomationAction.automation_id == automation_id
-        )
+        delete(AutomationAction).where(AutomationAction.automation_id == automation_id)
     )
     for action in actions:
         db.add(
@@ -279,14 +272,10 @@ async def _replace_delivery_targets(
         )
 
 
-async def _load_definition_or_404(
-    db: AsyncSession, automation_id: UUID
-) -> AutomationDefinition:
+async def _load_definition_or_404(db: AsyncSession, automation_id: UUID) -> AutomationDefinition:
     row = (
         await db.execute(
-            select(AutomationDefinition).where(
-                AutomationDefinition.id == automation_id
-            )
+            select(AutomationDefinition).where(AutomationDefinition.id == automation_id)
         )
     ).scalar_one_or_none()
     if row is None:
@@ -330,9 +319,7 @@ async def list_runs_by_install(
     ai = (
         await db.execute(select(AppInstance).where(AppInstance.id == app_instance_id))
     ).scalar_one_or_none()
-    if ai is None or (
-        ai.installer_user_id != user.id and not getattr(user, "is_superuser", False)
-    ):
+    if ai is None or (ai.installer_user_id != user.id and not getattr(user, "is_superuser", False)):
         raise HTTPException(status_code=404, detail="App install not found")
 
     query = (
@@ -415,11 +402,7 @@ async def list_automations(
     if app_instance_id is not None:
         query = query.where(AutomationDefinition.app_instance_id == app_instance_id)
 
-    query = (
-        query.order_by(AutomationDefinition.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    query = query.order_by(AutomationDefinition.created_at.desc()).limit(limit).offset(offset)
 
     rows = (await db.execute(query)).scalars().all()
     return [AutomationDefinitionSummary.model_validate(r) for r in rows]
@@ -463,9 +446,7 @@ async def create_automation(
         from ..models_automations import AppInstance
 
         ai = (
-            await db.execute(
-                select(AppInstance).where(AppInstance.id == payload.app_instance_id)
-            )
+            await db.execute(select(AppInstance).where(AppInstance.id == payload.app_instance_id))
         ).scalar_one_or_none()
         if ai is None or ai.installer_user_id != user.id:
             raise HTTPException(
@@ -560,9 +541,7 @@ async def update_automation(
     if payload.actions is not None:
         await _replace_actions(db, automation.id, payload.actions)
     if payload.delivery_targets is not None:
-        await _replace_delivery_targets(
-            db, automation.id, payload.delivery_targets
-        )
+        await _replace_delivery_targets(db, automation.id, payload.delivery_targets)
 
     await db.commit()
     await db.refresh(automation)
@@ -604,17 +583,13 @@ async def delete_automation(
             )
         await db.delete(automation)
         await db.commit()
-        logger.info(
-            "[AUTOMATIONS] hard-deleted id=%s by user=%s", automation_id, user.id
-        )
+        logger.info("[AUTOMATIONS] hard-deleted id=%s by user=%s", automation_id, user.id)
         return {"status": "deleted", "id": str(automation_id), "hard": True}
 
     automation.is_active = False
     automation.paused_reason = "deleted_by_user"
     await db.commit()
-    logger.info(
-        "[AUTOMATIONS] soft-deleted id=%s by user=%s", automation_id, user.id
-    )
+    logger.info("[AUTOMATIONS] soft-deleted id=%s by user=%s", automation_id, user.id)
     return {"status": "deactivated", "id": str(automation_id), "hard": False}
 
 
@@ -661,9 +636,7 @@ async def run_automation(
     await _authorize_definition(db, automation, user, write=True)
 
     if not automation.is_active:
-        raise HTTPException(
-            status_code=409, detail="Automation is paused / inactive"
-        )
+        raise HTTPException(status_code=409, detail="Automation is paused / inactive")
 
     event = AutomationEvent(
         id=uuid4(),
@@ -703,14 +676,12 @@ async def run_automation(
         # Best-effort rollback of any half-applied dispatcher state. The event
         # row is already committed above, so the missed-event drain
         # (``services.automations.missed_event_drain``) will pick it up.
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover — defensive
             await db.rollback()
-        except Exception:  # pragma: no cover — defensive
-            pass
         raise HTTPException(
             status_code=500,
             detail="dispatch failed — run will be retried by the controller",
-        )
+        ) from None
 
     logger.info(
         "[AUTOMATIONS] manual run automation=%s run=%s event=%s status=%s by user=%s",
@@ -733,9 +704,7 @@ async def run_automation(
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/{automation_id}/runs", response_model=list[AutomationRunSummary]
-)
+@router.get("/{automation_id}/runs", response_model=list[AutomationRunSummary])
 async def list_runs(
     automation_id: UUID,
     user: User = Depends(current_active_user),
@@ -760,9 +729,7 @@ async def list_runs(
     return [AutomationRunSummary.model_validate(r) for r in rows]
 
 
-@router.get(
-    "/{automation_id}/runs/{run_id}", response_model=AutomationRunDetail
-)
+@router.get("/{automation_id}/runs/{run_id}", response_model=AutomationRunDetail)
 async def get_run(
     automation_id: UUID,
     run_id: UUID,
@@ -820,9 +787,7 @@ async def get_run(
         created_at=run.created_at,
         raw_output=run.raw_output,
         artifacts=[AutomationRunArtifactOut.model_validate(a) for a in artifacts],
-        approval_requests=[
-            AutomationApprovalRequestOut.model_validate(a) for a in approvals
-        ],
+        approval_requests=[AutomationApprovalRequestOut.model_validate(a) for a in approvals],
     )
 
 
@@ -932,9 +897,7 @@ async def get_run_spend(
                 }
             )
     except Exception as exc:  # noqa: BLE001 — never block the rollup on join issues
-        logger.debug(
-            "[AUTOMATIONS] spend per-app join skipped run=%s err=%r", run_id, exc
-        )
+        logger.debug("[AUTOMATIONS] spend per-app join skipped run=%s err=%r", run_id, exc)
 
     return {"spend_by_source": spend_by_source, "per_app": per_app}
 
@@ -972,9 +935,7 @@ async def download_artifact(
 
     # Defence against cross-automation artifact lookups.
     run_owner = (
-        await db.execute(
-            select(AutomationRun.automation_id).where(AutomationRun.id == run_id)
-        )
+        await db.execute(select(AutomationRun.automation_id).where(AutomationRun.id == run_id))
     ).scalar_one_or_none()
     if run_owner != automation_id:
         raise HTTPException(status_code=404, detail="Artifact not found")
@@ -1000,9 +961,7 @@ async def download_artifact(
 # ---------------------------------------------------------------------------
 
 
-def _merge_scope_modifications(
-    contract: dict[str, Any], delta: dict[str, Any]
-) -> dict[str, Any]:
+def _merge_scope_modifications(contract: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
     """Shallow-merge ``delta`` into ``contract``.
 
     Top-level keys overwrite; list values replace whole-list (no append),
@@ -1046,9 +1005,7 @@ async def respond_to_approval(
 
     request = (
         await db.execute(
-            select(AutomationApprovalRequest).where(
-                AutomationApprovalRequest.id == request_id
-            )
+            select(AutomationApprovalRequest).where(AutomationApprovalRequest.id == request_id)
         )
     ).scalar_one_or_none()
     if request is None:
@@ -1056,25 +1013,18 @@ async def respond_to_approval(
 
     # Defence against cross-automation request_id lookups.
     run = (
-        await db.execute(
-            select(AutomationRun).where(AutomationRun.id == request.run_id)
-        )
+        await db.execute(select(AutomationRun).where(AutomationRun.id == request.run_id))
     ).scalar_one_or_none()
     if run is None or run.automation_id != automation_id:
         raise HTTPException(status_code=404, detail="Approval request not found")
 
     if request.resolved_at is not None:
-        raise HTTPException(
-            status_code=409, detail="Approval request already resolved"
-        )
+        raise HTTPException(status_code=409, detail="Approval request already resolved")
 
     if body.choice not in (request.options or []):
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"choice {body.choice!r} not in offered options "
-                f"{request.options!r}"
-            ),
+            detail=(f"choice {body.choice!r} not in offered options {request.options!r}"),
         )
 
     now = datetime.now(tz=UTC)
@@ -1124,9 +1074,7 @@ async def respond_to_approval(
         run.ended_at = now
         run.heartbeat_at = now
         automation.is_active = False
-        automation.paused_reason = (
-            f"disabled via approval response by user {user.id}"
-        )
+        automation.paused_reason = f"disabled via approval response by user {user.id}"
         new_run_status = "failed"
 
     await db.commit()
@@ -1140,9 +1088,7 @@ async def respond_to_approval(
         try:
             from ..services.task_queue import get_task_queue
 
-            await get_task_queue().enqueue(
-                "resume_automation_run", str(run.id)
-            )
+            await get_task_queue().enqueue("resume_automation_run", str(run.id))
             resume_enqueued = True
         except Exception as exc:  # noqa: BLE001 — enqueue must never fail the resolve
             logger.warning(

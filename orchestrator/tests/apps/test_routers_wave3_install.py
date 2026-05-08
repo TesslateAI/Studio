@@ -7,6 +7,7 @@ and `get_db` / `current_active_user`.
 
 from __future__ import annotations
 
+from datetime import UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -17,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.database import get_db
 from app.routers import app_installs, app_versions, marketplace_apps
+from app.services.apps import compatibility as compat_mod
 from app.services.apps.installer import (
     AlreadyInstalledError,
     IncompatibleAppError,
@@ -27,9 +29,7 @@ from app.services.apps.publisher import (
     DuplicateVersionError,
     PublishResult,
 )
-from app.services.apps import compatibility as compat_mod
 from app.users import current_active_user
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -85,9 +85,7 @@ def _mk_app(publish_fn=None, install_fn=None, db_rows=None) -> FastAPI:
 @pytest.fixture
 def publish_client(monkeypatch):
     async def _make(publish_fn):
-        monkeypatch.setattr(
-            "app.routers.app_versions.publish_version", publish_fn
-        )
+        monkeypatch.setattr("app.routers.app_versions.publish_version", publish_fn)
         app = _mk_app()
         transport = ASGITransport(app=app)
         return AsyncClient(transport=transport, base_url="http://test"), app
@@ -98,9 +96,7 @@ def publish_client(monkeypatch):
 @pytest.fixture
 def install_client(monkeypatch):
     async def _make(install_fn):
-        monkeypatch.setattr(
-            "app.routers.app_installs.install_app", install_fn
-        )
+        monkeypatch.setattr("app.routers.app_installs.install_app", install_fn)
         app = _mk_app()
         transport = ASGITransport(app=app)
         return AsyncClient(transport=transport, base_url="http://test"), app
@@ -254,23 +250,23 @@ async def test_install_endpoint_422_on_incompat(install_client):
 
 
 async def test_list_my_installs():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def _fake_instance(**kw):
-        base = dict(
-            id=uuid4(),
-            app_id=uuid4(),
-            app_version_id=uuid4(),
-            project_id=uuid4(),
-            state="installed",
-            update_policy="manual",
-            volume_id="vol-x",
-            installed_at=now,
-            uninstalled_at=None,
-            created_at=now,
-        )
+        base = {
+            "id": uuid4(),
+            "app_id": uuid4(),
+            "app_version_id": uuid4(),
+            "project_id": uuid4(),
+            "state": "installed",
+            "update_policy": "manual",
+            "volume_id": "vol-x",
+            "installed_at": now,
+            "uninstalled_at": None,
+            "created_at": now,
+        }
         base.update(kw)
         return SimpleNamespace(**base)
 

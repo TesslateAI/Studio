@@ -31,7 +31,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration + session fixtures
 # ---------------------------------------------------------------------------
@@ -40,9 +39,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -108,9 +105,7 @@ class _StubRedis:
 @pytest.fixture
 def stub_queue(monkeypatch: pytest.MonkeyPatch) -> _StubQueue:
     queue = _StubQueue()
-    monkeypatch.setattr(
-        "app.services.task_queue.get_task_queue", lambda: queue, raising=True
-    )
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue, raising=True)
     return queue
 
 
@@ -121,9 +116,7 @@ def stub_redis(monkeypatch: pytest.MonkeyPatch) -> _StubRedis:
     async def _get():
         return redis
 
-    monkeypatch.setattr(
-        "app.services.cache_service.get_redis_client", _get, raising=True
-    )
+    monkeypatch.setattr("app.services.cache_service.get_redis_client", _get, raising=True)
     return redis
 
 
@@ -169,9 +162,7 @@ def stub_app_action_dispatcher(monkeypatch: pytest.MonkeyPatch):
     #     ``from ..apps import action_dispatcher`` form returns the cached
     #     attribute when the real module has already been imported by an
     #     earlier test in the same session, ignoring sys.modules entirely.
-    monkeypatch.setitem(
-        sys.modules, "app.services.apps.action_dispatcher", fake
-    )
+    monkeypatch.setitem(sys.modules, "app.services.apps.action_dispatcher", fake)
     import app.services.apps as _apps_pkg
 
     monkeypatch.setattr(_apps_pkg, "action_dispatcher", fake, raising=False)
@@ -349,9 +340,9 @@ def test_resume_app_invoke_redispatches_with_saved_input(
     from app.models_automations import AutomationRun
     from app.services.automations import (
         DispatchStatus,
+        hydrate_checkpoint,
         resume_run,
         serialize_checkpoint,
-        hydrate_checkpoint,
     )
 
     saved_input = {"customer_id": "cust-123", "amount": "5.00"}
@@ -359,10 +350,8 @@ def test_resume_app_invoke_redispatches_with_saved_input(
     async def go():
         async with session_maker() as db:
             owner = await _seed_user(db)
-            saved_app_action_id, expected_instance_id = (
-                await _seed_app_action_for_owner(
-                    db, owner_user_id=owner, action_name="charge_card"
-                )
+            saved_app_action_id, expected_instance_id = await _seed_app_action_for_owner(
+                db, owner_user_id=owner, action_name="charge_card"
             )
             automation_id, run_id = await _seed_paused_run(
                 db,
@@ -375,9 +364,7 @@ def test_resume_app_invoke_redispatches_with_saved_input(
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             await serialize_checkpoint(
                 db,
@@ -404,9 +391,7 @@ def test_resume_app_invoke_redispatches_with_saved_input(
 
         async with session_maker() as db:
             final = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
         return result, final, expected_instance_id
 
@@ -432,9 +417,9 @@ def test_resume_gateway_send_re_emits_to_stream(
     from app.models_automations import AutomationRun
     from app.services.automations import (
         DispatchStatus,
+        hydrate_checkpoint,
         resume_run,
         serialize_checkpoint,
-        hydrate_checkpoint,
     )
 
     async def go():
@@ -450,9 +435,7 @@ def test_resume_gateway_send_re_emits_to_stream(
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             await serialize_checkpoint(
                 db,
@@ -481,9 +464,7 @@ def test_resume_gateway_send_re_emits_to_stream(
 
         async with session_maker() as db:
             final = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
         return result, final
 
@@ -509,9 +490,9 @@ def test_resume_agent_continue_re_enqueues_with_message_history(
     ``execute_agent_task`` with the saved message_history."""
     from app.models_automations import AutomationRun
     from app.services.automations import (
+        hydrate_checkpoint,
         resume_run,
         serialize_checkpoint,
-        hydrate_checkpoint,
     )
     from app.services.automations.checkpoint import ResumeStrategy
 
@@ -533,9 +514,7 @@ def test_resume_agent_continue_re_enqueues_with_message_history(
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             await serialize_checkpoint(
                 db,
@@ -568,9 +547,7 @@ def test_resume_agent_continue_re_enqueues_with_message_history(
 
         async with session_maker() as db:
             final = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
         return final
 
@@ -598,9 +575,9 @@ def test_resume_agent_restart_drops_history(
     the loop fresh — payload omits message_history / tool_result_trail."""
     from app.models_automations import AutomationRun
     from app.services.automations import (
+        hydrate_checkpoint,
         resume_run,
         serialize_checkpoint,
-        hydrate_checkpoint,
     )
     from app.services.automations.checkpoint import ResumeStrategy
 
@@ -617,9 +594,7 @@ def test_resume_agent_restart_drops_history(
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             await serialize_checkpoint(
                 db,
@@ -675,9 +650,9 @@ def test_resume_run_noop_when_run_terminal(
     from app.models_automations import AutomationRun
     from app.services.automations import (
         DispatchStatus,
+        hydrate_checkpoint,
         resume_run,
         serialize_checkpoint,
-        hydrate_checkpoint,
     )
 
     async def go():
@@ -693,9 +668,7 @@ def test_resume_run_noop_when_run_terminal(
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             await serialize_checkpoint(
                 db,

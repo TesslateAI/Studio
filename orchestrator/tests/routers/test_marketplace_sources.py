@@ -29,7 +29,6 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import uuid
 from typing import Any
@@ -38,8 +37,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 _ASYNC_DB_URL = os.environ.get(
     "DATABASE_URL",

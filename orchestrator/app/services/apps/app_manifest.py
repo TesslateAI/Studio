@@ -177,7 +177,9 @@ class PlatformFee(_StrictModel):
 
 class PromotionalBudget(_StrictModel):
     fund_usd: float = 0
-    covers: list[Literal["ai_compute", "general_compute", "platform_fee"]] = Field(default_factory=list)
+    covers: list[Literal["ai_compute", "general_compute", "platform_fee"]] = Field(
+        default_factory=list
+    )
     on_exhaust: Literal["disable", "flip_to_installer", "degrade_to_free"] = "flip_to_installer"
 
 
@@ -267,9 +269,7 @@ class RuntimeStorageSpec(_StrictModel):
 # Top-level enum aliases — surfaced for code that needs to type-check values
 # without importing the inner Literal.
 TenancyModel = Literal["per_install", "shared_singleton", "per_invocation"]
-StateModel = Literal[
-    "stateless", "per_install_volume", "service_pvc", "shared_volume", "external"
-]
+StateModel = Literal["stateless", "per_install_volume", "service_pvc", "shared_volume", "external"]
 
 
 class RuntimeSpec(_StrictModel):
@@ -441,7 +441,7 @@ class ConnectorSpec2026(_StrictModel):
     secret_key: str | None = None
 
     @model_validator(mode="after")
-    def _reject_oauth_env(self) -> "ConnectorSpec2026":
+    def _reject_oauth_env(self) -> ConnectorSpec2026:
         if self.kind == "oauth" and self.exposure == "env":
             raise ValueError(
                 "connectors[].exposure='env' is not allowed when kind='oauth' "
@@ -507,7 +507,7 @@ class AppManifest2026_05(_StrictModel):
     automation_templates: list[AutomationTemplateSpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _check_data_resource_action_refs(self) -> "AppManifest2026_05":
+    def _check_data_resource_action_refs(self) -> AppManifest2026_05:
         action_names = {a.name for a in self.actions}
         for resource in self.data_resources:
             if resource.backed_by_action not in action_names:
@@ -518,17 +518,19 @@ class AppManifest2026_05(_StrictModel):
         return self
 
     @model_validator(mode="after")
-    def _check_state_model_replica_constraints(self) -> "AppManifest2026_05":
+    def _check_state_model_replica_constraints(self) -> AppManifest2026_05:
         # per_install_volume and service_pvc both pin replicas to <= 1 because
         # there is exactly one PVC and replicas would race over it. Other
         # state models (stateless / shared_volume RWX / external) are
         # unbounded by this rule.
         max_one_state_models = {"per_install_volume", "service_pvc"}
-        if self.runtime.state_model in max_one_state_models:
-            if self.runtime.scaling.max_replicas > 1:
-                raise ValueError(
-                    f"runtime.state_model={self.runtime.state_model!r} requires "
-                    f"runtime.scaling.max_replicas <= 1 (got "
-                    f"{self.runtime.scaling.max_replicas})"
-                )
+        if (
+            self.runtime.state_model in max_one_state_models
+            and self.runtime.scaling.max_replicas > 1
+        ):
+            raise ValueError(
+                f"runtime.state_model={self.runtime.state_model!r} requires "
+                f"runtime.scaling.max_replicas <= 1 (got "
+                f"{self.runtime.scaling.max_replicas})"
+            )
         return self

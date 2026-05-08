@@ -31,7 +31,6 @@ from app.database import Base
 from app.models_automations import AutomationRunArtifact
 from app.services.automations import artifacts
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -94,6 +93,7 @@ async def test_create_artifact_routed_to_cas_when_oversized(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """32 KiB content + working CAS uploader → storage_mode='cas', sha256 ref."""
+
     # Patch the CAS uploader to behave as if the blob was accepted. The
     # production stub returns None (forcing inline+truncate fallback);
     # we override so the CAS branch is exercised end-to-end.

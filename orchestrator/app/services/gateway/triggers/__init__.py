@@ -35,10 +35,10 @@ from __future__ import annotations
 
 from .common import (
     GatewayCommandError,
-    NoMatchingAutomation,
     NoMatchingAppAction,
-    parse_slash_command,
+    NoMatchingAutomation,
     parse_bot_mention,
+    parse_slash_command,
 )
 
 __all__ = [

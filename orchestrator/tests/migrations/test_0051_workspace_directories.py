@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -45,9 +45,7 @@ def test_0051_creates_directory_tables(sqlite_db: str) -> None:
 
     conn = sqlite3.connect(sqlite_db)
     try:
-        tables = {
-            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "directories" in tables
         assert "agent_task_directories" in tables
 
@@ -56,7 +54,7 @@ def test_0051_creates_directory_tables(sqlite_db: str) -> None:
         directory_id = str(uuid4())
         ticket_id = str(uuid4())
         project_id = str(uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         conn.execute(
             "INSERT INTO directories (id, user_id, path, runtime, git_root, created_at)"

@@ -162,7 +162,6 @@ async def _compute_restart_targets(
         `connector_type == 'env_injection'` (where `container` is the source).
     External-only sources never need to restart themselves; only their consumers do.
     """
-    from sqlalchemy import or_
 
     from ..models import ContainerConnection
 
@@ -181,9 +180,7 @@ async def _compute_restart_targets(
         return targets
 
     target_ids = {c.target_container_id for c in connections}
-    consumer_rows = await db.execute(
-        select(Container).where(Container.id.in_(target_ids))
-    )
+    consumer_rows = await db.execute(select(Container).where(Container.id.in_(target_ids)))
     for consumer in consumer_rows.scalars().all():
         if consumer.deployment_mode == "container":
             targets.append(consumer)
@@ -229,14 +226,10 @@ async def _restart_one(container_id: UUID, project_id: UUID, user_id: UUID) -> N
 
             from ..models import ContainerConnection
 
-            all_rows = await db.execute(
-                select(Container).where(Container.project_id == project_id)
-            )
+            all_rows = await db.execute(select(Container).where(Container.project_id == project_id))
             all_containers = list(all_rows.scalars().all())
             conn_rows = await db.execute(
-                select(ContainerConnection).where(
-                    ContainerConnection.project_id == project_id
-                )
+                select(ContainerConnection).where(ContainerConnection.project_id == project_id)
             )
             connections = list(conn_rows.scalars().all())
 
@@ -251,9 +244,7 @@ async def _restart_one(container_id: UUID, project_id: UUID, user_id: UUID) -> N
             container.needs_restart = False
             await db.commit()
     except Exception:
-        logger.exception(
-            "[restart-on-save] restart_one failed for container %s", container_id
-        )
+        logger.exception("[restart-on-save] restart_one failed for container %s", container_id)
 
 
 async def dispatch_restart_after_config_change(
@@ -280,9 +271,7 @@ async def dispatch_restart_after_config_change(
     target_names = [c.name for c in targets]
 
     for target in targets:
-        asyncio.create_task(
-            _restart_one(target.id, project_id, user_id)
-        )
+        asyncio.create_task(_restart_one(target.id, project_id, user_id))
 
     if pubsub_target:
         try:
@@ -310,9 +299,7 @@ async def dispatch_restart_after_config_change(
     }
 
 
-def build_initial_values(
-    container: Container, schema: FormSchema
-) -> dict[str, Any]:
+def build_initial_values(container: Container, schema: FormSchema) -> dict[str, Any]:
     """Build initialValues for the UI — non-secret values verbatim, secret
     keys as ``"__SET__"`` if stored, otherwise absent. Never decrypts."""
     values: dict[str, Any] = {}
@@ -341,9 +328,7 @@ async def _find_pending(input_id: str):
     return get_pending_input_manager(), publish_pending_input_response
 
 
-async def _verify_input_ownership(
-    db: AsyncSession, current_user: User, input_id: str
-) -> dict:
+async def _verify_input_ownership(db: AsyncSession, current_user: User, input_id: str) -> dict:
     """Verify the user owns the project tied to this pending input."""
     manager, _ = await _find_pending(input_id)
     req = manager._pending.get(input_id)  # noqa: SLF001 — internal hook for auth
@@ -356,9 +341,7 @@ async def _verify_input_ownership(
     project = await db.get(Project, UUID(str(project_id)))
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.owner_id != current_user.id and not getattr(
-        current_user, "is_superuser", False
-    ):
+    if project.owner_id != current_user.id and not getattr(current_user, "is_superuser", False):
         raise HTTPException(status_code=403, detail="Not authorized for this project")
     return req.metadata
 
@@ -416,9 +399,7 @@ async def _load_container_for_user(
     project = await db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.owner_id != current_user.id and not getattr(
-        current_user, "is_superuser", False
-    ):
+    if project.owner_id != current_user.id and not getattr(current_user, "is_superuser", False):
         raise HTTPException(status_code=403, detail="Not authorized for this project")
     container = await db.get(Container, container_id)
     if container is None or container.project_id != project.id:
@@ -466,14 +447,10 @@ async def get_project_config(
     project = await db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.owner_id != current_user.id and not getattr(
-        current_user, "is_superuser", False
-    ):
+    if project.owner_id != current_user.id and not getattr(current_user, "is_superuser", False):
         raise HTTPException(status_code=403, detail="Not authorized for this project")
 
-    rows = await db.execute(
-        select(Container).where(Container.project_id == project_id)
-    )
+    rows = await db.execute(select(Container).where(Container.project_id == project_id))
     containers = list(rows.scalars().all())
 
     # Pending-input cross-reference. We snapshot the manager once so the view is
@@ -539,9 +516,7 @@ async def get_project_config(
     }
 
 
-def _merge_extra_keys_into_schema(
-    container: Container, schema: FormSchema
-) -> FormSchema:
+def _merge_extra_keys_into_schema(container: Container, schema: FormSchema) -> FormSchema:
     """Append synthesized fields for any stored env/secret key not already
     in ``schema.fields``. Powers the "+ Add field" affordance: once the user
     saves a custom key, the next GET surfaces it as a regular field so they
@@ -613,9 +588,7 @@ async def get_container_config(
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    _, container = await _load_container_for_user(
-        db, current_user, project_id, container_id
-    )
+    _, container = await _load_container_for_user(db, current_user, project_id, container_id)
     schema = _resolve_schema_for_container(container, preset, None)
     values = build_initial_values(container, schema)
     return {"schema": schema.to_dict(), "values": values, "preset": schema.preset}
@@ -630,9 +603,7 @@ async def patch_container_config(
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
-    project, container = await _load_container_for_user(
-        db, current_user, project_id, container_id
-    )
+    project, container = await _load_container_for_user(db, current_user, project_id, container_id)
     schema = _resolve_schema_for_container(container, body.preset, body.overrides)
     summary = apply_node_config(container, body.values, schema)
     await db.flush()
@@ -666,8 +637,7 @@ async def patch_container_config(
                         "type": "secret_rotated",
                         "data": {
                             "container_id": str(container.id),
-                            "keys": summary["rotated_secrets"]
-                            + summary["cleared_secrets"],
+                            "keys": summary["rotated_secrets"] + summary["cleared_secrets"],
                         },
                     },
                 )
@@ -691,9 +661,7 @@ async def patch_container_config(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/projects/{project_id}/containers/{container_id}/secrets/{key}/reveal"
-)
+@router.post("/projects/{project_id}/containers/{container_id}/secrets/{key}/reveal")
 async def reveal_container_secret(
     project_id: UUID,
     container_id: UUID,
@@ -723,9 +691,7 @@ async def reveal_container_secret(
     # auth path, only via a human-session JWT.
     if getattr(current_user, "_api_key_record", None) is not None:
         raise HTTPException(status_code=403, detail="Reveal not permitted for API key auth")
-    project, container = await _load_container_for_user(
-        db, current_user, project_id, container_id
-    )
+    project, container = await _load_container_for_user(db, current_user, project_id, container_id)
     encrypted = container.encrypted_secrets or {}
     enc_val = encrypted.get(key)
     if not enc_val:

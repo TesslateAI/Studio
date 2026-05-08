@@ -10,8 +10,9 @@ branch_labels = None
 depends_on = None
 
 import sqlalchemy as sa  # noqa: E402
-from app.types.guid import GUID
 from alembic import op  # noqa: E402
+
+from app.types.guid import GUID  # noqa: E402
 
 _TABLES = [
     "user_purchased_agents",

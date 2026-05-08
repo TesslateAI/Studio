@@ -45,7 +45,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -178,9 +178,7 @@ async def spend_rollup(
                 InvocationSubject,
                 InvocationSubject.id == SpendRecord.invocation_subject_id,
             )
-            .outerjoin(
-                AppInstance, AppInstance.id == InvocationSubject.app_instance_id
-            )
+            .outerjoin(AppInstance, AppInstance.id == InvocationSubject.app_instance_id)
             .outerjoin(MarketplaceApp, MarketplaceApp.id == AppInstance.app_id)
             .where(SpendRecord.created_at >= start)
             .where(SpendRecord.created_at <= end)

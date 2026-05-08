@@ -45,7 +45,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models_automations import (
     AppDataResource,
-    AppDependency,
     AppInstance,
     AppInstanceLink,
 )
@@ -140,8 +139,7 @@ async def _resolve_link(
     link = (await db.execute(stmt)).scalar_one_or_none()
     if link is None:
         raise AliasNotFound(
-            f"no active app_instance_links row for parent={parent_install_id} "
-            f"alias={alias!r}"
+            f"no active app_instance_links row for parent={parent_install_id} alias={alias!r}"
         )
     return link
 
@@ -196,9 +194,7 @@ async def dispatch_via_link(
     install only. The plan's parent-budget rollup explicitly requires a
     parent run as the rollup anchor.
     """
-    link = await _resolve_link(
-        db, parent_install_id=parent_install_id, alias=alias
-    )
+    link = await _resolve_link(db, parent_install_id=parent_install_id, alias=alias)
     granted = _grants_list(link.granted_actions)
     if action_name not in granted:
         raise ActionNotInGrants(
@@ -329,9 +325,7 @@ async def mint_embed_token(
     ``child_install_id``, ``view_name``, ``input``, and the link's
     granted-view scope list.
     """
-    link = await _resolve_link(
-        db, parent_install_id=parent_install_id, alias=alias
-    )
+    link = await _resolve_link(db, parent_install_id=parent_install_id, alias=alias)
     granted = _grants_list(link.granted_views)
     if view_name not in granted:
         raise ViewNotInGrants(
@@ -384,9 +378,7 @@ async def _resolve_data_resource(
     """
     inst = await db.get(AppInstance, child_install_id)
     if inst is None:
-        raise CompositionError(
-            f"child install {child_install_id} not found"
-        )
+        raise CompositionError(f"child install {child_install_id} not found")
     stmt = (
         select(AppDataResource)
         .where(AppDataResource.app_version_id == inst.app_version_id)
@@ -396,8 +388,7 @@ async def _resolve_data_resource(
     res = (await db.execute(stmt)).scalar_one_or_none()
     if res is None:
         raise CompositionError(
-            f"data_resource {resource_name!r} not declared on app_version "
-            f"{inst.app_version_id}"
+            f"data_resource {resource_name!r} not declared on app_version {inst.app_version_id}"
         )
     return res
 
@@ -425,9 +416,7 @@ async def query_data_resource(
     callers don't need spend / artifact metadata — those land on the
     parent run via the dispatcher.
     """
-    link = await _resolve_link(
-        db, parent_install_id=parent_install_id, alias=alias
-    )
+    link = await _resolve_link(db, parent_install_id=parent_install_id, alias=alias)
     granted = _grants_list(link.granted_data_resources)
     if resource_name not in granted:
         raise DataResourceNotInGrants(
@@ -466,8 +455,7 @@ async def query_data_resource(
         cached = await _cache_get(cache_key)
         if cached is not None:
             logger.debug(
-                "composition.query_data_resource cache_hit key=%s parent=%s "
-                "alias=%s resource=%s",
+                "composition.query_data_resource cache_hit key=%s parent=%s alias=%s resource=%s",
                 cache_key,
                 parent_install_id,
                 alias,
@@ -551,7 +539,7 @@ async def wire_install_links(
     db: AsyncSession,
     *,
     parent_install: AppInstance,
-    parent_manifest: "AppManifest2026_05",
+    parent_manifest: AppManifest2026_05,
     child_installs_by_app_id: dict[str, UUID],
 ) -> list[AppInstanceLink]:
     """Create ``app_instance_links`` rows for each declared dependency.
@@ -580,16 +568,13 @@ async def wire_install_links(
         child_id = child_installs_by_app_id.get(dep.app_id)
         if child_id is None:
             if dep.required:
-                raise MissingDependencyError(
-                    alias=dep.alias, child_app_slug=dep.app_id
-                )
+                raise MissingDependencyError(alias=dep.alias, child_app_slug=dep.app_id)
             # Optional dependency that the user opted not to install —
             # skip the link row. The runtime call will then surface
             # AliasNotFound, which the parent app can handle as "support
             # is not configured" rather than a hard failure.
             logger.info(
-                "wire_install_links: skipping optional dep alias=%s app_id=%s "
-                "(not installed)",
+                "wire_install_links: skipping optional dep alias=%s app_id=%s (not installed)",
                 dep.alias,
                 dep.app_id,
             )
@@ -597,9 +582,7 @@ async def wire_install_links(
 
         granted_actions = list(dep.needs.actions) if dep.needs else []
         granted_views = list(dep.needs.views) if dep.needs else []
-        granted_data_resources = (
-            list(dep.needs.data_resources) if dep.needs else []
-        )
+        granted_data_resources = list(dep.needs.data_resources) if dep.needs else []
 
         existing = (
             await db.execute(
@@ -652,7 +635,7 @@ async def resolve_dependency_installs(
     db: AsyncSession,
     *,
     installer_user_id: UUID,
-    parent_manifest: "AppManifest2026_05",
+    parent_manifest: AppManifest2026_05,
 ) -> dict[str, UUID]:
     """For each manifest dependency, find the user's existing AppInstance.
 
@@ -676,9 +659,7 @@ async def resolve_dependency_installs(
     for dep in parent_manifest.dependencies:
         # Resolve the MarketplaceApp by slug (the projection convention).
         app_id = (
-            await db.execute(
-                select(MarketplaceApp.id).where(MarketplaceApp.slug == dep.app_id)
-            )
+            await db.execute(select(MarketplaceApp.id).where(MarketplaceApp.slug == dep.app_id))
         ).scalar_one_or_none()
         if app_id is None:
             # Slug doesn't resolve — skip; wire_install_links will raise

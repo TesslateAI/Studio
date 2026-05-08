@@ -58,6 +58,7 @@ on-disk migration's UUIDs.
 
 from __future__ import annotations
 
+import contextlib
 import socket
 import uuid
 from collections.abc import AsyncGenerator
@@ -78,7 +79,6 @@ from sqlalchemy.ext.asyncio import (
 # automations module re-defines AppInstance under the Phase-1 hard reset.
 from app import models, models_automations  # noqa: F401
 from app.database import Base
-
 
 # ---------------------------------------------------------------------------
 # Wave 1X deterministic system source UUIDs
@@ -207,9 +207,7 @@ async def _bootstrap_probe_database() -> None:
             # NOT NULL flip; we reproduce that here so introspection
             # sees the post-migration shape.
             for tbl in ALL_CATALOG_TABLES_WITH_SOURCE_ID:
-                await conn.execute(
-                    text(f"ALTER TABLE {tbl} ALTER COLUMN source_id SET NOT NULL")
-                )
+                await conn.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN source_id SET NOT NULL"))
 
         Maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with Maker() as session:
@@ -304,10 +302,8 @@ async def db_session(db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, Non
             yield session
         finally:
             # Best-effort rollback in case a test raised mid-flush.
-            try:
+            with contextlib.suppress(Exception):
                 await session.rollback()
-            except Exception:  # noqa: BLE001
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -368,9 +364,7 @@ def _make_theme(*, source_id: uuid.UUID, slug: str) -> models.Theme:
     )
 
 
-def _make_workflow_template(
-    *, source_id: uuid.UUID, slug: str
-) -> models.WorkflowTemplate:
+def _make_workflow_template(*, source_id: uuid.UUID, slug: str) -> models.WorkflowTemplate:
     return models.WorkflowTemplate(
         id=uuid.uuid4(),
         source_id=source_id,
@@ -587,6 +581,7 @@ async def test_user_scope_allows_same_handle_for_different_users(
     ``handle`` globally unique across all scopes — which would be wrong.
     Together they pin down "partial WHERE scope='system'" precisely.
     """
+
     # Seed two real users via the ORM so all User Python-side defaults
     # (subscription_tier, credits, support_tier, etc.) get populated.
     # Raw SQL would have to enumerate every NOT-NULL-no-server-default

@@ -37,7 +37,6 @@ from app import models, models_automations  # noqa: F401
 from app.database import Base
 from app.services.automations import grant_resolver
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

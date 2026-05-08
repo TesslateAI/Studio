@@ -14,8 +14,8 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from ....services.automations.scopes import MARKETPLACE_AUTHOR
 from ....models import MarketplaceAgent
+from ....services.automations.scopes import MARKETPLACE_AUTHOR
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 
@@ -64,9 +64,7 @@ _FORBIDDEN_FIELDS: frozenset[str] = frozenset(
 )
 
 
-async def update_agent_executor(
-    params: dict[str, Any], context: dict[str, Any]
-) -> dict[str, Any]:
+async def update_agent_executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Patch a draft MarketplaceAgent's whitelisted fields."""
     agent_id_raw = params.get("agent_id")
     patch = params.get("patch")
@@ -96,9 +94,7 @@ async def update_agent_executor(
     # Ownership: the creator/forker may patch their own drafts. Built-ins
     # and system rows are never patchable via this tool.
     if agent.is_builtin or agent.is_system:
-        return error_output(
-            message="cannot patch built-in or system agents via this tool"
-        )
+        return error_output(message="cannot patch built-in or system agents via this tool")
     if agent.created_by_user_id != user_id and agent.forked_by_user_id != user_id:
         return error_output(message="not the owner of this agent")
 
@@ -106,9 +102,7 @@ async def update_agent_executor(
     # can flip is_published; once flipped, edits go through a dedicated
     # router that creates a new draft version, not via this tool.
     if agent.is_published:
-        return error_output(
-            message="agent is already published; create a fork to edit"
-        )
+        return error_output(message="agent is already published; create a fork to edit")
 
     forbidden = sorted(set(patch.keys()) & _FORBIDDEN_FIELDS)
     if forbidden:

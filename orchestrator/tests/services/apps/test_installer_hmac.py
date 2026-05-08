@@ -34,7 +34,6 @@ from app.database import Base
 from app.services.apps import installer
 from app.services.apps.connector_proxy import auth as proxy_auth
 
-
 # ---------------------------------------------------------------------------
 # Fake ``kubernetes`` module — installed into sys.modules before each test.
 # ---------------------------------------------------------------------------
@@ -102,9 +101,7 @@ def fake_k8s(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         kubernetes_namespace = "tesslate"
         secret_key = real_settings.secret_key or "test-secret-key"
 
-    monkeypatch.setattr(
-        "app.config.get_settings", lambda: _Patched()
-    )
+    monkeypatch.setattr("app.config.get_settings", lambda: _Patched())
     return api
 
 
@@ -258,9 +255,7 @@ async def test_non_k8s_mode_returns_token_without_secret_create(
         kubernetes_namespace = "tesslate"
         secret_key = "test-secret-key"
 
-    monkeypatch.setattr(
-        "app.config.get_settings", lambda: _Patched()
-    )
+    monkeypatch.setattr("app.config.get_settings", lambda: _Patched())
     # Ensure the K8s module IS NOT touched even if installed in this env.
     with patch("kubernetes.client.CoreV1Api") as mock_core:
         instance_id = uuid.uuid4()

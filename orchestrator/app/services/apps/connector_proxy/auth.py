@@ -100,9 +100,7 @@ def generate_pod_token(*, app_instance_id: UUID, signing_key: bytes) -> str:
     """
     nonce = secrets.token_urlsafe(16)
     payload = f"{app_instance_id}.{nonce}"
-    sig = hmac.new(
-        signing_key, payload.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    sig = hmac.new(signing_key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 
 
@@ -212,9 +210,7 @@ def _parse_token(header_value: str) -> tuple[UUID, str, str]:
     return instance_id, nonce, sig
 
 
-async def verify_app_instance(
-    request: Request, db: AsyncSession
-) -> AppInstance:
+async def verify_app_instance(request: Request, db: AsyncSession) -> AppInstance:
     """Resolve and authenticate the calling AppInstance.
 
     Steps:
@@ -241,7 +237,7 @@ async def verify_app_instance(
 
     expected = hmac.new(
         signing_key,
-        f"{instance_id}.{nonce}".encode("utf-8"),
+        f"{instance_id}.{nonce}".encode(),
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(expected, sig):
@@ -309,9 +305,7 @@ def derive_signing_key(
         from ....config import get_settings
 
         fallback_secret = get_settings().secret_key
-    return _derive_signing_key(
-        app_instance_id=app_instance_id, fallback_secret=fallback_secret
-    )
+    return _derive_signing_key(app_instance_id=app_instance_id, fallback_secret=fallback_secret)
 
 
 __all__ = [

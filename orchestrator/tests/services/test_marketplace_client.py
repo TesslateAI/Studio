@@ -19,12 +19,9 @@ in its own venv (we exec that venv's uvicorn).
 
 from __future__ import annotations
 
-import asyncio
-import json
 import os
 import socket
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -32,7 +29,6 @@ import httpx
 import pytest
 
 from app.services import marketplace_client as mc
-
 
 HUB_ID_HEADER = mc.HUB_ID_HEADER
 
@@ -70,9 +66,7 @@ async def test_get_manifest_records_hub_id_on_first_call() -> None:
         return _ok(payload, hub_id="hub-A")
 
     transport = httpx.MockTransport(handler)
-    async with mc.MarketplaceClient(
-        "https://example.com", transport=transport
-    ) as client:
+    async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
         result = await client.get_manifest()
         assert result["hub_id"] == "hub-A"
         assert client.last_seen_hub_id == "hub-A"
@@ -297,9 +291,7 @@ async def test_circuit_breaker_keyed_per_base_url(monkeypatch) -> None:
     fail_t = httpx.MockTransport(fail)
     ok_t = httpx.MockTransport(ok)
 
-    async with mc.MarketplaceClient(
-        "https://hub-a.test", transport=fail_t
-    ) as a_client:
+    async with mc.MarketplaceClient("https://hub-a.test", transport=fail_t) as a_client:
         for _ in range(mc._CB_FAILURE_THRESHOLD):
             with pytest.raises(mc.MarketplaceServerError):
                 await a_client.get_manifest()
@@ -416,7 +408,12 @@ async def test_appeal_yank_routes_to_appeal_endpoint() -> None:
         body = _json.loads(request.content.decode("utf-8")) if request.content else {}
         seen.append((request.method, request.url.path, body))
         return _ok(
-            {"id": "appeal-1", "yank_id": "y-1", "state": "resolved", "decision": "second_admin_confirmed"},
+            {
+                "id": "appeal-1",
+                "yank_id": "y-1",
+                "state": "resolved",
+                "decision": "second_admin_confirmed",
+            },
             hub_id="hub-A",
         )
 
@@ -442,9 +439,7 @@ async def test_admin_force_approve_routes_to_admin_endpoint() -> None:
 
     transport = httpx.MockTransport(handler)
     async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
-        await client.admin_force_approve_submission(
-            "sub-1", decision_reason="ops emergency"
-        )
+        await client.admin_force_approve_submission("sub-1", decision_reason="ops emergency")
     assert seen == [
         (
             "/v1/admin/submissions/sub-1/force-approve",
@@ -467,9 +462,7 @@ async def test_admin_force_reject_requires_reason() -> None:
     transport = httpx.MockTransport(handler)
     async with mc.MarketplaceClient("https://example.com", transport=transport) as client:
         await client.admin_force_reject_submission("sub-1", decision_reason="policy")
-    assert seen == [
-        ("/v1/admin/submissions/sub-1/force-reject", {"decision_reason": "policy"})
-    ]
+    assert seen == [("/v1/admin/submissions/sub-1/force-reject", {"decision_reason": "policy"})]
 
 
 @pytest.mark.asyncio
@@ -575,8 +568,7 @@ def marketplace_service():
     )
     if init_proc.returncode != 0:
         pytest.skip(
-            f"marketplace init_db failed (rc={init_proc.returncode}): "
-            f"{init_proc.stderr[-500:]}"
+            f"marketplace init_db failed (rc={init_proc.returncode}): {init_proc.stderr[-500:]}"
         )
 
     port = _free_port()

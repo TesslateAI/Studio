@@ -28,7 +28,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +71,7 @@ class Lease(Protocol):
     SETNX, K8s Lease optimistic concurrency).
     """
 
-    async def acquire(
-        self, name: str, holder_id: str, ttl_seconds: int
-    ) -> Optional[LeaseToken]:
+    async def acquire(self, name: str, holder_id: str, ttl_seconds: int) -> LeaseToken | None:
         """Try to take ``name``. Returns a token on success, ``None`` if held."""
 
     async def renew(self, token: LeaseToken) -> bool:
@@ -83,7 +81,7 @@ class Lease(Protocol):
         """Release ``token``. Idempotent — no-op if already released or expired."""
 
 
-def get_lease_backend(name: Optional[str] = None) -> Lease:
+def get_lease_backend(name: str | None = None) -> Lease:
     """Construct the configured lease backend.
 
     ``name`` overrides the env var; primarily used by tests. Defaults to
@@ -101,9 +99,7 @@ def get_lease_backend(name: Optional[str] = None) -> Lease:
 
             return RedisLease()
         except LeaseUnavailableError as exc:
-            logger.warning(
-                "lease: redis backend unavailable (%s); falling back to db", exc
-            )
+            logger.warning("lease: redis backend unavailable (%s); falling back to db", exc)
         except Exception:
             logger.exception("lease: redis backend init failed; falling back to db")
 
@@ -113,9 +109,7 @@ def get_lease_backend(name: Optional[str] = None) -> Lease:
 
             return K8sLease()
         except LeaseUnavailableError as exc:
-            logger.warning(
-                "lease: k8s backend unavailable (%s); falling back to db", exc
-            )
+            logger.warning("lease: k8s backend unavailable (%s); falling back to db", exc)
         except Exception:
             logger.exception("lease: k8s backend init failed; falling back to db")
 

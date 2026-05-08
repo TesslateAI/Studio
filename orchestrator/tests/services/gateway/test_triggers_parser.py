@@ -9,7 +9,6 @@ from app.services.gateway.triggers.common import (
     parse_slash_command,
 )
 
-
 # ---------------------------------------------------------------------------
 # Slash command parser
 # ---------------------------------------------------------------------------
@@ -42,8 +41,8 @@ def test_parse_slash_command_recognized(raw, expected_name, expected_args):
     [
         "",
         "   ",
-        "/automation",       # missing run + name
-        "run",                # missing name
+        "/automation",  # missing run + name
+        "run",  # missing name
         "run !!!bad-name!!!",  # invalid characters
     ],
 )
@@ -61,11 +60,14 @@ def test_parse_slash_command_unknown(raw):
     "raw,expected_alias,expected_name,expected_args",
     [
         # Slack — bot mention encoded as <@UBOT>.
-        ("<@U123ABC> summarize_commits foo bar", "U123ABC", "summarize_commits",
-         ["foo", "bar"]),
+        ("<@U123ABC> summarize_commits foo bar", "U123ABC", "summarize_commits", ["foo", "bar"]),
         # Telegram — @botname.
-        ("@github_app summarize_commits tesslate/studio yesterday", "github_app",
-         "summarize_commits", ["tesslate/studio", "yesterday"]),
+        (
+            "@github_app summarize_commits tesslate/studio yesterday",
+            "github_app",
+            "summarize_commits",
+            ["tesslate/studio", "yesterday"],
+        ),
     ],
 )
 def test_parse_bot_mention_recognized(raw, expected_alias, expected_name, expected_args):
@@ -81,8 +83,8 @@ def test_parse_bot_mention_recognized(raw, expected_alias, expected_name, expect
     [
         "",
         "no leading mention",
-        "<@U123>",       # has alias but no action name
-        "@bot",          # alias only
+        "<@U123>",  # has alias but no action name
+        "@bot",  # alias only
         "@bot !!!bad",  # invalid action name
     ],
 )

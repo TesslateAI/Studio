@@ -21,7 +21,6 @@ from app.services.channels.approval_cards import (
     parse_action_id,
 )
 
-
 INPUT_ID = "11111111-2222-3333-4444-555555555555"
 AUTOMATION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -37,6 +36,7 @@ def _run_db(coro_fn, *args, **kwargs):
     A new engine per call keeps asyncpg's connection pool bound to the loop
     that's about to close, avoiding cross-loop coupling.
     """
+
     async def _inner():
         engine = create_async_engine(_ASYNC_DB_URL, pool_pre_ping=False)
         try:
@@ -55,9 +55,7 @@ def admin_client(authenticated_client):
     client, user_data = authenticated_client
 
     async def _promote(db: AsyncSession) -> None:
-        result = await db.execute(
-            select(User).where(User.id == uuid.UUID(user_data["id"]))
-        )
+        result = await db.execute(select(User).where(User.id == uuid.UUID(user_data["id"])))
         user = result.scalar_one()
         user.is_superuser = True
         await db.commit()
@@ -120,9 +118,7 @@ def _insert_regular_user_skill(user_id: uuid.UUID) -> str:
 def _get_is_builtin(skill_id: str) -> bool:
     async def _do(db: AsyncSession) -> bool:
         result = await db.execute(
-            select(MarketplaceAgent.is_builtin).where(
-                MarketplaceAgent.id == uuid.UUID(skill_id)
-            )
+            select(MarketplaceAgent.is_builtin).where(MarketplaceAgent.id == uuid.UUID(skill_id))
         )
         return bool(result.scalar_one())
 
@@ -145,9 +141,7 @@ def _get_name_and_is_builtin(skill_id: str) -> tuple[str, bool]:
 def _row_exists(skill_id: str) -> bool:
     async def _do(db: AsyncSession) -> bool:
         result = await db.execute(
-            select(MarketplaceAgent.id).where(
-                MarketplaceAgent.id == uuid.UUID(skill_id)
-            )
+            select(MarketplaceAgent.id).where(MarketplaceAgent.id == uuid.UUID(skill_id))
         )
         return result.scalar_one_or_none() is not None
 

@@ -11,8 +11,9 @@ to support user-submitted project templates.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
 revision: str = "0007_add_base_user_submissions"

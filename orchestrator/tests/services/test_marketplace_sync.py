@@ -24,7 +24,6 @@ from __future__ import annotations
 import os
 import socket
 import subprocess
-import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,15 +36,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.models import (
     MarketplaceAgent,
     MarketplaceApp,
-    MarketplaceBase,
     MarketplaceSource,
-    Theme,
-    WorkflowTemplate,
 )
 from app.models_automations import AppInstance
 from app.services.marketplace_client import HubIdMismatchError
 from app.services.marketplace_sync import MarketplaceSyncWorker
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -112,9 +107,7 @@ def marketplace_service():
     except OSError:
         pytest.skip("postgres test container not reachable on :5433")
 
-    db_url = (
-        f"postgresql+asyncpg://tesslate_test:testpass@localhost:5433/{MARKETPLACE_DB_NAME}"
-    )
+    db_url = f"postgresql+asyncpg://tesslate_test:testpass@localhost:5433/{MARKETPLACE_DB_NAME}"
 
     # Provision a clean DB. DROP/CREATE require autocommit (no transaction).
     for stmt in (
@@ -136,8 +129,7 @@ def marketplace_service():
     )
     if init_proc.returncode != 0:
         pytest.skip(
-            f"marketplace init_db failed (rc={init_proc.returncode}): "
-            f"{init_proc.stderr[-1000:]}"
+            f"marketplace init_db failed (rc={init_proc.returncode}): {init_proc.stderr[-1000:]}"
         )
 
     port = _free_port()
@@ -213,10 +205,14 @@ async def federated_source(
     restore the original URL on teardown.
     """
     official = (
-        await orchestrator_session.execute(
-            select(MarketplaceSource).where(MarketplaceSource.handle == "tesslate-official")
+        (
+            await orchestrator_session.execute(
+                select(MarketplaceSource).where(MarketplaceSource.handle == "tesslate-official")
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     assert official is not None, "seeded `tesslate-official` system row missing"
 
     saved_base_url = official.base_url
@@ -307,12 +303,16 @@ async def test_sync_source_lands_federated_rows(
     # service's seeds remain unmodified — we filter to rows the sync
     # actually touched (source_etag IS NOT NULL).
     synced_agents = (
-        await orchestrator_session.execute(
-            select(MarketplaceAgent)
-            .where(MarketplaceAgent.source_id == federated_source.id)
-            .where(MarketplaceAgent.source_etag.is_not(None))
+        (
+            await orchestrator_session.execute(
+                select(MarketplaceAgent)
+                .where(MarketplaceAgent.source_id == federated_source.id)
+                .where(MarketplaceAgent.source_etag.is_not(None))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(synced_agents) >= 5, (
         f"expected at least 5 federated agents synced, got {len(synced_agents)}"
     )
@@ -388,10 +388,14 @@ asyncio.run(main())
     # references it). Both outcomes are correct per the plan; the
     # behaviour split is the worker's _has_user_state_reference check.
     remaining = (
-        await orchestrator_session.execute(
-            select(MarketplaceAgent).where(MarketplaceAgent.id == target_id)
+        (
+            await orchestrator_session.execute(
+                select(MarketplaceAgent).where(MarketplaceAgent.id == target_id)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if remaining is None:
         # Hard-deleted path
         return
@@ -447,10 +451,14 @@ async def test_sync_source_skips_local_sources(
     skipped_reason and never hit the network."""
     # Look up the seeded `local` system row.
     local = (
-        await orchestrator_session.execute(
-            select(MarketplaceSource).where(MarketplaceSource.handle == "local")
+        (
+            await orchestrator_session.execute(
+                select(MarketplaceSource).where(MarketplaceSource.handle == "local")
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     assert local is not None, "seeded `local` system row missing"
 
     SessionFactory = _orchestrator_session_factory()
@@ -539,9 +547,7 @@ async def test_hub_id_mismatch_auto_disables_source(
 
         # Re-read source — auto-disable must be persisted.
         await orchestrator_session.refresh(source)
-        assert source.is_active is False, (
-            "hub-id drift must auto-disable the source per the plan"
-        )
+        assert source.is_active is False, "hub-id drift must auto-disable the source per the plan"
         assert source.last_sync_error is not None
         assert "Hub ID drift" in source.last_sync_error
         assert source.last_synced_at is not None
@@ -569,6 +575,7 @@ async def test_handle_deactivate_app_uses_state_column(
     federated apps stayed in the "approved" state forever.
     """
     from uuid import uuid4 as _uuid4
+
     slug = f"federated-app-deactivate-{_uuid4().hex[:10]}"
     app = MarketplaceApp(
         slug=slug,
@@ -621,6 +628,7 @@ async def test_handle_delete_app_with_no_user_state_hard_deletes(
     fix in ``_handle_delete``.
     """
     from uuid import uuid4 as _uuid4
+
     slug = f"federated-app-delete-{_uuid4().hex[:10]}"
     app = MarketplaceApp(
         slug=slug,
@@ -648,10 +656,14 @@ async def test_handle_delete_app_with_no_user_state_hard_deletes(
         await sess.commit()
 
     remaining = (
-        await orchestrator_session.execute(
-            select(MarketplaceApp).where(MarketplaceApp.id == app_id)
+        (
+            await orchestrator_session.execute(
+                select(MarketplaceApp).where(MarketplaceApp.id == app_id)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     assert remaining is None, "no user state references — row should be hard-deleted"
 
 
@@ -753,10 +765,14 @@ async def test_handle_delete_app_with_user_state_keeps_stub(
         # The AppInstance MUST be untouched — the stub exists to satisfy
         # the RESTRICT FK without disrupting installed users.
         surviving_inst = (
-            await orchestrator_session.execute(
-                select(AppInstance).where(AppInstance.id == instance_id)
+            (
+                await orchestrator_session.execute(
+                    select(AppInstance).where(AppInstance.id == instance_id)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         assert surviving_inst is not None, "AppInstance must not be deleted"
         assert surviving_inst.state == "installed"
     finally:
@@ -881,8 +897,7 @@ async def test_apply_yank_event_marks_app_version_yanked_upstream(
             )
             await sess.commit()
         assert counter == "versions_yanked", (
-            f"Wave 7 yank consumer expected to bump versions_yanked counter, "
-            f"got {counter!r}"
+            f"Wave 7 yank consumer expected to bump versions_yanked counter, got {counter!r}"
         )
 
         await orchestrator_session.refresh(version)
@@ -894,10 +909,14 @@ async def test_apply_yank_event_marks_app_version_yanked_upstream(
         # Installed AppInstance is untouched — runtime gate is the
         # authoritative refuse-to-start barrier.
         surviving_inst = (
-            await orchestrator_session.execute(
-                select(AppInstance).where(AppInstance.id == instance_id)
+            (
+                await orchestrator_session.execute(
+                    select(AppInstance).where(AppInstance.id == instance_id)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         assert surviving_inst is not None
         assert surviving_inst.state == "installed"
 
@@ -919,9 +938,7 @@ async def test_apply_yank_event_marks_app_version_yanked_upstream(
             AppInstance.__table__.delete().where(AppInstance.id == instance_id)
         )
         await orchestrator_session.execute(
-            models.AppVersion.__table__.delete().where(
-                models.AppVersion.id == version_id
-            )
+            models.AppVersion.__table__.delete().where(models.AppVersion.id == version_id)
         )
         await orchestrator_session.execute(
             MarketplaceApp.__table__.delete().where(MarketplaceApp.id == app_id)

@@ -15,13 +15,13 @@ Asserts:
     alphabetical within each group.
   * Auth: 403 for non-owner, 401/403 unauthenticated.
 """
+
 from __future__ import annotations
 
 import asyncio
 from uuid import UUID, uuid4
 
 import pytest
-
 
 _loop: asyncio.AbstractEventLoop | None = None
 
@@ -140,9 +140,7 @@ def test_aggregation_403_for_non_owner(api_client_session, authenticated_client)
         "password": "TestPassword123!",
         "name": "Other",
     }
-    assert (
-        api_client_session.post("/api/auth/register", json=other_register).status_code == 201
-    )
+    assert api_client_session.post("/api/auth/register", json=other_register).status_code == 201
     r = api_client_session.post(
         "/api/auth/jwt/login",
         data={
@@ -469,9 +467,7 @@ def test_aggregation_resolves_external_generic_slug_to_empty_schema(
 def test_aggregation_empty_project_returns_empty_services(authenticated_client):
     _reset_manager()
     client, user_data = authenticated_client
-    project_id, _ = _run(
-        _create_project_with_containers(UUID(user_data["id"]), containers=[])
-    )
+    project_id, _ = _run(_create_project_with_containers(UUID(user_data["id"]), containers=[]))
     resp = client.get(f"/api/projects/{project_id}/config")
     assert resp.status_code == 200, resp.text
     body = resp.json()

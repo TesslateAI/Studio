@@ -30,7 +30,6 @@ project shares the ``seeded_project`` fixture.
 
 from __future__ import annotations
 
-import json
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -59,7 +58,6 @@ from app.services.apps.publish_checker import (
     WARNING_SQLITE_DETECTED,
     check_state_model,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -181,12 +179,15 @@ async def seeded_project(db: AsyncSession, tmp_path: Path):
 
     # Patch get_project_path so both publish_checker and managed_resources
     # see the same on-disk root.
-    with patch(
-        "app.services.apps.publish_checker.get_project_path",
-        return_value=str(project_root),
-    ), patch(
-        "app.services.apps.managed_resources.get_project_path",
-        return_value=str(project_root),
+    with (
+        patch(
+            "app.services.apps.publish_checker.get_project_path",
+            return_value=str(project_root),
+        ),
+        patch(
+            "app.services.apps.managed_resources.get_project_path",
+            return_value=str(project_root),
+        ),
     ):
         yield project, project_root
 
@@ -243,8 +244,7 @@ async def test_check_state_model_sqlite_detected(db, seeded_project):
     offer = verdict.upgrade_offers[0]
     assert offer.manifest_patch["runtime"]["state_model"] == "external"
     assert (
-        offer.manifest_patch["runtime"]["scaling"]["max_replicas"]
-        == DEFAULT_SCALABLE_MAX_REPLICAS
+        offer.manifest_patch["runtime"]["scaling"]["max_replicas"] == DEFAULT_SCALABLE_MAX_REPLICAS
     )
 
 
@@ -301,9 +301,7 @@ async def test_check_state_model_framework_pattern(db, seeded_project):
 
     verdict = await check_state_model(db, project=project, manifest=manifest)
 
-    framework_warnings = [
-        w for w in verdict.warnings if w.kind == WARNING_FRAMEWORK_PATTERN
-    ]
+    framework_warnings = [w for w in verdict.warnings if w.kind == WARNING_FRAMEWORK_PATTERN]
     assert len(framework_warnings) >= 2, (
         "expected one framework warning from the file scan and one from the "
         f"startup-command sniff, got {framework_warnings!r}"
@@ -321,9 +319,7 @@ async def test_check_state_model_framework_pattern(db, seeded_project):
 
 
 @pytest.mark.asyncio
-async def test_add_postgres_writes_secret_and_patches_manifest(
-    db, seeded_project, monkeypatch
-):
+async def test_add_postgres_writes_secret_and_patches_manifest(db, seeded_project, monkeypatch):
     """add_postgres: stubbed URL + real K8s Secret write + manifest patched.
 
     The K8s client is a MagicMock so we can assert ``create_namespaced_secret``

@@ -32,7 +32,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Fixtures (mirror tests/services/automations/test_dispatcher.py)
 # ---------------------------------------------------------------------------
@@ -41,9 +40,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -157,9 +154,7 @@ async def _seed_event(db, *, automation_id: uuid.UUID) -> uuid.UUID:
     return evt.id
 
 
-async def _seed_run(
-    db, *, automation_id: uuid.UUID, event_id: uuid.UUID
-) -> uuid.UUID:
+async def _seed_run(db, *, automation_id: uuid.UUID, event_id: uuid.UUID) -> uuid.UUID:
     from app.models_automations import AutomationRun
 
     run = AutomationRun(
@@ -265,23 +260,17 @@ def test_installer_default_resolves_to_opensail_credits(session_maker) -> None:
             user_id = await _seed_user(db)
             automation_id = await _seed_automation(db, owner_user_id=user_id)
             event_id = await _seed_event(db, automation_id=automation_id)
-            run_id = await _seed_run(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            run_id = await _seed_run(db, automation_id=automation_id, event_id=event_id)
             await _seed_action(db, automation_id=automation_id)
             await db.commit()
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             automation = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == automation_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == automation_id)
                 )
             ).scalar_one()
             resolved = await resolve_invocation_subject(
@@ -339,41 +328,29 @@ def test_parent_run_inherits_billing_and_debits_parent(session_maker) -> None:
                 },
             )
             child_event = await _seed_event(db, automation_id=child_autom_id)
-            child_run_id = await _seed_run(
-                db, automation_id=child_autom_id, event_id=child_event
-            )
+            child_run_id = await _seed_run(db, automation_id=child_autom_id, event_id=child_event)
             await _seed_action(db, automation_id=child_autom_id)
             await db.commit()
 
         async with session_maker() as db:
             parent_run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == parent_run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == parent_run_id))
             ).scalar_one()
             parent_autom = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == parent_autom_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == parent_autom_id)
                 )
             ).scalar_one()
-            await resolve_invocation_subject(
-                db, automation_run=parent_run, automation=parent_autom
-            )
+            await resolve_invocation_subject(db, automation_run=parent_run, automation=parent_autom)
             await db.commit()
 
         async with session_maker() as db:
             child_run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == child_run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == child_run_id))
             ).scalar_one()
             child_autom = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == child_autom_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == child_autom_id)
                 )
             ).scalar_one()
             child_resolved = await resolve_invocation_subject(
@@ -395,21 +372,18 @@ def test_parent_run_inherits_billing_and_debits_parent(session_maker) -> None:
         async with session_maker() as db:
             parent_subject = (
                 await db.execute(
-                    select(InvocationSubject)
-                    .where(InvocationSubject.automation_run_id == parent_run_id)
+                    select(InvocationSubject).where(
+                        InvocationSubject.automation_run_id == parent_run_id
+                    )
                 )
             ).scalar_one()
             child_subject = (
                 await db.execute(
-                    select(InvocationSubject).where(
-                        InvocationSubject.id == child_resolved.id
-                    )
+                    select(InvocationSubject).where(InvocationSubject.id == child_resolved.id)
                 )
             ).scalar_one()
             parent_run_after = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == parent_run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == parent_run_id))
             ).scalar_one()
             return (
                 child_resolved,
@@ -482,9 +456,7 @@ def test_contract_overrides_app_manifest_default(session_maker) -> None:
                 },
             )
             event_id = await _seed_event(db, automation_id=automation_id)
-            run_id = await _seed_run(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            run_id = await _seed_run(db, automation_id=automation_id, event_id=event_id)
             await _seed_action(
                 db,
                 automation_id=automation_id,
@@ -495,20 +467,14 @@ def test_contract_overrides_app_manifest_default(session_maker) -> None:
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             autom = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == automation_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == automation_id)
                 )
             ).scalar_one()
-            resolved = await resolve_invocation_subject(
-                db, automation_run=run, automation=autom
-            )
+            resolved = await resolve_invocation_subject(db, automation_run=run, automation=autom)
             await db.commit()
             return resolved, team_id
 
@@ -540,28 +506,20 @@ def test_budget_envelope_from_contract(session_maker) -> None:
                 },
             )
             event_id = await _seed_event(db, automation_id=automation_id)
-            run_id = await _seed_run(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            run_id = await _seed_run(db, automation_id=automation_id, event_id=event_id)
             await _seed_action(db, automation_id=automation_id)
             await db.commit()
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             autom = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == automation_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == automation_id)
                 )
             ).scalar_one()
-            resolved = await resolve_invocation_subject(
-                db, automation_run=run, automation=autom
-            )
+            resolved = await resolve_invocation_subject(db, automation_run=run, automation=autom)
             await db.commit()
             return resolved
 
@@ -589,28 +547,20 @@ def test_settle_writes_spend_record_with_subject_id(session_maker) -> None:
             user_id = await _seed_user(db)
             automation_id = await _seed_automation(db, owner_user_id=user_id)
             event_id = await _seed_event(db, automation_id=automation_id)
-            run_id = await _seed_run(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            run_id = await _seed_run(db, automation_id=automation_id, event_id=event_id)
             await _seed_action(db, automation_id=automation_id)
             await db.commit()
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             autom = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == automation_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == automation_id)
                 )
             ).scalar_one()
-            resolved = await resolve_invocation_subject(
-                db, automation_run=run, automation=autom
-            )
+            resolved = await resolve_invocation_subject(db, automation_run=run, automation=autom)
             await settle_subject_spend(
                 db,
                 subject_id=resolved.id,
@@ -622,17 +572,17 @@ def test_settle_writes_spend_record_with_subject_id(session_maker) -> None:
 
         async with session_maker() as db:
             spend_rows = (
-                await db.execute(
-                    select(SpendRecord).where(
-                        SpendRecord.invocation_subject_id == resolved.id
+                (
+                    await db.execute(
+                        select(SpendRecord).where(SpendRecord.invocation_subject_id == resolved.id)
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             subject_row = (
                 await db.execute(
-                    select(InvocationSubject).where(
-                        InvocationSubject.id == resolved.id
-                    )
+                    select(InvocationSubject).where(InvocationSubject.id == resolved.id)
                 )
             ).scalar_one()
             return spend_rows, subject_row

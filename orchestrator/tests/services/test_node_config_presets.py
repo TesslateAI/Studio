@@ -3,6 +3,7 @@
 Covers preset registry shape, uniqueness of field keys, and override merging
 semantics for ``resolve_schema``.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -14,7 +15,6 @@ from app.services.node_config_presets import (
     Preset,
     resolve_schema,
 )
-
 
 # ---------------------------------------------------------------------------
 # Preset registry

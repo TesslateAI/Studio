@@ -25,8 +25,10 @@ controller plane. Every 5 seconds it:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy import select
 
@@ -206,15 +208,11 @@ class DockerReconciler(_BaseReconciler):
             elif kind == "scale_up":
                 container.start()
             elif kind == "delete_pod":
-                try:
+                with contextlib.suppress(Exception):
                     container.kill()
-                except Exception:
-                    pass
                 container.remove(force=True)
             else:
-                raise NotImplementedError(
-                    f"DockerReconciler: unsupported kind {kind!r}"
-                )
+                raise NotImplementedError(f"DockerReconciler: unsupported kind {kind!r}")
 
         await asyncio.to_thread(_do)
 
@@ -268,9 +266,7 @@ async def run_loop(
 
     while not shutdown_event.is_set():
         try:
-            await asyncio.wait_for(
-                shutdown_event.wait(), timeout=interval_seconds
-            )
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
             return
         except TimeoutError:
             pass

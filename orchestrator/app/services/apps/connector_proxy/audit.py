@@ -13,6 +13,7 @@ swallowed.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from uuid import UUID, uuid4
@@ -62,7 +63,7 @@ def scrub_error_body(body: str | None) -> str | None:
     if not body:
         return body
     # Bound the work — don't scrub a 5MB log line forever.
-    truncated = body[:_ERROR_PREFIX_LIMIT * 4]
+    truncated = body[: _ERROR_PREFIX_LIMIT * 4]
     scrubbed = _AUTH_HEADER_RE.sub(r"\1[REDACTED]", truncated)
     scrubbed = _BEARER_RE.sub(r"\1 [REDACTED]", scrubbed)
     scrubbed = _PROVIDER_TOKEN_RE.sub("[REDACTED]", scrubbed)
@@ -110,17 +111,14 @@ async def record_call(
         await db.commit()
     except Exception as exc:  # pragma: no cover — best-effort path
         logger.warning(
-            "connector_proxy_calls audit write failed: connector=%s "
-            "endpoint=%s status=%s error=%r",
+            "connector_proxy_calls audit write failed: connector=%s endpoint=%s status=%s error=%r",
             connector_id,
             endpoint,
             status_code,
             exc,
         )
-        try:
+        with contextlib.suppress(Exception):
             await db.rollback()
-        except Exception:
-            pass
 
 
 __all__ = ["record_call", "scrub_error_body"]

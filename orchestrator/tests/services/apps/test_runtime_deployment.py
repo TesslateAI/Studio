@@ -45,7 +45,6 @@ from app.services.apps.installer import (
     install_app,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — fresh in-memory SQLite per test.
 # ---------------------------------------------------------------------------
@@ -133,9 +132,7 @@ def _patch_install_orchestrator(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     import app.services.orchestration as _orchestration
 
-    monkeypatch.setattr(
-        _orchestration, "get_orchestrator", lambda *a, **kw: _StubOrchestrator()
-    )
+    monkeypatch.setattr(_orchestration, "get_orchestrator", lambda *a, **kw: _StubOrchestrator())
 
 
 # ---------------------------------------------------------------------------
@@ -371,27 +368,24 @@ async def test_shared_singleton_reuses_existing_deployment(
     inst_c = await db.get(models_automations.AppInstance, result_c.app_instance_id)
     assert inst_a is not None and inst_b is not None and inst_c is not None
     assert (
-        inst_a.runtime_deployment_id
-        == inst_b.runtime_deployment_id
-        == inst_c.runtime_deployment_id
+        inst_a.runtime_deployment_id == inst_b.runtime_deployment_id == inst_c.runtime_deployment_id
     )
     # All three resolve to the same K8s project (the shared one).
-    assert (
-        inst_a.project_id
-        == inst_b.project_id
-        == inst_c.project_id
-        == result_a.project_id
-    )
+    assert inst_a.project_id == inst_b.project_id == inst_c.project_id == result_a.project_id
 
     # And exactly one row in app_runtime_deployments for this app+version.
     rows = (
-        await db.execute(
-            select(AppRuntimeDeployment).where(
-                AppRuntimeDeployment.app_id == av.app_id,
-                AppRuntimeDeployment.app_version_id == av.id,
+        (
+            await db.execute(
+                select(AppRuntimeDeployment).where(
+                    AppRuntimeDeployment.app_id == av.app_id,
+                    AppRuntimeDeployment.app_version_id == av.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].tenancy_model == "shared_singleton"
     assert rows[0].max_replicas == 5  # honored from manifest
@@ -564,12 +558,14 @@ async def test_installer_rejects_per_install_volume_with_shared_singleton(
     assert hub.create_calls == []
     # No runtime deployment row written.
     rows = (
-        await db.execute(
-            select(AppRuntimeDeployment).where(
-                AppRuntimeDeployment.app_version_id == av.id
+        (
+            await db.execute(
+                select(AppRuntimeDeployment).where(AppRuntimeDeployment.app_version_id == av.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows == []
 
 

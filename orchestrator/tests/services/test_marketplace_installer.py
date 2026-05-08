@@ -34,7 +34,6 @@ from nacl.signing import SigningKey
 from app.services import marketplace_client as mc
 from app.services import marketplace_installer as installer
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -120,7 +119,7 @@ def _envelope_handler(
                 "attestation": attestation,
             }
             return httpx.Response(200, json=envelope, headers=headers)
-        if path.endswith(f"/items/agent/coder"):
+        if path.endswith("/items/agent/coder"):
             return httpx.Response(
                 200,
                 json={"slug": "coder", "kind": "agent", "latest_version": "1.0.0"},
@@ -165,21 +164,26 @@ async def test_installer_uses_source_specific_envelope(opensail_home, monkeypatc
                     200, json=envelope, headers={HUB_ID_HEADER: hub_id, "ETag": "v1"}
                 )
             return httpx.Response(404, json={}, headers={HUB_ID_HEADER: hub_id})
+
         return handler
 
     transport_a = httpx.MockTransport(_make_handler(hub_id="hub-a", sha=sha_a, body=bundle_a_bytes))
     transport_b = httpx.MockTransport(_make_handler(hub_id="hub-b", sha=sha_b, body=bundle_b_bytes))
 
-    source_a = _make_source(handle="hub-a-source", base_url="https://hub-a.example.com", pinned_hub_id="hub-a")
-    source_b = _make_source(handle="hub-b-source", base_url="https://hub-b.example.com", pinned_hub_id="hub-b")
+    source_a = _make_source(
+        handle="hub-a-source", base_url="https://hub-a.example.com", pinned_hub_id="hub-a"
+    )
+    source_b = _make_source(
+        handle="hub-b-source", base_url="https://hub-b.example.com", pinned_hub_id="hub-b"
+    )
 
     client_a = mc.MarketplaceClient(source_a.base_url, pinned_hub_id="hub-a", transport=transport_a)
     client_b = mc.MarketplaceClient(source_b.base_url, pinned_hub_id="hub-b", transport=transport_b)
 
     # Patch the bundle download to serve the right body per CDN URL.
     bodies = {
-        f"https://cdn-hub-a.example.com/bundle.tar.zst": bundle_a_bytes,
-        f"https://cdn-hub-b.example.com/bundle.tar.zst": bundle_b_bytes,
+        "https://cdn-hub-a.example.com/bundle.tar.zst": bundle_a_bytes,
+        "https://cdn-hub-b.example.com/bundle.tar.zst": bundle_b_bytes,
     }
 
     async def fake_download_and_verify(url, expected_sha256, max_bytes, dest_tmp, *, http=None):
@@ -195,11 +199,19 @@ async def test_installer_uses_source_specific_envelope(opensail_home, monkeypatc
     monkeypatch.setattr(installer, "_download_and_verify", fake_download_and_verify)
 
     res_a = await installer.install_from_source(
-        source=source_a, kind="agent", slug="coder", version="1.0.0", client=client_a,
+        source=source_a,
+        kind="agent",
+        slug="coder",
+        version="1.0.0",
+        client=client_a,
     )
     res_b = await installer.install_from_source(
-        source=source_b, kind="agent", slug="coder", version="1.0.0",
-        client=client_b, dest_root_override=opensail_home / "agents" / "coder-b",
+        source=source_b,
+        kind="agent",
+        slug="coder",
+        version="1.0.0",
+        client=client_b,
+        dest_root_override=opensail_home / "agents" / "coder-b",
     )
     await client_a.aclose()
     await client_b.aclose()
@@ -226,7 +238,6 @@ async def test_installer_uses_source_specific_envelope(opensail_home, monkeypatc
 @pytest.mark.asyncio
 async def test_installer_refuses_sha256_mismatch(opensail_home) -> None:
     real_bundle = _make_tarzst({"manifest.json": b'{"x":1}'})
-    real_sha = hashlib.sha256(real_bundle).hexdigest()
     bogus_sha = "0" * 64  # claim a different sha256
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -272,14 +283,23 @@ async def test_installer_refuses_sha256_mismatch(opensail_home) -> None:
     async def patched_download(url, expected_sha256, max_bytes, dest_tmp, *, http=None):
         async with httpx.AsyncClient(transport=cdn_transport) as cdn_client:
             return await orig_download(
-                url, expected_sha256, max_bytes, dest_tmp, http=cdn_client,
+                url,
+                expected_sha256,
+                max_bytes,
+                dest_tmp,
+                http=cdn_client,
             )
 
     import unittest.mock as um
+
     with um.patch.object(installer, "_download_and_verify", patched_download):
         with pytest.raises(installer.BundleSha256MismatchError) as exc:
             await installer.install_from_source(
-                source=source, kind="agent", slug="coder", version="1.0.0", client=client,
+                source=source,
+                kind="agent",
+                slug="coder",
+                version="1.0.0",
+                client=client,
             )
     await client.aclose()
     assert exc.value.reason == "bundle_sha256_mismatch"
@@ -328,16 +348,23 @@ async def test_installer_refuses_size_exceeded(opensail_home) -> None:
             return await orig_download(url, expected_sha256, max_bytes, dest_tmp, http=cdn_client)
 
     import unittest.mock as um
+
     with um.patch.object(installer, "_download_and_verify", patched_download):
         with pytest.raises(installer.BundleSizeExceededError):
             await installer.install_from_source(
-                source=source, kind="agent", slug="coder", version="1.0.0", client=client,
+                source=source,
+                kind="agent",
+                slug="coder",
+                version="1.0.0",
+                client=client,
             )
     await client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_installer_refuses_envelope_size_above_envelope_self(opensail_home, monkeypatch) -> None:
+async def test_installer_refuses_envelope_size_above_envelope_self(
+    opensail_home, monkeypatch
+) -> None:
     """If the envelope itself claims 99 GB but the cap drops it to 1 GB,
     refuse before downloading."""
     body = b"x" * 100
@@ -367,7 +394,11 @@ async def test_installer_refuses_envelope_size_above_envelope_self(opensail_home
 
     with pytest.raises(installer.BundleSizeExceededError):
         await installer.install_from_source(
-            source=source, kind="agent", slug="coder", version="1.0.0", client=client,
+            source=source,
+            kind="agent",
+            slug="coder",
+            version="1.0.0",
+            client=client,
         )
     await client.aclose()
 
@@ -401,11 +432,17 @@ async def test_installer_refuses_expired_url(opensail_home) -> None:
 
     source = _make_source(handle="x", base_url="https://hub.example.com", pinned_hub_id="hub-x")
     client = mc.MarketplaceClient(
-        source.base_url, pinned_hub_id="hub-x", transport=httpx.MockTransport(handler),
+        source.base_url,
+        pinned_hub_id="hub-x",
+        transport=httpx.MockTransport(handler),
     )
     with pytest.raises(installer.BundleExpiredError):
         await installer.install_from_source(
-            source=source, kind="agent", slug="coder", version="1.0.0", client=client,
+            source=source,
+            kind="agent",
+            slug="coder",
+            version="1.0.0",
+            client=client,
         )
     await client.aclose()
 
@@ -585,22 +622,26 @@ def test_parse_envelope_rejects_missing_fields() -> None:
 
 def test_parse_envelope_rejects_non_tarzst() -> None:
     with pytest.raises(installer.BundleFormatError):
-        installer._parse_envelope({
-            "url": "https://x",
-            "sha256": "a" * 64,
-            "size_bytes": 1,
-            "archive_format": "zip",
-        })
+        installer._parse_envelope(
+            {
+                "url": "https://x",
+                "sha256": "a" * 64,
+                "size_bytes": 1,
+                "archive_format": "zip",
+            }
+        )
 
 
 def test_parse_envelope_rejects_bad_sha() -> None:
     with pytest.raises(installer.BundleEnvelopeError):
-        installer._parse_envelope({
-            "url": "https://x",
-            "sha256": "bad",
-            "size_bytes": 1,
-            "archive_format": "tar.zst",
-        })
+        installer._parse_envelope(
+            {
+                "url": "https://x",
+                "sha256": "bad",
+                "size_bytes": 1,
+                "archive_format": "tar.zst",
+            }
+        )
 
 
 # ---------------------------------------------------------------------------

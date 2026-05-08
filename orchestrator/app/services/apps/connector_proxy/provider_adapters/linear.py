@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from .base import AllowedEndpoint, AuthScheme, ProviderAdapter
 
-
 LINEAR_ALLOWED_ENDPOINTS: tuple[AllowedEndpoint, ...] = (
     # GraphQL — the main entry point. Linear requires POST.
     AllowedEndpoint(method="POST", path="graphql"),

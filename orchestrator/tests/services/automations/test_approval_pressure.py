@@ -20,13 +20,6 @@ Redis instance.
 
 from __future__ import annotations
 
-from datetime import timedelta
-from typing import Any
-from unittest.mock import AsyncMock
-from uuid import uuid4
-
-import pytest
-
 # Import the leaf module directly to avoid pulling the full
 # ``app.services.automations`` package init chain (dispatcher imports
 # the agent + tesslate-agent submodule, which is heavyweight). The
@@ -35,6 +28,12 @@ import pytest
 import importlib.util
 import pathlib
 import sys
+from datetime import timedelta
+from typing import Any
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
 
 _MOD_PATH = (
     pathlib.Path(__file__).resolve().parents[3]
@@ -110,51 +109,35 @@ class _FakeRedis:
 
 
 class TestComputeCap:
-    def test_floor_of_2_on_tiny_pool(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv(
-            "AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False
-        )
+    def test_floor_of_2_on_tiny_pool(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False)
         # 4 // 4 = 1, but the floor of 2 wins so the very first
         # escalation doesn't deadlock the cap.
         assert approval_pressure.compute_cap(arq_pool_size=4) == 2
 
     def test_quarter_pool(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv(
-            "AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False
-        )
+        monkeypatch.delenv("AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False)
         assert approval_pressure.compute_cap(arq_pool_size=16) == 4
         assert approval_pressure.compute_cap(arq_pool_size=32) == 8
         assert approval_pressure.compute_cap(arq_pool_size=64) == 16
 
-    def test_env_override_wins(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_override_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AUTOMATION_APPROVAL_PRESSURE_CAP", "12")
         # Override beats the computed value (would have been 4).
         assert approval_pressure.compute_cap(arq_pool_size=16) == 12
 
-    def test_env_override_invalid_falls_back(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_override_invalid_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AUTOMATION_APPROVAL_PRESSURE_CAP", "not-a-number")
         # Falls back to the computed value, doesn't crash.
         assert approval_pressure.compute_cap(arq_pool_size=16) == 4
 
-    def test_env_override_below_one_clamps(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_override_below_one_clamps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AUTOMATION_APPROVAL_PRESSURE_CAP", "0")
         # 0 would deadlock every acquire; clamp to 1 (caller surface).
         assert approval_pressure.compute_cap(arq_pool_size=16) == 1
 
-    def test_zero_pool_size_defensive(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv(
-            "AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False
-        )
+    def test_zero_pool_size_defensive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False)
         # Misconfigured pool size shouldn't return 0 (which would
         # deadlock every escalation).
         assert approval_pressure.compute_cap(arq_pool_size=0) == 2
@@ -170,9 +153,7 @@ class TestTryAcquire:
     async def test_under_cap_returns_token_and_increments(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv(
-            "AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False
-        )
+        monkeypatch.delenv("AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False)
         fake = _FakeRedis()
 
         token = await approval_pressure.try_acquire_pressure_slot(
@@ -186,12 +167,8 @@ class TestTryAcquire:
         assert len(fake.eval_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_at_cap_returns_none_no_increment(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv(
-            "AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False
-        )
+    async def test_at_cap_returns_none_no_increment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False)
         fake = _FakeRedis()
         # cap for arq_pool_size=16 is 4; pre-fill to cap.
         fake._kv[approval_pressure.POOL_KEY] = 4
@@ -205,21 +182,15 @@ class TestTryAcquire:
         assert fake.current(approval_pressure.POOL_KEY) == 4
 
     @pytest.mark.asyncio
-    async def test_no_redis_issues_synthetic_token(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_no_redis_issues_synthetic_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Desktop / no-Redis path: get_redis_client returns None, but
         # the caller still gets a token so its release path is symmetric.
         async def _no_redis() -> None:
             return None
 
-        monkeypatch.setattr(
-            approval_pressure, "_get_redis", _no_redis
-        )
+        monkeypatch.setattr(approval_pressure, "_get_redis", _no_redis)
 
-        token = await approval_pressure.try_acquire_pressure_slot(
-            arq_pool_size=16
-        )
+        token = await approval_pressure.try_acquire_pressure_slot(arq_pool_size=16)
 
         assert token is not None
         assert token.is_released() is False
@@ -246,17 +217,13 @@ class TestTryAcquire:
     ) -> None:
         # The Lua reimplementation mirrors the real script's atomicity.
         # Five concurrent acquires on a cap-of-4 pool: 4 succeed, 1 fails.
-        monkeypatch.delenv(
-            "AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False
-        )
+        monkeypatch.delenv("AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False)
         fake = _FakeRedis()
         import asyncio
 
         results = await asyncio.gather(
             *(
-                approval_pressure.try_acquire_pressure_slot(
-                    arq_pool_size=16, redis_client=fake
-                )
+                approval_pressure.try_acquire_pressure_slot(arq_pool_size=16, redis_client=fake)
                 for _ in range(5)
             )
         )
@@ -276,12 +243,8 @@ class TestTryAcquire:
 
 class TestRelease:
     @pytest.mark.asyncio
-    async def test_release_decrements(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv(
-            "AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False
-        )
+    async def test_release_decrements(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False)
         fake = _FakeRedis()
 
         token = await approval_pressure.try_acquire_pressure_slot(
@@ -290,23 +253,17 @@ class TestRelease:
         assert token is not None
         assert fake.current(approval_pressure.POOL_KEY) == 1
 
-        await approval_pressure.release_pressure_slot(
-            token, redis_client=fake
-        )
+        await approval_pressure.release_pressure_slot(token, redis_client=fake)
 
         assert fake.current(approval_pressure.POOL_KEY) == 0
         assert token.is_released() is True
         assert fake.decr_calls == [approval_pressure.POOL_KEY]
 
     @pytest.mark.asyncio
-    async def test_double_release_is_idempotent(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_double_release_is_idempotent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Defensive: callers may release in a finally block AND in a
         # success path. Second release must be a no-op (no extra DECR).
-        monkeypatch.delenv(
-            "AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False
-        )
+        monkeypatch.delenv("AUTOMATION_APPROVAL_PRESSURE_CAP", raising=False)
         fake = _FakeRedis()
 
         token = await approval_pressure.try_acquire_pressure_slot(
@@ -314,21 +271,15 @@ class TestRelease:
         )
         assert token is not None
 
-        await approval_pressure.release_pressure_slot(
-            token, redis_client=fake
-        )
-        await approval_pressure.release_pressure_slot(
-            token, redis_client=fake
-        )
+        await approval_pressure.release_pressure_slot(token, redis_client=fake)
+        await approval_pressure.release_pressure_slot(token, redis_client=fake)
 
         assert fake.current(approval_pressure.POOL_KEY) == 0
         # Only one DECR — the second call short-circuited.
         assert len(fake.decr_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_release_resets_negative_counter(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_release_resets_negative_counter(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # If the counter has been corrupted (e.g. an external reset),
         # a DECR can land at -1. We log loudly and reset to 0 so the
         # leak surfaces in monitoring instead of silently corrupting
@@ -343,9 +294,7 @@ class TestRelease:
             acquired_at=datetime.now(tz=UTC),
             _released=[False],
         )
-        await approval_pressure.release_pressure_slot(
-            token, redis_client=fake
-        )
+        await approval_pressure.release_pressure_slot(token, redis_client=fake)
 
         # DECR took us to -1; the reset path landed us at 0.
         assert fake.current(approval_pressure.POOL_KEY) == 0
@@ -386,10 +335,7 @@ class TestJitteredBackoff:
     def test_jitter_actually_jitters(self) -> None:
         # Sanity: across 50 samples we should see at least 10 distinct
         # values (uniform random, not a fixed multiple).
-        samples = {
-            approval_pressure.compute_jittered_backoff(0).total_seconds()
-            for _ in range(50)
-        }
+        samples = {approval_pressure.compute_jittered_backoff(0).total_seconds() for _ in range(50)}
         assert len(samples) > 10
 
 
@@ -487,9 +433,7 @@ class TestScheduleDeferredRetry:
         # we failed to defer so it can fail the run cleanly instead of
         # silently dropping the retry.
         pool = AsyncMock()
-        pool.enqueue_job = AsyncMock(
-            side_effect=RuntimeError("redis pool down")
-        )
+        pool.enqueue_job = AsyncMock(side_effect=RuntimeError("redis pool down"))
 
         ok = await approval_pressure.schedule_deferred_retry(
             pool=pool,

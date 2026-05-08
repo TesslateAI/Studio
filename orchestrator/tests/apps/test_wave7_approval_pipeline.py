@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -21,7 +21,6 @@ from app.services.apps import (
     stage1_scanner,
     stage2_sandbox,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fake rows
@@ -36,9 +35,7 @@ class _Sub:
     decision: str = "pending"
     reviewer_user_id: UUID | None = None
     decision_notes: str | None = None
-    stage_entered_at: datetime = field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
-    )
+    stage_entered_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 @dataclass
@@ -52,7 +49,7 @@ class _AV:
 @dataclass
 class _Suite:
     id: UUID
-    created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 # ---------------------------------------------------------------------------
@@ -69,9 +66,7 @@ class _FakeResult:
 
     def scalars(self):
         rows = (
-            []
-            if self._row is None
-            else (self._row if isinstance(self._row, list) else [self._row])
+            [] if self._row is None else (self._row if isinstance(self._row, list) else [self._row])
         )
 
         class _S:
@@ -131,12 +126,8 @@ async def test_stage1_scan_all_pass_advances_to_stage2(monkeypatch):
     db = _FakeSession([sub, av, sub])
 
     # Bypass real manifest parsing and feature diff.
-    monkeypatch.setattr(
-        stage1_scanner, "parse", lambda _raw: object()
-    )
-    monkeypatch.setattr(
-        "app.config_features.diff", lambda _req: []
-    )
+    monkeypatch.setattr(stage1_scanner, "parse", lambda _raw: object())
+    monkeypatch.setattr("app.config_features.diff", lambda _req: [])
 
     out = await stage1_scanner.run_stage1_scan(db, submission_id=sub_id)
 
@@ -149,15 +140,14 @@ async def test_stage1_scan_all_pass_advances_to_stage2(monkeypatch):
 async def test_stage1_scan_failure_rejects(monkeypatch):
     sub_id, av_id = uuid.uuid4(), uuid.uuid4()
     sub = _Sub(id=sub_id, app_version_id=av_id, stage="stage1")
-    av = _AV(
-        id=av_id, manifest_json=_manifest(), required_features=["missing.feature.x"]
-    )
+    av = _AV(id=av_id, manifest_json=_manifest(), required_features=["missing.feature.x"])
 
     db = _FakeSession([sub, av, sub])
 
     monkeypatch.setattr(stage1_scanner, "parse", lambda _raw: object())
     monkeypatch.setattr(
-        "app.config_features.diff", lambda req: list(req)  # everything "missing"
+        "app.config_features.diff",
+        lambda req: list(req),  # everything "missing"
     )
 
     out = await stage1_scanner.run_stage1_scan(db, submission_id=sub_id)

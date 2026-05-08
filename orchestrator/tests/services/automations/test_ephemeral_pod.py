@@ -42,7 +42,6 @@ from app.services.automations.ephemeral_pod import (
     run_in_ephemeral_pod,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -309,7 +308,9 @@ async def test_run_in_ephemeral_pod_happy_path_persists_warnings(
     automation_id = uuid.uuid4()
     log_text = "\n".join(
         [
-            json.dumps({"event": "write_tracker_started", "path": "/var", "ts": "2026-04-26T00:00:00Z"}),
+            json.dumps(
+                {"event": "write_tracker_started", "path": "/var", "ts": "2026-04-26T00:00:00Z"}
+            ),
             json.dumps(
                 {
                     "event": "write_outside_tmp",

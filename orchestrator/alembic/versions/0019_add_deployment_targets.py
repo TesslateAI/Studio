@@ -13,8 +13,10 @@ Adds:
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
+
 # revision identifiers, used by Alembic.
 revision: str = "0019_add_deployment_targets"
 down_revision: str | Sequence[str] | None = "0018_add_deployment_provider"
@@ -103,9 +105,7 @@ def upgrade() -> None:
         )
 
     # Add new columns to deployments table
-    existing_deployment_columns = [
-        c["name"] for c in inspector.get_columns("deployments")
-    ]
+    existing_deployment_columns = [c["name"] for c in inspector.get_columns("deployments")]
 
     if "deployment_target_id" not in existing_deployment_columns:
         op.add_column(
@@ -158,9 +158,7 @@ def downgrade() -> None:
     inspector = sa.inspect(conn)
 
     # Remove columns from deployments table
-    existing_deployment_columns = [
-        c["name"] for c in inspector.get_columns("deployments")
-    ]
+    existing_deployment_columns = [c["name"] for c in inspector.get_columns("deployments")]
 
     if "version" in existing_deployment_columns:
         op.drop_column("deployments", "version")

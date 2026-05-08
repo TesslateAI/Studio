@@ -30,7 +30,6 @@ from app.services.apps.settlement_worker import (
     settle_spend_batch,
 )
 
-
 # ---------------------------------------------------------------------------
 # Unit: resolve_payer (pure)
 # ---------------------------------------------------------------------------
@@ -47,19 +46,11 @@ DEFAULT_MIX = {
 @pytest.mark.asyncio
 async def test_resolve_payer_honors_byok_for_ai_compute() -> None:
     # BYOK overrides ai_compute.
-    assert (
-        await resolve_payer(DEFAULT_MIX, "ai_compute", is_byok=True) == "byok"
-    )
+    assert await resolve_payer(DEFAULT_MIX, "ai_compute", is_byok=True) == "byok"
     # BYOK does NOT override general_compute — declared payer still pays.
-    assert (
-        await resolve_payer(DEFAULT_MIX, "general_compute", is_byok=True)
-        == "platform"
-    )
+    assert await resolve_payer(DEFAULT_MIX, "general_compute", is_byok=True) == "platform"
     # Non-BYOK goes to declared payer.
-    assert (
-        await resolve_payer(DEFAULT_MIX, "ai_compute", is_byok=False)
-        == "installer"
-    )
+    assert await resolve_payer(DEFAULT_MIX, "ai_compute", is_byok=False) == "installer"
 
 
 @pytest.mark.asyncio
@@ -73,9 +64,7 @@ async def test_resolve_payer_missing_dimension_raises() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "payer", ["creator", "platform", "installer", "byok"]
-)
+@pytest.mark.parametrize("payer", ["creator", "platform", "installer", "byok"])
 async def test_resolve_payer_all_four_payers(payer: str) -> None:
     mix = {"ai_compute": {"payer": payer, "markup_pct": 0}}
     # Non-BYOK path returns the declared payer verbatim (including the
@@ -177,14 +166,13 @@ async def test_record_spend_writes_row(db) -> None:
         amount_usd=Decimal("0.25"),
     )
 
-    from app import models
     from sqlalchemy import select
+
+    from app import models
 
     row = (
         await db.execute(
-            select(models.SpendRecord).where(
-                models.SpendRecord.id == outcome.spend_record_id
-            )
+            select(models.SpendRecord).where(models.SpendRecord.id == outcome.spend_record_id)
         )
     ).scalar_one()
     assert row.settled is False
@@ -248,8 +236,9 @@ async def test_record_spend_missing_wallet_mix_raises(db) -> None:
 @pytest.mark.integration
 async def test_settle_spend_batch_happy_path(db) -> None:
     """Installer pays gross; creator gets net; platform gets markup."""
-    from app import models
     from sqlalchemy import select
+
+    from app import models
 
     installer = await _make_user(db, email_tag="installer")
     creator = await _make_user(db, email_tag="creator")
@@ -281,12 +270,14 @@ async def test_settle_spend_batch_happy_path(db) -> None:
 
     async with AsyncSessionLocal() as check:
         rows = (
-            await check.execute(
-                select(models.SpendRecord).where(
-                    models.SpendRecord.app_instance_id == inst.id
+            (
+                await check.execute(
+                    select(models.SpendRecord).where(models.SpendRecord.app_instance_id == inst.id)
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert all(r.settled for r in rows)
 
         # Installer wallet debited -1.00.
@@ -325,20 +316,25 @@ async def test_settle_spend_batch_happy_path(db) -> None:
         # Three ledger entries for this spend record.
         spend_id = rows[0].id
         entries = (
-            await check.execute(
-                select(models.WalletLedgerEntry).where(
-                    models.WalletLedgerEntry.reference_id == spend_id
+            (
+                await check.execute(
+                    select(models.WalletLedgerEntry).where(
+                        models.WalletLedgerEntry.reference_id == spend_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(entries) == 3
         assert sum(Decimal(e.delta_usd) for e in entries) == Decimal("0")
 
 
 @pytest.mark.integration
 async def test_settle_spend_batch_byok_ai_compute_skipped(db) -> None:
-    from app import models
     from sqlalchemy import select
+
+    from app import models
 
     installer = await _make_user(db, email_tag="installer")
     creator = await _make_user(db, email_tag="creator")
@@ -367,9 +363,7 @@ async def test_settle_spend_batch_byok_ai_compute_skipped(db) -> None:
     async with AsyncSessionLocal() as check:
         row = (
             await check.execute(
-                select(models.SpendRecord).where(
-                    models.SpendRecord.id == outcome.spend_record_id
-                )
+                select(models.SpendRecord).where(models.SpendRecord.id == outcome.spend_record_id)
             )
         ).scalar_one()
         assert row.settled is True
@@ -377,21 +371,26 @@ async def test_settle_spend_batch_byok_ai_compute_skipped(db) -> None:
 
         # No ledger entries.
         entries = (
-            await check.execute(
-                select(models.WalletLedgerEntry).where(
-                    models.WalletLedgerEntry.reference_id == outcome.spend_record_id
+            (
+                await check.execute(
+                    select(models.WalletLedgerEntry).where(
+                        models.WalletLedgerEntry.reference_id == outcome.spend_record_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert entries == []
 
 
 @pytest.mark.integration
 async def test_find_or_create_wallet_race_safe() -> None:
     """10 concurrent creators for the same user → exactly one wallet row."""
+    from sqlalchemy import select
+
     from app import models
     from app.database import AsyncSessionLocal
-    from sqlalchemy import select
 
     # Seed a user in its own session.
     async with AsyncSessionLocal() as seed:
@@ -401,9 +400,7 @@ async def test_find_or_create_wallet_race_safe() -> None:
 
     async def _one():
         async with AsyncSessionLocal() as s:
-            w = await find_or_create_wallet(
-                s, owner_type="installer", owner_user_id=user_id
-            )
+            w = await find_or_create_wallet(s, owner_type="installer", owner_user_id=user_id)
             await s.commit()
             return w.id
 
@@ -412,11 +409,15 @@ async def test_find_or_create_wallet_race_safe() -> None:
 
     async with AsyncSessionLocal() as check:
         rows = (
-            await check.execute(
-                select(models.Wallet).where(
-                    models.Wallet.owner_type == "installer",
-                    models.Wallet.owner_user_id == user_id,
+            (
+                await check.execute(
+                    select(models.Wallet).where(
+                        models.Wallet.owner_type == "installer",
+                        models.Wallet.owner_user_id == user_id,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1

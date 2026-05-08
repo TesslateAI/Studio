@@ -50,6 +50,7 @@ Wave coordination
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
@@ -60,10 +61,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models_automations import AutomationDefinition
-from ..litellm_keys import LiteLLMDelegate, mint_with_secret as litellm_mint_with_secret
+from ..litellm_keys import LiteLLMDelegate
+from ..litellm_keys import mint_with_secret as litellm_mint_with_secret
 
 if TYPE_CHECKING:  # pragma: no cover
-    from ..apps.key_lifecycle import KeyTier as _KeyTier
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -128,9 +130,7 @@ class BudgetExhaustedError(BudgetError):
         self.run_id = run_id
         self.key_id = key_id
         self.spent_usd = spent_usd
-        super().__init__(
-            f"budget exhausted for run {run_id}: key {key_id} spent ${spent_usd}"
-        )
+        super().__init__(f"budget exhausted for run {run_id}: key {key_id} spent ${spent_usd}")
 
 
 class DailyBudgetExceeded(BudgetError):
@@ -291,9 +291,7 @@ def _seconds_until_end_of_day_utc() -> int:
     from datetime import UTC, datetime, timedelta
 
     now = datetime.now(tz=UTC)
-    tomorrow = (now + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return max(int((tomorrow - now).total_seconds()), 60)
 
 
@@ -421,19 +419,10 @@ async def allocate_run_budget(
     """
     max_per_run = contract.get("max_spend_per_run_usd")
     if max_per_run is None:
-        raise ValueError(
-            "contract.max_spend_per_run_usd is required for budget allocation"
-        )
+        raise ValueError("contract.max_spend_per_run_usd is required for budget allocation")
     max_per_run = Decimal(str(max_per_run))
     if max_per_run <= 0:
-        raise ValueError(
-            f"contract.max_spend_per_run_usd must be positive, got {max_per_run}"
-        )
-
-    # Daily cap is optional — None means "no daily limit". The plan calls
-    # this out as the explicit user opt-out: leave the field unset.
-    max_per_day_raw = contract.get("max_spend_per_day_usd")
-    max_per_day = Decimal(str(max_per_day_raw)) if max_per_day_raw is not None else None
+        raise ValueError(f"contract.max_spend_per_run_usd must be positive, got {max_per_run}")
 
     if redis_client is None:
         from ..cache_service import get_redis_client
@@ -476,9 +465,7 @@ async def allocate_run_budget(
         try:
             own_remaining: Decimal | None = None
             for idx, chain_member in enumerate(chain):
-                remaining = await _atomic_reserve_daily(
-                    redis_client, chain_member, max_per_run
-                )
+                remaining = await _atomic_reserve_daily(redis_client, chain_member, max_per_run)
                 debited.append(chain_member)
                 if idx == 0:
                     own_remaining = remaining
@@ -661,17 +648,13 @@ async def request_budget_extension(
 
         try:
             return await asyncio.wait_for(_await_message(), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
     finally:
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover
             await pubsub.unsubscribe(channel)
-        except Exception:  # pragma: no cover
-            pass
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover
             await pubsub.close()
-        except Exception:  # pragma: no cover
-            pass
 
 
 async def publish_extension_resolution(
@@ -706,10 +689,8 @@ async def publish_extension_resolution(
     finally:
         # Drop the lock regardless of publish success so the next
         # extension request for this run can proceed.
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover
             await redis_client.delete(lock_key)
-        except Exception:  # pragma: no cover
-            pass
 
 
 __all__ = [

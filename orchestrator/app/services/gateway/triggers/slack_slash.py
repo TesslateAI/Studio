@@ -55,9 +55,7 @@ async def _resolve_owner(
     db: AsyncSession, channel_config_id: uuid.UUID
 ) -> tuple[uuid.UUID | None, uuid.UUID | None]:
     """Return ``(owner_user_id, team_id)`` for the inbound channel config."""
-    config = await db.scalar(
-        select(ChannelConfig).where(ChannelConfig.id == channel_config_id)
-    )
+    config = await db.scalar(select(ChannelConfig).where(ChannelConfig.id == channel_config_id))
     if config is None:
         return None, None
     return config.user_id, getattr(config, "team_id", None)
@@ -81,10 +79,7 @@ async def dispatch_from_slack(
     is_slash = bool(payload.get("command"))
     raw_text: str = (payload.get("text") or "").strip()
 
-    if is_slash:
-        parsed = parse_slash_command(raw_text)
-    else:
-        parsed = parse_bot_mention(raw_text)
+    parsed = parse_slash_command(raw_text) if is_slash else parse_bot_mention(raw_text)
 
     if parsed.kind == "unknown":
         return {"ack": "ok", "error": "could_not_parse", "raw": raw_text[:200]}

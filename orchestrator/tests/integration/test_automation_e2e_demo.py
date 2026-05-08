@@ -38,7 +38,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration / session fixtures (mirrors tests/services/automations/test_dispatcher.py)
 # ---------------------------------------------------------------------------
@@ -47,9 +46,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -115,9 +112,7 @@ class _StubRedis:
 @pytest.fixture
 def stub_queue(monkeypatch: pytest.MonkeyPatch) -> _StubQueue:
     queue = _StubQueue()
-    monkeypatch.setattr(
-        "app.services.task_queue.get_task_queue", lambda: queue, raising=True
-    )
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue, raising=True)
     return queue
 
 
@@ -128,9 +123,7 @@ def stub_redis(monkeypatch: pytest.MonkeyPatch) -> _StubRedis:
     async def _get():
         return redis
 
-    monkeypatch.setattr(
-        "app.services.cache_service.get_redis_client", _get, raising=True
-    )
+    monkeypatch.setattr("app.services.cache_service.get_redis_client", _get, raising=True)
     return redis
 
 
@@ -309,9 +302,7 @@ async def _seed_event_for(db, *, automation_id: uuid.UUID) -> uuid.UUID:
 async def _load_run(db, run_id: uuid.UUID):
     from app.models_automations import AutomationRun
 
-    return (
-        await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
-    ).scalar_one()
+    return (await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))).scalar_one()
 
 
 # ---------------------------------------------------------------------------
@@ -353,15 +344,11 @@ async def test_demo_recurring_report_end_to_end(
             "spend_usd": {"model_usd": 0.04, "tool_usd": 0.01},
         }
     )
-    monkeypatch.setitem(
-        sys.modules, "app.services.apps.action_dispatcher", fake_module
-    )
+    monkeypatch.setitem(sys.modules, "app.services.apps.action_dispatcher", fake_module)
 
     import app.services.apps as apps_pkg
 
-    monkeypatch.setattr(
-        apps_pkg, "action_dispatcher", fake_module, raising=False
-    )
+    monkeypatch.setattr(apps_pkg, "action_dispatcher", fake_module, raising=False)
 
     # ---- Step 1: owner + app + version + action + install + automation ---
     async with session_maker() as db:
@@ -369,9 +356,7 @@ async def test_demo_recurring_report_end_to_end(
         # The dispatcher resolves automation_actions.app_action_id ->
         # AppAction -> AppInstance(installer_user_id=owner) before
         # forwarding to dispatch_app_action, so the FK chain must exist.
-        app_action_id, _ = await _seed_app_action_for_owner(
-            db, owner_user_id=owner_id
-        )
+        app_action_id, _ = await _seed_app_action_for_owner(db, owner_user_id=owner_id)
         automation_id = await _seed_recurring_automation(
             db, owner_user_id=owner_id, app_action_id=app_action_id
         )
@@ -413,9 +398,7 @@ async def test_demo_recurring_report_end_to_end(
         from app.models_automations import AutomationEvent
 
         evt = (
-            await db.execute(
-                select(AutomationEvent).where(AutomationEvent.id == event_id)
-            )
+            await db.execute(select(AutomationEvent).where(AutomationEvent.id == event_id))
         ).scalar_one()
     # The dispatcher writes processed_at on the success path. (dispatched_at
     # is the cron producer's responsibility.) Either way at least one of
@@ -440,19 +423,27 @@ async def test_demo_recurring_report_end_to_end(
         )
 
         subjects = (
-            await db.execute(
-                select(InvocationSubject).where(
-                    InvocationSubject.automation_run_id == result.run_id
+            (
+                await db.execute(
+                    select(InvocationSubject).where(
+                        InvocationSubject.automation_run_id == result.run_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         artifacts = (
-            await db.execute(
-                select(AutomationRunArtifact).where(
-                    AutomationRunArtifact.run_id == result.run_id
+            (
+                await db.execute(
+                    select(AutomationRunArtifact).where(
+                        AutomationRunArtifact.run_id == result.run_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     if subjects:
         assert subjects[0].payer_policy == "installer", (

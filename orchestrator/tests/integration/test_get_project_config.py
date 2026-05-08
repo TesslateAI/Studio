@@ -4,13 +4,13 @@ Read-only inspection of every container in the project. Critical security
 assertion: it returns key names only — no plaintext values, no ``__SET__``
 sentinels, nothing the agent could leak into chat or code.
 """
+
 from __future__ import annotations
 
 import asyncio
 from uuid import UUID, uuid4
 
 import pytest
-
 
 _loop: asyncio.AbstractEventLoop | None = None
 
@@ -180,9 +180,7 @@ def test_never_leaks_plaintext_or_sentinel(authenticated_client):
                     "name": "stripe",
                     "service_slug": "stripe",
                     "encrypted_secrets": {
-                        "STRIPE_SECRET_KEY": enc.encrypt(
-                            "sk_test_PLAINTEXT_MUST_NOT_LEAK"
-                        ),
+                        "STRIPE_SECRET_KEY": enc.encrypt("sk_test_PLAINTEXT_MUST_NOT_LEAK"),
                     },
                 },
             ],
@@ -218,9 +216,7 @@ def test_sorts_external_first_then_internal_alphabetical(authenticated_client):
 @pytest.mark.integration
 def test_empty_project_returns_empty_services(authenticated_client):
     _, user_data = authenticated_client
-    project_id, _ = _run(
-        _create_project_with_containers(UUID(user_data["id"]), containers=[])
-    )
+    project_id, _ = _run(_create_project_with_containers(UUID(user_data["id"]), containers=[]))
     result = _run(_exec(project_id))
     assert result["success"] is True
     assert result["services"] == []

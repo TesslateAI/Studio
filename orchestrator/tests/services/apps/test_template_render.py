@@ -26,6 +26,7 @@ import resolves.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from pathlib import Path
 
@@ -42,7 +43,6 @@ from app.services.apps.template_render_worker import (
     TEMPLATE_LIMIT_BYTES,
     TRUNCATE_MARKER,
 )
-
 
 # Force the worker subprocess cwd to the orchestrator package root so
 # `python -m app.services.apps.template_render_worker` resolves regardless
@@ -216,10 +216,8 @@ async def test_worker_crash_recovered_on_next_call(client):
     await proc.wait()
     # Next render: either succeeds (respawn happened cleanly) or raises
     # (we wrote to a dead pipe). Either is acceptable.
-    try:
+    with contextlib.suppress(RenderError):
         await client.render("ok", {"output": {}})
-    except RenderError:
-        pass
     # Subsequent calls must all succeed against the respawned worker.
     rendered = await client.render(
         "Hello {{ output.name }}",
@@ -304,9 +302,7 @@ async def test_manifest_validator_rejects_bad_template():
             },
         ],
     }
-    parsed = ParsedManifest(
-        manifest=None, raw=raw, canonical_hash="x", schema_version="2026-05"
-    )
+    parsed = ParsedManifest(manifest=None, raw=raw, canonical_hash="x", schema_version="2026-05")
 
     with pytest.raises(ManifestValidationError) as excinfo:
         await validate_result_templates(parsed)
@@ -350,8 +346,6 @@ async def test_manifest_validator_accepts_valid_templates():
             {"name": "tojson_pass", "result_template": "{{ output | tojson }}"},
         ],
     }
-    parsed = ParsedManifest(
-        manifest=None, raw=raw, canonical_hash="x", schema_version="2026-05"
-    )
+    parsed = ParsedManifest(manifest=None, raw=raw, canonical_hash="x", schema_version="2026-05")
     # No exception means the dry-render succeeded for every template.
     await validate_result_templates(parsed)

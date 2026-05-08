@@ -37,9 +37,10 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable
+from typing import Any
 
 import pytest
 from alembic import command
@@ -48,7 +49,6 @@ from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.services.automations.lease import Lease, LeaseToken
-
 
 # ---------------------------------------------------------------------------
 # Backend registry — each entry is a ``(id, factory)`` pair.
@@ -77,9 +77,7 @@ class _Helpers:
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -130,10 +128,7 @@ async def _build_db_backend(
     async def expire(name: str) -> None:
         async with maker() as session:
             await session.execute(
-                text(
-                    "UPDATE controller_leases SET expires_at = :past "
-                    "WHERE name = :name"
-                ),
+                text("UPDATE controller_leases SET expires_at = :past WHERE name = :name"),
                 {
                     "past": datetime.now(UTC) - timedelta(seconds=10),
                     "name": name,
@@ -166,9 +161,7 @@ async def _build_redis_backend(
     *, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[tuple[Lease, _Helpers]]:
     if not _fakeredis_available():
-        pytest.skip(
-            "fakeredis not installed; redis lease backend cannot be matrix-tested"
-        )
+        pytest.skip("fakeredis not installed; redis lease backend cannot be matrix-tested")
 
     import fakeredis.aioredis as fakeredis_aioredis
 
@@ -256,9 +249,7 @@ class _FakeCoordinationV1Api:
             raise _FakeApiException(status=404, reason="NotFound")
         return lease
 
-    def create_namespaced_lease(
-        self, *, namespace: str, body: _FakeK8sLease
-    ) -> _FakeK8sLease:
+    def create_namespaced_lease(self, *, namespace: str, body: _FakeK8sLease) -> _FakeK8sLease:
         key = (namespace, body.metadata.name)
         if key in self._store:
             raise _FakeApiException(status=409, reason="AlreadyExists")
@@ -441,9 +432,7 @@ async def test_holder_dies_then_second_acquires_after_ttl_expires(
     token_b = await backend.acquire(name, holder_id="holder-B", ttl_seconds=60)
     assert token_b is not None, "holder-B must acquire after expiry"
     assert token_b.holder == "holder-B"
-    assert token_b.term > token_a.term, (
-        "post-expiry takeover must bump term"
-    )
+    assert token_b.term > token_a.term, "post-expiry takeover must bump term"
 
 
 @pytest.mark.asyncio
@@ -464,12 +453,8 @@ async def test_concurrent_acquire_only_one_wins(
 
     winners = [t for t in results if t is not None]
     losers = [t for t in results if t is None]
-    assert len(winners) == 1, (
-        f"exactly one acquire must win, got winners={len(winners)}"
-    )
-    assert len(losers) == 1, (
-        f"the other acquire must return None, got losers={len(losers)}"
-    )
+    assert len(winners) == 1, f"exactly one acquire must win, got winners={len(winners)}"
+    assert len(losers) == 1, f"the other acquire must return None, got losers={len(losers)}"
 
 
 @pytest.mark.asyncio
@@ -512,15 +497,11 @@ async def test_term_is_monotonic_across_acquisitions(
     for holder in holder_ids:
         token = await backend.acquire(name, holder_id=holder, ttl_seconds=60)
         # Each fresh acquire after expiry must succeed.
-        assert token is not None, (
-            f"acquire by {holder} after expiry must succeed"
-        )
+        assert token is not None, f"acquire by {holder} after expiry must succeed"
         terms.append(token.term)
         # Force expiry for the next holder to take over.
         await helpers.expire(name)
 
     # Strictly monotonic — each new term is greater than the previous.
     for i in range(1, len(terms)):
-        assert terms[i] > terms[i - 1], (
-            f"term sequence must be monotonic; got {terms}"
-        )
+        assert terms[i] > terms[i - 1], f"term sequence must be monotonic; got {terms}"

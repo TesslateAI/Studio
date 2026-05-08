@@ -11,14 +11,13 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app import models
 from app.database import Base
-
 
 # -- Pure unit: import + metadata registration --------------------------------
 
@@ -39,9 +38,7 @@ def test_wave2_models_registered_on_metadata():
     }
     for tablename, cls in expected.items():
         assert cls.__tablename__ == tablename, f"{cls.__name__} tablename mismatch"
-        assert tablename in Base.metadata.tables, (
-            f"{tablename} not registered on Base.metadata"
-        )
+        assert tablename in Base.metadata.tables, f"{tablename} not registered on Base.metadata"
 
 
 def test_wave1_models_still_register():
@@ -98,7 +95,7 @@ def test_yank_critical_two_admin_check(db_session):
         status="approved",
         primary_admin_id=None,
         secondary_admin_id=None,
-        decided_at=datetime.now(timezone.utc),
+        decided_at=datetime.now(UTC),
     )
     db_session.add(bad_yank)
 

@@ -26,7 +26,6 @@ import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -34,7 +33,6 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 # ---------------------------------------------------------------------------
 # Migration / session fixtures
@@ -44,9 +42,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -89,9 +85,7 @@ def session_maker(migrated_sqlite: str, monkeypatch: pytest.MonkeyPatch):
     _install_sqlite_now(engine)
     maker = async_sessionmaker(engine, expire_on_commit=False)
 
-    monkeypatch.setattr(
-        "app.database.AsyncSessionLocal", maker, raising=False
-    )
+    monkeypatch.setattr("app.database.AsyncSessionLocal", maker, raising=False)
 
     yield maker
     asyncio.run(engine.dispose())
@@ -221,11 +215,7 @@ async def test_lease_failover_re_enqueues_stuck_runs(
         automation_id = await _seed_automation(db, owner_user_id=owner_id)
         seeded: list[tuple[uuid.UUID, uuid.UUID]] = []
         for _ in range(3):
-            seeded.append(
-                await _seed_queued_run(
-                    db, automation_id=automation_id, age_seconds=120
-                )
-            )
+            seeded.append(await _seed_queued_run(db, automation_id=automation_id, age_seconds=120))
         await db.commit()
 
     # 3. Simulate node-A crash: its lease entry stays but expires below.
@@ -236,10 +226,7 @@ async def test_lease_failover_re_enqueues_stuck_runs(
         from sqlalchemy import text
 
         await db.execute(
-            text(
-                "UPDATE controller_leases SET expires_at = :past "
-                "WHERE name = :name"
-            ),
+            text("UPDATE controller_leases SET expires_at = :past WHERE name = :name"),
             {
                 "past": datetime.now(UTC) - timedelta(seconds=1),
                 "name": "controller",
@@ -266,13 +253,10 @@ async def test_lease_failover_re_enqueues_stuck_runs(
     assert fired == 3, f"expected 3 sweep enqueues, got {fired}"
 
     # ARQ dedup belt: every call must use _job_id=str(event_id).
-    seen_job_ids = {
-        call.kwargs.get("_job_id") for call in arq_pool.enqueue_job.await_args_list
-    }
+    seen_job_ids = {call.kwargs.get("_job_id") for call in arq_pool.enqueue_job.await_args_list}
     expected_job_ids = {str(event_id) for _, event_id in seeded}
     assert seen_job_ids == expected_job_ids, (
-        f"sweep didn't pin _job_id to event_id: got {seen_job_ids} "
-        f"expected {expected_job_ids}"
+        f"sweep didn't pin _job_id to event_id: got {seen_job_ids} expected {expected_job_ids}"
     )
 
 
@@ -305,9 +289,9 @@ async def test_stale_intent_marked_superseded_without_touching_k8s(
 
     # Reconciler runs at term=43 -- stale intent must be superseded.
     fake_recon = MagicMock()
-    fake_recon.apply = AsyncMock(side_effect=AssertionError(
-        "reconciler.apply MUST NOT be called for a stale-term intent"
-    ))
+    fake_recon.apply = AsyncMock(
+        side_effect=AssertionError("reconciler.apply MUST NOT be called for a stale-term intent")
+    )
 
     counts = await reconciler.tick(
         db_factory=session_maker,
@@ -322,11 +306,7 @@ async def test_stale_intent_marked_superseded_without_touching_k8s(
     # Verify the row's status.
     async with session_maker() as db:
         row = (
-            await db.execute(
-                select(ControllerIntent).where(
-                    ControllerIntent.id == stale_intent_id
-                )
-            )
+            await db.execute(select(ControllerIntent).where(ControllerIntent.id == stale_intent_id))
         ).scalar_one()
     assert row.status == "superseded"
 
@@ -371,11 +351,7 @@ async def test_current_term_intent_drives_single_k8s_patch(
 
     async with session_maker() as db:
         row = (
-            await db.execute(
-                select(ControllerIntent).where(
-                    ControllerIntent.id == intent_id
-                )
-            )
+            await db.execute(select(ControllerIntent).where(ControllerIntent.id == intent_id))
         ).scalar_one()
     assert row.status == "applied"
     assert row.applied_at is not None

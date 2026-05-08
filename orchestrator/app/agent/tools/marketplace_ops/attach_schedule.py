@@ -32,7 +32,6 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from ....services.automations.scopes import AUTOMATIONS_WRITE
 from ....models import MarketplaceAgent
 from ....models_automations import (
     AutomationAction,
@@ -41,6 +40,7 @@ from ....models_automations import (
     AutomationTrigger,
     CommunicationDestination,
 )
+from ....services.automations.scopes import AUTOMATIONS_WRITE
 from ...tools.output_formatter import error_output, success_output
 from ...tools.registry import Tool, ToolCategory
 
@@ -68,9 +68,7 @@ async def attach_schedule_executor(
     max_compute_tier = int(params.get("max_compute_tier", 0) or 0)
 
     if not agent_id_raw or not isinstance(trigger, dict) or not prompt_template:
-        return error_output(
-            message="agent_id, trigger (dict), and prompt_template are required"
-        )
+        return error_output(message="agent_id, trigger (dict), and prompt_template are required")
     if not isinstance(contract, dict):
         return error_output(message="contract (dict) is required")
     if workspace_scope not in _VALID_WORKSPACE_SCOPES:
@@ -95,9 +93,7 @@ async def attach_schedule_executor(
     # Trigger validation.
     trigger_kind = trigger.get("kind")
     if trigger_kind not in _VALID_TRIGGER_KINDS:
-        return error_output(
-            message=f"trigger.kind must be one of {sorted(_VALID_TRIGGER_KINDS)}"
-        )
+        return error_output(message=f"trigger.kind must be one of {sorted(_VALID_TRIGGER_KINDS)}")
     trigger_config = trigger.get("config") or {}
     if not isinstance(trigger_config, dict):
         return error_output(message="trigger.config must be a dict")
@@ -118,15 +114,11 @@ async def attach_schedule_executor(
             )
         parent_automation = (
             await db.execute(
-                select(AutomationDefinition).where(
-                    AutomationDefinition.id == parent_id
-                )
+                select(AutomationDefinition).where(AutomationDefinition.id == parent_id)
             )
         ).scalar_one_or_none()
         if parent_automation is None:
-            return error_output(
-                message=f"parent automation {parent_id} not found"
-            )
+            return error_output(message=f"parent automation {parent_id} not found")
 
         # Depth-1 cap. Parent at depth 1 -> child would be depth 2 ->
         # the DB CHECK would reject anyway, but we surface a typed

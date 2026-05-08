@@ -27,14 +27,13 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirror tests/services/automations/test_invocation_subject.py)
@@ -44,9 +43,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -241,9 +238,7 @@ def test_provision_for_run_already_warm_returns_ready_immediately(
             )
             await db.commit()
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             return result, run
 
@@ -332,17 +327,19 @@ def test_provision_for_run_timeout_creates_approval_request(
             )
             await db.commit()
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             approvals = (
-                await db.execute(
-                    select(AutomationApprovalRequest).where(
-                        AutomationApprovalRequest.run_id == run_id
+                (
+                    await db.execute(
+                        select(AutomationApprovalRequest).where(
+                            AutomationApprovalRequest.run_id == run_id
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return result, run, approvals
 
     result, run, approvals = asyncio.run(go())

@@ -39,7 +39,6 @@ from fastapi.testclient import TestClient
 from app.database import get_db
 from app.routers import app_triggers
 
-
 # ---------------------------------------------------------------------------
 # Lightweight stand-ins for the SQLAlchemy models — they only need the
 # attributes the handler reads/writes. Keeping them out of the real ORM
@@ -142,11 +141,11 @@ class _StubSession:
         # the relevant columns into our dataclass for assertions.
         self.events.append(
             _StubEventRow(
-                id=getattr(row, "id"),
-                automation_id=getattr(row, "automation_id"),
-                trigger_id=getattr(row, "trigger_id"),
-                trigger_kind=getattr(row, "trigger_kind"),
-                payload=getattr(row, "payload"),
+                id=row.id,
+                automation_id=row.automation_id,
+                trigger_id=row.trigger_id,
+                trigger_kind=row.trigger_kind,
+                payload=row.payload,
                 idempotency_key=getattr(row, "idempotency_key", None),
             )
         )

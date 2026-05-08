@@ -153,9 +153,7 @@ def test_setup_config_full_graph_sync(
         "primaryApp": "api",
     }
 
-    resp = client.post(
-        f"/api/projects/{project['slug']}/setup-config", json=full_config
-    )
+    resp = client.post(f"/api/projects/{project['slug']}/setup-config", json=full_config)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     # Both app and infrastructure containers are tracked.
@@ -287,7 +285,6 @@ def test_setup_config_rejects_bad_primary_app(
     setup (custom error handler chain), so we assert on the raised
     exception rather than an HTTP status code.
     """
-    from fastapi.exceptions import RequestValidationError
 
     client, _user = authenticated_client
     project = _make_project(client, default_base_id)
@@ -305,9 +302,7 @@ def test_setup_config_rejects_bad_primary_app(
     # to serialize the inner ValueError). Either outcome proves the
     # validator rejected the config — which is what we care about.
     with pytest.raises(Exception):  # noqa: B017 — any rejection is fine
-        client.post(
-            f"/api/projects/{project['slug']}/setup-config", json=config
-        )
+        client.post(f"/api/projects/{project['slug']}/setup-config", json=config)
 
 
 @pytest.mark.integration

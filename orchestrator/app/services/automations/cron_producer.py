@@ -48,8 +48,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -84,9 +85,7 @@ async def run_loop(
 
     while not shutdown_event.is_set():
         try:
-            await asyncio.wait_for(
-                shutdown_event.wait(), timeout=interval_seconds
-            )
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
             return
         except TimeoutError:
             pass
@@ -136,28 +135,20 @@ async def tick(
         if use_for_update:
             row = (
                 await db.execute(
-                    text(
-                        "SELECT term FROM controller_leases "
-                        "WHERE name = 'controller' FOR UPDATE"
-                    )
+                    text("SELECT term FROM controller_leases WHERE name = 'controller' FOR UPDATE")
                 )
             ).first()
         else:
             row = (
                 await db.execute(
-                    text(
-                        "SELECT term FROM controller_leases "
-                        "WHERE name = 'controller'"
-                    )
+                    text("SELECT term FROM controller_leases WHERE name = 'controller'")
                 )
             ).first()
 
         if row is None:
             raise LeaseLost("controller lease row missing")
         if int(row[0] or 0) != current_term:
-            raise LeaseLost(
-                f"lease term mismatch (db={row[0]} ours={current_term})"
-            )
+            raise LeaseLost(f"lease term mismatch (db={row[0]} ours={current_term})")
 
         # --------------------------------------------------------------
         # Claim due triggers.
@@ -283,9 +274,7 @@ async def tick(
     return fired
 
 
-async def _enqueue_dispatch(
-    arq_pool: Any | None, automation_id: UUID, event_id: UUID
-) -> None:
+async def _enqueue_dispatch(arq_pool: Any | None, automation_id: UUID, event_id: UUID) -> None:
     """Enqueue ``dispatch_automation_task`` (ARQ in cloud, local in desktop).
 
     Uses ``_job_id=str(event_id)`` so a duplicate enqueue against the same

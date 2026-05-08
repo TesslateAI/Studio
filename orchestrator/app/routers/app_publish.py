@@ -37,10 +37,6 @@ from ..models import (
 )
 from ..permissions import Permission
 from ..services.apps.app_manifest import AppManifest2026_05
-from ..services.apps.manifest_parser import (
-    ManifestValidationError,
-    parse as parse_manifest,
-)
 from ..services.apps.managed_resources import (
     ManagedDbResult,
     ManagedKvResult,
@@ -49,6 +45,12 @@ from ..services.apps.managed_resources import (
     add_kv,
     add_object_storage,
     add_postgres,
+)
+from ..services.apps.manifest_parser import (
+    ManifestValidationError,
+)
+from ..services.apps.manifest_parser import (
+    parse as parse_manifest,
 )
 from ..services.apps.publish_checker import (
     StateModelVerdict,
@@ -201,9 +203,7 @@ async def publish_app(
     # existing app owned by this user with the same derived slug.
     target_app_id: UUID | None = body.app_id
     if target_app_id is None:
-        existing = await find_existing_app_for_project(
-            db, project=project, user_id=user.id
-        )
+        existing = await find_existing_app_for_project(db, project=project, user_id=user.id)
         if existing is not None:
             target_app_id = existing.id
 
@@ -347,9 +347,7 @@ class UpgradeAddKvResponse(BaseModel):
     notes: list[str]
 
 
-async def _load_or_infer_manifest_for_check(
-    project, override: Any | None
-) -> AppManifest2026_05:
+async def _load_or_infer_manifest_for_check(project, override: Any | None) -> AppManifest2026_05:
     """Resolve a 2026-05 manifest for the per-replica-safety check.
 
     Resolution order:
@@ -385,9 +383,7 @@ async def _load_or_infer_manifest_for_check(
 
     from ..utils.resource_naming import get_project_path
 
-    manifest_path = (
-        Path(get_project_path(project.owner_id, project.id)) / "opensail.app.yaml"
-    )
+    manifest_path = Path(get_project_path(project.owner_id, project.id)) / "opensail.app.yaml"
     if manifest_path.exists():
         try:
             with manifest_path.open("r", encoding="utf-8") as f:
@@ -397,15 +393,12 @@ async def _load_or_infer_manifest_for_check(
                 return parsed.manifest
         except ManifestValidationError as exc:
             logger.info(
-                "publish-check: workspace opensail.app.yaml failed validation "
-                "for project=%s: %s",
+                "publish-check: workspace opensail.app.yaml failed validation for project=%s: %s",
                 project.id,
                 exc,
             )
         except OSError as exc:
-            logger.warning(
-                "publish-check: failed to read %s: %r", manifest_path, exc
-            )
+            logger.warning("publish-check: failed to read %s: %r", manifest_path, exc)
 
     # Conservative fallback — see docstring.
     raw = {
@@ -434,9 +427,7 @@ def _verdict_to_schema(verdict: StateModelVerdict) -> StateModelVerdictOut:
         detected_state_model=verdict.detected_state_model,
         pinned_max_replicas=verdict.pinned_max_replicas,
         warnings=[
-            StateModelWarningOut(
-                kind=w.kind, message=w.message, detected_at=w.detected_at
-            )
+            StateModelWarningOut(kind=w.kind, message=w.message, detected_at=w.detected_at)
             for w in verdict.warnings
         ],
         upgrade_offers=[
@@ -493,13 +484,9 @@ async def upgrade_add_postgres(
     """
     project = await _get_project_for_edit(slug, db, user)
     try:
-        result: ManagedDbResult = await add_postgres(
-            db, project=project, user=user
-        )
+        result: ManagedDbResult = await add_postgres(db, project=project, user=user)
     except ManagedResourcesNotConfigured as exc:
-        raise HTTPException(
-            status_code=412, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     return UpgradeAddPostgresResponse(
         secret_name=result.secret_name,
         secret_namespace=result.secret_namespace,
@@ -533,9 +520,7 @@ async def upgrade_add_object_storage(
             db, project=project, user=user
         )
     except ManagedResourcesNotConfigured as exc:
-        raise HTTPException(
-            status_code=412, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     return UpgradeAddObjectStorageResponse(
         secret_name=result.secret_name,
         secret_namespace=result.secret_namespace,
@@ -567,13 +552,9 @@ async def upgrade_add_kv(
     """
     project = await _get_project_for_edit(slug, db, user)
     try:
-        result: ManagedKvResult = await add_kv(
-            db, project=project, user=user
-        )
+        result: ManagedKvResult = await add_kv(db, project=project, user=user)
     except ManagedResourcesNotConfigured as exc:
-        raise HTTPException(
-            status_code=412, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     return UpgradeAddKvResponse(
         secret_name=result.secret_name,
         secret_namespace=result.secret_namespace,

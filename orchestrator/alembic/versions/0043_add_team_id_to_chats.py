@@ -7,8 +7,9 @@ Revises: 0042_legacy_scopes
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
 
 revision: str = "0043_chat_team_id"
 down_revision: str | Sequence[str] | None = "0042_legacy_scopes"
@@ -19,7 +20,9 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column("chats", sa.Column("team_id", GUID(), nullable=True))
     with op.batch_alter_table("chats") as batch_op:
-        batch_op.create_foreign_key("fk_chats_team_id", "teams", ["team_id"], ["id"], ondelete="SET NULL")
+        batch_op.create_foreign_key(
+            "fk_chats_team_id", "teams", ["team_id"], ["id"], ondelete="SET NULL"
+        )
     op.create_index("ix_chats_team_id", "chats", ["team_id"])
 
     if op.get_bind().dialect.name != "postgresql":

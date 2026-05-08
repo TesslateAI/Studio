@@ -30,17 +30,14 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app import models, models_automations  # noqa: F401  -- register tables
 from app.database import Base
-from app.services.apps import installer
 from app.services.apps.installer import (
     AlreadyInstalledError,
     install_app,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures.
@@ -124,9 +121,7 @@ def _patch_install_orchestrator(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub orchestrator so the install path can read .tesslate/config.json."""
     import app.services.orchestration as _orchestration
 
-    monkeypatch.setattr(
-        _orchestration, "get_orchestrator", lambda *a, **kw: _StubOrchestrator()
-    )
+    monkeypatch.setattr(_orchestration, "get_orchestrator", lambda *a, **kw: _StubOrchestrator())
 
 
 async def _seed(db: AsyncSession, slug: str):
@@ -291,13 +286,10 @@ async def test_partial_unique_index_rejects_second_installed_row(
     # form is acceptable; what we want to know is "the new partial
     # UNIQUE on (installer_user_id, app_id) fired."
     first_line = str(exc_info.value).splitlines()[0].lower()
-    assert (
-        "uq_app_instances_user_app_installed" in first_line
-        or (
-            "unique constraint failed" in first_line
-            and "installer_user_id" in first_line
-            and "app_id" in first_line
-        )
+    assert "uq_app_instances_user_app_installed" in first_line or (
+        "unique constraint failed" in first_line
+        and "installer_user_id" in first_line
+        and "app_id" in first_line
     ), f"unexpected integrity error first line: {first_line!r}"
     # Reference ``first`` so static analysis doesn't flag the unused
     # binding — the integrity error is the load-bearing assertion.

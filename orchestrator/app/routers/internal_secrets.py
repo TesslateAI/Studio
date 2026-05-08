@@ -97,10 +97,8 @@ def mint_secret_token(
     )
     exp = int(time.time()) + max(1, ttl_seconds)
     payload = f"{user_id}:{app_instance_id}:{secret_key}:{exp}"
-    sig = hmac.new(
-        signing_key, payload.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-    raw = f"{payload}:{sig}".encode("utf-8")
+    sig = hmac.new(signing_key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    raw = f"{payload}:{sig}".encode()
     # base64url so the token is URL-safe — the route encodes the token
     # in the path segment. Strip padding so we never have to worry about
     # FastAPI URL-decoding a `=` mid-route.
@@ -165,7 +163,7 @@ def _decode_token(
     )
     expected = hmac.new(
         signing_key,
-        f"{user_id}:{app_instance_id}:{secret_key}:{exp}".encode("utf-8"),
+        f"{user_id}:{app_instance_id}:{secret_key}:{exp}".encode(),
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(expected, sig_hex):
@@ -204,12 +202,16 @@ async def _resolve_secret(
     """
     # 1) UserMcpConfig credentials.
     rows = (
-        await db.execute(
-            select(UserMcpConfig)
-            .where(UserMcpConfig.user_id == user_id)
-            .where(UserMcpConfig.is_active.is_(True))
+        (
+            await db.execute(
+                select(UserMcpConfig)
+                .where(UserMcpConfig.user_id == user_id)
+                .where(UserMcpConfig.is_active.is_(True))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for row in rows:
         if not row.credentials:
             continue
@@ -224,13 +226,19 @@ async def _resolve_secret(
 
     # 2) OAuth-derived secrets.
     oauth_rows = (
-        await db.execute(
-            select(McpOAuthConnection).join(
-                UserMcpConfig,
-                UserMcpConfig.id == McpOAuthConnection.user_mcp_config_id,
-            ).where(UserMcpConfig.user_id == user_id)
+        (
+            await db.execute(
+                select(McpOAuthConnection)
+                .join(
+                    UserMcpConfig,
+                    UserMcpConfig.id == McpOAuthConnection.user_mcp_config_id,
+                )
+                .where(UserMcpConfig.user_id == user_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for oauth in oauth_rows:
         if not oauth.tokens_encrypted:
             continue

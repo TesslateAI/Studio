@@ -27,16 +27,15 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, insert as core_insert
+from sqlalchemy import event
+from sqlalchemy import insert as core_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001 - SA event signature
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -301,9 +300,7 @@ def test_rollup_by_team(app_client) -> None:
                 )
             )
             await db.flush()
-            inv = await _seed_invocation_subject(
-                db, user_id=alice, team_id=team_id
-            )
+            inv = await _seed_invocation_subject(db, user_id=alice, team_id=team_id)
             now = datetime.now(UTC)
             await _seed_spend(
                 db,

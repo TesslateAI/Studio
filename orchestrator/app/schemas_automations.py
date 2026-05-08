@@ -29,7 +29,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Trigger / Action / DeliveryTarget — nested input + output shapes
 # ---------------------------------------------------------------------------
@@ -73,9 +72,7 @@ class AutomationActionIn(BaseModel):
     def _validate_type(cls, v: str) -> str:
         allowed = {"agent.run", "app.invoke", "gateway.send"}
         if v not in allowed:
-            raise ValueError(
-                f"action.action_type must be one of {sorted(allowed)!r}, got {v!r}"
-            )
+            raise ValueError(f"action.action_type must be one of {sorted(allowed)!r}, got {v!r}")
         return v
 
 
@@ -108,7 +105,10 @@ class AutomationDefinitionIn(BaseModel):
     """Create payload. Owner is taken from the authenticated user, never the body."""
 
     name: str = Field(..., max_length=200)
-    workspace_scope: str = Field("none", description="none | user_automation_workspace | team_automation_workspace | target_project")
+    workspace_scope: str = Field(
+        "none",
+        description="none | user_automation_workspace | team_automation_workspace | target_project",
+    )
     workspace_project_id: UUID | None = None
     target_project_id: UUID | None = None
     team_id: UUID | None = None
@@ -148,9 +148,7 @@ class AutomationDefinitionIn(BaseModel):
             "target_project",
         }
         if v not in allowed:
-            raise ValueError(
-                f"workspace_scope must be one of {sorted(allowed)!r}, got {v!r}"
-            )
+            raise ValueError(f"workspace_scope must be one of {sorted(allowed)!r}, got {v!r}")
         return v
 
 
@@ -344,9 +342,7 @@ class ApprovalResponseIn(BaseModel):
     @classmethod
     def _validate_choice(cls, v: str) -> str:
         if v not in _APPROVAL_CHOICES:
-            raise ValueError(
-                f"choice must be one of {sorted(_APPROVAL_CHOICES)!r}, got {v!r}"
-            )
+            raise ValueError(f"choice must be one of {sorted(_APPROVAL_CHOICES)!r}, got {v!r}")
         return v
 
 

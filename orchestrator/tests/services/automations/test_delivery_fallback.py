@@ -24,7 +24,6 @@ from app.models_automations import (
 )
 from app.services.automations.delivery_fallback import send_with_fallback
 
-
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------
@@ -210,14 +209,10 @@ async def test_telegram_dm_when_slack_fails(db):
 
 @pytest.mark.asyncio
 async def test_email_when_no_paired_identities(db):
-    request, *_ = await _seed(
-        db, paired_slack=False, paired_telegram=False
-    )
+    request, *_ = await _seed(db, paired_slack=False, paired_telegram=False)
     email = StubEmailService(configured=True)
 
-    result = await send_with_fallback(
-        request.id, db, gateway_client=None, email_service=email
-    )
+    result = await send_with_fallback(request.id, db, gateway_client=None, email_service=email)
 
     assert result.kind == "email"
     assert result.surface == "owner@example.com"

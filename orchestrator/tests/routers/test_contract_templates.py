@@ -27,16 +27,15 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, insert as core_insert
+from sqlalchemy import event
+from sqlalchemy import insert as core_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001 - SA event signature
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -208,9 +207,7 @@ def test_list_filters_unpublished_for_non_admin(app_client) -> None:
     assert "Draft" not in names
 
     # include_unpublished=true is silently ignored for non-superusers.
-    listing = client.get(
-        "/api/contract-templates", params={"include_unpublished": "true"}
-    ).json()
+    listing = client.get("/api/contract-templates", params={"include_unpublished": "true"}).json()
     names = {row["name"] for row in listing}
     assert "Draft" not in names
 
@@ -227,9 +224,7 @@ def test_list_filters_by_category(app_client) -> None:
     client.post("/api/contract-templates", json=a)
     client.post("/api/contract-templates", json=b)
 
-    rows = client.get(
-        "/api/contract-templates", params={"category": "coding"}
-    ).json()
+    rows = client.get("/api/contract-templates", params={"category": "coding"}).json()
     assert {r["name"] for r in rows} == {"B"}
 
 

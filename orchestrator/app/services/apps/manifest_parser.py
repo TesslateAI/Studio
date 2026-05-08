@@ -26,7 +26,8 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
-from pydantic import BaseModel, ValidationError as PydanticValidationError
+from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from .app_manifest import (
     MANIFEST_SCHEMA_VERSION,
@@ -115,8 +116,7 @@ def parse(source: str | bytes | dict[str, Any]) -> ParsedManifest:
     if declared not in _VALIDATORS:
         supported = ", ".join(SUPPORTED_SCHEMA_VERSIONS)
         raise ManifestValidationError(
-            f"unsupported manifest_schema_version: {declared!r} "
-            f"(supported: {supported})"
+            f"unsupported manifest_schema_version: {declared!r} (supported: {supported})"
         )
 
     validator = _VALIDATORS[declared]
@@ -156,9 +156,7 @@ def _coerce_to_dict(source: str | bytes | dict[str, Any]) -> dict[str, Any]:
     # YAML is a superset of JSON; yaml.safe_load handles both.
     data = yaml.safe_load(source)
     if not isinstance(data, dict):
-        raise ManifestValidationError(
-            f"manifest root must be an object, got {type(data).__name__}"
-        )
+        raise ManifestValidationError(f"manifest root must be an object, got {type(data).__name__}")
     return data
 
 

@@ -9,8 +9,9 @@ Create Date: 2026-03-26 13:24:16.277085
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
 revision: str = "0034_refresh_tokens"

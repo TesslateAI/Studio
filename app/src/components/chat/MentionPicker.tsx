@@ -155,7 +155,8 @@ export function MentionPicker({
     const filteredFiles = files.filter((f) => matches(f.display) || matches(f.path));
 
     const rows: FlatRow[] = [];
-    for (const a of filteredAgents) rows.push({ section: 'agent', row: { ...a, rowKind: 'mention' } });
+    for (const a of filteredAgents)
+      rows.push({ section: 'agent', row: { ...a, rowKind: 'mention' } });
     for (const a of filteredApps) rows.push({ section: 'app', row: { ...a, rowKind: 'mention' } });
     for (const m of filteredMcps) rows.push({ section: 'mcp', row: { ...m, rowKind: 'mention' } });
     for (const f of filteredFiles)
@@ -274,7 +275,9 @@ export function MentionPicker({
           className="flex items-center justify-between px-3 py-2 border-b text-[11px] uppercase tracking-wide text-[var(--text-muted)]"
           style={{ borderColor: 'var(--border)' }}
         >
-          <span>{query ? `Matching “${query}”` : 'Type to search · ↑↓ to navigate · ↵ to insert'}</span>
+          <span>
+            {query ? `Matching “${query}”` : 'Type to search · ↑↓ to navigate · ↵ to insert'}
+          </span>
           {loading ? <span>loading…</span> : null}
         </div>
 
@@ -308,7 +311,9 @@ export function MentionPicker({
                           onMouseEnter={() => setActiveIndex(rowIndex(flat))}
                           onClick={() => commit(flat)}
                           className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 ${
-                            isActive ? 'bg-[var(--surface-hover)]' : 'hover:bg-[var(--surface-hover)]'
+                            isActive
+                              ? 'bg-[var(--surface-hover)]'
+                              : 'hover:bg-[var(--surface-hover)]'
                           }`}
                         >
                           <Icon size={14} weight="regular" className={tokens.iconText} />
@@ -331,14 +336,17 @@ export function MentionPicker({
                         } ${item.enabled ? '' : 'opacity-50'}`}
                       >
                         {item.icon_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
                           <img
                             src={item.icon_url}
                             alt=""
                             className="h-4 w-4 rounded-sm flex-shrink-0"
                           />
                         ) : (
-                          <Icon size={14} weight="regular" className={`${tokens.iconText} flex-shrink-0`} />
+                          <Icon
+                            size={14}
+                            weight="regular"
+                            className={`${tokens.iconText} flex-shrink-0`}
+                          />
                         )}
                         <span className="text-[var(--text)] truncate flex-1">{item.name}</span>
                         {item.slug ? (
