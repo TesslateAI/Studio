@@ -378,9 +378,6 @@ async def start_runtime(
             )
 
     from ..services.apps.installer import create_per_pod_signing_key
-    from ..services.apps.per_install_secret_provisioner import (
-        materialize_per_install_secrets,
-    )
     from ..services.compute_manager import current_app_instance_id
     from ..services.orchestration import get_orchestrator
 
@@ -414,33 +411,26 @@ async def start_runtime(
                 exc_info=True,
             )
 
-        # Materialize any per-install Secrets the manifest references that
-        # neither the platform nor an orchestrator service owns (e.g. the
-        # ``pg-creds`` Secret for crm-with-postgres). Same race window as
-        # the per-pod signing key above — kubelet auto-retries on Secret
-        # appearance. Only meaningful in K8s mode; the function short-
-        # circuits otherwise (the import lazily pulls in kubernetes/).
-        if getattr(settings, "is_kubernetes_mode", False):
-            try:
-                env_dicts = [c.environment_vars for c in containers]
-                await asyncio.to_thread(
-                    materialize_per_install_secrets,
-                    app_instance_id=inst.id,
-                    target_namespace=f"proj-{project.id}",
-                    source_namespace=getattr(settings, "k8s_default_namespace", "tesslate")
-                    or "tesslate",
-                    env_dicts=env_dicts,
-                )
-            except Exception:
-                logger.warning(
-                    "app_runtime_status: per-install secret materialization "
-                    "failed instance=%s ns=proj-%s (pod will surface "
-                    "CreateContainerConfigError until the user creates the "
-                    "Secret manually)",
-                    inst.id,
-                    project.id,
-                    exc_info=True,
-                )
+        # Provision any app-infrastructure Secrets (e.g. pg-creds) that the
+        # manifest references but that don't yet exist in the namespace.
+        # kubelet auto-retries pods on Secret appearance so this resolves
+        # CreateContainerConfigError without a manual post-install step.
+        from ..services.apps.secret_provisioner import provision_app_secrets
+
+        try:
+            await provision_app_secrets(
+                project_id=project.id,
+                containers=containers,
+                connections=connections,
+            )
+        except Exception:
+            logger.warning(
+                "app_runtime_status: app-secret provisioning failed "
+                "instance=%s ns=proj-%s (pod will surface missing env; retry /start)",
+                inst.id,
+                project.id,
+                exc_info=True,
+            )
     except RuntimeError as e:
         # Concurrent /start — another request holds the env lock and is already
         # bringing the environment up. Return the current rollup idempotently.

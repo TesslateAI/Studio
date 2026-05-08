@@ -217,6 +217,7 @@ async def materialize_compute_from_volume(
                 target_container_id=target.id,
                 connector_type="env_injection",
                 connection_type="depends_on",
+                config=conn.config if conn.config else None,
             )
         )
 

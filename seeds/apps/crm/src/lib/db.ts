@@ -7,32 +7,19 @@ const DATA_DIR = '/app/data';
 const SENTINEL = path.join(DATA_DIR, '.migrations-applied');
 
 function ensureMigrations() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (fs.existsSync(SENTINEL)) return;
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (fs.existsSync(SENTINEL)) return;
-    console.log('[crm] applying prisma migrations...');
-    execSync('npx prisma migrate deploy', {
+    execSync('npx prisma db push --skip-generate --accept-data-loss', {
       cwd: '/app',
       stdio: 'inherit',
       env: { ...process.env },
     });
     fs.writeFileSync(SENTINEL, new Date().toISOString());
   } catch (err) {
-    // If migrate deploy fails (e.g. no migrations directory), try db push
-    // as a pragmatic fallback for first-boot seed.
-    console.warn('[crm] migrate deploy failed, falling back to db push', err);
-    try {
-      execSync('npx prisma db push --skip-generate --accept-data-loss', {
-        cwd: '/app',
-        stdio: 'inherit',
-        env: { ...process.env },
-      });
-      fs.writeFileSync(SENTINEL, new Date().toISOString());
-    } catch (err2) {
-      console.error('[crm] prisma db push also failed', err2);
-    }
+    console.error('[crm] prisma db push failed', err);
   }
 }
 

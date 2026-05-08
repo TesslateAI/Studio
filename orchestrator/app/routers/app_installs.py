@@ -34,6 +34,7 @@ from ..services.apps.installer import (
     SourceMismatchError,
     delete_per_pod_signing_key,
     install_app,
+    mark_attempt_committed,
     propagate_user_secrets_post_install,
 )
 from ..services.apps.user_secret_propagator import delete_user_secrets
@@ -154,6 +155,13 @@ async def install_endpoint(
                 update_policy=payload.update_policy,
             )
             await db.commit()
+            # Flip the saga ledger row AFTER commit so the FK check in the
+            # independent session can see the committed AppInstance row.
+            if result.attempt_id is not None:
+                await mark_attempt_committed(
+                    attempt_id=result.attempt_id,
+                    app_instance_id=result.app_instance_id,
+                )
         except AlreadyInstalledError as e:
             await db.rollback()
             raise HTTPException(status_code=409, detail=str(e)) from e
@@ -253,9 +261,7 @@ async def list_my_installs(
     source_id_filter: Any = None
     if source:
         source_row = (
-            await db.execute(
-                select(MarketplaceSource).where(MarketplaceSource.handle == source)
-            )
+            await db.execute(select(MarketplaceSource).where(MarketplaceSource.handle == source))
         ).scalar_one_or_none()
         if source_row is None:
             raise HTTPException(
@@ -459,11 +465,7 @@ async def get_install_detail(
                 (
                     await db.execute(
                         select(AutomationTrigger)
-                        .where(
-                            AutomationTrigger.automation_id.in_(
-                                [r.id for r in defn_rows]
-                            )
-                        )
+                        .where(AutomationTrigger.automation_id.in_([r.id for r in defn_rows]))
                         .order_by(AutomationTrigger.created_at.asc())
                     )
                 )

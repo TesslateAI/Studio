@@ -2301,7 +2301,7 @@ export function ChatContainer({
           bg-[var(--bg)]
           ${
             isDocked
-              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border-hover)] overflow-hidden'
+              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border-hover)]'
               : `
               fixed
               z-40

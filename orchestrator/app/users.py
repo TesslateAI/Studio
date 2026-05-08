@@ -566,10 +566,6 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             "is_verified": is_verified_by_default,
             # OAuth users don't have passwords - generate a random one they can't use
             "hashed_password": self.password_helper.hash(generate(size=32)),
-            "subscription_tier": "free",
-            "total_spend": 0,
-            "bundled_credits": 0,
-            "purchased_credits": 0,
             "avatar_url": avatar_url,
         }
 

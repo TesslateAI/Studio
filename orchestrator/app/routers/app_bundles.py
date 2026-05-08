@@ -280,6 +280,14 @@ async def install_bundle_endpoint(
                 mcp_consents=consent.mcp_consents,
                 team_id=body.team_id,
             )
+            await db.commit()
+            # Flip saga ledger AFTER commit so the FK check in the independent
+            # session can see the committed AppInstance row.
+            if result.attempt_id is not None:
+                await installer_svc.mark_attempt_committed(
+                    attempt_id=result.attempt_id,
+                    app_instance_id=result.app_instance_id,
+                )
             succeeded.append(
                 InstalledItem(
                     app_version_id=av_id,
@@ -288,8 +296,10 @@ async def install_bundle_endpoint(
                 )
             )
         except installer_svc.InstallError as e:
+            await db.rollback()
             failed.append(FailedItem(app_version_id=av_id, error=str(e)))
         except Exception as e:  # defensive
+            await db.rollback()
             logger.exception("bundle install: unexpected failure for av=%s", av_id)
             failed.append(FailedItem(app_version_id=av_id, error=repr(e)))
     note: str | None = None

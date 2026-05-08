@@ -97,41 +97,41 @@ resolve_label() {
 # Image build config
 image_name() {
   case "$1" in
-    backend)    echo "tesslate-backend" ;;
-    frontend)   echo "tesslate-frontend" ;;
-    devserver)  echo "tesslate-devserver" ;;
-    btrfs-csi)  echo "tesslate-btrfs-csi" ;;
-    ast)        echo "tesslate-ast" ;;
-    markitdown)   echo "tesslate-markitdown" ;;
-    deerflow)     echo "tesslate-deerflow" ;;
-    marketplace)  echo "tesslate-marketplace" ;;
+    backend)     echo "tesslate-backend" ;;
+    frontend)    echo "tesslate-frontend" ;;
+    devserver)   echo "tesslate-devserver" ;;
+    btrfs-csi)   echo "tesslate-btrfs-csi" ;;
+    ast)         echo "tesslate-ast" ;;
+    marketplace) echo "tesslate-marketplace" ;;
+    markitdown)  echo "tesslate-markitdown" ;;
+    deerflow)    echo "tesslate-deerflow" ;;
     *) echo "" ;;
   esac
 }
 
 image_dockerfile() {
   case "$1" in
-    backend)      echo "orchestrator/Dockerfile" ;;
-    frontend)     echo "app/Dockerfile.prod" ;;
-    devserver)    echo "orchestrator/Dockerfile.devserver" ;;
-    btrfs-csi)    echo "services/btrfs-csi/Dockerfile" ;;
-    ast)          echo "services/ast/Dockerfile" ;;
-    markitdown)   echo "seeds/apps/markitdown/Dockerfile" ;;
-    deerflow)     echo "seeds/apps/deer-flow/Dockerfile" ;;
-    marketplace)  echo "packages/tesslate-marketplace/Dockerfile" ;;
+    backend)     echo "orchestrator/Dockerfile" ;;
+    frontend)    echo "app/Dockerfile.prod" ;;
+    devserver)   echo "orchestrator/Dockerfile.devserver" ;;
+    btrfs-csi)   echo "services/btrfs-csi/Dockerfile" ;;
+    ast)         echo "services/ast/Dockerfile" ;;
+    marketplace) echo "packages/tesslate-marketplace/Dockerfile" ;;
+    markitdown)  echo "seeds/apps/markitdown/Dockerfile" ;;
+    deerflow)    echo "seeds/apps/deer-flow/Dockerfile" ;;
   esac
 }
 
 image_context() {
   case "$1" in
-    backend)      echo "." ;;
-    frontend)     echo "app" ;;
-    devserver)    echo "." ;;
-    btrfs-csi)    echo "services/btrfs-csi" ;;
-    ast)          echo "services/ast" ;;
-    markitdown)   echo "seeds/apps/markitdown" ;;
-    deerflow)     echo "seeds/apps/deer-flow" ;;
-    marketplace)  echo "packages/tesslate-marketplace" ;;
+    backend)     echo "." ;;
+    frontend)    echo "app" ;;
+    devserver)   echo "." ;;
+    btrfs-csi)   echo "services/btrfs-csi" ;;
+    ast)         echo "services/ast" ;;
+    marketplace) echo "packages/tesslate-marketplace" ;;
+    markitdown)  echo "seeds/apps/markitdown" ;;
+    deerflow)    echo "seeds/apps/deer-flow" ;;
   esac
 }
 
@@ -166,6 +166,30 @@ wait_for_backend_ready() {
     -l app=tesslate-backend \
     -n "$NAMESPACE" \
     --timeout=120s
+}
+
+# Patch the NGINX ingress ConfigMap to allow server-snippet annotations.
+# Required for the internal API block in ingress.yaml (nginx v1.14 blocks
+# snippets by default). Idempotent — no-op if already configured.
+_ensure_nginx_snippets() {
+  info "Waiting for NGINX ingress controller..."
+  $KC rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
+
+  local current
+  current=$($KC get configmap ingress-nginx-controller -n ingress-nginx \
+    -o jsonpath='{.data.allow-snippet-annotations}' 2>/dev/null || echo "")
+
+  if [[ "$current" == "true" ]]; then
+    info "NGINX snippet annotations already enabled — skipping"
+    return
+  fi
+
+  info "Enabling NGINX server-snippet annotations..."
+  $KC patch configmap ingress-nginx-controller -n ingress-nginx --type=merge \
+    -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical"}}'
+  $KC rollout restart deployment/ingress-nginx-controller -n ingress-nginx
+  $KC rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=60s
+  success "NGINX snippet annotations enabled"
 }
 
 # Ensure git submodules are present on disk. The orchestrator Dockerfile
@@ -231,6 +255,7 @@ STACK_SECRETS=(
   "k8s/overlays/minikube/secrets/postgres-secret.example.yaml:k8s/overlays/minikube/secrets/postgres-secret.yaml:postgres-secret"
   "k8s/overlays/minikube/secrets/s3-credentials.example.yaml:k8s/overlays/minikube/secrets/s3-credentials.yaml:s3-credentials"
   "k8s/overlays/minikube/secrets/app-secrets.example.yaml:k8s/overlays/minikube/secrets/app-secrets.yaml:app-secrets"
+  "k8s/overlays/minikube/secrets/marketplace-secret.example.yaml:k8s/overlays/minikube/secrets/marketplace-secret.yaml:marketplace-secret"
   "k8s/overlays/minikube/minio/credentials.example.yaml:k8s/overlays/minikube/minio/credentials.yaml:minio-credentials"
   "services/btrfs-csi/overlays/minikube/csi-credentials.example.yaml:services/btrfs-csi/overlays/minikube/csi-credentials.yaml:csi-credentials"
 )
@@ -339,16 +364,6 @@ cmd_start() {
     success "Minikube cluster started"
   fi
 
-  # Enable server-snippet annotations in NGINX ingress controller.
-  # The main ingress uses a server-snippet to block /api/internal/* at the
-  # edge.  Newer NGINX ingress versions disable snippets by default.
-  info "Configuring NGINX ingress to allow snippet annotations..."
-  $KC patch configmap ingress-nginx-controller -n ingress-nginx \
-    --type merge -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical"}}' \
-    2>/dev/null || warn "Could not patch ingress-nginx configmap (ingress may not be ready yet)"
-  $KC rollout restart deployment/ingress-nginx-controller -n ingress-nginx 2>/dev/null || true
-  $KC rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s 2>/dev/null || true
-
   # Ensure all images are loaded (app + infrastructure)
   for svc in backend frontend devserver btrfs-csi ast marketplace; do
     local img
@@ -390,6 +405,11 @@ cmd_start() {
   # 4. Compute pool namespace + isolation (tesslate-compute-pool)
   header "Applying Compute Pool"
   $KC apply -k k8s/base/compute-pool
+
+  # 4b. NGINX snippet annotations — must be configured before the ingress
+  #     manifest is applied, because ingress.yaml uses server-snippet to
+  #     block /api/internal/* and NGINX v1.14 rejects snippets by default.
+  _ensure_nginx_snippets
 
   # 5. Main application (tesslate namespace)
   header "Applying Tesslate application"
@@ -597,38 +617,21 @@ cmd_seed() {
   wait_for_backend_ready
 
   header "Seeding database"
-  local backend_pod
-  backend_pod=$($KC get pods -n "$NAMESPACE" -l app=tesslate-backend -o jsonpath='{.items[0].metadata.name}')
-  if [[ -z "$backend_pod" ]]; then
-    error "No backend pod found"
-    exit 1
-  fi
 
-  local seed_dir="$PROJECT_ROOT/scripts/seed"
-  if [[ ! -d "$seed_dir" ]]; then
-    error "Seed directory not found: $seed_dir"
-    exit 1
-  fi
+  # Seed Tesslate Apps via the federated marketplace pipeline.
+  # TSL_APPS_DEV_AUTO_APPROVE=1 auto-approves submissions so apps are
+  # immediately installable without manual review.
+  info "Seeding Tesslate Apps..."
+  $KC exec -n "$NAMESPACE" deployment/tesslate-backend -c backend -- \
+    env TSL_APPS_DEV_AUTO_APPROVE=1 python -m scripts.seed_apps 2>&1 || {
+    warn "seed_apps failed (non-fatal), continuing..."
+  }
 
-  local scripts=(
-    seed_marketplace_bases.py
-    seed_marketplace_agents.py
-    seed_opensource_agents.py
-    seed_skills.py
-    seed_themes.py
-    seed_mcp_servers.py
-    seed_community_bases.py
-  )
-
-  for script in "${scripts[@]}"; do
-    if [[ -f "$seed_dir/$script" ]]; then
-      info "Running $script..."
-      $KC cp "$seed_dir/$script" "$NAMESPACE/${backend_pod}:/tmp/$script"
-      $KC exec -n "$NAMESPACE" "$backend_pod" -- python "/tmp/$script" 2>&1 || {
-        warn "$script failed (non-fatal), continuing..."
-      }
-    fi
-  done
+  info "Seeding contract templates..."
+  $KC exec -n "$NAMESPACE" deployment/tesslate-backend -c backend -- \
+    python -m scripts.seed_contract_templates 2>&1 || {
+    warn "seed_contract_templates failed (non-fatal), continuing..."
+  }
 
   success "Database seeded"
 }
@@ -923,7 +926,7 @@ _usage() {
   echo "  cf status          Show tunnel status"
   echo "  cf logs            Tail cloudflared logs"
   echo ""
-  echo "Services: backend, frontend, worker, postgres, redis, devserver, btrfs-csi, ast, marketplace"
+  echo "Services: backend, frontend, worker, marketplace, postgres, redis, devserver, btrfs-csi, ast"
 }
 
 main() {

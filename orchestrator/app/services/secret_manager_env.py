@@ -336,6 +336,13 @@ async def build_env_overrides(
                 env=container_env(source),
                 port=effective_port,
             )
+        elif conn.config and conn.config.get("env_mapping"):
+            # Manifest-declared explicit env mapping takes priority over the
+            # service catalog. Values may contain ${secret:name/key} and
+            # ${NAMESPACE} templates — resolve_env_for_pod expands secrets via
+            # K8s env chaining; compute_manager substitutes ${NAMESPACE} with
+            # the real namespace before the pod spec is built.
+            resolved = dict(conn.config["env_mapping"])
         else:
             service_def = get_service(source.service_slug) if source.service_slug else None
             creds = None

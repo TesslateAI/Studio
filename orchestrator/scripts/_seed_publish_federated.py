@@ -177,11 +177,12 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
         based apps that don't otherwise carry a framework hint).
       * ``compute.containers[*].source_strategy`` → ``apps[name].source_strategy``
         — explicit creator declaration. If unset, defaults to ``'image'``
-        when ``image`` is present (the App Runtime Contract treats a
-        custom image as self-contained unless told otherwise) and
-        ``'bundle'`` otherwise. ``'bundle'`` keeps the legacy behaviour
-        (PVC at /app); ``'image'`` lets the image's WORKDIR/source remain
-        authoritative.
+        when ``image`` is present AND is not the platform devserver
+        (``tesslate-devserver:*``). The devserver is a generic runtime host
+        whose source always comes from the bundle PVC, so it stays
+        ``'bundle'`` even when listed as the container image.
+        ``'bundle'`` keeps the legacy behaviour (PVC at /app); ``'image'``
+        lets the image's WORKDIR/source remain authoritative.
       * ``compute.containers[*].state_mount_path`` → ``apps[name].state_mount_path``
         — explicit. If unset and ``state.model='per-install-volume'`` and
         the resolved strategy is ``'image'``, falls back to
@@ -201,6 +202,7 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
     state_mount_default = state_block.get("mount_path") if isinstance(state_block, dict) else None
 
     apps: dict[str, dict[str, Any]] = {}
+    infrastructure: dict[str, dict[str, Any]] = {}
     primary_name: str | None = None
 
     for container in containers:
@@ -210,12 +212,25 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
         if not isinstance(name, str) or not name:
             continue
 
+        kind = container.get("kind", "base")
         ports = container.get("ports") or []
         port = ports[0] if isinstance(ports, list) and ports else None
-
         env = container.get("env") if isinstance(container.get("env"), dict) else {}
-
         image = container.get("image") or None
+
+        if kind == "service":
+            # Service containers (databases, caches, etc.) belong in infrastructure.
+            # install_compute_materializer creates them as container_type='service'
+            # so compute_manager deploys via create_service_container_deployment —
+            # native image entrypoint, no tsinit wrapper.
+            infra_entry: dict[str, Any] = {
+                "image": image,
+                "port": port,
+                "env": env,
+                "type": "container",
+            }
+            infrastructure[name] = infra_entry
+            continue
 
         # Source strategy: explicit > inferred. A custom image without an
         # explicit strategy defaults to ``'image'`` (the App Runtime
@@ -286,19 +301,30 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
         primary_name = next(iter(apps))
 
     config: dict[str, Any] = {"apps": apps}
+    if infrastructure:
+        config["infrastructure"] = infrastructure
     if primary_name:
         config["primaryApp"] = primary_name
 
     connections_raw = compute.get("connections") or []
     if isinstance(connections_raw, list):
-        connections: list[dict[str, str]] = []
+        connections: list[dict] = []
         for conn in connections_raw:
             if not isinstance(conn, dict):
                 continue
-            from_node = conn.get("from") or conn.get("from_node")
-            to_node = conn.get("to") or conn.get("to_node")
-            if isinstance(from_node, str) and isinstance(to_node, str):
-                connections.append({"from": from_node, "to": to_node})
+            # Manifest schema uses source_container/target_container;
+            # legacy config.json format uses from/to or from_node/to_node.
+            from_node = conn.get("source_container") or conn.get("from") or conn.get("from_node")
+            to_node = conn.get("target_container") or conn.get("to") or conn.get("to_node")
+            if not (isinstance(from_node, str) and isinstance(to_node, str)):
+                continue
+            entry: dict = {"from": from_node, "to": to_node}
+            # Preserve env_injection config (env_mapping, etc.) so the
+            # install materializer can wire up env vars on the target container.
+            config_block = conn.get("config")
+            if isinstance(config_block, dict):
+                entry["config"] = config_block
+            connections.append(entry)
         if connections:
             config["connections"] = connections
 

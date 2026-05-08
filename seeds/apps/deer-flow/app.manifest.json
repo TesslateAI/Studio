@@ -4,7 +4,7 @@
     "id": "com.bytedance.deer-flow",
     "slug": "deer-flow",
     "name": "DeerFlow",
-    "version": "0.1.4",
+    "version": "0.1.6",
     "description": "ByteDance DeerFlow 2.0 \u2014 open-source super-agent harness orchestrating sub-agents, memory, and sandboxes for deep research. Requires an OpenAI-compatible LLM API key.",
     "category": "research",
     "forkable": "restricted"
@@ -32,7 +32,7 @@
           8001,
           2024
         ],
-        "startup_command": "make dev",
+        "startup_command": "sh -c 'cd /app && PATH=$PATH:/usr/sbin make dev'",
         "env": {
           "LLM_API_KEY": "${secret:llama-api-credentials/api_key}",
           "LLM_BASE_URL": "https://api.llama.com/compat/v1/",

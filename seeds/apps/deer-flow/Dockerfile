@@ -16,7 +16,7 @@ ENV DEER_FLOW_REF=${DEER_FLOW_REF} \
     PATH=/root/.local/share/pnpm:/root/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential curl git ca-certificates gnupg \
+        build-essential curl git ca-certificates gnupg nginx \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \

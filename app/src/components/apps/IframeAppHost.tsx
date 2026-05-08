@@ -77,6 +77,10 @@ export function IframeAppHost({
 }: IframeAppHostProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const allowedOrigin = useMemo(() => safeOrigin(entrypoint), [entrypoint]);
+  // Tracks which origin the iframe has actually loaded — reset on entrypoint change,
+  // set in onLoad. Used to skip postMessage before the iframe has settled to its
+  // real origin (which would trigger an uncatchable browser console security error).
+  const loadedOriginRef = useRef<string | null>(null);
 
   // Keep latest values in refs for the listener without re-registering each tick.
   const sessionRef = useRef(sessionId);
@@ -196,11 +200,15 @@ export function IframeAppHost({
         // once the iframe document has settled to its real origin.
       }
     };
-    // Fire once on mount; the iframe's own 'load' re-triggers it.
-    const onLoad = () => send();
+    const onLoad = () => {
+      loadedOriginRef.current = allowedOrigin;
+      send();
+    };
     frame.addEventListener('load', onLoad);
-    // Also re-send when session/apiKey become set after load.
-    send();
+    // Only send immediately if the iframe has already settled to this origin
+    // (e.g. session/apiKey change after initial load). On first mount the iframe
+    // hasn't navigated yet — onLoad will fire once it does.
+    if (loadedOriginRef.current === allowedOrigin) send();
     return () => {
       frame.removeEventListener('load', onLoad);
     };

@@ -27,6 +27,7 @@ import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -34,13 +35,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import (
+    AppVersion,
     MarketplaceAgent,
     MarketplaceApp,
     MarketplaceSource,
 )
 from app.models_automations import AppInstance
 from app.services.marketplace_client import HubIdMismatchError
-from app.services.marketplace_sync import MarketplaceSyncWorker
+from app.services.marketplace_sync import (
+    _DEFAULT_MANIFEST_SCHEMA_VERSION,
+    MarketplaceSyncWorker,
+)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_ORCHESTRATOR_TEST_DB_URL = (
+    "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test"
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -177,12 +190,9 @@ async def orchestrator_session() -> AsyncSession:
     `tesslate_test` on session start, so the marketplace_sources table is
     present.
     """
-    engine = create_async_engine(
-        "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
-        future=True,
-    )
-    SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
-    async with SessionFactory() as session:
+    engine = create_async_engine(_ORCHESTRATOR_TEST_DB_URL, future=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
         yield session
     await engine.dispose()
 
@@ -245,13 +255,17 @@ async def federated_source(
     await orchestrator_session.commit()
 
 
-def _orchestrator_session_factory():
-    """Factory the worker uses to open new sessions per task."""
-    engine = create_async_engine(
-        "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
-        future=True,
+def _orchestrator_session_factory() -> async_sessionmaker:
+    """Return a sessionmaker the worker uses to open new sessions per task.
+
+    The engine is shared via a module-level instance so repeated calls in a
+    single test run share the connection pool rather than leaking a new pool
+    per call.
+    """
+    return async_sessionmaker(
+        create_async_engine(_ORCHESTRATOR_TEST_DB_URL, future=True),
+        expire_on_commit=False,
     )
-    return async_sessionmaker(engine, expire_on_commit=False)
 
 
 # ---------------------------------------------------------------------------
@@ -476,10 +490,11 @@ async def test_sync_source_skips_local_sources(
 class _FakeMarketplaceClient:
     """In-test stand-in for :class:`MarketplaceClient`.
 
-    Only the few methods :meth:`MarketplaceSyncWorker._sync_one` calls are
-    implemented. ``get_manifest`` raises whatever was passed to the
-    constructor so tests can drive specific failure modes (e.g. hub-id
-    drift) without booting a real upstream service.
+    ``get_manifest`` raises whatever exception was passed to the constructor
+    so tests can drive specific failure modes (e.g. hub-id drift). All other
+    methods raise :exc:`NotImplementedError` with a descriptive message so an
+    unexpected call produces a clear test failure rather than a silent
+    ``AttributeError``.
     """
 
     def __init__(self, manifest_exc: Exception) -> None:
@@ -488,6 +503,23 @@ class _FakeMarketplaceClient:
 
     async def get_manifest(self) -> dict:
         raise self._manifest_exc
+
+    async def get_changes(self, **kwargs):
+        raise NotImplementedError("_FakeMarketplaceClient.get_changes not configured for this test")
+
+    async def get_yanks(self, **kwargs):
+        raise NotImplementedError("_FakeMarketplaceClient.get_yanks not configured for this test")
+
+    async def get_item(self, kind: str, slug: str):
+        raise NotImplementedError("_FakeMarketplaceClient.get_item not configured for this test")
+
+    async def get_bundle(self, kind: str, slug: str, version: str):
+        raise NotImplementedError("_FakeMarketplaceClient.get_bundle not configured for this test")
+
+    async def list_versions(self, kind: str, slug: str):
+        raise NotImplementedError(
+            "_FakeMarketplaceClient.list_versions not configured for this test"
+        )
 
     async def aclose(self) -> None:
         self.aclose_calls += 1
@@ -946,4 +978,511 @@ async def test_apply_yank_event_marks_app_version_yanked_upstream(
         await orchestrator_session.execute(
             models.User.__table__.delete().where(models.User.id == user_id)
         )
+        await orchestrator_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Unit tests — no DB required
+# ---------------------------------------------------------------------------
+
+
+class TestDerivePricing:
+    """Pure unit tests for the pricing stripping / trust-gate logic."""
+
+    def test_trusted_source_passes_paid_pricing_through(self):
+        upstream = {"pricing_type": "paid", "price_cents": 999, "stripe_price_id": "price_abc"}
+        result = MarketplaceSyncWorker._derive_effective_pricing(upstream, is_trusted=True)
+        assert result["pricing_type"] == "paid"
+        assert result["price_cents"] == 999
+        assert result["stripe_price_id"] == "price_abc"
+        assert result["stripped"] is False
+
+    def test_untrusted_source_paid_is_stripped_to_free(self):
+        upstream = {"pricing_type": "paid", "price_cents": 500, "stripe_price_id": "price_xyz"}
+        result = MarketplaceSyncWorker._derive_effective_pricing(upstream, is_trusted=False)
+        assert result["pricing_type"] == "free"
+        assert result["price_cents"] == 0
+        assert result["stripe_price_id"] is None
+        assert result["stripped"] is True
+
+    def test_untrusted_free_item_not_marked_stripped(self):
+        upstream = {"pricing_type": "free", "price_cents": 0, "stripe_price_id": None}
+        result = MarketplaceSyncWorker._derive_effective_pricing(upstream, is_trusted=False)
+        assert result["pricing_type"] == "free"
+        assert result["stripped"] is False
+
+    def test_empty_upstream_defaults_to_free(self):
+        result = MarketplaceSyncWorker._derive_effective_pricing({}, is_trusted=False)
+        assert result["pricing_type"] == "free"
+        assert result["price_cents"] == 0
+        assert result["stripped"] is False
+
+    def test_nonzero_cents_with_free_type_is_still_stripped(self):
+        upstream = {"pricing_type": "free", "price_cents": 1}
+        result = MarketplaceSyncWorker._derive_effective_pricing(upstream, is_trusted=False)
+        assert result["stripped"] is True
+
+    def test_trusted_free_item_not_stripped(self):
+        upstream = {"pricing_type": "free", "price_cents": 0}
+        result = MarketplaceSyncWorker._derive_effective_pricing(upstream, is_trusted=True)
+        assert result["stripped"] is False
+
+
+class TestResolvePricing:
+    """Tests for the _resolve_pricing helper that wraps _derive_effective_pricing."""
+
+    def test_extracts_dict_pricing_from_item(self):
+        item = {"pricing": {"pricing_type": "paid", "price_cents": 100}}
+        pricing, effective = MarketplaceSyncWorker._resolve_pricing(item, "official")
+        assert pricing == {"pricing_type": "paid", "price_cents": 100}
+        assert effective["pricing_type"] == "paid"
+
+    def test_non_dict_pricing_treated_as_empty(self):
+        item = {"pricing": "not-a-dict"}
+        pricing, _ = MarketplaceSyncWorker._resolve_pricing(item, "official")
+        assert pricing == {}
+
+    def test_missing_pricing_treated_as_empty(self):
+        item = {}
+        pricing, effective = MarketplaceSyncWorker._resolve_pricing(item, "untrusted")
+        assert pricing == {}
+        assert effective["pricing_type"] == "free"
+
+
+class TestExtractVersionManifest:
+    """Tests for _extract_version_manifest."""
+
+    def test_reads_from_versions_list(self):
+        item = {"versions": [{"manifest": {"mode": "dark"}}]}
+        result = MarketplaceSyncWorker._extract_version_manifest(item)
+        assert result == {"mode": "dark"}
+
+    def test_falls_back_to_top_level_manifest(self):
+        item = {"manifest": {"mode": "light"}}
+        result = MarketplaceSyncWorker._extract_version_manifest(item)
+        assert result == {"mode": "light"}
+
+    def test_falls_back_to_extra_metadata(self):
+        item = {"extra_metadata": {"skill_body": "do stuff"}}
+        result = MarketplaceSyncWorker._extract_version_manifest(item)
+        assert result == {"skill_body": "do stuff"}
+
+    def test_returns_none_when_absent(self):
+        assert MarketplaceSyncWorker._extract_version_manifest({}) is None
+
+
+class TestManifestRefreshDue:
+    """Tests for the per-instance manifest refresh cache."""
+
+    def test_always_due_on_fresh_worker(self):
+        worker = MarketplaceSyncWorker(db_session_factory=lambda: None)
+        assert worker._manifest_refresh_due(uuid4()) is True
+
+    def test_not_due_immediately_after_update(self):
+        import time
+
+        worker = MarketplaceSyncWorker(db_session_factory=lambda: None)
+        source_id = uuid4()
+        worker._manifest_refresh_at[source_id] = time.monotonic()
+        assert worker._manifest_refresh_due(source_id) is False
+
+    def test_workers_do_not_share_cache(self):
+        import time
+
+        w1 = MarketplaceSyncWorker(db_session_factory=lambda: None)
+        w2 = MarketplaceSyncWorker(db_session_factory=lambda: None)
+        source_id = uuid4()
+        w1._manifest_refresh_at[source_id] = time.monotonic()
+        # w2 has its own dict — the update to w1 must not affect w2.
+        assert w2._manifest_refresh_due(source_id) is True
+
+
+class TestSchemaVersionExtraction:
+    """Regression tests for the schema_version ternary bug (#460/#461)."""
+
+    def test_reads_manifest_schema_version_without_compatibility_dict(self):
+        """manifest_schema_version at top level, no compatibility key — must not fall back."""
+        manifest = {"manifest_schema_version": "2026-05"}
+        # Reproduce the logic from _sync_app_versions inline so the test is
+        # self-contained and does not depend on the private method's internals.
+        schema_version = (
+            manifest.get("manifest_schema_version")
+            or (manifest.get("compatibility") or {}).get("manifest_schema")
+            or _DEFAULT_MANIFEST_SCHEMA_VERSION
+        )
+        assert schema_version == "2026-05"
+
+    def test_reads_from_compatibility_dict_when_top_level_absent(self):
+        manifest = {"compatibility": {"manifest_schema": "2025-06"}}
+        schema_version = (
+            manifest.get("manifest_schema_version")
+            or (manifest.get("compatibility") or {}).get("manifest_schema")
+            or _DEFAULT_MANIFEST_SCHEMA_VERSION
+        )
+        assert schema_version == "2025-06"
+
+    def test_falls_back_to_default_when_both_absent(self):
+        manifest = {}
+        schema_version = (
+            manifest.get("manifest_schema_version")
+            or (manifest.get("compatibility") or {}).get("manifest_schema")
+            or _DEFAULT_MANIFEST_SCHEMA_VERSION
+        )
+        assert schema_version == _DEFAULT_MANIFEST_SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------------------
+# Integration — pricing_change event handler
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_pricing_change_strips_untrusted_source(
+    orchestrator_session: AsyncSession,
+    federated_source: MarketplaceSource,
+) -> None:
+    """``_handle_pricing_change`` must strip a paid price to free when the
+    source is untrusted, and preserve the raw payload in the provenance columns."""
+    slug = f"pricing-change-test-{uuid4().hex[:10]}"
+    agent = MarketplaceAgent(
+        slug=slug,
+        name="Pricing Change Test Agent",
+        item_type="agent",
+        source_id=federated_source.id,
+        source_etag="v1",
+        source_remote_id=slug,
+        pricing_type="free",
+        price=0,
+        deleted_upstream=False,
+    )
+    orchestrator_session.add(agent)
+    await orchestrator_session.commit()
+
+    # Temporarily make the source untrusted so we can verify stripping.
+    saved_trust = federated_source.trust_level
+    federated_source.trust_level = "untrusted"
+    await orchestrator_session.commit()
+
+    try:
+        factory = _orchestrator_session_factory()
+        worker = MarketplaceSyncWorker(db_session_factory=factory)
+        async with factory() as sess:
+            bound_source = await sess.get(MarketplaceSource, federated_source.id)
+            assert bound_source is not None
+            ok = await worker._handle_pricing_change(
+                sess,
+                bound_source,
+                "agent",
+                slug,
+                {"from": "free", "to": "paid", "price_cents": 999, "stripe_price_id": "price_x"},
+            )
+            assert ok is True
+            await sess.commit()
+
+        await orchestrator_session.refresh(agent)
+        # Untrusted source — price must be stripped to free.
+        assert agent.pricing_type == "free"
+        assert agent.price == 0
+        assert agent.source_pricing_ignored is True
+        # Provenance preserved.
+        assert agent.source_pricing_type_original == "paid"
+    finally:
+        federated_source.trust_level = saved_trust
+        await orchestrator_session.commit()
+        await orchestrator_session.delete(agent)
+        await orchestrator_session.commit()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_pricing_change_passes_through_on_trusted_source(
+    orchestrator_session: AsyncSession,
+    federated_source: MarketplaceSource,
+) -> None:
+    """On a trusted source the effective price must match the upstream payload."""
+    slug = f"pricing-trusted-{uuid4().hex[:10]}"
+    agent = MarketplaceAgent(
+        slug=slug,
+        name="Trusted Pricing Agent",
+        item_type="agent",
+        source_id=federated_source.id,
+        source_etag="v1",
+        source_remote_id=slug,
+        pricing_type="free",
+        price=0,
+        deleted_upstream=False,
+    )
+    orchestrator_session.add(agent)
+    await orchestrator_session.commit()
+
+    try:
+        factory = _orchestrator_session_factory()
+        worker = MarketplaceSyncWorker(db_session_factory=factory)
+        # federated_source fixture points at tesslate-official which is "official" trust.
+        async with factory() as sess:
+            bound_source = await sess.get(MarketplaceSource, federated_source.id)
+            assert bound_source is not None
+            ok = await worker._handle_pricing_change(
+                sess,
+                bound_source,
+                "agent",
+                slug,
+                {"from": "free", "to": "paid", "price_cents": 500, "stripe_price_id": "price_y"},
+            )
+            assert ok is True
+            await sess.commit()
+
+        await orchestrator_session.refresh(agent)
+        assert agent.pricing_type == "paid"
+        assert agent.price == 500
+        assert agent.source_pricing_ignored is False
+    finally:
+        await orchestrator_session.delete(agent)
+        await orchestrator_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Integration — version_remove event handler
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_version_remove_hard_deletes_unreferenced_version(
+    orchestrator_session: AsyncSession,
+    federated_source: MarketplaceSource,
+) -> None:
+    """An unreferenced AppVersion must be hard-deleted on version_remove."""
+
+    slug = f"ver-remove-{uuid4().hex[:10]}"
+    app = MarketplaceApp(
+        slug=slug,
+        name="Version Remove App",
+        creator_user_id=None,
+        state="approved",
+        visibility="public",
+        source_id=federated_source.id,
+        source_etag="v1",
+        source_remote_id=slug,
+        deleted_upstream=False,
+    )
+    orchestrator_session.add(app)
+    await orchestrator_session.flush()
+
+    version = AppVersion(
+        id=uuid4(),
+        app_id=app.id,
+        version="2.0.0",
+        manifest_schema_version="2026-05",
+        manifest_json={"app": {"slug": slug}},
+        manifest_hash="hash-remove",
+        feature_set_hash="fh-remove",
+        approval_state="stage1_approved",
+        published_at=datetime.now(UTC),
+        source_id=federated_source.id,
+    )
+    orchestrator_session.add(version)
+    await orchestrator_session.commit()
+    version_id = version.id
+
+    factory = _orchestrator_session_factory()
+    worker = MarketplaceSyncWorker(db_session_factory=factory)
+
+    try:
+        async with factory() as sess:
+            bound_source = await sess.get(MarketplaceSource, federated_source.id)
+            assert bound_source is not None
+            removed = await worker._handle_version_remove(sess, bound_source, "app", slug, "2.0.0")
+            assert removed is True
+            await sess.commit()
+
+        remaining = (
+            (
+                await orchestrator_session.execute(
+                    select(AppVersion).where(AppVersion.id == version_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert remaining is None, "unreferenced AppVersion should be hard-deleted"
+    finally:
+        await orchestrator_session.execute(
+            MarketplaceApp.__table__.delete().where(MarketplaceApp.id == app.id)
+        )
+        await orchestrator_session.commit()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_handle_version_remove_yanks_referenced_version(
+    orchestrator_session: AsyncSession,
+    federated_source: MarketplaceSource,
+) -> None:
+    """An AppVersion referenced by an AppInstance must be yanked, not hard-deleted."""
+    from app import models
+
+    user_id = uuid4()
+    user = models.User(
+        id=user_id,
+        email=f"ver-remove-ref-{user_id}@example.com",
+        hashed_password="x",
+        is_active=True,
+        is_superuser=False,
+        is_verified=True,
+        name="Version Remove Ref Owner",
+        username=f"ver-rem-{user_id.hex[:10]}",
+        slug=f"ver-rem-{user_id.hex[:10]}",
+    )
+    orchestrator_session.add(user)
+
+    slug = f"ver-remove-ref-{user_id.hex[:10]}"
+    app = MarketplaceApp(
+        slug=slug,
+        name="Version Remove Ref App",
+        creator_user_id=user_id,
+        state="approved",
+        visibility="public",
+        source_id=federated_source.id,
+        source_etag="v1",
+        source_remote_id=slug,
+        deleted_upstream=False,
+    )
+    orchestrator_session.add(app)
+    await orchestrator_session.flush()
+
+    version = AppVersion(
+        id=uuid4(),
+        app_id=app.id,
+        version="3.0.0",
+        manifest_schema_version="2026-05",
+        manifest_json={"app": {"slug": slug}},
+        manifest_hash="hash-ref",
+        feature_set_hash="fh-ref",
+        approval_state="stage1_approved",
+        published_at=datetime.now(UTC),
+        source_id=federated_source.id,
+    )
+    orchestrator_session.add(version)
+    await orchestrator_session.flush()
+
+    instance = AppInstance(
+        id=uuid4(),
+        app_id=app.id,
+        app_version_id=version.id,
+        installer_user_id=user_id,
+        state="installed",
+    )
+    orchestrator_session.add(instance)
+    await orchestrator_session.commit()
+
+    version_id = version.id
+    instance_id = instance.id
+
+    factory = _orchestrator_session_factory()
+    worker = MarketplaceSyncWorker(db_session_factory=factory)
+
+    try:
+        async with factory() as sess:
+            bound_source = await sess.get(MarketplaceSource, federated_source.id)
+            assert bound_source is not None
+            removed = await worker._handle_version_remove(sess, bound_source, "app", slug, "3.0.0")
+            assert removed is True
+            await sess.commit()
+
+        await orchestrator_session.refresh(version)
+        assert version.approval_state == "yanked", (
+            "referenced AppVersion must be yanked rather than hard-deleted"
+        )
+        assert version.yanked_upstream_at is not None
+
+        surviving_inst = (
+            (
+                await orchestrator_session.execute(
+                    select(AppInstance).where(AppInstance.id == instance_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert surviving_inst is not None, "AppInstance must survive a version_remove"
+    finally:
+        await orchestrator_session.execute(
+            AppInstance.__table__.delete().where(AppInstance.id == instance_id)
+        )
+        await orchestrator_session.execute(
+            AppVersion.__table__.delete().where(AppVersion.id == version_id)
+        )
+        await orchestrator_session.execute(
+            MarketplaceApp.__table__.delete().where(MarketplaceApp.id == app.id)
+        )
+        await orchestrator_session.execute(
+            models.User.__table__.delete().where(models.User.id == user_id)
+        )
+        await orchestrator_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Unit — fetch_yanks_aggressively (mocked client, no real hub)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_fetch_yanks_aggressively_skips_sources_with_no_yanks_feed(
+    orchestrator_session: AsyncSession,
+) -> None:
+    """When every active source's /v1/yanks endpoint returns UnsupportedCapabilityError
+    the fast path must return a result per source with no error and 0 yanks."""
+    from app.services.marketplace_client import UnsupportedCapabilityError
+
+    handle = f"yanks-fast-{uuid4().hex[:10]}"
+    source = MarketplaceSource(
+        handle=handle,
+        display_name="Yanks Fast Test",
+        base_url="https://example.invalid",
+        scope="system",
+        trust_level="official",
+        is_active=True,
+        pinned_hub_id="hub-yanks-fast",
+    )
+    orchestrator_session.add(source)
+    await orchestrator_session.commit()
+    await orchestrator_session.refresh(source)
+
+    class _NoYanksFeed(_FakeMarketplaceClient):
+        def __init__(self):
+            super().__init__(manifest_exc=RuntimeError("should not be called"))
+
+        async def get_manifest(self):
+            raise RuntimeError("get_manifest should not be called for yanks-only path")
+
+        async def get_yanks(self, **kwargs):
+            raise UnsupportedCapabilityError(
+                capability="yanks", url="https://example.invalid/v1/yanks"
+            )
+
+    def _factory(_src, _tok):
+        return _NoYanksFeed()
+
+    try:
+        factory = _orchestrator_session_factory()
+        worker = MarketplaceSyncWorker(
+            db_session_factory=factory,
+            marketplace_client_factory=_factory,
+        )
+        results = await worker.fetch_yanks_aggressively()
+        # The source above + any other active sources are polled. The one we
+        # inserted must appear in results with no error (UnsupportedCapabilityError
+        # is swallowed as a graceful skip).
+        our_results = [r for r in results if r.source_handle == handle]
+        assert our_results, f"source {handle!r} missing from results"
+        r = our_results[0]
+        assert r.error is None, (
+            f"yanks-only fast path should not error on unsupported feed: {r.error}"
+        )
+        assert r.versions_yanked == 0
+    finally:
+        await orchestrator_session.delete(source)
         await orchestrator_session.commit()

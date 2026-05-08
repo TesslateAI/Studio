@@ -265,6 +265,7 @@ class ConnectionConfig:
 
     from_node: str = ""
     to_node: str = ""
+    config: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -419,6 +420,7 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             ConnectionConfig(
                 from_node=conn_data.get("from", ""),
                 to_node=conn_data.get("to", ""),
+                config=conn_data.get("config") or {},
             )
         )
 

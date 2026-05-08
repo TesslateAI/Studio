@@ -1605,10 +1605,17 @@ class ComputeManager:
 
         for svc_container in service_containers:
             service_def = get_service(svc_container.service_slug)
+            if not service_def and svc_container.image:
+                # App-installed service containers may carry a custom slug (e.g.
+                # "db") that doesn't match the catalog. Fall back to the image
+                # name as a slug — postgres:16-alpine → get_service("postgres").
+                _image_base = (svc_container.image or "").split(":")[0].rsplit("/", 1)[-1]
+                service_def = get_service(_image_base)
             if not service_def:
                 logger.warning(
-                    "[COMPUTE-T2] No service definition for slug=%s, skipping",
+                    "[COMPUTE-T2] No service definition for slug=%s (image=%s), skipping",
                     svc_container.service_slug,
+                    svc_container.image,
                 )
                 continue
 
@@ -1721,6 +1728,14 @@ class ComputeManager:
             env_overrides = await build_env_overrides(db, project.id, [container])
             extra_env = env_overrides.get(container.id, {})
 
+            # Expand ${NAMESPACE} in env values injected from connection env_mappings.
+            # The namespace is not known at bundle-publish time, so manifests use the
+            # ${NAMESPACE} placeholder; we substitute the real value here.
+            extra_env = {
+                k: v.replace("${NAMESPACE}", namespace) if isinstance(v, str) else v
+                for k, v in extra_env.items()
+            }
+
             # Inject sibling container URLs for service discovery
             for sibling in containers:
                 if sibling.id == container.id:
@@ -1793,6 +1808,19 @@ class ComputeManager:
                 "always" if project.project_kind == PROJECT_KIND_APP_RUNTIME else "never"
             )
 
+            # source_strategy="image" means this container uses its own
+            # manifest-declared image (e.g. ghcr.io/owner/app:tag, postgres).
+            # K8S_IMAGE_PULL_POLICY=Never is intentionally set for minikube to
+            # force the use of pre-loaded platform images (devserver, backend,
+            # etc.). But external app images are NOT pre-loaded — they must be
+            # pulled on first use. Always use IfNotPresent for image-strategy
+            # containers so minikube doesn't block the pull with ErrImageNeverPull.
+            effective_pull_policy = (
+                "IfNotPresent"
+                if (container.source_strategy or "bundle").lower() == "image"
+                else settings.k8s_image_pull_policy
+            )
+
             deployment = create_v2_dev_deployment(
                 namespace=namespace,
                 project_id=project.id,
@@ -1809,7 +1837,7 @@ class ComputeManager:
                 tsinit_source_image=settings.k8s_devserver_image,
                 pvc_name="project-source",
                 working_directory=working_directory,
-                image_pull_policy=settings.k8s_image_pull_policy,
+                image_pull_policy=effective_pull_policy,
                 image_pull_secret=settings.k8s_image_pull_secret or None,
                 extra_env=extra_env,
                 preferred_node=node_name,
