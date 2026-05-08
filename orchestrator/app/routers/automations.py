@@ -199,6 +199,7 @@ async def _project_definition(
         max_compute_tier=definition.max_compute_tier,
         max_spend_per_run_usd=definition.max_spend_per_run_usd,
         max_spend_per_day_usd=definition.max_spend_per_day_usd,
+        compute_profile=getattr(definition, "compute_profile", None) or "persistent_workspace",
         parent_automation_id=definition.parent_automation_id,
         depth=definition.depth,
         is_active=definition.is_active,
@@ -667,6 +668,7 @@ async def create_automation(
         max_compute_tier=payload.max_compute_tier,
         max_spend_per_run_usd=payload.max_spend_per_run_usd,
         max_spend_per_day_usd=payload.max_spend_per_day_usd,
+        compute_profile=payload.compute_profile,
         is_active=True,
         created_by_user_id=user.id,
         depth=0,
@@ -735,6 +737,22 @@ async def update_automation(
         automation.max_spend_per_run_usd = payload.max_spend_per_run_usd
     if payload.max_spend_per_day_usd is not None:
         automation.max_spend_per_day_usd = payload.max_spend_per_day_usd
+    if payload.compute_profile is not None:
+        # Phase B (#471). The CHECK constraint on the column rejects
+        # invalid values; the schema validator catches it earlier.
+        if payload.compute_profile not in (
+            "connector_only",
+            "ephemeral_workspace",
+            "persistent_workspace",
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "compute_profile must be connector_only, "
+                    "ephemeral_workspace, or persistent_workspace"
+                ),
+            )
+        automation.compute_profile = payload.compute_profile
 
     if payload.triggers is not None:
         await _replace_triggers(db, automation.id, payload.triggers)

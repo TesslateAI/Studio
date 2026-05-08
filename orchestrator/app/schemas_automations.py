@@ -331,6 +331,10 @@ class AutomationDefinitionIn(BaseModel):
     max_spend_per_run_usd: Decimal | None = None
     max_spend_per_day_usd: Decimal | None = None
 
+    # Phase B (#471). Default persistent_workspace keeps existing
+    # callers unchanged; connector_only opts into the lightweight tier.
+    compute_profile: str = "persistent_workspace"
+
     triggers: list[AutomationTriggerIn] = Field(..., min_length=1)
     # Phase A (#470) lifted the 1-action cap. The workflow engine in
     # services/workflows/ walks ordinal-ordered actions when there are
@@ -369,6 +373,15 @@ class AutomationDefinitionIn(BaseModel):
         }
         if v not in allowed:
             raise ValueError(f"workspace_scope must be one of {sorted(allowed)!r}, got {v!r}")
+        return v
+
+    @field_validator("compute_profile")
+    @classmethod
+    def _validate_profile(cls, v: str) -> str:
+        # Phase B (#471). Mirrors the CHECK on automation_definitions.
+        allowed = {"connector_only", "ephemeral_workspace", "persistent_workspace"}
+        if v not in allowed:
+            raise ValueError(f"compute_profile must be one of {sorted(allowed)!r}, got {v!r}")
         return v
 
     @model_validator(mode="after")
@@ -485,6 +498,7 @@ class AutomationDefinitionUpdate(BaseModel):
     max_compute_tier: int | None = None
     max_spend_per_run_usd: Decimal | None = None
     max_spend_per_day_usd: Decimal | None = None
+    compute_profile: str | None = None
 
     triggers: list[AutomationTriggerIn] | None = None
     actions: list[AutomationActionIn] | None = None
@@ -514,13 +528,15 @@ class AutomationDefinitionUpdate(BaseModel):
 
     @field_validator("actions")
     @classmethod
-    def _exactly_one_action(
+    def _actions_within_cap(
         cls, v: list[AutomationActionIn] | None
     ) -> list[AutomationActionIn] | None:
+        # Phase A (#470) lifted the 1-action cap. The workflow engine
+        # walks ordinal-ordered actions when there is more than one.
         if v is None:
             return v
-        if len(v) != 1:
-            raise ValueError("phase 1 supports exactly one action per automation")
+        if len(v) > 64:
+            raise ValueError("automation may not have more than 64 actions")
         return v
 
     @model_validator(mode="after")
@@ -645,6 +661,7 @@ class AutomationDefinitionOut(BaseModel):
     max_compute_tier: int
     max_spend_per_run_usd: Decimal | None
     max_spend_per_day_usd: Decimal | None
+    compute_profile: str = "persistent_workspace"
     parent_automation_id: UUID | None
     depth: int
     is_active: bool
