@@ -32,6 +32,15 @@ images:
   - name: tesslate-devserver
     newName: tesslate-devserver
     newTag: latest
+  - name: tesslate-btrfs-csi
+    newName: tesslate-btrfs-csi
+    newTag: latest
+  - name: tesslate-ast
+    newName: tesslate-ast
+    newTag: latest
+  - name: tesslate-marketplace
+    newName: tesslate-marketplace
+    newTag: latest
 ```
 
 **Loading Images**:
@@ -238,6 +247,10 @@ minikube -p tesslate addons enable ingress
 ### 2. Build and Load Images
 
 ```bash
+# Recommended: use the Swiss Knife script (builds all 6 images automatically)
+scripts/minikube.sh start
+
+# Manual: build each image individually
 # Backend
 docker build --no-cache -t tesslate-backend:latest -f orchestrator/Dockerfile .
 minikube -p tesslate image load tesslate-backend:latest
@@ -246,9 +259,21 @@ minikube -p tesslate image load tesslate-backend:latest
 docker build --no-cache -t tesslate-frontend:latest -f app/Dockerfile.prod app/
 minikube -p tesslate image load tesslate-frontend:latest
 
-# Devserver
+# Devserver (base image for user project containers)
 docker build --no-cache -t tesslate-devserver:latest -f orchestrator/Dockerfile.devserver .
 minikube -p tesslate image load tesslate-devserver:latest
+
+# btrfs-CSI (storage driver + Volume Hub)
+docker build --no-cache -t tesslate-btrfs-csi:latest -f services/btrfs-csi/Dockerfile services/btrfs-csi
+minikube -p tesslate image load tesslate-btrfs-csi:latest
+
+# AST (sidecar in backend pod)
+docker build --no-cache -t tesslate-ast:latest -f services/ast/Dockerfile services/ast
+minikube -p tesslate image load tesslate-ast:latest
+
+# Marketplace (federated catalog service)
+docker build --no-cache -t tesslate-marketplace:latest -f packages/tesslate-marketplace/Dockerfile packages/tesslate-marketplace
+minikube -p tesslate image load tesslate-marketplace:latest
 ```
 
 ### 3. Create Secrets

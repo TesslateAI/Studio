@@ -15,7 +15,7 @@
 #   deploy-k8s         Reapply app manifests and restart pods
 #   deploy-compute     Reapply btrfs-CSI + Volume Hub manifests
 #   rebuild <svc>      Rebuild image, load into minikube, restart pod
-#   rebuild --all      Rebuild all images (backend, frontend, devserver, btrfs-csi, ast)
+#   rebuild --all      Rebuild all images (backend, frontend, devserver, btrfs-csi, ast, marketplace)
 #   restart [svc]      Restart pod(s) for a service
 #
 # Operations:
@@ -68,13 +68,14 @@ MINIKUBE_NODES="${MINIKUBE_NODES:-1}"
 resolve_k8s() {
   local name="${1:-backend}"
   case "$name" in
-    backend)  echo "tesslate-backend" ;;
-    frontend) echo "tesslate-frontend" ;;
-    worker)   echo "tesslate-worker" ;;
-    ast)      echo "tesslate-ast" ;;
-    postgres) echo "postgres" ;;
-    redis)    echo "redis" ;;
-    *)        echo "$name" ;;
+    backend)     echo "tesslate-backend" ;;
+    frontend)    echo "tesslate-frontend" ;;
+    worker)      echo "tesslate-worker" ;;
+    ast)         echo "tesslate-ast" ;;
+    marketplace) echo "tesslate-marketplace" ;;
+    postgres)    echo "postgres" ;;
+    redis)       echo "redis" ;;
+    *)           echo "$name" ;;
   esac
 }
 
@@ -82,13 +83,14 @@ resolve_k8s() {
 resolve_label() {
   local name="${1:-backend}"
   case "$name" in
-    backend)  echo "tesslate-backend" ;;
-    frontend) echo "tesslate-frontend" ;;
-    worker)   echo "tesslate-worker" ;;
-    ast)      echo "tesslate-ast" ;;
-    postgres) echo "postgres" ;;
-    redis)    echo "redis" ;;
-    *)        echo "$name" ;;
+    backend)     echo "tesslate-backend" ;;
+    frontend)    echo "tesslate-frontend" ;;
+    worker)      echo "tesslate-worker" ;;
+    ast)         echo "tesslate-ast" ;;
+    marketplace) echo "tesslate-marketplace" ;;
+    postgres)    echo "postgres" ;;
+    redis)       echo "redis" ;;
+    *)           echo "$name" ;;
   esac
 }
 
@@ -100,33 +102,36 @@ image_name() {
     devserver)  echo "tesslate-devserver" ;;
     btrfs-csi)  echo "tesslate-btrfs-csi" ;;
     ast)        echo "tesslate-ast" ;;
-    markitdown) echo "tesslate-markitdown" ;;
-    deerflow)   echo "tesslate-deerflow" ;;
+    markitdown)   echo "tesslate-markitdown" ;;
+    deerflow)     echo "tesslate-deerflow" ;;
+    marketplace)  echo "tesslate-marketplace" ;;
     *) echo "" ;;
   esac
 }
 
 image_dockerfile() {
   case "$1" in
-    backend)    echo "orchestrator/Dockerfile" ;;
-    frontend)   echo "app/Dockerfile.prod" ;;
-    devserver)  echo "orchestrator/Dockerfile.devserver" ;;
-    btrfs-csi)  echo "services/btrfs-csi/Dockerfile" ;;
-    ast)        echo "services/ast/Dockerfile" ;;
-    markitdown) echo "seeds/apps/markitdown/Dockerfile" ;;
-    deerflow)   echo "seeds/apps/deer-flow/Dockerfile" ;;
+    backend)      echo "orchestrator/Dockerfile" ;;
+    frontend)     echo "app/Dockerfile.prod" ;;
+    devserver)    echo "orchestrator/Dockerfile.devserver" ;;
+    btrfs-csi)    echo "services/btrfs-csi/Dockerfile" ;;
+    ast)          echo "services/ast/Dockerfile" ;;
+    markitdown)   echo "seeds/apps/markitdown/Dockerfile" ;;
+    deerflow)     echo "seeds/apps/deer-flow/Dockerfile" ;;
+    marketplace)  echo "packages/tesslate-marketplace/Dockerfile" ;;
   esac
 }
 
 image_context() {
   case "$1" in
-    backend)    echo "." ;;
-    frontend)   echo "app" ;;
-    devserver)  echo "." ;;
-    btrfs-csi)  echo "services/btrfs-csi" ;;
-    ast)        echo "services/ast" ;;
-    markitdown) echo "seeds/apps/markitdown" ;;
-    deerflow)   echo "seeds/apps/deer-flow" ;;
+    backend)      echo "." ;;
+    frontend)     echo "app" ;;
+    devserver)    echo "." ;;
+    btrfs-csi)    echo "services/btrfs-csi" ;;
+    ast)          echo "services/ast" ;;
+    markitdown)   echo "seeds/apps/markitdown" ;;
+    deerflow)     echo "seeds/apps/deer-flow" ;;
+    marketplace)  echo "packages/tesslate-marketplace" ;;
   esac
 }
 
@@ -334,8 +339,18 @@ cmd_start() {
     success "Minikube cluster started"
   fi
 
+  # Enable server-snippet annotations in NGINX ingress controller.
+  # The main ingress uses a server-snippet to block /api/internal/* at the
+  # edge.  Newer NGINX ingress versions disable snippets by default.
+  info "Configuring NGINX ingress to allow snippet annotations..."
+  $KC patch configmap ingress-nginx-controller -n ingress-nginx \
+    --type merge -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical"}}' \
+    2>/dev/null || warn "Could not patch ingress-nginx configmap (ingress may not be ready yet)"
+  $KC rollout restart deployment/ingress-nginx-controller -n ingress-nginx 2>/dev/null || true
+  $KC rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s 2>/dev/null || true
+
   # Ensure all images are loaded (app + infrastructure)
-  for svc in backend frontend devserver btrfs-csi; do
+  for svc in backend frontend devserver btrfs-csi ast marketplace; do
     local img
     img="$(image_name "$svc"):latest"
     if ! minikube -p "$PROFILE" ssh -- docker image inspect "$img" &>/dev/null 2>&1; then
@@ -385,6 +400,7 @@ cmd_start() {
   wait_for_rollout "postgres" 120
   wait_for_rollout "tesslate-backend" 180
   wait_for_rollout "tesslate-frontend" 120
+  wait_for_rollout "tesslate-marketplace" 180
 
   success "All services deployed"
   echo ""
@@ -459,7 +475,7 @@ cmd_rebuild() {
   done
 
   if [[ "$target" == "--all" ]]; then
-    for svc in backend frontend devserver btrfs-csi ast; do
+    for svc in backend frontend devserver btrfs-csi ast marketplace; do
       build_and_load "$svc" "$cache_flag"
     done
     info "Restarting all pods..."
@@ -468,6 +484,7 @@ cmd_rebuild() {
     $KC delete pod -n kube-system -l app=tesslate-btrfs-csi-node
     wait_for_rollout "tesslate-backend" 180  # ast sidecar comes up with backend
     wait_for_rollout "tesslate-frontend" 120
+    wait_for_rollout "tesslate-marketplace" 180
     $KC rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
     $KC rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
     success "Full rebuild complete"
@@ -475,14 +492,14 @@ cmd_rebuild() {
   fi
 
   if [[ -z "$target" ]]; then
-    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|ast|markitdown|deerflow|--all> [--no-cache]"
+    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|ast|marketplace|markitdown|deerflow|--all> [--no-cache]"
     exit 1
   fi
 
   local img
   img=$(image_name "$target")
   if [[ -z "$img" ]]; then
-    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, ast, markitdown, deerflow, --all"
+    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, ast, marketplace, markitdown, deerflow, --all"
     exit 1
   fi
 
@@ -887,7 +904,7 @@ _usage() {
   echo "Deploy:"
   echo "  deploy-k8s         Reapply app manifests and restart pods"
   echo "  deploy-compute     Reapply btrfs-CSI + Volume Hub manifests"
-  echo "  rebuild <svc>      Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|ast|--all)"
+  echo "  rebuild <svc>      Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|ast|marketplace|--all)"
   echo "  restart [svc]      Restart pod(s) for a service"
   echo ""
   echo "Operations:"
@@ -906,7 +923,7 @@ _usage() {
   echo "  cf status          Show tunnel status"
   echo "  cf logs            Tail cloudflared logs"
   echo ""
-  echo "Services: backend, frontend, worker, postgres, redis, devserver, btrfs-csi"
+  echo "Services: backend, frontend, worker, postgres, redis, devserver, btrfs-csi, ast, marketplace"
 }
 
 main() {

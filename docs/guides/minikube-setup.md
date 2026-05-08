@@ -202,16 +202,22 @@ kubectl --context=tesslate -n tesslate create secret generic llama-api-credentia
 ### Build and load the application images
 
 ```bash
-docker build -t tesslate-backend:latest    -f orchestrator/Dockerfile          .
-docker build -t tesslate-frontend:latest   -f app/Dockerfile.prod              app/
-docker build -t tesslate-devserver:latest  -f orchestrator/Dockerfile.devserver .
+docker build -t tesslate-backend:latest      -f orchestrator/Dockerfile                    .
+docker build -t tesslate-frontend:latest     -f app/Dockerfile.prod                        app/
+docker build -t tesslate-devserver:latest    -f orchestrator/Dockerfile.devserver           .
+docker build -t tesslate-btrfs-csi:latest    -f services/btrfs-csi/Dockerfile              services/btrfs-csi
+docker build -t tesslate-ast:latest          -f services/ast/Dockerfile                    services/ast
+docker build -t tesslate-marketplace:latest  -f packages/tesslate-marketplace/Dockerfile   packages/tesslate-marketplace
 
 minikube -p tesslate image load tesslate-backend:latest
 minikube -p tesslate image load tesslate-frontend:latest
 minikube -p tesslate image load tesslate-devserver:latest
+minikube -p tesslate image load tesslate-btrfs-csi:latest
+minikube -p tesslate image load tesslate-ast:latest
+minikube -p tesslate image load tesslate-marketplace:latest
 ```
 
-The devserver image is the base image used for every user project container. The minikube overlay sets `K8S_DEVSERVER_IMAGE=tesslate-devserver:latest` and `K8S_IMAGE_PULL_POLICY=Never`, so the image must already exist inside the node before any project starts.
+The devserver image is the base image used for every user project container. The AST image runs as a sidecar in the backend pod. The marketplace image runs the federated catalog service. The minikube overlay sets `K8S_DEVSERVER_IMAGE=tesslate-devserver:latest` and `K8S_IMAGE_PULL_POLICY=Never`, so all images must already exist inside the node before any service starts.
 
 ### Deploy MinIO
 

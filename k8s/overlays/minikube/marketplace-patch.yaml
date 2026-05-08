@@ -15,6 +15,8 @@ spec:
   template:
     spec:
       initContainers:
+      - name: create-database
+        imagePullPolicy: IfNotPresent
       - name: alembic-migrate
         imagePullPolicy: Never
       containers:
