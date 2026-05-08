@@ -1,8 +1,14 @@
 /**
- * AppInstallWizard — compat gating + step navigation.
+ * AppInstallWizard — compat gating + install button enablement.
+ *
+ * The Phase 5 rewrite collapsed the multi-step wizard into a single
+ * `AppInstallModal` review screen with collapsible advanced sections.
+ * `AppInstallWizard` is now a thin forwarding wrapper. The previous
+ * `compat-step` / `wallet-step` / `wizard-next` testids no longer
+ * exist; gating happens via `compat-blocker` + `install-confirm-btn`.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('../../config', () => ({
   config: { API_URL: 'http://test' },
@@ -33,6 +39,24 @@ vi.mock('../../contexts/TeamContext', () => ({
 
 import { AppInstallWizard } from '../../components/apps/AppInstallWizard';
 
+const baseVersion = {
+  id: 'v1',
+  app_id: 'a1',
+  version: '1.0.0',
+  manifest_schema_version: '1',
+  manifest_hash: 'h',
+  bundle_hash: 'b',
+  approval_state: 'approved',
+  yanked_at: null,
+  yanked_reason: null,
+  yanked_is_critical: false,
+  published_at: null,
+  created_at: '',
+  manifest_json: {},
+  feature_set_hash: 'x',
+  required_features: [],
+};
+
 describe('AppInstallWizard', () => {
   beforeEach(() => {
     getVersion.mockReset();
@@ -40,24 +64,8 @@ describe('AppInstallWizard', () => {
     installApp.mockReset();
   });
 
-  it('blocks advancement when compat.compatible=false', async () => {
-    getVersion.mockResolvedValue({
-      id: 'v1',
-      app_id: 'a1',
-      version: '1.0.0',
-      manifest_schema_version: '1',
-      manifest_hash: 'h',
-      bundle_hash: 'b',
-      approval_state: 'approved',
-      yanked_at: null,
-      yanked_reason: null,
-      yanked_is_critical: false,
-      published_at: null,
-      created_at: '',
-      manifest_json: {},
-      feature_set_hash: 'x',
-      required_features: [],
-    });
+  it('disables install and shows compat-blocker when compat.compatible=false', async () => {
+    getVersion.mockResolvedValue(baseVersion);
     compat.mockResolvedValue({
       compatible: false,
       missing_features: ['feature.x'],
@@ -76,30 +84,14 @@ describe('AppInstallWizard', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('compat-step')).toBeInTheDocument();
+      expect(screen.getByTestId('compat-blocker')).toBeInTheDocument();
     });
     expect(screen.getByText(/not compatible/i)).toBeInTheDocument();
-    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+    expect(screen.getByTestId('install-confirm-btn')).toBeDisabled();
   });
 
-  it('allows advancing to wallet step when compatible', async () => {
-    getVersion.mockResolvedValue({
-      id: 'v1',
-      app_id: 'a1',
-      version: '1.0.0',
-      manifest_schema_version: '1',
-      manifest_hash: 'h',
-      bundle_hash: 'b',
-      approval_state: 'approved',
-      yanked_at: null,
-      yanked_reason: null,
-      yanked_is_critical: false,
-      published_at: null,
-      created_at: '',
-      manifest_json: {},
-      feature_set_hash: 'x',
-      required_features: [],
-    });
+  it('enables install when compat.compatible=true with a selected team', async () => {
+    getVersion.mockResolvedValue(baseVersion);
     compat.mockResolvedValue({
       compatible: true,
       missing_features: [],
@@ -117,14 +109,11 @@ describe('AppInstallWizard', () => {
       />
     );
 
+    // Wait for the compat fetch to resolve — install button enables
+    // once compat.compatible flips and the active team is preselected.
     await waitFor(() => {
-      expect(screen.getByTestId('compat-step')).toBeInTheDocument();
+      expect(screen.getByTestId('install-confirm-btn')).not.toBeDisabled();
     });
-    const next = screen.getByTestId('wizard-next');
-    expect(next).not.toBeDisabled();
-    fireEvent.click(next);
-    await waitFor(() => {
-      expect(screen.getByTestId('wallet-step')).toBeInTheDocument();
-    });
+    expect(screen.queryByTestId('compat-blocker')).not.toBeInTheDocument();
   });
 });

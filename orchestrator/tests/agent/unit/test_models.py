@@ -269,14 +269,24 @@ class TestCreateModelAdapter:
             assert adapter.max_tokens == 3000
 
     @pytest.mark.asyncio
-    async def test_create_adapter_anthropic_provider_unsupported(self, mock_user_id, mock_db):
-        """Test that native Anthropic provider raises ValueError (unsupported)."""
-        with pytest.raises(ValueError) as exc_info:
-            await create_model_adapter(
-                model_name="claude-3-opus", user_id=mock_user_id, db=mock_db, provider="anthropic"
+    async def test_create_adapter_anthropic_provider_supported(self, mock_user_id, mock_db):
+        """Anthropic provider is now served via the OpenAI-compatible adapter
+        (Anthropic exposes a Bearer-auth /v1 chat.completions surface). The
+        adapter must be created without raising — get_llm_client handles the
+        provider-specific base URL and auth wiring."""
+        with patch("app.services.model_adapters.get_llm_client") as mock_get_client:
+            mock_client = AsyncMock()
+            mock_get_client.return_value = mock_client
+
+            adapter = await create_model_adapter(
+                model_name="claude-3-opus",
+                user_id=mock_user_id,
+                db=mock_db,
+                provider="anthropic",
             )
 
-        assert "Unsupported provider" in str(exc_info.value)
+        assert isinstance(adapter, OpenAIAdapter)
+        assert adapter.model_name == "claude-3-opus"
 
     @pytest.mark.asyncio
     async def test_create_adapter_unsupported_provider(self, mock_user_id, mock_db):

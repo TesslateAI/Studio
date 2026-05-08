@@ -1827,10 +1827,8 @@ class ComputeManager:
             container_resources = dict(container.resources) if container.resources else None
             readiness_port = None
             if container_resources and "readiness_port" in container_resources:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     readiness_port = int(container_resources.pop("readiness_port"))
-                except (ValueError, TypeError):
-                    pass
                 if not container_resources:
                     container_resources = None
 

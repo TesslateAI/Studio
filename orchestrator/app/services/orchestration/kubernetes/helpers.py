@@ -1438,11 +1438,15 @@ def create_v2_dev_deployment(
     # Working directory inside container
     effective_dir = working_directory or container_directory
     if use_image_source:
-        # Image is the source of truth — never cd into a manifest-declared
-        # directory. The image's own WORKDIR is authoritative. Injecting any
-        # cd prefix would break images whose baked-in source is not at that
-        # path (postgres, mirofish, markitdown, etc.).
-        working_dir_prefix = ""
+        # Image strategy: by default the image's own WORKDIR is authoritative
+        # (postgres, mirofish, markitdown, etc. would break if we cd'd into
+        # /app/<dir>). When the manifest *explicitly* sets working_directory
+        # we cd into that path RELATIVE to the image WORKDIR (no /app prefix)
+        # so multi-service image layouts can pick a baked-in subdirectory.
+        if working_directory and working_directory not in (".", ""):
+            working_dir_prefix = f"cd {working_directory} && "
+        else:
+            working_dir_prefix = ""
     else:
         working_dir = "/app" if effective_dir in (".", "") else f"/app/{effective_dir}"
         working_dir_prefix = f"mkdir -p {working_dir} && cd {working_dir} && "
