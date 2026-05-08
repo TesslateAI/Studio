@@ -6,9 +6,9 @@ models:
   - name: primary
     display_name: Tesslate LLM
     use: langchain_openai:ChatOpenAI
-    model: ${LLM_MODEL:-Llama-4-Maverick-17B-128E-Instruct-FP8}
-    api_key: ${LLM_API_KEY}
-    base_url: ${LLM_BASE_URL:-https://api.llama.com/compat/v1/}
+    model: $LLM_MODEL
+    api_key: $LLM_API_KEY
+    base_url: $LLM_BASE_URL
 
 default_model: primary
 

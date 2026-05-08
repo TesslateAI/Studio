@@ -237,6 +237,7 @@ class AppConfig:
     # The K8s pod renderer merges these onto the platform defaults so a
     # heavy app can opt into more memory without forking the runtime.
     # Empty / None → platform defaults apply.
+    readiness_port: int | None = None
     resources: dict[str, str] | None = None
     env: dict[str, str] = field(default_factory=dict)
     exports: dict[str, str] = field(default_factory=dict)
@@ -392,6 +393,7 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             image=app_data.get("image") or None,
             source_strategy=app_data.get("source_strategy") or None,
             state_mount_path=app_data.get("state_mount_path") or None,
+            readiness_port=app_data.get("readiness_port") or None,
             resources=resources,
             env=app_data.get("env", {}),
             exports=app_data.get("exports", {}),

@@ -1821,6 +1821,19 @@ class ComputeManager:
                 else settings.k8s_image_pull_policy
             )
 
+            # Extract readiness_port from resources JSON (stashed there to
+            # avoid a DB migration). Strip it before passing resources to
+            # the K8s renderer which only expects resource-quantity keys.
+            container_resources = dict(container.resources) if container.resources else None
+            readiness_port = None
+            if container_resources and "readiness_port" in container_resources:
+                try:
+                    readiness_port = int(container_resources.pop("readiness_port"))
+                except (ValueError, TypeError):
+                    pass
+                if not container_resources:
+                    container_resources = None
+
             deployment = create_v2_dev_deployment(
                 namespace=namespace,
                 project_id=project.id,
@@ -1855,17 +1868,21 @@ class ComputeManager:
                 # 2026-05 — per-container resource overrides from the
                 # manifest. NULL → renderer applies platform defaults
                 # (256Mi req / 1Gi limit / 50m req / 1000m limit).
-                resources=container.resources,
+                resources=container_resources,
+                readiness_port=readiness_port,
             )
             await k8s.create_deployment(deployment, namespace)
 
             # Service + Ingress
+            # When readiness_port is set, the app's entry point is on that
+            # port (e.g. nginx reverse proxy), not the PORT env port.
+            service_port = readiness_port or port
             service = create_service_manifest(
                 namespace=namespace,
                 project_id=project.id,
                 container_id=container.id,
                 container_directory=container_directory,
-                port=port,
+                port=service_port,
             )
             await k8s.create_service(service, namespace)
 
@@ -1897,7 +1914,7 @@ class ComputeManager:
                 container_id=container.id,
                 container_directory=container_directory,
                 project_slug=project.slug,
-                port=port,
+                port=service_port,
                 domain=settings.app_domain,
                 ingress_class=settings.k8s_ingress_class,
                 tls_secret=settings.k8s_wildcard_tls_secret or None,

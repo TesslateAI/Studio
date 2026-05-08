@@ -38,6 +38,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _merge_readiness_port(
+    resources: dict[str, str] | None, readiness_port: int | None
+) -> dict | None:
+    """Stash readiness_port inside the resources JSON to avoid a DB migration."""
+    if readiness_port is None:
+        return resources or None
+    merged = dict(resources) if resources else {}
+    merged["readiness_port"] = str(readiness_port)
+    return merged
+
+
 class BundleConfigMissing(Exception):
     """The materialized volume has no readable .tesslate/config.json.
 
@@ -154,7 +165,7 @@ async def materialize_compute_from_volume(
             # defaults apply in the K8s renderer; non-null dict is a
             # whitelist-filtered subset of {memory_request, memory_limit,
             # cpu_request, cpu_limit} from the manifest.
-            resources=app_cfg.resources or None,
+            resources=_merge_readiness_port(app_cfg.resources, app_cfg.readiness_port),
             exports=app_cfg.exports or None,
             container_type="base",
             status="stopped",

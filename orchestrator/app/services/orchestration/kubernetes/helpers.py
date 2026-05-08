@@ -1378,6 +1378,7 @@ def create_v2_dev_deployment(
     source_strategy: str | None = None,
     state_mount_path: str | None = None,
     resources: dict[str, str] | None = None,
+    readiness_port: int | None = None,
 ) -> client.V1Deployment:
     """
     Create a v2 dev container deployment using CSI-backed PVC volumes.
@@ -1516,6 +1517,12 @@ def create_v2_dev_deployment(
         # ``resources`` shape was filtered upstream by the federated
         # converter, so we trust the keys here.
         resources=_merge_resource_overrides(resources),
+        # Image-based apps run as whatever user the image defines (often
+        # root). Bundle-based apps are user code — lock to uid 1000.
+        security_context=client.V1SecurityContext(
+            allow_privilege_escalation=False,
+            **({"run_as_non_root": True, "run_as_user": 1000} if not use_image_source else {}),
+        ),
         startup_probe=client.V1Probe(
             _exec=client.V1ExecAction(command=[tsinit_path, "health", "/tmp/tsinit.sock"]),
             initial_delay_seconds=2,
@@ -1524,7 +1531,7 @@ def create_v2_dev_deployment(
             failure_threshold=30,
         ),
         readiness_probe=client.V1Probe(
-            http_get=client.V1HTTPGetAction(path="/", port=port),
+            http_get=client.V1HTTPGetAction(path="/", port=readiness_port or port),
             initial_delay_seconds=5,
             period_seconds=5,
             timeout_seconds=3,
@@ -1553,9 +1560,6 @@ def create_v2_dev_deployment(
             "cp /usr/local/bin/tsinit /opt/bin/tsinit && chmod 0755 /opt/bin/tsinit",
         ],
         volume_mounts=[client.V1VolumeMount(name="tsinit-bin", mount_path="/opt/bin")],
-        # Init runs as the same uid as the main container. tsinit is owned
-        # by root in devserver but world-readable / world-executable, so the
-        # cp below works without root.
         security_context=client.V1SecurityContext(
             run_as_non_root=True, run_as_user=1000, allow_privilege_escalation=False
         ),
@@ -1583,8 +1587,12 @@ def create_v2_dev_deployment(
                 empty_dir=client.V1EmptyDirVolumeSource(medium="Memory", size_limit="16Mi"),
             ),
         ],
+        # Bundle apps: lock the entire pod to uid 1000.
+        # Image apps: let the image's baked-in user run (often root);
+        # only set fsGroup so the PVC state volume is group-writable.
         security_context=client.V1PodSecurityContext(
-            run_as_non_root=True, run_as_user=1000, fs_group=1000
+            **({"run_as_non_root": True, "run_as_user": 1000} if not use_image_source else {}),
+            fs_group=1000,
         ),
     )
 

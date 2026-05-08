@@ -264,6 +264,15 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
             elif isinstance(state_mount_default, str) and state_mount_default:
                 state_mount_path = state_mount_default
 
+        readiness_port = container.get("readiness_port")
+        if isinstance(readiness_port, int):
+            pass
+        elif isinstance(ports, list) and len(ports) > 1:
+            # No explicit readiness_port — default to ports[0] (same as port)
+            readiness_port = None
+        else:
+            readiness_port = None
+
         app_entry: dict[str, Any] = {
             "directory": container.get("directory") or ".",
             "port": port,
@@ -277,6 +286,8 @@ def derive_tesslate_config_from_manifest(manifest: dict[str, Any]) -> dict[str, 
             "source_strategy": source_strategy,
             "env": env,
         }
+        if readiness_port is not None:
+            app_entry["readiness_port"] = readiness_port
         if state_mount_path:
             app_entry["state_mount_path"] = state_mount_path
         # Per-container resource overrides. Manifest shape:

@@ -6860,7 +6860,11 @@ async def check_container_health(
         external_url = f"{settings.k8s_container_url_protocol}://{project.slug}-{container_dir}.{settings.app_domain}"
         # Internal URL for health check (always reachable from within cluster)
         # Service naming: dev-{container_dir} in namespace proj-{project.id}
-        service_port = container.effective_port
+        # When readiness_port is set (stashed in resources JSON), the K8s
+        # Service exposes that port instead of effective_port.
+        _res = container.resources or {}
+        _rp = _res.get("readiness_port") if isinstance(_res, dict) else None
+        service_port = int(_rp) if _rp else container.effective_port
         health_check_url = (
             f"http://dev-{container_dir}.proj-{project.id}.svc.cluster.local:{service_port}"
         )

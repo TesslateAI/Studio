@@ -233,10 +233,14 @@ build_and_load() {
   # `docker save` / `minikube image load` can't find it.
   docker buildx build --load $cache_flag -t "$img" -f "$dockerfile" "$context"
 
-  # Remove the old image from ALL minikube nodes before loading to prevent
-  # stale cached layers from being served instead of the new build.
-  # `minikube image load` distributes to all nodes, but stale tags on
-  # worker nodes can cause pods to run the old image.
+  load_image_to_minikube "$img"
+  success "$img built and loaded"
+}
+
+# Remove stale image tags from all minikube nodes, then load image.
+# Shared by build_and_load (local builds) and pull_and_load (remote pulls).
+load_image_to_minikube() {
+  local img="$1"
   info "Loading $img into minikube..."
   local nodes
   nodes=$(minikube -p "$PROFILE" node list 2>/dev/null | awk '{print $1}')
@@ -244,7 +248,60 @@ build_and_load() {
     minikube -p "$PROFILE" ssh -n "$node" -- docker rmi -f "$img" 2>/dev/null || true
   done
   minikube -p "$PROFILE" image load "$img"
-  success "$img built and loaded"
+}
+
+# Pull a remote image and load it into minikube.
+pull_and_load() {
+  local img="$1"
+  info "Pulling $img..."
+  docker pull "$img"
+  load_image_to_minikube "$img"
+  success "$img pulled and loaded"
+}
+
+# Walk seed app manifests and pre-load any container images that use
+# source_strategy=image. Builds locally when a Dockerfile exists in the
+# seed dir, otherwise pulls the remote image. Idempotent — skips images
+# already present in minikube.
+preload_seed_images() {
+  header "Pre-loading seed app images"
+  local manifest
+  for manifest in "$PROJECT_ROOT"/seeds/apps/*/app.manifest.json; do
+    [[ -f "$manifest" ]] || continue
+    local app_dir
+    app_dir="$(dirname "$manifest")"
+    local images
+    images=$(python3 -c "
+import json, sys
+m = json.load(open(sys.argv[1]))
+for c in m.get('compute', {}).get('containers', []):
+    if c.get('source_strategy') == 'image' and c.get('image'):
+        print(c['image'])
+" "$manifest" 2>/dev/null) || continue
+    [[ -z "$images" ]] && continue
+
+    local img
+    while IFS= read -r img; do
+      [[ -z "$img" ]] && continue
+      # Skip if already in minikube
+      if minikube -p "$PROFILE" ssh -- docker image inspect "$img" &>/dev/null 2>&1; then
+        info "Image $img already loaded, skipping"
+        continue
+      fi
+      # Local Dockerfile → build, otherwise pull remote
+      if [[ -f "$app_dir/Dockerfile" ]]; then
+        info "Image $img not found — building from $app_dir/Dockerfile..."
+        docker buildx build --load -t "$img" -f "$app_dir/Dockerfile" "$app_dir" \
+          && load_image_to_minikube "$img" \
+          && success "$img built and loaded" \
+          || warn "Failed to build $img (non-fatal)"
+      else
+        pull_and_load "$img" \
+          || warn "Failed to pull $img (non-fatal)"
+      fi
+    done <<< "$images"
+  done
+  success "Seed image pre-load complete"
 }
 
 # ── Init (secret generation) ──────────────────────────────────────────
@@ -615,6 +672,8 @@ cmd_migrate() {
 cmd_seed() {
   ensure_minikube
   wait_for_backend_ready
+
+  preload_seed_images
 
   header "Seeding database"
 

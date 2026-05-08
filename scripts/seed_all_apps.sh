@@ -100,6 +100,24 @@ else
 fi
 
 # ────────────────────────────────────────────────────────────────────────────
+# 2b. Ensure the zep-credentials secret exists (used by mirofish).
+# ────────────────────────────────────────────────────────────────────────────
+if [[ -n "${ZEP_API_KEY:-}" ]]; then
+  say "upsert zep-credentials secret in $NS"
+  kubectl --context="$CTX" -n "$NS" create secret generic zep-credentials \
+    --from-literal=api_key="$ZEP_API_KEY" \
+    --dry-run=client -o yaml | kubectl --context="$CTX" -n "$NS" apply -f -
+else
+  if ! kubectl --context="$CTX" -n "$NS" get secret zep-credentials >/dev/null 2>&1; then
+    warn "zep-credentials not present in $NS namespace and ZEP_API_KEY not set"
+    warn "mirofish will fail to start without a Zep API key"
+    warn "get a free key at https://app.getzep.com/ then:"
+    warn "  kubectl --context=$CTX -n $NS create secret generic zep-credentials \\"
+    warn "    --from-literal=api_key='<your-key>'"
+  fi
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
 # 3. Roll the backend so TSL_APPS_DEV_AUTO_APPROVE + bumped project caps
 #    are picked up.
 # ────────────────────────────────────────────────────────────────────────────

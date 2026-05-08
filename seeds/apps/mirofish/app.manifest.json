@@ -4,7 +4,7 @@
     "id": "com.666ghj.mirofish",
     "slug": "mirofish",
     "name": "MiroFish",
-    "version": "0.1.6",
+    "version": "0.2.2",
     "description": "Swarm-intelligence multi-agent prediction engine. Uploads a seed report or novel, runs thousands of persona-driven agents in a simulated world, and returns a prediction report. Requires an OpenAI-compatible LLM API key.",
     "category": "research",
     "forkable": "restricted"
@@ -36,11 +36,20 @@
           "LLM_API_KEY": "${secret:llama-api-credentials/api_key}",
           "LLM_BASE_URL": "https://api.llama.com/compat/v1/",
           "LLM_MODEL_NAME": "Llama-4-Maverick-17B-128E-Instruct-FP8",
-          "UV_CACHE_DIR": "/data/.cache/uv"
+          "ZEP_API_KEY": "${secret:zep-credentials/api_key}",
+          "UV_NO_CACHE": "1"
         }
       }
     ],
-    "connections": []
+    "connections": [],
+    "credentials": [
+      {
+        "secret_ref": "zep-credentials/api_key",
+        "label": "Zep API Key",
+        "description": "Memory graph service — get a free key at https://app.getzep.com/",
+        "required": true
+      }
+    ]
   },
   "surfaces": [
     {
@@ -50,7 +59,7 @@
   ],
   "state": {
     "model": "per-install-volume",
-    "volume_size": "2Gi",
+    "volume_size": "10Gi",
     "mount_path": "/data"
   },
   "billing": {

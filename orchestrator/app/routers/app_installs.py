@@ -51,6 +51,7 @@ class InstallRequest(BaseModel):
     wallet_mix_consent: dict[str, Any] = Field(default_factory=dict)
     mcp_consents: list[dict[str, Any]] = Field(default_factory=list)
     update_policy: str = "manual"
+    user_credentials: dict[str, str] = Field(default_factory=dict)
 
 
 class InstallResponse(BaseModel):
@@ -135,6 +136,65 @@ def _get_hub_client() -> HubClient:
     return HubClient(settings.volume_hub_address)
 
 
+def _provision_user_credentials(user_credentials: dict[str, str]) -> None:
+    """Create/update K8s Secrets in the platform namespace from user-provided values.
+
+    Each key in ``user_credentials`` is a ``secret_ref`` in the form
+    ``"secret-name/key"`` (matching the ``${secret:name/key}`` manifest
+    pattern). Values are grouped by secret name and upserted as Opaque
+    Secrets in the platform namespace.
+
+    Only runs in Kubernetes mode; silently returns otherwise.
+    """
+    settings = get_settings()
+    if not getattr(settings, "is_kubernetes_mode", False):
+        return
+
+    # Group refs by secret name: {"zep-credentials": {"api_key": "val"}}
+    grouped: dict[str, dict[str, str]] = {}
+    for ref, value in user_credentials.items():
+        if "/" not in ref:
+            continue
+        secret_name, key = ref.split("/", 1)
+        grouped.setdefault(secret_name, {})[key] = value
+
+    if not grouped:
+        return
+
+    from kubernetes import client as k8s_client
+    from kubernetes.client.rest import ApiException
+
+    core_v1 = k8s_client.CoreV1Api()
+    namespace = getattr(settings, "k8s_default_namespace", "tesslate")
+
+    for secret_name, string_data in grouped.items():
+        body = k8s_client.V1Secret(
+            metadata=k8s_client.V1ObjectMeta(
+                name=secret_name,
+                namespace=namespace,
+                labels={
+                    "tesslate.io/managed-by": "user-credential-install",
+                },
+            ),
+            type="Opaque",
+            string_data=string_data,
+        )
+        try:
+            core_v1.create_namespaced_secret(namespace=namespace, body=body)
+            logger.info("user_credentials: created secret=%s in ns=%s", secret_name, namespace)
+        except ApiException as exc:
+            if exc.status == 409:
+                # Secret already exists — patch with new values.
+                core_v1.patch_namespaced_secret(
+                    name=secret_name,
+                    namespace=namespace,
+                    body={"stringData": string_data},
+                )
+                logger.info("user_credentials: patched secret=%s in ns=%s", secret_name, namespace)
+            else:
+                raise
+
+
 @router.post("/install", response_model=InstallResponse, status_code=status.HTTP_201_CREATED)
 async def install_endpoint(
     payload: InstallRequest,
@@ -205,6 +265,21 @@ async def install_endpoint(
                 await close()
             except Exception:  # pragma: no cover
                 logger.debug("hub_client close failed", exc_info=True)
+
+    # Best-effort: materialize user-provided credentials as K8s Secrets in
+    # the platform namespace. At runtime start, secret_propagator copies
+    # them into the project namespace where the pod resolves them via
+    # ${secret:name/key} env var references.
+    if payload.user_credentials:
+        try:
+            _provision_user_credentials(payload.user_credentials)
+        except Exception:
+            logger.warning(
+                "install_endpoint: user credential provisioning failed for instance=%s "
+                "(install succeeded; credentials can be re-provisioned via reseed or kubectl)",
+                result.app_instance_id,
+                exc_info=True,
+            )
 
     # Best-effort: materialize per-user OAuth/API-key Secrets for any
     # ``exposure='env'`` connector grants. Failures here MUST NOT roll back

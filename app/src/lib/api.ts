@@ -4520,6 +4520,7 @@ export interface InstallRequest {
   wallet_mix_consent?: Record<string, unknown>;
   mcp_consents?: Record<string, unknown>[];
   update_policy?: UpdatePolicy;
+  user_credentials?: Record<string, string>;
 }
 
 export interface InstallResult {
