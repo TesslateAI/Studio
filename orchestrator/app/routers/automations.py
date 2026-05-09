@@ -47,7 +47,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..models import User
+from ..models import MarketplaceAgent, User
 from ..models_automations import (
     AutomationAction,
     AutomationApprovalRequest,
@@ -57,6 +57,7 @@ from ..models_automations import (
     AutomationRun,
     AutomationRunArtifact,
     AutomationTrigger,
+    InvocationSubject,
 )
 from ..permissions import Permission, get_team_membership
 from ..schemas_automations import (
@@ -78,6 +79,10 @@ from ..schemas_automations import (
     AutomationRunSummary,
     AutomationTriggerIn,
     AutomationTriggerOut,
+)
+from ..services.marketplace_agent_scope import (
+    AgentScopeError,
+    resolve_agent_in_user_scope,
 )
 from ..users import current_active_user
 
@@ -343,7 +348,35 @@ async def _replace_actions(
     db: AsyncSession,
     automation_id: UUID,
     actions: list[AutomationActionIn],
+    *,
+    user: User,
 ) -> None:
+    """Replace the action rows for an automation.
+
+    For ``agent.run`` actions, the agent UUID must be reachable for the
+    caller (existence + correct ``item_type`` + active + library scope).
+    The schema validator already enforces the wire shape (present,
+    UUID-parseable); this is the DB-aware second layer the schema can't
+    do — it needs the session and the caller identity. Resolution is
+    delegated to :func:`resolve_agent_in_user_scope` so the picker, the
+    automation API, and the apps installer all agree on what "in scope"
+    means (TC-03 Bug #21).
+    """
+    # Validate every agent.run binding BEFORE we delete the existing rows.
+    # A partial-validation failure on row N would otherwise leave the
+    # automation actionless mid-PATCH.
+    for action in actions:
+        if action.action_type != "agent.run":
+            continue
+        cfg = action.config or {}
+        # Schema validator already rejects missing / non-UUID values;
+        # this UUID(...) call is total under that contract.
+        agent_uuid = UUID(str(cfg["agent_id"]))
+        try:
+            await resolve_agent_in_user_scope(db, agent_id=agent_uuid, user=user)
+        except AgentScopeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     await db.execute(
         delete(AutomationAction).where(AutomationAction.automation_id == automation_id)
     )
@@ -586,7 +619,7 @@ async def create_automation(
     await db.flush()
 
     await _replace_triggers(db, automation.id, payload.triggers)
-    await _replace_actions(db, automation.id, payload.actions)
+    await _replace_actions(db, automation.id, payload.actions, user=user)
     await _replace_delivery_targets(db, automation.id, payload.delivery_targets)
 
     await db.commit()
@@ -650,7 +683,7 @@ async def update_automation(
     if payload.triggers is not None:
         await _replace_triggers(db, automation.id, payload.triggers)
     if payload.actions is not None:
-        await _replace_actions(db, automation.id, payload.actions)
+        await _replace_actions(db, automation.id, payload.actions, user=user)
     if payload.delivery_targets is not None:
         await _replace_delivery_targets(db, automation.id, payload.delivery_targets)
 
@@ -950,6 +983,25 @@ async def get_run(
         .all()
     )
 
+    # Resolve the agent identity from the InvocationSubject row written
+    # by the worker when the agent loaded. Single SELECT so we don't
+    # pay an N+1 across the runs list. ``ORDER BY id`` is a stable tie-break
+    # in the unlikely event a future Phase writes more than one subject
+    # per run (parent-run rollup).
+    subject_row = (
+        await db.execute(
+            select(InvocationSubject.agent_id, MarketplaceAgent.name)
+            .outerjoin(
+                MarketplaceAgent, MarketplaceAgent.id == InvocationSubject.agent_id
+            )
+            .where(InvocationSubject.automation_run_id == run_id)
+            .order_by(InvocationSubject.created_at.asc())
+            .limit(1)
+        )
+    ).first()
+    agent_id = subject_row[0] if subject_row else None
+    agent_name = subject_row[1] if subject_row else None
+
     return AutomationRunDetail(
         id=run.id,
         automation_id=run.automation_id,
@@ -965,6 +1017,8 @@ async def get_run(
         raw_output=run.raw_output,
         artifacts=[AutomationRunArtifactOut.model_validate(a) for a in artifacts],
         approval_requests=[AutomationApprovalRequestOut.model_validate(a) for a in approvals],
+        agent_id=agent_id,
+        agent_name=agent_name,
     )
 
 

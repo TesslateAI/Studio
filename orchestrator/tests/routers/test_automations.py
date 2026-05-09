@@ -86,6 +86,14 @@ def session_maker(migrated_sqlite: str):
 # ---------------------------------------------------------------------------
 
 
+# Stable UUID for the seeded system agent used by ``_good_create_payload``.
+# System agents bypass the library-scope check in
+# ``services/marketplace_agent_scope.resolve_agent_in_user_scope``, so the
+# test can reuse one fixture-seeded row across every CRUD case without
+# also needing a ``UserPurchasedAgent`` link per test user.
+_TEST_SYSTEM_AGENT_ID = uuid.UUID("00000000-0000-0000-0000-00000000a9e7")
+
+
 async def _seed_user(db) -> uuid.UUID:
     from app.models_auth import User
 
@@ -106,6 +114,43 @@ async def _seed_user(db) -> uuid.UUID:
     )
     await db.flush()
     return user_id
+
+
+async def _seed_system_agent(db) -> uuid.UUID:
+    """Insert a system MarketplaceAgent with the well-known test UUID.
+
+    Anchored to the ``tesslate-official`` system source seeded by alembic
+    ``0088_marketplace_sources`` so the NOT NULL constraint on
+    ``marketplace_agents.source_id`` is satisfied. Idempotent — a duplicate
+    insert across the same test DB returns the existing row's id.
+    """
+    from app.models import MarketplaceAgent
+
+    existing = await db.get(MarketplaceAgent, _TEST_SYSTEM_AGENT_ID)
+    if existing is not None:
+        return existing.id
+
+    # Mirrors the constant in alembic/versions/0088_marketplace_sources.py.
+    tesslate_official_source_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+    await db.execute(
+        core_insert(MarketplaceAgent.__table__).values(
+            id=_TEST_SYSTEM_AGENT_ID,
+            name="Router-Test System Agent",
+            slug="router-test-system-agent",
+            description="System agent seeded for routers/test_automations.py",
+            category="builder",
+            item_type="agent",
+            agent_type="IterativeAgent",
+            pricing_type="free",
+            source_id=tesslate_official_source_id,
+            is_active=True,
+            is_system=True,
+            is_published=True,
+        )
+    )
+    await db.flush()
+    return _TEST_SYSTEM_AGENT_ID
 
 
 # ---------------------------------------------------------------------------
@@ -201,10 +246,13 @@ def app_client(session_maker, stub_queue, stub_dispatcher):
     from app.routers import automations as automations_router
     from app.users import current_active_user
 
-    # Seed an owner user up front so the override dep can return them.
+    # Seed an owner user + the well-known system agent up front so the
+    # override dep can return the user and ``_good_create_payload`` has a
+    # valid ``agent_id`` for ``agent.run`` actions.
     async def _seed():
         async with session_maker() as db:
             uid = await _seed_user(db)
+            await _seed_system_agent(db)
             await db.commit()
             return uid
 
@@ -248,6 +296,11 @@ def _good_create_payload() -> dict[str, Any]:
     # requires a delivery_target, and a real CommunicationDestination row
     # would force every test to seed one. gateway.send-specific validation
     # has its own dedicated tests below.
+    #
+    # ``config.agent_id`` references the seeded system agent (see
+    # ``_seed_system_agent``). System agents bypass the per-user library
+    # check, so the same UUID works for every test owner without extra
+    # ``UserPurchasedAgent`` plumbing.
     return {
         "name": "router-test-automation",
         "workspace_scope": "none",
@@ -261,7 +314,7 @@ def _good_create_payload() -> dict[str, Any]:
         "actions": [
             {
                 "action_type": "agent.run",
-                "config": {"agent_id": str(uuid.uuid4()), "prompt": "noop"},
+                "config": {"agent_id": str(_TEST_SYSTEM_AGENT_ID), "prompt": "noop"},
                 "ordinal": 0,
             }
         ],
@@ -308,8 +361,16 @@ def test_create_rejects_multi_actions(app_client) -> None:
     client, _, _ = app_client
     payload = _good_create_payload()
     payload["actions"] = [
-        {"action_type": "agent.run", "config": {"prompt": "a"}, "ordinal": 0},
-        {"action_type": "agent.run", "config": {"prompt": "b"}, "ordinal": 1},
+        {
+            "action_type": "agent.run",
+            "config": {"agent_id": str(_TEST_SYSTEM_AGENT_ID), "prompt": "a"},
+            "ordinal": 0,
+        },
+        {
+            "action_type": "agent.run",
+            "config": {"agent_id": str(_TEST_SYSTEM_AGENT_ID), "prompt": "b"},
+            "ordinal": 1,
+        },
     ]
     resp = client.post("/api/automations", json=payload)
     assert resp.status_code == 422, resp.text

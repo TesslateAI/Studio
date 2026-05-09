@@ -164,6 +164,36 @@ class AutomationActionIn(BaseModel):
                     "gateway.send action requires a non-empty 'body' "
                     "(the message to send)"
                 )
+        # agent.run must declare which agent runs. Without this, the worker
+        # historically (a) crashed on ``UUID(None)`` for a missing key, (b)
+        # crashed on a non-UUID string with a leaked ValueError, or (c)
+        # silently fell back to "the first active IterativeAgent" — running
+        # the wrong agent on the user's behalf with no warning. Catch all
+        # three at the wire so the failure is a clean 422 at assign time.
+        # Existence/scope/type checks live one layer up in
+        # ``routers/automations._replace_actions`` because they need the
+        # DB session + caller identity (which Pydantic validators can't
+        # see). Order is intentional: parse here, authorize there.
+        if self.action_type == "agent.run":
+            cfg = self.config or {}
+            raw = cfg.get("agent_id")
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                raise ValueError(
+                    "agent.run action requires 'config.agent_id' (the "
+                    "marketplace agent UUID)"
+                )
+            if not isinstance(raw, str | UUID):
+                raise ValueError(
+                    f"agent.run action 'config.agent_id' must be a UUID "
+                    f"string, got {type(raw).__name__}"
+                )
+            try:
+                UUID(str(raw))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"agent.run action 'config.agent_id' is not a valid "
+                    f"UUID: {raw!r}"
+                ) from exc
         return self
 
 
@@ -503,6 +533,15 @@ class AutomationRunDetail(AutomationRunSummary):
     raw_output: Any | None = None
     artifacts: list[AutomationRunArtifactOut] = Field(default_factory=list)
     approval_requests: list[AutomationApprovalRequestOut] = Field(default_factory=list)
+    # Resolved at read time from the run's :class:`InvocationSubject` row.
+    # ``None`` means the worker never wrote the subject — typically because
+    # the agent failed to load (see ``raw_output.error``) or because the
+    # row predates the audit-identity wiring (TC-03 Bug #19). Surfacing
+    # both lets the UI render "Ran as: <name>" without an extra round-trip
+    # and lets manager dashboards attribute spend by agent without joining
+    # client-side.
+    agent_id: UUID | None = None
+    agent_name: str | None = None
 
 
 # ---------------------------------------------------------------------------

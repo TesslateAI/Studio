@@ -444,6 +444,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
         MarketplaceAgent,
         Message,
         Project,
+        User,
         UserPurchasedAgent,
     )
     from .services.agent_context import (
@@ -561,29 +562,201 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 heartbeat_task = asyncio.create_task(_heartbeat_lock(pubsub, chat_id, task_id))
 
             # 3. Load agent model
-            agent_model = None
-            if payload.agent_id:
-                result = await db.execute(
-                    select(MarketplaceAgent).where(
-                        MarketplaceAgent.id == UUID(payload.agent_id),
-                        MarketplaceAgent.is_active.is_(True),
-                    )
-                )
-                agent_model = result.scalar_one_or_none()
-            else:
-                result = await db.execute(
-                    select(MarketplaceAgent)
-                    .where(
-                        MarketplaceAgent.is_active.is_(True),
-                        MarketplaceAgent.agent_type == "IterativeAgent",
-                    )
-                    .limit(1)
-                )
-                agent_model = result.scalar_one_or_none()
+            #
+            # Resolution rules:
+            #   * Automation-driven runs (``auto_run_id`` set by the
+            #     dispatcher) MUST carry an explicit, valid ``agent_id``.
+            #     The route-level validator (``_replace_actions``) already
+            #     refuses to save an automation without one — this branch
+            #     is the run-time safety net for legacy rows that predate
+            #     the validator + a defense-in-depth team-scope check.
+            #     A miss writes a terminal ``failed`` row with a typed
+            #     ``raw_output.error`` so the run doesn't hang at
+            #     ``running`` forever (TC-03 Bug #20d).
+            #   * Chat / ticket / external-agent paths keep the legacy
+            #     "first active IterativeAgent" fallback for unauthenticated
+            #     paths that don't carry an agent_id. The fallback is
+            #     SUPPRESSED for automation runs because it silently runs
+            #     the wrong agent on the user's behalf (TC-03 Bug #20e).
+            from .services.marketplace_agent_scope import (
+                AgentScopeError,
+                resolve_agent_in_user_scope,
+            )
 
-            if not agent_model:
-                await _publish_error(pubsub, task_id, "No agent found")
+            agent_model: MarketplaceAgent | None = None
+            agent_load_error: str | None = None
+            agent_load_reason: str | None = None
+            try:
+                if payload.agent_id:
+                    try:
+                        requested_agent_id = UUID(payload.agent_id)
+                    except (TypeError, ValueError) as exc:
+                        # Pre-validator rows could carry a non-UUID string.
+                        # Don't leak the ValueError — surface a typed error
+                        # the dispatcher / UI can render.
+                        raise AgentScopeError(
+                            AgentScopeError.REASON_NOT_FOUND,
+                            f"agent_id {payload.agent_id!r} is not a valid UUID",
+                        ) from exc
+
+                    if auto_run_id is not None:
+                        # Automation context — apply the same scope check
+                        # the assign-time path uses, so a stale or
+                        # cross-team agent_id can't reach the agent loop.
+                        owner = (
+                            await db.execute(
+                                select(User).where(User.id == UUID(payload.user_id))
+                            )
+                        ).scalar_one_or_none()
+                        if owner is None:
+                            raise AgentScopeError(
+                                AgentScopeError.REASON_NOT_FOUND,
+                                f"user {payload.user_id} no longer exists",
+                            )
+                        agent_model = await resolve_agent_in_user_scope(
+                            db, agent_id=requested_agent_id, user=owner
+                        )
+                    else:
+                        # Chat / ticket path — existence + active + correct
+                        # item_type are still required (a skill UUID can't
+                        # run an agent loop without crashing on a None tool
+                        # list) but library scope is enforced upstream.
+                        from .services.marketplace_agent_scope import (
+                            RUNNABLE_AGENT_ITEM_TYPE,
+                        )
+
+                        result = await db.execute(
+                            select(MarketplaceAgent).where(
+                                MarketplaceAgent.id == requested_agent_id,
+                                MarketplaceAgent.is_active.is_(True),
+                                MarketplaceAgent.item_type == RUNNABLE_AGENT_ITEM_TYPE,
+                            )
+                        )
+                        agent_model = result.scalar_one_or_none()
+                        if agent_model is None:
+                            raise AgentScopeError(
+                                AgentScopeError.REASON_NOT_FOUND,
+                                f"agent {requested_agent_id} is not loadable "
+                                "(missing, inactive, or wrong item_type)",
+                            )
+                elif auto_run_id is not None:
+                    # Automation run with no agent_id at all — historically
+                    # this silently fell through to "first active
+                    # IterativeAgent". That ran the wrong agent on the
+                    # user's behalf without warning. Refuse instead.
+                    raise AgentScopeError(
+                        AgentScopeError.REASON_NOT_FOUND,
+                        "automation run is missing agent_id — automations "
+                        "must bind an explicit agent at assign time",
+                    )
+                else:
+                    # Legacy chat fallback: pick the first active
+                    # IterativeAgent. Kept for unauthenticated entrypoints
+                    # that historically depended on it.
+                    from .services.marketplace_agent_scope import (
+                        RUNNABLE_AGENT_ITEM_TYPE,
+                    )
+
+                    result = await db.execute(
+                        select(MarketplaceAgent)
+                        .where(
+                            MarketplaceAgent.is_active.is_(True),
+                            MarketplaceAgent.agent_type == "IterativeAgent",
+                            MarketplaceAgent.item_type == RUNNABLE_AGENT_ITEM_TYPE,
+                        )
+                        .limit(1)
+                    )
+                    agent_model = result.scalar_one_or_none()
+                    if agent_model is None:
+                        raise AgentScopeError(
+                            AgentScopeError.REASON_NOT_FOUND,
+                            "no active IterativeAgent registered",
+                        )
+            except AgentScopeError as exc:
+                agent_load_error = str(exc)
+                agent_load_reason = exc.reason
+                agent_model = None
+
+            if agent_model is None:
+                # Publish the error so the chat surface / SSE can render
+                # it — same call we made before this fix.
+                await _publish_error(
+                    pubsub, task_id, f"No agent found: {agent_load_error}"
+                )
+                # Critically, write the terminal automation_runs row when
+                # this was an automation-driven run. Without this the row
+                # sat at ``status='running'`` indefinitely (TC-03 Bug #20d).
+                if auto_run_id is not None:
+                    await _finalize_automation_run(
+                        auto_run_id,
+                        status="failed",
+                        raw_output={
+                            "task_id": task_id,
+                            "error": agent_load_error,
+                            "error_type": "agent_load_failed",
+                            "reason": agent_load_reason,
+                            "agent_id": payload.agent_id,
+                        },
+                    )
                 return
+
+            # 3b. Persist agent identity for the audit / spend rollups.
+            #
+            # The dispatcher's preflight does NOT yet write an
+            # ``invocation_subjects`` row (the full Phase-2 resolver has
+            # dependencies on budget allocation that aren't wired yet).
+            # Without a row, ``invocation_subjects`` is empty for every
+            # automation run — the only trace of which agent executed
+            # lives on the editable ``automation_actions.config.agent_id``
+            # JSON field, so a post-run PATCH can rewrite history
+            # (TC-03 Bug #19). Insert one here keyed off the loaded
+            # ``agent_model`` so the run row is permanently joinable to
+            # the agent that actually ran. Defaults match the existing
+            # ``invocation_subject.PayerPolicy.INSTALLER`` /
+            # ``CreditSource.OPENSAIL_CREDITS`` decision tree — the
+            # full payer-policy resolver will replace this stub when
+            # it lands without changing the public API surface.
+            if auto_run_id is not None:
+                from .models_automations import InvocationSubject
+                from .services.automations.invocation_subject import (
+                    CreditSource,
+                    PayerPolicy,
+                )
+
+                # Idempotent — the worker may be re-entered after an
+                # approval pause, and a duplicate INSERT would orphan the
+                # audit chain. SELECT-then-INSERT is fine: the only writer
+                # for this row at runtime is this branch (the dispatcher's
+                # preflight stub leaves ``agent_id=NULL``; we'd just
+                # update it).
+                existing_subject_id = (
+                    await db.execute(
+                        select(InvocationSubject.id)
+                        .where(InvocationSubject.automation_run_id == auto_run_id)
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if existing_subject_id is None:
+                    db.add(
+                        InvocationSubject(
+                            automation_run_id=auto_run_id,
+                            invoking_user_id=UUID(payload.user_id),
+                            team_id=UUID(payload.team_id) if payload.team_id else None,
+                            agent_id=agent_model.id,
+                            payer_policy=PayerPolicy.INSTALLER.value,
+                            credit_source=CreditSource.OPENSAIL_CREDITS.value,
+                        )
+                    )
+                else:
+                    from sqlalchemy import update as _sa_update
+
+                    await db.execute(
+                        _sa_update(InvocationSubject)
+                        .where(InvocationSubject.id == existing_subject_id)
+                        .where(InvocationSubject.agent_id.is_(None))
+                        .values(agent_id=agent_model.id)
+                    )
+                await db.commit()
 
             # 4. Get model name
             model_name = payload.model_name
