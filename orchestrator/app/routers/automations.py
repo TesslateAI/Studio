@@ -36,7 +36,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import delete, func, select
@@ -208,6 +210,34 @@ async def _project_definition(
 # ---------------------------------------------------------------------------
 
 
+def _compute_next_run_at(config: dict[str, Any]) -> datetime | None:
+    """Compute the next cron boundary for a trigger config, in UTC.
+
+    Returns ``None`` for non-cron / malformed triggers — callers persist
+    ``next_run_at`` only when this returns a real datetime. The schema
+    validator already rejects malformed cron, so reaching here with bad
+    input is defensive (callers that bypass the schema still don't trip).
+    """
+    expr = (config.get("expression") or config.get("cron_expression") or "").strip()
+    if not expr:
+        return None
+    tz_name = config.get("timezone") or "UTC"
+    try:
+        tz = ZoneInfo(tz_name) if tz_name and tz_name != "UTC" else UTC
+    except (ZoneInfoNotFoundError, KeyError, ValueError):
+        return None
+    now = datetime.now(UTC)
+    try:
+        local_now = now.astimezone(tz)
+        iter_ = croniter(expr, local_now)
+        local_next = iter_.get_next(datetime)
+    except (ValueError, KeyError):
+        return None
+    if local_next.tzinfo is None:
+        local_next = local_next.replace(tzinfo=tz)
+    return local_next.astimezone(UTC)
+
+
 async def _replace_triggers(
     db: AsyncSession,
     automation_id: UUID,
@@ -217,6 +247,13 @@ async def _replace_triggers(
         delete(AutomationTrigger).where(AutomationTrigger.automation_id == automation_id)
     )
     for trig in triggers:
+        # Pre-compute next_run_at on insert so the cron producer doesn't
+        # treat the row as "due now" on the next leader-tick. Without
+        # this, a freshly-saved cron fires once ~30-60s after save
+        # regardless of schedule.
+        next_run_at = (
+            _compute_next_run_at(trig.config or {}) if trig.kind == "cron" else None
+        )
         db.add(
             AutomationTrigger(
                 id=uuid4(),
@@ -224,6 +261,7 @@ async def _replace_triggers(
                 kind=trig.kind,
                 config=trig.config or {},
                 is_active=True,
+                next_run_at=next_run_at,
             )
         )
 
@@ -829,6 +867,90 @@ async def list_run_artifacts(
         .all()
     )
     return [AutomationRunArtifactOut.model_validate(a) for a in artifacts]
+
+
+@router.get("/{automation_id}/runs/{run_id}/steps")
+async def list_run_steps(
+    automation_id: UUID,
+    run_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Append-only agent step trace for a run.
+
+    Only ``agent.run`` actions produce steps — the worker writes one
+    :class:`AgentStep` per iteration tied to the assistant ``Message``
+    it created (the message's ``message_metadata.task_id`` carries the
+    automation run id). ``app.invoke`` and ``gateway.send`` runs return
+    ``[]`` (the UI surfaces their data via ``raw_output`` / artifacts).
+
+    Without this endpoint the RunDetailPage's Steps tab silently rendered
+    "No steps recorded" because its fetch hit a 404 that the client
+    swallowed.
+    """
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    run = (
+        await db.execute(
+            select(AutomationRun.id).where(
+                AutomationRun.id == run_id,
+                AutomationRun.automation_id == automation_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    from ..models import AgentStep, Message
+
+    # The worker stamps ``message_metadata.task_id = str(run.id)`` on the
+    # assistant message it creates. Look up that message via the JSON
+    # accessor ``Message.message_metadata["task_id"].as_string()`` (same
+    # pattern admin.py already uses for ``completion_reason``).
+    message_id = (
+        await db.execute(
+            select(Message.id).where(
+                Message.message_metadata["task_id"].as_string() == str(run_id)
+            )
+        )
+    ).scalar_one_or_none()
+    if message_id is None:
+        return []
+
+    rows = (
+        (
+            await db.execute(
+                select(AgentStep)
+                .where(AgentStep.message_id == message_id)
+                .order_by(AgentStep.step_index.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        data = row.step_data or {}
+        tool_calls = data.get("tool_calls") or []
+        first_call = tool_calls[0] if tool_calls else {}
+        tool_results = data.get("tool_results") or []
+        first_result = tool_results[0] if tool_results else None
+        out.append(
+            {
+                "id": str(row.id),
+                "ordinal": row.step_index,
+                "name": data.get("name") or data.get("step_name"),
+                "thought": data.get("thought"),
+                "tool_name": first_call.get("name") if isinstance(first_call, dict) else None,
+                "input": first_call.get("parameters") if isinstance(first_call, dict) else None,
+                "output": data.get("response_text") or first_result,
+                "status": data.get("status") or ("complete" if data.get("is_complete") else "running"),
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+        )
+    return out
 
 
 @router.get("/{automation_id}/runs/{run_id}/spend")

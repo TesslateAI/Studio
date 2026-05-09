@@ -304,6 +304,53 @@ async def test_lease_term_mismatch_raises_lease_lost(session_maker) -> None:
 
 
 @pytest.mark.asyncio
+async def test_null_next_run_at_self_heals_without_firing(session_maker) -> None:
+    """A NULL next_run_at used to be misread as 'due now' on the next
+    leader-tick. The self-heal should compute the next slot and skip
+    firing this tick — no AutomationEvent row, no enqueue."""
+    from app.models_automations import AutomationEvent, AutomationTrigger
+    from app.services.automations.cron_producer import tick
+
+    user_id = await _seed_user(session_maker)
+    now = datetime.now(UTC)
+    autom_id, trig_id = await _seed_automation_with_cron(
+        session_maker, owner_id=user_id, next_run_at=None
+    )
+    await _seed_lease(session_maker, term=1)
+
+    pool = _FakeArqPool()
+    fired = await tick(
+        db_factory=session_maker,
+        arq_pool=pool,
+        current_term=1,
+        now=now,
+    )
+    assert fired == 0
+    assert pool.calls == []
+
+    async with session_maker() as db:
+        events = (
+            await db.execute(
+                select(AutomationEvent).where(
+                    AutomationEvent.automation_id == autom_id
+                )
+            )
+        ).scalars().all()
+        assert events == []
+        trig = (
+            await db.execute(
+                select(AutomationTrigger).where(AutomationTrigger.id == trig_id)
+            )
+        ).scalar_one()
+        assert trig.next_run_at is not None
+        # SQLite drops tz info on write/read — coerce before comparison.
+        nxt = trig.next_run_at
+        if nxt.tzinfo is None:
+            nxt = nxt.replace(tzinfo=UTC)
+        assert nxt > now
+
+
+@pytest.mark.asyncio
 async def test_not_due_trigger_no_rows(session_maker) -> None:
     from app.models_automations import AutomationEvent
     from app.services.automations.cron_producer import tick

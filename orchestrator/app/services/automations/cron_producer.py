@@ -62,7 +62,10 @@ from .intents import LeaseLost
 logger = logging.getLogger(__name__)
 
 
-_TICK_INTERVAL_SECONDS = 60
+# Kept in sync with controller_main._LEADER_TICK_INTERVAL_SECONDS. The
+# 15s cadence keeps wall-clock cron drift inside ±30s; longer intervals
+# put a `*/5 * * * *` schedule outside that tolerance on its first fire.
+_TICK_INTERVAL_SECONDS = 15
 _MAX_BATCH = 100
 
 
@@ -218,6 +221,16 @@ async def tick(
                     exc,
                 )
                 trigger.is_active = False
+                continue
+
+            # Self-heal: if a row arrived here with a NULL next_run_at
+            # (legacy, pre-on-insert-compute, or a writer that bypassed
+            # the router), compute the next slot and skip firing this
+            # tick. Otherwise the OR-NULL claim clause in the SELECT above
+            # would misread the NULL as "due now" and ship a spurious
+            # event ahead of the cron boundary.
+            if trigger.next_run_at is None:
+                trigger.next_run_at = new_next
                 continue
 
             trigger.next_run_at = new_next

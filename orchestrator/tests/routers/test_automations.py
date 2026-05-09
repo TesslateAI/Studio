@@ -244,6 +244,10 @@ def app_client(session_maker, stub_queue, stub_dispatcher):
 
 
 def _good_create_payload() -> dict[str, Any]:
+    # Uses ``agent.run`` so the fixture stays minimal — gateway.send now
+    # requires a delivery_target, and a real CommunicationDestination row
+    # would force every test to seed one. gateway.send-specific validation
+    # has its own dedicated tests below.
     return {
         "name": "router-test-automation",
         "workspace_scope": "none",
@@ -256,8 +260,8 @@ def _good_create_payload() -> dict[str, Any]:
         "triggers": [{"kind": "manual", "config": {}}],
         "actions": [
             {
-                "action_type": "gateway.send",
-                "config": {"body_template": "hello {x}"},
+                "action_type": "agent.run",
+                "config": {"agent_id": str(uuid.uuid4()), "prompt": "noop"},
                 "ordinal": 0,
             }
         ],
@@ -304,8 +308,8 @@ def test_create_rejects_multi_actions(app_client) -> None:
     client, _, _ = app_client
     payload = _good_create_payload()
     payload["actions"] = [
-        {"action_type": "gateway.send", "config": {}, "ordinal": 0},
-        {"action_type": "gateway.send", "config": {}, "ordinal": 1},
+        {"action_type": "agent.run", "config": {"prompt": "a"}, "ordinal": 0},
+        {"action_type": "agent.run", "config": {"prompt": "b"}, "ordinal": 1},
     ]
     resp = client.post("/api/automations", json=payload)
     assert resp.status_code == 422, resp.text
@@ -323,7 +327,7 @@ def test_create_persists_definition_with_children(app_client) -> None:
     assert len(body["triggers"]) == 1
     assert body["triggers"][0]["kind"] == "manual"
     assert len(body["actions"]) == 1
-    assert body["actions"][0]["action_type"] == "gateway.send"
+    assert body["actions"][0]["action_type"] == "agent.run"
     assert body["delivery_targets"] == []
 
 
@@ -378,7 +382,10 @@ def test_patch_replace_triggers(app_client) -> None:
         f"/api/automations/{aid}",
         json={
             "triggers": [
-                {"kind": "cron", "config": {"expr": "0 * * * *"}},
+                {
+                    "kind": "cron",
+                    "config": {"expression": "0 * * * *", "timezone": "UTC"},
+                },
                 {"kind": "manual", "config": {}},
             ]
         },
@@ -386,6 +393,85 @@ def test_patch_replace_triggers(app_client) -> None:
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert sorted(t["kind"] for t in body["triggers"]) == ["cron", "manual"]
+
+
+# ---------------------------------------------------------------------------
+# Schedule trigger + gateway.send delivery validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_create_rejects_invalid_cron_expression(app_client) -> None:
+    """4-field cron used to be silently coerced to empty string."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [{"kind": "cron", "config": {"expression": "* * * *"}}]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "expression" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_rejects_empty_cron_expression(app_client) -> None:
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [{"kind": "cron", "config": {"expression": ""}}]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.unit
+def test_create_populates_next_run_at_for_cron(app_client) -> None:
+    """Previously NULL → cron producer fired on the next leader-tick."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {"expression": "*/5 * * * *", "timezone": "UTC"},
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 201, resp.text
+    trig = resp.json()["triggers"][0]
+    assert trig["next_run_at"] is not None
+    # Should be in the future, not "now or earlier". SQLite drops tz info
+    # in the JSON serialization, so coerce to UTC-aware before comparing.
+    nxt = datetime.fromisoformat(trig["next_run_at"].replace("Z", "+00:00"))
+    if nxt.tzinfo is None:
+        nxt = nxt.replace(tzinfo=UTC)
+    assert nxt > datetime.now(UTC)
+
+
+@pytest.mark.unit
+def test_create_rejects_gateway_send_without_delivery_target(app_client) -> None:
+    """gateway.send + zero delivery_targets used to save as 'Active'."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["actions"] = [
+        {
+            "action_type": "gateway.send",
+            "config": {"body": "hello"},
+            "ordinal": 0,
+        }
+    ]
+    payload["delivery_targets"] = []
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "delivery target" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_rejects_gateway_send_with_empty_body(app_client) -> None:
+    """gateway.send used to accept config={}."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["actions"] = [
+        {"action_type": "gateway.send", "config": {}, "ordinal": 0}
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "body" in resp.text.lower()
 
 
 @pytest.mark.unit

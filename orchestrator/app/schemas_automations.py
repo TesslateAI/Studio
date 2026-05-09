@@ -26,8 +26,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from croniter import croniter
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Trigger / Action / DeliveryTarget — nested input + output shapes
@@ -47,6 +49,36 @@ class AutomationTriggerIn(BaseModel):
         if v not in allowed:
             raise ValueError(f"trigger.kind must be one of {sorted(allowed)!r}, got {v!r}")
         return v
+
+    @model_validator(mode="after")
+    def _validate_cron_config(self) -> AutomationTriggerIn:
+        # Without this, a typo like ``* * * *`` (4 fields) was silently coerced
+        # to an empty string at save and combined with ``next_run_at IS NULL``
+        # in cron_producer, fired on every leader-tick.
+        if self.kind != "cron":
+            return self
+        cfg = self.config or {}
+        expr = cfg.get("expression") or cfg.get("cron_expression") or ""
+        if not isinstance(expr, str) or not expr.strip():
+            raise ValueError(
+                "cron trigger requires a non-empty 'expression' in config "
+                "(e.g. '*/5 * * * *' for every five minutes)"
+            )
+        try:
+            croniter(expr.strip())
+        except (ValueError, KeyError) as exc:
+            raise ValueError(
+                f"cron trigger has invalid expression {expr!r}: {exc}"
+            ) from exc
+        tz = cfg.get("timezone")
+        if tz not in (None, "", "UTC"):
+            try:
+                ZoneInfo(str(tz))
+            except (ZoneInfoNotFoundError, KeyError, ValueError) as exc:
+                raise ValueError(
+                    f"cron trigger has invalid timezone {tz!r}: {exc}"
+                ) from exc
+        return self
 
 
 class AutomationTriggerOut(AutomationTriggerIn):
@@ -74,6 +106,24 @@ class AutomationActionIn(BaseModel):
         if v not in allowed:
             raise ValueError(f"action.action_type must be one of {sorted(allowed)!r}, got {v!r}")
         return v
+
+    @model_validator(mode="after")
+    def _validate_action_config(self) -> AutomationActionIn:
+        # gateway.send must have a message body — without this, actions
+        # could save with config={} and runs completed in ms with
+        # status=succeeded while never sending anything. The dispatcher
+        # reads ``config.body`` / ``config.body_template``; rejecting both
+        # empty here keeps the run from looking "Done" when it had nothing
+        # to deliver.
+        if self.action_type == "gateway.send":
+            cfg = self.config or {}
+            body = cfg.get("body") or cfg.get("body_template")
+            if not isinstance(body, str) or not body.strip():
+                raise ValueError(
+                    "gateway.send action requires a non-empty 'body' "
+                    "(the message to send)"
+                )
+        return self
 
 
 class AutomationActionOut(AutomationActionIn):
@@ -151,6 +201,20 @@ class AutomationDefinitionIn(BaseModel):
             raise ValueError(f"workspace_scope must be one of {sorted(allowed)!r}, got {v!r}")
         return v
 
+    @model_validator(mode="after")
+    def _validate_gateway_send_has_target(self) -> AutomationDefinitionIn:
+        # Refuse to mark an automation Active when it has a gateway.send
+        # action but no delivery target wired up. The dispatcher would
+        # otherwise return ``delivered: True`` against an empty set and the
+        # run shows "succeeded" with $0 spend.
+        has_gateway_send = any(a.action_type == "gateway.send" for a in self.actions)
+        if has_gateway_send and not self.delivery_targets:
+            raise ValueError(
+                "Automations with a 'gateway.send' action require at least one "
+                "delivery target (set 'Where to send the result')."
+            )
+        return self
+
 
 class AutomationDefinitionUpdate(BaseModel):
     """Patch payload. Lists ``triggers``/``actions``/``delivery_targets`` are
@@ -187,6 +251,22 @@ class AutomationDefinitionUpdate(BaseModel):
         if len(v) != 1:
             raise ValueError("phase 1 supports exactly one action per automation")
         return v
+
+    @model_validator(mode="after")
+    def _validate_gateway_send_has_target(self) -> AutomationDefinitionUpdate:
+        # Mirror of the create-time check — only enforce when the caller is
+        # actually replacing both lists in the same patch. Replacing only
+        # ``actions`` means the existing delivery_targets stay; we trust
+        # those (the create-time validator already guarded them).
+        if self.actions is None or self.delivery_targets is None:
+            return self
+        has_gateway_send = any(a.action_type == "gateway.send" for a in self.actions)
+        if has_gateway_send and not self.delivery_targets:
+            raise ValueError(
+                "Automations with a 'gateway.send' action require at least one "
+                "delivery target (set 'Where to send the result')."
+            )
+        return self
 
 
 class AutomationDefinitionOut(BaseModel):

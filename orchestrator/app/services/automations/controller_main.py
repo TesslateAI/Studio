@@ -258,7 +258,12 @@ async def _run_as_leader(
         logger.warning("[CONTROLLER] release failed", exc_info=True)
 
 
-_LEADER_TICK_INTERVAL_SECONDS = 60
+# A 60s tick made every cron fire up to 60s late — a `*/5 * * * *`
+# schedule could observe ~35s drift on the very first real boundary. 15s
+# keeps wall-clock drift inside the ±30s tolerance while only 4x'ing the
+# (already cheap, idempotent) heartbeat / approval-timeout sweeps that
+# share the same tick.
+_LEADER_TICK_INTERVAL_SECONDS = 15
 
 
 async def _leader_tick_loop(
