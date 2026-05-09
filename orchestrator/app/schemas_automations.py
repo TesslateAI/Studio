@@ -37,15 +37,35 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class AutomationTriggerIn(BaseModel):
-    """One trigger rule. ``kind`` must match the model CHECK."""
+    """One trigger rule. ``kind`` must match the model CHECK.
 
-    kind: str = Field(..., description="cron | webhook | app_invocation | manual")
+    ``app_invocation`` is reserved in the DB CHECK constraint and the
+    feature-flag registry (``apps.triggers.app_invocation``, default OFF —
+    see ``config_features.py``) but has **no producer** in this codebase
+    today: nothing writes ``automation_events`` rows with
+    ``trigger_kind='app_invocation'``. To prevent silently-dead trigger
+    rows, the API rejects the kind here. Re-add to the allowed-set when
+    the producer lands; the DB CHECK already permits it so no migration
+    is needed at that point.
+
+    Tracking: TesslateAI/OpenSail-Enterprise#408 (Phase 1 follow-up —
+    "unified dispatch_automation for cron/webhook/app_invocation" was
+    scoped but the app_invocation producer never landed).
+    """
+
+    kind: str = Field(..., description="cron | webhook | manual")
     config: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("kind")
     @classmethod
     def _validate_kind(cls, v: str) -> str:
-        allowed = {"cron", "webhook", "app_invocation", "manual"}
+        allowed = {"cron", "webhook", "manual"}
+        if v == "app_invocation":
+            # See class docstring + TesslateAI/OpenSail-Enterprise#408.
+            raise ValueError(
+                "trigger.kind='app_invocation' is reserved but not yet wired — "
+                "no producer exists. Use 'cron', 'webhook', or 'manual'."
+            )
         if v not in allowed:
             raise ValueError(f"trigger.kind must be one of {sorted(allowed)!r}, got {v!r}")
         return v

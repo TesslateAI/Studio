@@ -47,7 +47,12 @@ from ...tools.registry import Tool, ToolCategory
 logger = logging.getLogger(__name__)
 
 
-_VALID_TRIGGER_KINDS = {"cron", "webhook", "app_invocation", "manual"}
+# Mirror of ``schemas_automations.AutomationTriggerIn._validate_kind``.
+# ``app_invocation`` is reserved but has no producer wired — see the docstring
+# on ``AutomationTriggerIn`` for context. Kept in lockstep so this tool fails
+# fast instead of constructing a silently-dead trigger row.
+# Tracking: TesslateAI/OpenSail-Enterprise#408.
+_VALID_TRIGGER_KINDS = {"cron", "webhook", "manual"}
 _VALID_WORKSPACE_SCOPES = {
     "none",
     "user_automation_workspace",
@@ -261,10 +266,10 @@ def register_attach_schedule_tool(registry):
             name="attach_schedule",
             description=(
                 "Create a draft AutomationDefinition that runs a target agent "
-                "on a trigger (cron/webhook/app_invocation/manual). The new "
-                "automation is a CHILD of the parent automation that called "
-                "this tool — depth-1 cap enforced. The contract must be a "
-                "strict restriction of the parent's contract (per-run cap + "
+                "on a trigger (cron/webhook/manual). The new automation is a "
+                "CHILD of the parent automation that called this tool — "
+                "depth-1 cap enforced. The contract must be a strict "
+                "restriction of the parent's contract (per-run cap + "
                 "positive-list scopes). Created with is_active=False; user "
                 "enables in UI. Required scope: automations.write."
             ),
@@ -274,7 +279,7 @@ def register_attach_schedule_tool(registry):
                     "agent_id": {"type": "string", "description": "Draft agent UUID"},
                     "trigger": {
                         "type": "object",
-                        "description": "{kind, config} — kind is cron|webhook|app_invocation|manual",
+                        "description": "{kind, config} — kind is cron|webhook|manual",
                     },
                     "prompt_template": {
                         "type": "string",

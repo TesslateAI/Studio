@@ -379,7 +379,13 @@ async def _find_shared_singleton_deployment(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-_VALID_TRIGGER_KINDS: frozenset[str] = frozenset({"cron", "webhook", "app_invocation", "manual"})
+# Mirror of ``schemas_automations.AutomationTriggerIn._validate_kind``. Kept in
+# lockstep so a manifest with an ``app_invocation`` trigger template lands as a
+# clean install-time skip instead of a downstream silently-dead trigger row.
+# The DB CHECK constraint stays permissive for forward compatibility — see the
+# docstring on ``AutomationTriggerIn`` for the producer-not-wired rationale.
+# Tracking: TesslateAI/OpenSail-Enterprise#408.
+_VALID_TRIGGER_KINDS: frozenset[str] = frozenset({"cron", "webhook", "manual"})
 _VALID_ACTION_TYPES: frozenset[str] = frozenset({"agent.run", "app.invoke", "gateway.send"})
 
 

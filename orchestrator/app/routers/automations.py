@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import secrets as _stdlib_secrets
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -42,6 +43,7 @@ from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -238,28 +240,99 @@ def _compute_next_run_at(config: dict[str, Any]) -> datetime | None:
     return local_next.astimezone(UTC)
 
 
+def _mint_webhook_secret() -> dict[str, Any]:
+    """Generate a fresh entry for ``config.webhook_secrets[]``.
+
+    Matches the rotation-friendly shape consumed by
+    :func:`app.routers.app_triggers._candidate_secrets`. The secret is a
+    URL-safe 32-byte token; ``kid='v1'`` for the first-mint case (rotation
+    is appended by a future endpoint, not by this helper).
+    """
+    return {
+        "kid": "v1",
+        "secret": _stdlib_secrets.token_urlsafe(32),
+        "created_at": datetime.now(tz=UTC).isoformat(),
+        "revoked_at": None,
+    }
+
+
 async def _replace_triggers(
     db: AsyncSession,
     automation_id: UUID,
     triggers: list[AutomationTriggerIn],
 ) -> None:
+    """Replace the trigger rows for an automation.
+
+    Standalone webhook triggers (``kind='webhook'`` and no
+    ``config.app_instance_id``) are auto-provisioned with a URL path
+    ``token`` and an HMAC ``webhook_secrets[]`` entry on first save. The
+    pair is **preserved across PATCH**: we read existing webhook rows
+    before the wholesale delete and reuse their token/secrets when the
+    incoming config doesn't carry them. Without this preservation, every
+    PATCH to a webhook automation would rotate the URL and break
+    deployed callers — silently.
+    """
+    # Snapshot existing webhook tokens/secrets BEFORE the wholesale delete
+    # so PATCH calls that round-trip the trigger don't regenerate them.
+    existing_webhook_token: str | None = None
+    existing_webhook_secrets: list[Any] | None = None
+    existing_rows = (
+        (
+            await db.execute(
+                select(AutomationTrigger).where(
+                    AutomationTrigger.automation_id == automation_id,
+                    AutomationTrigger.kind == "webhook",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in existing_rows:
+        cfg = row.config or {}
+        if not isinstance(cfg, dict):
+            continue
+        if existing_webhook_token is None and isinstance(cfg.get("token"), str):
+            existing_webhook_token = cfg["token"]
+        if existing_webhook_secrets is None and isinstance(
+            cfg.get("webhook_secrets"), list
+        ):
+            existing_webhook_secrets = cfg["webhook_secrets"]
+
     await db.execute(
         delete(AutomationTrigger).where(AutomationTrigger.automation_id == automation_id)
     )
     for trig in triggers:
+        config = dict(trig.config or {})
         # Pre-compute next_run_at on insert so the cron producer doesn't
         # treat the row as "due now" on the next leader-tick. Without
         # this, a freshly-saved cron fires once ~30-60s after save
         # regardless of schedule.
         next_run_at = (
-            _compute_next_run_at(trig.config or {}) if trig.kind == "cron" else None
+            _compute_next_run_at(config) if trig.kind == "cron" else None
         )
+        if trig.kind == "webhook" and not config.get("app_instance_id"):
+            # Standalone webhook — keyed by automation_id + path token. The
+            # public ingest route is mounted by ``routers/app_triggers.py``
+            # at ``POST /api/automations/{automation_id}/webhook/{token}``.
+            if not isinstance(config.get("token"), str) or not config["token"].strip():
+                config["token"] = (
+                    existing_webhook_token or _stdlib_secrets.token_urlsafe(16)
+                )
+            has_list = isinstance(config.get("webhook_secrets"), list) and config["webhook_secrets"]
+            has_legacy = isinstance(config.get("webhook_secret"), str) and config["webhook_secret"]
+            if not has_list and not has_legacy:
+                config["webhook_secrets"] = (
+                    existing_webhook_secrets
+                    if existing_webhook_secrets
+                    else [_mint_webhook_secret()]
+                )
         db.add(
             AutomationTrigger(
                 id=uuid4(),
                 automation_id=automation_id,
                 kind=trig.kind,
-                config=trig.config or {},
+                config=config,
                 is_active=True,
                 next_run_at=next_run_at,
             )
@@ -676,18 +749,84 @@ async def run_automation(
     if not automation.is_active:
         raise HTTPException(status_code=409, detail="Automation is paused / inactive")
 
+    # Snapshot the user PK *before* any commit. ``user`` is a SQLAlchemy ORM
+    # instance attached to this async session; ``db.rollback()`` in the
+    # idempotency-dedup branch below expires every loaded attribute, and the
+    # next ``user.id`` access would trigger a sync refresh via the asyncpg
+    # cursor → ``MissingGreenlet``. Holding a plain UUID sidesteps the
+    # descriptor entirely (same value, no lifecycle).
+    user_id = user.id
+
     event = AutomationEvent(
         id=uuid4(),
-        automation_id=automation.id,
+        automation_id=automation_id,
         trigger_id=None,  # manual runs have no trigger row
         trigger_kind="manual",
         payload=payload.payload or {},
         idempotency_key=payload.idempotency_key,
         received_at=datetime.now(tz=UTC),
     )
+    # Capture the new event id BEFORE the commit so the downstream dispatch
+    # path doesn't have to read it back off an ORM instance — that read
+    # would hit a sync lazy-load after a rollback in the dedup branch and
+    # trigger ``MissingGreenlet`` in async context.
+    event_id = event.id
     db.add(event)
-    await db.commit()
-    await db.refresh(event)
+    try:
+        await db.commit()
+    except IntegrityError:
+        # ``uq_automation_events_idempotency_key`` is partial-unique on
+        # ``idempotency_key WHERE NOT NULL`` — a collision means the caller
+        # is replaying a manual run with the same key. Resolve by routing
+        # through the existing event so the dispatcher's idempotent run
+        # upsert returns the original run unchanged. Without this branch
+        # the asyncpg ``UniqueViolationError`` propagated as a bare 500
+        # and the caller had no way to recover.
+        await db.rollback()
+        if payload.idempotency_key is None:
+            # No key on the payload but a unique constraint fired — the
+            # only such constraint is the idempotency-key index, so this
+            # is unreachable in practice. Re-raise rather than mask.
+            raise
+        # Column-level select to avoid post-rollback ORM lazy-load. After
+        # ``db.rollback()`` SQLAlchemy expires every loaded attribute on
+        # any orphaned ORM instance; the next ``existing.automation_id``
+        # access would otherwise trigger a sync refresh via the asyncpg
+        # cursor and raise ``MissingGreenlet``. Returning scalars sidesteps
+        # the descriptor entirely.
+        row = (
+            await db.execute(
+                select(
+                    AutomationEvent.id, AutomationEvent.automation_id
+                ).where(AutomationEvent.idempotency_key == payload.idempotency_key)
+            )
+        ).first()
+        if row is None:
+            # Constraint fired but the row vanished (e.g. concurrent delete).
+            # Surface a typed 409 — clearer than a 500.
+            raise HTTPException(
+                status_code=409,
+                detail="idempotency_key conflict and original event no longer exists",
+            ) from None
+        existing_event_id, existing_automation_id = row
+        # Use the route parameter ``automation_id`` (a plain UUID) for the
+        # comparison and the log below — ``automation.id`` would trigger a
+        # post-rollback ORM lazy-load on the still-in-scope ``automation``
+        # instance and raise ``MissingGreenlet`` in the async session.
+        if existing_automation_id != automation_id:
+            raise HTTPException(
+                status_code=409,
+                detail="idempotency_key already used on a different automation",
+            ) from None
+        event_id = existing_event_id
+        logger.info(
+            "[AUTOMATIONS] manual run idempotent replay automation=%s "
+            "event=%s key=%r user=%s",
+            automation_id,
+            event_id,
+            payload.idempotency_key,
+            user_id,
+        )
 
     # Synchronously dispatch. The dispatcher creates the run row via its own
     # idempotent upsert (Phase A) and proceeds through Phase B preflight,
@@ -699,17 +838,17 @@ async def run_automation(
     try:
         result = await dispatch_automation(
             db,
-            automation_id=automation.id,
-            event_id=event.id,
-            worker_id=f"manual:{user.id}",
+            automation_id=automation_id,
+            event_id=event_id,
+            worker_id=f"manual:{user_id}",
         )
     except Exception:
         logger.exception(
             "[AUTOMATIONS] manual dispatch failed automation=%s event=%s "
             "user=%s — event row persists; controller sweep will retry",
-            automation.id,
-            event.id,
-            user.id,
+            automation_id,
+            event_id,
+            user_id,
         )
         # Best-effort rollback of any half-applied dispatcher state. The event
         # row is already committed above, so the missed-event drain
@@ -723,16 +862,16 @@ async def run_automation(
 
     logger.info(
         "[AUTOMATIONS] manual run automation=%s run=%s event=%s status=%s by user=%s",
-        automation.id,
+        automation_id,
         result.run_id,
-        event.id,
+        event_id,
         result.run_status,
-        user.id,
+        user_id,
     )
     return AutomationRunResponse(
-        automation_id=automation.id,
+        automation_id=automation_id,
         run_id=result.run_id,
-        event_id=event.id,
+        event_id=event_id,
         status=result.run_status,
     )
 

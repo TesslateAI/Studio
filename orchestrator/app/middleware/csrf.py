@@ -14,6 +14,7 @@ Exempt Routes:
 - Bearer token authenticated requests (CSRF not needed for stateless auth)
 """
 
+import re
 import secrets
 from collections.abc import Callable
 
@@ -111,6 +112,19 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         "/openapi.json",
     }
 
+    # Path regexes for exemptions where ``startswith`` over-matches.
+    # ``/api/automations/`` is the home of an authenticated CRUD router
+    # (POST /run, PATCH, DELETE, etc.) where CSRF MUST stay enforced.
+    # Only the specific ``…/webhook/{token}`` subpath is the public
+    # external-caller surface that CSRF can't reach (no cookie, no
+    # Bearer header — HMAC-only). Match it precisely so the rest of the
+    # router stays protected.
+    EXEMPT_PATTERNS = (
+        re.compile(
+            r"^/api/automations/[0-9a-fA-F-]{36}/webhook/[A-Za-z0-9_\-]+/?$"
+        ),
+    )
+
     # Methods that require CSRF protection
     PROTECTED_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
 
@@ -125,6 +139,8 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         # Skip CSRF check for exempt paths
         path = request.url.path
         if any(path.startswith(exempt) for exempt in self.EXEMPT_PATHS):
+            return await call_next(request)
+        if any(p.match(path) for p in self.EXEMPT_PATTERNS):
             return await call_next(request)
 
         # Skip CSRF check if using Bearer token authentication

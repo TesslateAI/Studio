@@ -576,6 +576,40 @@ export default function AutomationDetailPage() {
             )}
           </section>
 
+          {/* Webhook URL — only shown for standalone webhook triggers that
+              have a path token minted by the backend on save. The path
+              token gates resolution (404 without it); HMAC over the body
+              is still required by the ingest route. */}
+          {trig?.kind === 'webhook' &&
+            typeof trig.config?.token === 'string' &&
+            !trig.config?.app_instance_id && (
+              <section
+                className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-2"
+                data-testid="webhook-url-card"
+              >
+                <header>
+                  <h3 className="text-xs font-semibold text-[var(--text)]">Webhook URL</h3>
+                  <p className="text-[10px] text-[var(--text-subtle)] mt-0.5">
+                    POST signed payloads here to trigger a run. Sign the raw body with your
+                    HMAC-SHA256 secret and include it as{' '}
+                    <code className="font-mono">X-Tesslate-Signature: sha256=&lt;hex&gt;</code>.
+                  </p>
+                </header>
+                <code
+                  className="block text-[11px] font-mono px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-small)] text-[var(--text)] break-all"
+                  data-testid="webhook-url"
+                >
+                  {`${window.location.origin}/api/automations/${definition.id}/webhook/${String(
+                    trig.config.token,
+                  )}`}
+                </code>
+                <span className="text-[10px] text-[var(--text-subtle)]">
+                  The signing secret is stored server-side and never returned by the API. To
+                  rotate or reveal it, talk to your admin.
+                </span>
+              </section>
+            )}
+
           {/* Cost rollups — three inline windows summed from loaded runs */}
           <section
             data-testid="cost-rollup-card"
