@@ -1,6 +1,25 @@
 import type { AutomationTriggerIn, AutomationTriggerKind } from '../../../types/automations';
 import { ScheduleBuilder } from './ScheduleBuilder';
 
+function detectBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+function initialConfigForKind(kind: AutomationTriggerKind): Record<string, unknown> {
+  // Pre-populating timezone here (instead of in ScheduleBuilder's mount
+  // effect) avoids the closure race where a preset click could fire
+  // before the mount effect resolved, leaving the saved expression empty
+  // and the timezone unwritten.
+  if (kind === 'cron') {
+    return { expression: '', timezone: detectBrowserTimezone() };
+  }
+  return {};
+}
+
 interface Props {
   value: AutomationTriggerIn;
   onChange: (next: AutomationTriggerIn) => void;
@@ -45,7 +64,10 @@ export function TriggerEditor({ value, onChange, webhookUrl }: Props) {
         </span>
         <select
           value={value.kind}
-          onChange={(e) => onChange({ kind: e.target.value as AutomationTriggerKind, config: {} })}
+          onChange={(e) => {
+            const nextKind = e.target.value as AutomationTriggerKind;
+            onChange({ kind: nextKind, config: initialConfigForKind(nextKind) });
+          }}
           className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
         >
           {KIND_OPTIONS.map((opt) => (

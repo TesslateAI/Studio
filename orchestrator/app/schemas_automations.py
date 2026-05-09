@@ -70,10 +70,19 @@ class AutomationTriggerIn(BaseModel):
             raise ValueError(
                 f"cron trigger has invalid expression {expr!r}: {exc}"
             ) from exc
+        # Symmetrically with expression: a missing / empty timezone used
+        # to silently fall back to UTC at evaluation time, which made DST
+        # and "9 AM local" semantics invisible. Require an explicit IANA
+        # name (or "UTC") on the wire so the user's intent is recorded.
         tz = cfg.get("timezone")
-        if tz not in (None, "", "UTC"):
+        if not isinstance(tz, str) or not tz.strip():
+            raise ValueError(
+                "cron trigger requires a non-empty 'timezone' in config "
+                "(e.g. 'America/New_York' or 'UTC')"
+            )
+        if tz != "UTC":
             try:
-                ZoneInfo(str(tz))
+                ZoneInfo(tz)
             except (ZoneInfoNotFoundError, KeyError, ValueError) as exc:
                 raise ValueError(
                     f"cron trigger has invalid timezone {tz!r}: {exc}"

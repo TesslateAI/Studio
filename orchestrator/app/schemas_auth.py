@@ -14,11 +14,20 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
 
     Inherits from fastapi-users BaseUser:
     - id: UUID
-    - email: str
+    - email: str  (overridden — see below)
     - is_active: bool
     - is_superuser: bool
     - is_verified: bool
     """
+
+    # Override BaseUser.email (EmailStr) with plain str. EmailStr rejects
+    # RFC-2606 special-use TLDs (.local, .test, .example, .invalid),
+    # which is correct on the registration boundary but breaks reads of
+    # rows that were inserted via direct DB paths (seed scripts,
+    # admin user creation, OAuth callbacks). Inbound user-supplied
+    # registration still uses EmailStr via BaseUserCreate, so the
+    # validation surface stays at the system boundary where it belongs.
+    email: str
 
     # Custom fields
     name: str

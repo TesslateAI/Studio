@@ -151,10 +151,27 @@ export default function AutomationCreatePage() {
       toast.success('Automation created');
       navigate(`/automations/${created.id}`);
     } catch (err) {
-      const msg =
-        (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ||
-        'Failed to create automation';
-      toast.error(typeof msg === 'string' ? msg : 'Failed to create automation');
+      const detail = (
+        err as { response?: { data?: { detail?: unknown } } }
+      ).response?.data?.detail;
+      let msg = 'Failed to create automation';
+      if (typeof detail === 'string') {
+        msg = detail;
+      } else if (Array.isArray(detail)) {
+        // FastAPI 422: detail = [{loc, msg, type}, ...]. Surface each
+        // entry — the Pydantic validators we ship return user-actionable
+        // messages, so showing them verbatim is more useful than a
+        // generic "validation failed".
+        msg = detail
+          .map((entry) => {
+            const e = entry as { loc?: unknown; msg?: unknown };
+            const loc = Array.isArray(e.loc) ? e.loc.slice(1).join('.') : '';
+            const text = typeof e.msg === 'string' ? e.msg : String(entry);
+            return loc ? `${loc}: ${text}` : text;
+          })
+          .join('; ');
+      }
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }

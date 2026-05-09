@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { humanizeCron } from '../utils/humanize';
 
 interface Props {
@@ -66,22 +66,6 @@ export function ScheduleBuilder({ expression, timezone, onChange }: Props) {
 
   const matchedPreset = PRESETS.find((p) => p.expression === expression.trim()) ?? null;
   const showAdvanced = advancedOpen || (!!expression && !matchedPreset);
-
-  // When the form opens with an empty timezone, the <select> visually
-  // defaults to the browser TZ but state stays "" — so saving without
-  // touching the picker writes timezone="" to the backend and cron
-  // evaluation silently falls back to UTC. Commit the visible default
-  // exactly once on mount so the user's perceived selection actually
-  // persists.
-  const initRef = useRef(false);
-  useEffect(() => {
-    if (initRef.current) return;
-    initRef.current = true;
-    if (timezone === '') {
-      onChange({ expression, timezone: browserTz ?? 'UTC' });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const setExpression = (next: string) => onChange({ expression: next, timezone });
   const setTimezone = (next: string) => onChange({ expression, timezone: next });

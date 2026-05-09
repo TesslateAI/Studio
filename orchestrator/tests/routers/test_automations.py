@@ -421,6 +421,52 @@ def test_create_rejects_empty_cron_expression(app_client) -> None:
 
 
 @pytest.mark.unit
+def test_create_rejects_cron_without_timezone(app_client) -> None:
+    """Empty / missing timezone used to silently default to UTC."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {"kind": "cron", "config": {"expression": "*/5 * * * *"}}
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "timezone" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_rejects_cron_with_empty_timezone(app_client) -> None:
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {"expression": "*/5 * * * *", "timezone": ""},
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "timezone" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_rejects_cron_with_invalid_timezone(app_client) -> None:
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {
+                "expression": "*/5 * * * *",
+                "timezone": "Mars/Olympus_Mons",
+            },
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "timezone" in resp.text.lower()
+
+
+@pytest.mark.unit
 def test_create_populates_next_run_at_for_cron(app_client) -> None:
     """Previously NULL → cron producer fired on the next leader-tick."""
     client, _, _ = app_client
