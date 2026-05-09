@@ -351,6 +351,116 @@ async def test_null_next_run_at_self_heals_without_firing(session_maker) -> None
 
 
 @pytest.mark.asyncio
+async def test_suspended_owner_skips_fire_advances_next_run(session_maker) -> None:
+    """A suspended user's cron must not enqueue a real run — it should
+    advance next_run_at (so unsuspend doesn't flood-fire) and persist a
+    terminal AutomationEvent (failed_at set) for the audit trail."""
+    from sqlalchemy import update
+
+    from app.models_auth import User
+    from app.models_automations import AutomationEvent, AutomationTrigger
+    from app.services.automations.cron_producer import tick
+
+    user_id = await _seed_user(session_maker)
+    now = datetime.now(UTC)
+    autom_id, trig_id = await _seed_automation_with_cron(
+        session_maker, owner_id=user_id, next_run_at=now - timedelta(seconds=30)
+    )
+    await _seed_lease(session_maker, term=7)
+
+    async with session_maker() as db:
+        await db.execute(update(User).where(User.id == user_id).values(is_suspended=True))
+        await db.commit()
+
+    pool = _FakeArqPool()
+    fired = await tick(
+        db_factory=session_maker,
+        arq_pool=pool,
+        current_term=7,
+        now=now,
+    )
+    assert fired == 0
+    assert pool.calls == []
+
+    async with session_maker() as db:
+        events = list(
+            (
+                await db.execute(
+                    select(AutomationEvent).where(
+                        AutomationEvent.automation_id == autom_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(events) == 1
+        ev = events[0]
+        assert ev.trigger_kind == "cron"
+        assert ev.failed_at is not None
+        assert ev.dispatched_at is not None
+        assert ev.last_error == "owner_suspended"
+        assert ev.payload.get("skipped_reason") == "owner_suspended"
+
+        trig = (
+            await db.execute(
+                select(AutomationTrigger).where(AutomationTrigger.id == trig_id)
+            )
+        ).scalar_one()
+        nxt = trig.next_run_at
+        if nxt is not None and nxt.tzinfo is None:
+            nxt = nxt.replace(tzinfo=UTC)
+        assert nxt is not None and nxt > now
+
+
+@pytest.mark.asyncio
+async def test_deleted_owner_skips_fire(session_maker) -> None:
+    """Soft-deleted owner shares the same skip path as suspended owner."""
+    from sqlalchemy import update
+
+    from app.models_auth import User
+    from app.models_automations import AutomationEvent
+    from app.services.automations.cron_producer import tick
+
+    user_id = await _seed_user(session_maker)
+    now = datetime.now(UTC)
+    autom_id, _ = await _seed_automation_with_cron(
+        session_maker, owner_id=user_id, next_run_at=now - timedelta(seconds=30)
+    )
+    await _seed_lease(session_maker, term=8)
+
+    async with session_maker() as db:
+        await db.execute(update(User).where(User.id == user_id).values(is_deleted=True))
+        await db.commit()
+
+    pool = _FakeArqPool()
+    fired = await tick(
+        db_factory=session_maker,
+        arq_pool=pool,
+        current_term=8,
+        now=now,
+    )
+    assert fired == 0
+    assert pool.calls == []
+
+    async with session_maker() as db:
+        events = list(
+            (
+                await db.execute(
+                    select(AutomationEvent).where(
+                        AutomationEvent.automation_id == autom_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(events) == 1
+        assert events[0].last_error == "owner_deleted"
+        assert events[0].failed_at is not None
+
+
+@pytest.mark.asyncio
 async def test_not_due_trigger_no_rows(session_maker) -> None:
     from app.models_automations import AutomationEvent
     from app.services.automations.cron_producer import tick

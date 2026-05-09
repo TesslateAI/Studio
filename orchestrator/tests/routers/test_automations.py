@@ -490,6 +490,46 @@ def test_create_populates_next_run_at_for_cron(app_client) -> None:
 
 
 @pytest.mark.unit
+def test_create_rejects_six_field_cron_expression(app_client) -> None:
+    """6-field (seconds-first) cron used to be accepted by croniter and
+    silently quantized by the producer to multi-minute boundaries —
+    the user's '*/30 * * * * *' (every 30s) would actually fire at
+    coarser intervals with no warning."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {
+                "expression": "*/30 * * * * *",
+                "timezone": "UTC",
+            },
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "5-field" in resp.text or "sub-minute" in resp.text
+
+
+@pytest.mark.unit
+def test_create_rejects_seven_field_cron_expression(app_client) -> None:
+    """7-field (seconds + year) cron has the same coercion problem."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {
+                "expression": "0 */30 * * * * 2026",
+                "timezone": "UTC",
+            },
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.unit
 def test_create_rejects_gateway_send_without_delivery_target(app_client) -> None:
     """gateway.send + zero delivery_targets used to save as 'Active'."""
     client, _, _ = app_client

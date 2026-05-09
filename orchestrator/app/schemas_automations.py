@@ -64,6 +64,18 @@ class AutomationTriggerIn(BaseModel):
                 "cron trigger requires a non-empty 'expression' in config "
                 "(e.g. '*/5 * * * *' for every five minutes)"
             )
+        # croniter accepts 6-field (seconds-first) and 7-field
+        # (seconds + year) forms, but the producer ticks every 15s and
+        # next_run_at is computed at minute resolution — sub-minute schedules
+        # were silently rounded to multi-minute fires. Reject anything other
+        # than the standard 5-field grammar so user intent matches behavior.
+        field_count = len(expr.strip().split())
+        if field_count != 5:
+            raise ValueError(
+                f"cron trigger has invalid expression {expr!r}: "
+                "must use the 5-field format 'minute hour day month weekday' "
+                "(sub-minute schedules are not supported)"
+            )
         try:
             croniter(expr.strip())
         except (ValueError, KeyError) as exc:

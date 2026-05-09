@@ -119,6 +119,7 @@ async def tick(
         now = datetime.now(UTC)
 
     # Lazy import — avoids module-load surface in tests.
+    from ...models_auth import User
     from ...models_automations import (
         AutomationDefinition,
         AutomationEvent,
@@ -157,10 +158,14 @@ async def tick(
         # Claim due triggers.
         # --------------------------------------------------------------
         stmt = (
-            select(AutomationTrigger, AutomationDefinition)
+            select(AutomationTrigger, AutomationDefinition, User)
             .join(
                 AutomationDefinition,
                 AutomationDefinition.id == AutomationTrigger.automation_id,
+            )
+            .join(
+                User,
+                User.id == AutomationDefinition.owner_user_id,
             )
             .where(AutomationTrigger.kind == "cron")
             .where(AutomationTrigger.is_active.is_(True))
@@ -183,7 +188,7 @@ async def tick(
             await db.commit()
             return 0
 
-        for trigger, automation in rows:
+        for trigger, automation, owner in rows:
             cfg = trigger.config or {}
             cron_expr = cfg.get("cron_expression") or cfg.get("expression")
             if not cron_expr:
@@ -231,6 +236,52 @@ async def tick(
             # event ahead of the cron boundary.
             if trigger.next_run_at is None:
                 trigger.next_run_at = new_next
+                continue
+
+            # Owner suspended / deleted: a user the platform has decided to
+            # stop serving must not accrue compute or spend through cron
+            # automations they owned at the time of suspension. Advance
+            # next_run_at so the schedule does not flood-fire on unsuspend,
+            # and persist a terminal AutomationEvent (failed_at set, no ARQ
+            # enqueue) for the audit trail. sweep_on_acquire and
+            # process_trigger_events_batch both filter on failed_at IS NULL
+            # so this synthetic event is never picked up for execution.
+            owner_blocked_reason = None
+            if getattr(owner, "is_deleted", False):
+                owner_blocked_reason = "owner_deleted"
+            elif getattr(owner, "is_suspended", False):
+                owner_blocked_reason = "owner_suspended"
+            if owner_blocked_reason is not None:
+                trigger.next_run_at = new_next
+                trigger.last_run_at = now
+                event_id = uuid4()
+                tick_iso = now.replace(microsecond=0).isoformat()
+                db.add(
+                    AutomationEvent(
+                        id=event_id,
+                        automation_id=automation.id,
+                        trigger_id=trigger.id,
+                        trigger_kind="cron",
+                        payload={
+                            "fired_at": now.isoformat(),
+                            "cron_expression": cron_expr,
+                            "timezone": tz_name,
+                            "kind": "cron",
+                            "skipped_reason": owner_blocked_reason,
+                        },
+                        idempotency_key=f"cron:{trigger.id}:{tick_iso}",
+                        received_at=now,
+                        dispatched_at=now,
+                        failed_at=now,
+                        last_error=owner_blocked_reason,
+                    )
+                )
+                logger.info(
+                    "[CRON-PROD] trigger %s skipped fire: %s (owner=%s)",
+                    trigger.id,
+                    owner_blocked_reason,
+                    owner.id,
+                )
                 continue
 
             trigger.next_run_at = new_next
