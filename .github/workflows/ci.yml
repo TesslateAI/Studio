@@ -144,7 +144,12 @@ jobs:
 
       - name: Run integration tests
         working-directory: orchestrator
-        run: pytest tests/integration/ -m integration --tb=short --maxfail=5 --junit-xml=test-results/integration-results.xml
+        # Integration tests share a session-scoped TestClient + rebound
+        # app.database.engine; they need per-test event loops so the
+        # asyncpg pool stays aligned with the loop that owns it. The
+        # repo-wide asyncio_default_test_loop_scope=module setting is for
+        # unit-test parallelization only, so override it here.
+        run: pytest tests/integration/ -m integration --override-ini=asyncio_default_test_loop_scope=function --tb=short --maxfail=5 --junit-xml=test-results/integration-results.xml
         env:
           DATABASE_URL: postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test
           SECRET_KEY: test-secret-key-ci
