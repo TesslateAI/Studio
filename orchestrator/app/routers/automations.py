@@ -687,6 +687,23 @@ async def update_automation(
     if payload.delivery_targets is not None:
         await _replace_delivery_targets(db, automation.id, payload.delivery_targets)
 
+    # Mirrors the create-time scope/tier check against the *merged* row state
+    # (Pydantic on the update payload can't see fields the patch didn't touch).
+    # Without this an existing scope='none' row patched to tier=2, or a
+    # scope='none' patched onto a tier=2 row, hits the DB CHECK
+    # ``ck_automation_definitions_scope_none_tier_zero`` and surfaces as a
+    # raw HTTP 500 (Bug #31).
+    if automation.workspace_scope == "none" and automation.max_compute_tier > 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"max_compute_tier={automation.max_compute_tier} requires a "
+                f"workspace_scope other than 'none' (Tier-1+ runs need a "
+                f"workspace to mount). Either pick a workspace scope or drop "
+                f"the power level to Light (max_compute_tier=0)."
+            ),
+        )
+
     await db.commit()
     await db.refresh(automation)
     return await _project_definition(db, automation)
@@ -1098,16 +1115,34 @@ async def list_run_steps(
     from ..models import AgentStep, Message
 
     # The worker stamps ``message_metadata.task_id = str(run.id)`` on the
-    # assistant message it creates. Look up that message via the JSON
-    # accessor ``Message.message_metadata["task_id"].as_string()`` (same
-    # pattern admin.py already uses for ``completion_reason``).
-    message_id = (
-        await db.execute(
-            select(Message.id).where(
-                Message.message_metadata["task_id"].as_string() == str(run_id)
-            )
-        )
+    # assistant message it creates. Prefer the direct link the worker
+    # writes into ``automation_runs.raw_output['message_id']`` at finalize
+    # time — it's a string-equality lookup with no JSON-path coercion
+    # and works on every backend (TC-04 Bug #23 saw the JSONB ``->>``
+    # cast silently miss when the metadata column type differed across
+    # alembic revisions). The metadata lookup is kept as a fallback for
+    # mid-flight runs that haven't finalised yet.
+    run_row = (
+        await db.execute(select(AutomationRun.raw_output).where(AutomationRun.id == run_id))
     ).scalar_one_or_none()
+
+    message_id = None
+    if isinstance(run_row, dict):
+        raw_message_id = run_row.get("message_id")
+        if raw_message_id:
+            try:
+                message_id = UUID(str(raw_message_id))
+            except (TypeError, ValueError):
+                message_id = None
+
+    if message_id is None:
+        message_id = (
+            await db.execute(
+                select(Message.id).where(
+                    Message.message_metadata["task_id"].as_string() == str(run_id)
+                )
+            )
+        ).scalar_one_or_none()
     if message_id is None:
         return []
 
@@ -1123,27 +1158,113 @@ async def list_run_steps(
         .all()
     )
 
+    return _serialize_agent_steps(rows)
+
+
+def _serialize_agent_steps(rows: list[Any]) -> list[dict[str, Any]]:
+    """Render ``AgentStep`` rows for the Steps tab.
+
+    Fans out one entry per tool call so multi-tool iterations are not
+    silently collapsed to the first call (TC-04 Bug #25). Each entry
+    carries an explicit ``status`` derived from the captured tool
+    result so completed tool calls don't sit at ``running`` forever
+    (TC-04 Bug #24).
+    """
     out: list[dict[str, Any]] = []
     for row in rows:
         data = row.step_data or {}
-        tool_calls = data.get("tool_calls") or []
-        first_call = tool_calls[0] if tool_calls else {}
-        tool_results = data.get("tool_results") or []
-        first_result = tool_results[0] if tool_results else None
+        tool_calls = list(data.get("tool_calls") or [])
+        tool_results = list(data.get("tool_results") or [])
+        thought = data.get("thought")
+        response_text = data.get("response_text") or ""
+        name = data.get("name") or data.get("step_name")
+        created_at = row.created_at.isoformat() if row.created_at else None
+        is_complete = bool(data.get("is_complete"))
+
+        if tool_calls:
+            for sub_idx, tc in enumerate(tool_calls):
+                # Tool call entries embedded under ``step_data.tool_calls``
+                # may already carry their own result via the worker's
+                # ``_build_step_dict`` shape (``{name, parameters, result}``)
+                # OR be paired through a sibling ``tool_results`` array.
+                # Tolerate both so older + newer rows render the same way.
+                if isinstance(tc, dict) and "result" in tc:
+                    tool_result = tc.get("result")
+                elif sub_idx < len(tool_results):
+                    tool_result = tool_results[sub_idx]
+                else:
+                    tool_result = None
+
+                out.append(
+                    {
+                        "id": f"{row.id}:{sub_idx}",
+                        "ordinal": row.step_index,
+                        "name": name,
+                        # Surface the thought once per row so the UI keeps
+                        # the iteration narrative without duplicating it
+                        # across every fan-out entry.
+                        "thought": thought if sub_idx == 0 else None,
+                        "tool_name": tc.get("name") if isinstance(tc, dict) else None,
+                        "input": tc.get("parameters") if isinstance(tc, dict) else None,
+                        "output": tool_result,
+                        "status": _derive_step_status(
+                            tool_call=tc,
+                            tool_result=tool_result,
+                            is_complete=is_complete,
+                        ),
+                        "created_at": created_at,
+                    }
+                )
+            continue
+
+        # Thought-only / response-only iteration — keep one entry so the
+        # narrative doesn't drop turns where the model only spoke.
         out.append(
             {
                 "id": str(row.id),
                 "ordinal": row.step_index,
-                "name": data.get("name") or data.get("step_name"),
-                "thought": data.get("thought"),
-                "tool_name": first_call.get("name") if isinstance(first_call, dict) else None,
-                "input": first_call.get("parameters") if isinstance(first_call, dict) else None,
-                "output": data.get("response_text") or first_result,
-                "status": data.get("status") or ("complete" if data.get("is_complete") else "running"),
-                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "name": name,
+                "thought": thought,
+                "tool_name": None,
+                "input": None,
+                "output": response_text or None,
+                "status": "complete" if is_complete or response_text else "running",
+                "created_at": created_at,
             }
         )
     return out
+
+
+def _derive_step_status(
+    *,
+    tool_call: Any,
+    tool_result: Any,
+    is_complete: bool,
+) -> str:
+    """Derive a tool-call step's terminal status from the captured result.
+
+    Worker-side ``_build_step_dict`` does not stamp a status field on
+    each tool entry — without this derivation every tool row sits at
+    ``running`` forever even though the run is terminal. The shape
+    inside ``tool_result`` mirrors ``ToolRegistry.execute``: a dict with
+    ``success`` (success / failure), ``approval_required`` (paused),
+    or empty ``{}`` (still in flight before the worker captured a
+    result).
+    """
+    if isinstance(tool_result, dict):
+        if tool_result.get("approval_required"):
+            return "waiting_approval"
+        if tool_result.get("contract_breach"):
+            return "denied"
+        if tool_result.get("success") is False:
+            return "failed"
+        if "success" in tool_result or "result" in tool_result or tool_result.get("error"):
+            return "complete"
+    if is_complete:
+        return "complete"
+    # No captured result yet and the run hasn't completed — genuinely
+    # in-flight. Mid-flight polling lands here.
+    return "running"
 
 
 @router.get("/{automation_id}/runs/{run_id}/spend")

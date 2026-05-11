@@ -56,7 +56,7 @@ import socket
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
@@ -162,9 +162,22 @@ _REQUIRED_CONTRACT_KEYS = (
 
 _VALID_ON_BREACH = ("pause_for_approval", "hard_stop", "extend_once")
 
+# Highest compute tier the runtime knows how to route. ``dispatcher.py``
+# branches on tier == 1 (ephemeral pod) today; tier 2 wakes via
+# ``services/automations/wake.py``. Anything above is unwired — accepting
+# a higher value would silently fall through to Tier-0 routing, hiding the
+# misconfiguration. Bump this when a new tier ships in the wake/dispatch
+# tables.
+MAX_KNOWN_COMPUTE_TIER = 2
 
-def _validate_contract(contract: Any) -> None:
+
+def validate_contract(contract: Any) -> None:
     """Raise :class:`ContractInvalid` if the contract JSONB is malformed.
+
+    Public name (``validate_contract``) so the Pydantic schema can call
+    it directly at write time instead of deferring to dispatch — that way
+    POST/PATCH return 422 with field-level errors rather than persisting
+    a broken row that fails next run (TC-04 Bug #28).
 
     Phase 1 only enforces structural validity. Phase 2's ContractGate
     layers semantics (allow-list checks, tier mapping, spend estimation)
@@ -181,14 +194,50 @@ def _validate_contract(contract: Any) -> None:
     # ``None`` means "inherit project defaults"; a list is the explicit form.
     if allowed_tools is not None and not isinstance(allowed_tools, list):
         raise ContractInvalid("contract.allowed_tools must be null or a list of tool names")
+    if isinstance(allowed_tools, list) and not all(isinstance(t, str) for t in allowed_tools):
+        raise ContractInvalid("contract.allowed_tools entries must all be strings")
 
     tier = contract.get("max_compute_tier")
-    if not isinstance(tier, int) or tier < 0:
+    # ``bool`` is a subclass of ``int`` in Python; reject it explicitly so
+    # ``True`` doesn't slip through as ``tier=1``.
+    if isinstance(tier, bool) or not isinstance(tier, int) or tier < 0:
         raise ContractInvalid("contract.max_compute_tier must be a non-negative integer")
+    if tier > MAX_KNOWN_COMPUTE_TIER:
+        raise ContractInvalid(
+            f"contract.max_compute_tier={tier} exceeds the highest wired tier "
+            f"({MAX_KNOWN_COMPUTE_TIER}). Higher values are silently routed to "
+            f"Tier-0 by the dispatcher."
+        )
 
     on_breach = contract.get("on_breach", "pause_for_approval")
     if on_breach not in _VALID_ON_BREACH:
         raise ContractInvalid(f"contract.on_breach={on_breach!r} not in {_VALID_ON_BREACH!r}")
+
+    max_iter = contract.get("max_iterations")
+    if max_iter is not None and (
+        isinstance(max_iter, bool) or not isinstance(max_iter, int) or max_iter <= 0
+    ):
+        raise ContractInvalid(
+            "contract.max_iterations, when set, must be a positive integer"
+        )
+
+    max_spend_run = contract.get("max_spend_per_run_usd")
+    if max_spend_run is not None:
+        try:
+            if Decimal(str(max_spend_run)) < 0:
+                raise ContractInvalid(
+                    "contract.max_spend_per_run_usd must be non-negative"
+                )
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ContractInvalid(
+                "contract.max_spend_per_run_usd must be a numeric value"
+            ) from exc
+
+
+# Backwards-compatible alias so existing dispatch-time callers keep working
+# while we migrate them to the public name. New code should call
+# ``validate_contract`` directly.
+_validate_contract = validate_contract
 
 
 # ---------------------------------------------------------------------------

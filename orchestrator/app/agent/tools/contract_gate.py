@@ -57,7 +57,86 @@ __all__ = [
     "ContractGateDecision",
     "ContractBreachException",
     "BreachKind",
+    "TOOL_GROUP_ALIASES",
+    "expand_tool_aliases",
 ]
+
+
+# Maps user-facing permission group names (the shorthand the UI checkbox
+# surface emits — see ``LimitsForm.tsx``) to the canonical tool names the
+# registry knows about. Defining the map here, next to the gate that uses
+# it, keeps the contract semantics reviewable in one place. Group names
+# are stable; tool sets can grow as new tools are registered.
+#
+# Contracts may mix group names and canonical names freely; the gate
+# expands the union before the allow-list check. A ``None`` allow-list
+# still means "inherit project defaults" (no enforcement).
+TOOL_GROUP_ALIASES: dict[str, frozenset[str]] = {
+    "read": frozenset(
+        {
+            "read_file",
+            "read_many_files",
+            "view_image",
+            "glob",
+            "grep",
+            "list_dir",
+            "git_log",
+            "git_status",
+            "git_diff",
+            "git_blame",
+            "metadata",
+            "get_project_info",
+        }
+    ),
+    "write": frozenset({"write_file", "delete_file", "file_undo"}),
+    "edit": frozenset({"patch_file", "multi_edit", "apply_patch"}),
+    "bash": frozenset(
+        {
+            "bash_exec",
+            "shell_exec",
+            "shell_open",
+            "shell_close",
+            "write_stdin",
+            "list_background_processes",
+            "read_background_output",
+            "python_repl",
+        }
+    ),
+    "web": frozenset({"web_fetch", "web_search"}),
+    "skill": frozenset({"load_skill"}),
+    "container": frozenset(
+        {
+            "container_status",
+            "container_start",
+            "container_stop",
+            "container_restart",
+            "container_logs",
+            "container_health",
+        }
+    ),
+    "kanban": frozenset(
+        {"kanban_create", "kanban_move", "kanban_update", "kanban_comment"}
+    ),
+    "send_message": frozenset({"send_message"}),
+    "app": frozenset({"invoke_app_action"}),
+}
+
+
+def expand_tool_aliases(allowed_tools: list[str]) -> set[str]:
+    """Expand user-facing group names into the canonical tool-name set.
+
+    Entries that are not group names pass through unchanged (so callers can
+    mix canonical names like ``read_file`` and group names like ``read`` in
+    the same allow-list).
+    """
+    expanded: set[str] = set()
+    for entry in allowed_tools:
+        group = TOOL_GROUP_ALIASES.get(entry)
+        if group is None:
+            expanded.add(entry)
+        else:
+            expanded.update(group)
+    return expanded
 
 
 # Decision-only sentinel strings — kept narrow so callers can branch with a
@@ -233,12 +312,20 @@ class ContractGate:
             return None
 
         allowed_tools = self.contract.get("allowed_tools")
-        if allowed_tools is not None and tool_name not in allowed_tools:
-            return ContractGateDecision(
-                allowed=False,
-                reason=f"tool '{tool_name}' not in contract.allowed_tools",
-                breach_kind=BreachKind.TOOL_DISALLOWED,
-            )
+        if allowed_tools is not None:
+            # Expand user-facing group names (``read``, ``write``, ``bash``)
+            # to the canonical registry tool names (``read_file``,
+            # ``write_file``, ``bash_exec``, ...). Without this the UI's
+            # checkbox surface — which writes shorthand into the contract —
+            # would deny every tool call. Canonical names pass through
+            # unchanged so raw-JSON authors can keep using either form.
+            expanded = expand_tool_aliases(allowed_tools)
+            if tool_name not in expanded:
+                return ContractGateDecision(
+                    allowed=False,
+                    reason=f"tool '{tool_name}' not in contract.allowed_tools",
+                    breach_kind=BreachKind.TOOL_DISALLOWED,
+                )
 
         # MCP allow-list (for tools whose params name an MCP server).
         # ``mcp_name`` / ``server`` are the conventional param keys —

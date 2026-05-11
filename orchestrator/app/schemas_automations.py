@@ -254,9 +254,22 @@ class AutomationDefinitionIn(BaseModel):
 
     @field_validator("contract")
     @classmethod
-    def _contract_non_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
+    def _validate_contract_schema(cls, v: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(v, dict) or not v:
             raise ValueError("contract is required and must be a non-empty object")
+        # Defer the structural rules to the dispatcher's validator so the
+        # router and run-time agree on the schema. Without this the user
+        # could persist a malformed contract via POST/PATCH and only see
+        # the failure on the next dispatch (TC-04 Bug #28).
+        from .services.automations.dispatcher import (
+            ContractInvalid,
+            validate_contract,
+        )
+
+        try:
+            validate_contract(v)
+        except ContractInvalid as exc:
+            raise ValueError(str(exc)) from exc
         return v
 
     @field_validator("workspace_scope")
@@ -286,6 +299,54 @@ class AutomationDefinitionIn(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _reconcile_compute_tier(self) -> AutomationDefinitionIn:
+        # The dispatcher branches on the column ``automation_definitions
+        # .max_compute_tier`` to pick Tier-0 vs Tier-1+ routing, while
+        # ContractGate enforces ``contract.max_compute_tier`` per tool.
+        # If they disagree the routing tier and the per-tool cap drift
+        # apart silently — see TC-04 Bug #29. Force them equal at write
+        # time so there's a single source of truth.
+        from .services.automations.dispatcher import MAX_KNOWN_COMPUTE_TIER
+
+        if self.max_compute_tier < 0:
+            raise ValueError("max_compute_tier must be non-negative")
+        if self.max_compute_tier > MAX_KNOWN_COMPUTE_TIER:
+            raise ValueError(
+                f"max_compute_tier={self.max_compute_tier} exceeds the highest "
+                f"wired tier ({MAX_KNOWN_COMPUTE_TIER})."
+            )
+
+        contract_tier = self.contract.get("max_compute_tier")
+        if contract_tier is not None and contract_tier != self.max_compute_tier:
+            raise ValueError(
+                f"contract.max_compute_tier={contract_tier} disagrees with "
+                f"max_compute_tier={self.max_compute_tier}; remove one or "
+                f"set them equal."
+            )
+        # Mirror the column into the contract so the gate cap and the
+        # dispatcher routing always match for downstream readers.
+        self.contract["max_compute_tier"] = self.max_compute_tier
+        return self
+
+    @model_validator(mode="after")
+    def _validate_scope_tier_constraint(self) -> AutomationDefinitionIn:
+        # Mirrors the DB CHECK ``ck_automation_definitions_scope_none_tier_zero``
+        # so the user gets a typed 422 with field-level guidance instead of
+        # an unhandled IntegrityError surfaced as raw HTTP 500 (Bug #31).
+        # ``workspace_scope='none'`` means the automation has no associated
+        # storage — there's nothing for a Tier-1+ ephemeral pod to mount, so
+        # the dispatcher's tier routing has no destination.
+        if self.workspace_scope == "none" and self.max_compute_tier > 0:
+            raise ValueError(
+                f"max_compute_tier={self.max_compute_tier} requires a "
+                f"workspace_scope other than 'none' (Tier-1+ runs need a "
+                f"workspace to mount). Either pick a workspace scope (personal "
+                f"folder, team folder, or target project) or drop the power "
+                f"level to Light (max_compute_tier=0)."
+            )
+        return self
+
 
 class AutomationDefinitionUpdate(BaseModel):
     """Patch payload. Lists ``triggers``/``actions``/``delivery_targets`` are
@@ -305,11 +366,24 @@ class AutomationDefinitionUpdate(BaseModel):
 
     @field_validator("contract")
     @classmethod
-    def _contract_non_empty(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+    def _validate_contract_schema(
+        cls, v: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
         if v is None:
             return v
         if not isinstance(v, dict) or not v:
             raise ValueError("contract, when provided, must be a non-empty object")
+        # Mirror of the create-time validator so PATCH gets the same 422
+        # surface — see TC-04 Bug #28.
+        from .services.automations.dispatcher import (
+            ContractInvalid,
+            validate_contract,
+        )
+
+        try:
+            validate_contract(v)
+        except ContractInvalid as exc:
+            raise ValueError(str(exc)) from exc
         return v
 
     @field_validator("actions")
@@ -337,6 +411,42 @@ class AutomationDefinitionUpdate(BaseModel):
                 "Automations with a 'gateway.send' action require at least one "
                 "delivery target (set 'Where to send the result')."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _reconcile_compute_tier(self) -> AutomationDefinitionUpdate:
+        # Same reconciliation as the create-time validator — kicks in
+        # only when the caller actually patched at least one of the two
+        # tier surfaces. See TC-04 Bug #29.
+        from .services.automations.dispatcher import MAX_KNOWN_COMPUTE_TIER
+
+        contract_tier = (
+            self.contract.get("max_compute_tier") if self.contract is not None else None
+        )
+        column_tier = self.max_compute_tier
+
+        if column_tier is None and contract_tier is None:
+            return self
+
+        # Whichever side the caller set, validate range and propagate to
+        # the other so the dispatcher and gate stay in sync.
+        if column_tier is not None:
+            if column_tier < 0:
+                raise ValueError("max_compute_tier must be non-negative")
+            if column_tier > MAX_KNOWN_COMPUTE_TIER:
+                raise ValueError(
+                    f"max_compute_tier={column_tier} exceeds the highest "
+                    f"wired tier ({MAX_KNOWN_COMPUTE_TIER})."
+                )
+
+        if column_tier is not None and contract_tier is not None:
+            if column_tier != contract_tier:
+                raise ValueError(
+                    f"contract.max_compute_tier={contract_tier} disagrees with "
+                    f"max_compute_tier={column_tier}; remove one or set them equal."
+                )
+        elif column_tier is not None and self.contract is not None:
+            self.contract["max_compute_tier"] = column_tier
         return self
 
 

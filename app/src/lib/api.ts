@@ -5300,17 +5300,14 @@ export const automationsApi = {
 
   /**
    * Read-only listing of progressively-persisted agent steps for a run
-   * whose action_type is ``agent.run``. Phase 5 stub: returns ``[]`` if the
-   * server-side endpoint hasn't shipped yet rather than throwing — the UI
-   * renders "No steps recorded" in that case.
+   * whose action_type is ``agent.run``. Errors propagate to the caller —
+   * silently returning ``[]`` here was masking real failures (404 from a
+   * routing typo, 500 from a JSON-path mismatch) and showing the user
+   * "No steps recorded" for runs that actually had steps (TC-04 Bug #23).
    */
   async listRunSteps(id: string, runId: string): Promise<RunStep[]> {
-    try {
-      const response = await api.get(`/api/automations/${id}/runs/${runId}/steps`);
-      return Array.isArray(response.data) ? response.data : [];
-    } catch {
-      return [];
-    }
+    const response = await api.get(`/api/automations/${id}/runs/${runId}/steps`);
+    return Array.isArray(response.data) ? response.data : [];
   },
 
   /**

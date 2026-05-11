@@ -14,6 +14,11 @@ interface Props {
 
   maxSpendPerDay: string;
   onMaxSpendPerDayChange: (next: string) => void;
+
+  /** Workspace scope from the parent form. Used to surface the DB CHECK
+   *  ``ck_automation_definitions_scope_none_tier_zero`` constraint inline
+   *  before the user submits and gets a 422 (Bug #31). */
+  workspaceScope: string;
 }
 
 /** Tools the structured allow-list checkbox surface offers out of the box.
@@ -32,6 +37,12 @@ const POWER_LEVELS: Array<{ tier: number; label: string; help: string }> = [
   { tier: 1, label: 'Standard', help: 'Default sandbox. Most automations should use this.' },
   { tier: 2, label: 'Heavy', help: 'Larger sandbox for big jobs. Higher cost.' },
 ];
+
+// Mirrors ``MAX_KNOWN_COMPUTE_TIER`` in the orchestrator's dispatcher.
+// Anything above this is rejected at the API boundary because the
+// dispatcher only routes Tier-0/1/2 today; bump both when a new wake
+// path ships.
+const MAX_KNOWN_TIER = 2;
 
 interface ParsedContract {
   ok: boolean;
@@ -65,6 +76,7 @@ export function LimitsForm({
   onMaxSpendPerRunChange,
   maxSpendPerDay,
   onMaxSpendPerDayChange,
+  workspaceScope,
 }: Props) {
   const [rawOpen, setRawOpen] = useState(false);
 
@@ -113,6 +125,25 @@ export function LimitsForm({
     });
   };
 
+  // Single update site for Power level. Mirrors the column value into
+  // ``contract.max_compute_tier`` so the Bug #29 reconciler invariant
+  // (column == contract) holds for every UI interaction (Bug #30).
+  const setComputeTier = (next: string) => {
+    onMaxComputeTierChange(next);
+    const n = parseInt(next, 10);
+    if (!Number.isFinite(n)) return;
+    writeContract((obj) => {
+      obj.max_compute_tier = n;
+    });
+  };
+
+  // ``ck_automation_definitions_scope_none_tier_zero`` enforces tier=0 when
+  // scope='none'. Surface inline so the user fixes it before submit and
+  // doesn't see a raw 500 (Bug #31). Backend validator catches it as
+  // defense in depth.
+  const tierConflictsWithScope =
+    workspaceScope === 'none' && parseInt(maxComputeTier, 10) > 0;
+
   const structuredDisabled = !parsed.ok;
 
   return (
@@ -127,7 +158,7 @@ export function LimitsForm({
               name="power-level"
               value={opt.tier}
               checked={parseInt(maxComputeTier, 10) === opt.tier}
-              onChange={() => onMaxComputeTierChange(String(opt.tier))}
+              onChange={() => setComputeTier(String(opt.tier))}
               className="mt-0.5"
             />
             <span className="flex-1">
@@ -136,18 +167,23 @@ export function LimitsForm({
             </span>
           </label>
         ))}
-        <p className="text-[10px] text-[var(--text-subtle)]">
-          Higher tiers (3+) are available — type a number in the raw JSON if you need them.
-        </p>
         <input
           type="number"
           min={0}
+          max={MAX_KNOWN_TIER}
           step={1}
           value={maxComputeTier}
-          onChange={(e) => onMaxComputeTierChange(e.target.value)}
+          onChange={(e) => setComputeTier(e.target.value)}
           aria-label="Power level (numeric override)"
           className="w-20 px-2 py-1 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs font-mono focus:outline-none focus:border-[var(--border-hover)]"
         />
+        {tierConflictsWithScope && (
+          <p className="text-[10px] text-[var(--status-error)]">
+            Standard / Heavy power levels need a workspace. Pick a personal /
+            team folder or a project under "Where it should run" above, or drop
+            the power level back to Light.
+          </p>
+        )}
       </fieldset>
 
       {/* Allowed tools */}

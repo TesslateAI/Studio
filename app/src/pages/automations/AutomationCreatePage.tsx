@@ -17,9 +17,14 @@ import { DestinationPicker } from './components/DestinationPicker';
 import { WorkspacePicker } from './components/WorkspacePicker';
 import { LimitsForm } from './components/LimitsForm';
 
+// ``contract.max_compute_tier`` MUST agree with the column ``max_compute_tier``
+// (Bug #29 invariant — the create-time model_validator rejects mismatches).
+// Ship Light (0) by default to match the Power level radio's default; the
+// LimitsForm mirrors any subsequent radio change back into the contract so
+// the two can never drift.
 const DEFAULT_CONTRACT = `{
   "allowed_tools": ["read", "write", "bash"],
-  "max_compute_tier": 1,
+  "max_compute_tier": 0,
   "max_iterations": 25
 }`;
 
@@ -280,6 +285,7 @@ export default function AutomationCreatePage() {
               onMaxSpendPerRunChange={setMaxSpendPerRun}
               maxSpendPerDay={maxSpendPerDay}
               onMaxSpendPerDayChange={setMaxSpendPerDay}
+              workspaceScope={scope}
             />
           </Section>
 

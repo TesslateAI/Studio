@@ -87,22 +87,35 @@ export default function RunDetailPage() {
     return () => window.clearInterval(handle);
   }, [run, reload]);
 
-  // Lazy-load Steps when the user activates the Steps tab.
+  // Load Steps when the user activates the Steps tab. Re-fetch on every
+  // run poll while the run is non-terminal so steps written after first
+  // load become visible without a manual refresh — the previous version
+  // gated re-fetch on ``steps === null`` and could leave the panel empty
+  // forever if the first fetch raced ahead of the worker (TC-04 Bug #23).
   useEffect(() => {
-    if (!id || !runId || activeTab !== 'steps' || steps !== null) return;
+    if (!id || !runId || activeTab !== 'steps') return;
+    if (run && TERMINAL_STATES.has(run.status) && steps !== null) return;
     let cancelled = false;
     automationsApi
       .listRunSteps(id, runId)
       .then((rows) => {
-        if (!cancelled) setSteps(rows);
+        if (!cancelled) {
+          setSteps(rows);
+          setStepsError(null);
+        }
       })
-      .catch((err: Error) => {
-        if (!cancelled) setStepsError(err.message ?? 'Failed to load steps');
+      .catch((err: { message?: string; response?: { data?: { detail?: string } } }) => {
+        if (!cancelled) {
+          const detail = err.response?.data?.detail;
+          setStepsError(
+            (typeof detail === 'string' ? detail : err.message) ?? 'Failed to load steps'
+          );
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [id, runId, activeTab, steps]);
+  }, [id, runId, activeTab, run, steps]);
 
   // Lazy-load Spend rollup when the user activates the Spend tab.
   useEffect(() => {

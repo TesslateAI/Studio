@@ -229,6 +229,28 @@ async def _heartbeat_lock(pubsub, chat_id: str, task_id: str):
         pass
 
 
+async def _contract_gate_hook(tool_name, parameters, context, tool):
+    """Pre-execute hook bridging the submodule registry into ContractGate.
+
+    The orchestrator's automation contract gate lives in-tree (it touches
+    ``automation_runs``, billing tables, etc., which the submodule must
+    not depend on). The submodule registry exposes a ``pre_execute_hook``
+    seam so we can wedge the gate in without duplicating its logic.
+
+    Returns ``None`` for non-automation invocations (no contract in
+    context) so chat sessions are unaffected, or a tool-result envelope
+    when the gate denies the call (same shape as the in-tree path).
+    """
+    from .agent.tools.registry import check_contract_gate
+
+    return await check_contract_gate(
+        tool_name=tool_name,
+        parameters=parameters,
+        context=context,
+        tool=tool,
+    )
+
+
 def _build_submodule_registry(in_tree_registry, approval_handler=None):
     """Transfer tools from an in-tree ToolRegistry to a submodule ToolRegistry.
 
@@ -240,11 +262,20 @@ def _build_submodule_registry(in_tree_registry, approval_handler=None):
     ``approval_handler`` is an optional async callable injected into the
     submodule registry so the orchestrator's interactive approval flow (Redis
     pub/sub + frontend dialog) is used instead of the env-var-based fallback.
+
+    The submodule registry's ``pre_execute_hook`` is wired to
+    ``_contract_gate_hook`` so automation runs enforce ``allowed_tools`` /
+    ``allowed_mcps`` / ``allowed_skills`` / ``max_compute_tier`` /
+    ``max_spend_per_run_usd`` — without this the in-tree ContractGate is
+    dead code on every automation dispatch (TC-04 Bug #22).
     """
     try:
         from tesslate_agent.agent.tools.registry import ToolRegistry as SubmoduleRegistry
 
-        sub = SubmoduleRegistry(approval_handler=approval_handler)
+        sub = SubmoduleRegistry(
+            approval_handler=approval_handler,
+            pre_execute_hook=_contract_gate_hook,
+        )
         for tool in in_tree_registry._tools.values():
             sub.register(tool)
         return sub
@@ -866,6 +897,26 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 settings=settings,
                 approval_handler=_approval_handler,
             )
+
+            # Plumb ``contract.max_iterations`` onto the agent runner so the
+            # cap declared on the automation actually fires. Mirrors the
+            # ``chat.py:1146`` pattern. Without this the submodule defaults
+            # to ``DEFAULT_MAX_ITERATIONS=0`` (unlimited) and a runaway
+            # tool-call loop only stops at the worker timeout (TC-04 Bug #27).
+            _max_iter = (payload.contract or {}).get("max_iterations") if payload.contract else None
+            if _max_iter is not None:
+                try:
+                    _max_iter_int = int(_max_iter)
+                except (TypeError, ValueError):
+                    _max_iter_int = None
+                if _max_iter_int is not None and _max_iter_int > 0:
+                    inner = getattr(agent_run_obj, "inner", None)
+                    if inner is not None and hasattr(inner, "max_iterations"):
+                        inner.max_iterations = _max_iter_int
+                        logger.info(
+                            "[WORKER] Applied contract.max_iterations=%d to agent runner",
+                            _max_iter_int,
+                        )
 
             # 7b. Load MCP tools for this user/agent and inject into tool registry
             mcp_context: dict | None = None
