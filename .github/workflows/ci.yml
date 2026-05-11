@@ -56,7 +56,7 @@ jobs:
 
       - name: Run unit tests
         working-directory: orchestrator
-        run: pytest -m "unit or mocked" --tb=short --maxfail=5
+        run: pytest -m "unit or mocked" -n auto --dist=loadfile --tb=short --maxfail=5
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test
           SECRET_KEY: test-secret-key
