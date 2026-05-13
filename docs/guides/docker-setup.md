@@ -62,7 +62,7 @@ These live in `/home/smirk/Tesslate-Studio/.env.example`. Open that file for the
 Docker Compose does not interpolate variables inside other variables in `.env`, so `ALLOWED_HOSTS=${APP_DOMAIN}` keeps the literal `${APP_DOMAIN}` string. For dev it still works because `APP_DOMAIN=localhost` is also the default; in production set `ALLOWED_HOSTS` to an explicit value.
 
 ## 3. First boot
-
+monmonn
 ```bash
 docker compose up --build -d
 ```
