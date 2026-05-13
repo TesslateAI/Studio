@@ -72,7 +72,18 @@ class ManifestInvalid(ProjectionError):
 
     Wraps the underlying ``ManifestValidationError`` so the install caller
     can catch a single domain error type and roll back.
+
+    ``errors`` mirrors ``ManifestValidationError.errors`` (a list of
+    ``{path, message, validator, validator_value}`` dicts) so callers can
+    surface field-level detail in API responses without unpacking the
+    cause chain.
     """
+
+    def __init__(
+        self, message: str, errors: list[dict[str, Any]] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.errors: list[dict[str, Any]] = errors or []
 
 
 class DependencyAppNotFound(ProjectionError):
@@ -161,7 +172,8 @@ async def regenerate_projection(
         parsed = parse_manifest(av.manifest_json or {})
     except ManifestValidationError as e:
         raise ManifestInvalid(
-            f"AppVersion {app_version_id} manifest_json failed validation: {e}"
+            f"AppVersion {app_version_id} manifest_json failed validation: {e}",
+            errors=list(getattr(e, "errors", []) or []),
         ) from e
 
     manifest = parsed.manifest

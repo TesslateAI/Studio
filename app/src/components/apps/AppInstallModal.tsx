@@ -261,6 +261,14 @@ export function AppInstallModal({
   );
   const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  // Inline failure detail for install errors. Toast alone is too easy to
+  // miss — when a 422 comes back the user needs to see the server's
+  // message (and optionally the field-level error list from
+  // ProjectionError.errors) without opening devtools.
+  const [submitError, setSubmitError] = useState<{
+    message: string;
+    errors?: Array<{ path?: unknown[]; message?: string }>;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -425,6 +433,7 @@ export function AppInstallModal({
       return;
     }
     setSubmitting(true);
+    setSubmitError(null);
     try {
       const walletMix: Record<string, unknown> = { accepted: true };
       for (const key of ['ai_compute', 'general_compute', 'platform_fee'] as const) {
@@ -455,8 +464,35 @@ export function AppInstallModal({
       });
       onDone(result.app_instance_id);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Install failed';
-      toast.error(msg);
+      // FastAPI 422s ride on `err.response.data.detail` (string for
+      // simple errors, `{message, errors[]}` for manifest validation
+      // failures — see ProjectionError.ManifestInvalid). Surface the
+      // server's text inline AND in the toast so the user sees the
+      // actual failure reason rather than "Request failed with status
+      // code 422".
+      const axiosLike = err as {
+        response?: {
+          data?: {
+            detail?:
+              | string
+              | { message?: string; errors?: Array<{ path?: unknown[]; message?: string }> };
+          };
+        };
+        message?: string;
+      };
+      const detail = axiosLike?.response?.data?.detail;
+      let message: string;
+      let errors: Array<{ path?: unknown[]; message?: string }> | undefined;
+      if (typeof detail === 'string') {
+        message = detail;
+      } else if (detail && typeof detail === 'object') {
+        message = detail.message ?? 'Install failed';
+        errors = detail.errors;
+      } else {
+        message = axiosLike?.message ?? 'Install failed';
+      }
+      setSubmitError({ message, errors });
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }
@@ -907,6 +943,38 @@ export function AppInstallModal({
           )}
         </div>
 
+        {submitError && (
+          <div
+            className="mx-4 mb-2 mt-1 rounded border border-red-500/40 bg-red-500/10 p-3 text-[11px] text-red-300"
+            role="alert"
+            data-testid="install-error"
+          >
+            <div className="font-semibold text-red-200">Install failed</div>
+            <div className="mt-1 whitespace-pre-wrap break-words">
+              {submitError.message}
+            </div>
+            {submitError.errors && submitError.errors.length > 0 && (
+              <ul className="mt-2 list-disc pl-4 space-y-0.5">
+                {submitError.errors.slice(0, 8).map((err, i) => (
+                  <li key={i}>
+                    <span className="font-mono text-red-200">
+                      {Array.isArray(err.path) && err.path.length > 0
+                        ? err.path.join('.')
+                        : '<root>'}
+                    </span>
+                    {' — '}
+                    {err.message ?? 'validation error'}
+                  </li>
+                ))}
+                {submitError.errors.length > 8 && (
+                  <li className="text-red-400/70">
+                    + {submitError.errors.length - 8} more
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-2 p-4 border-t border-[var(--border)]">
           <button className="btn" onClick={onClose} disabled={submitting}>
             Cancel

@@ -151,6 +151,50 @@ def _stable_manifest_hash(manifest: dict[str, Any]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+# Top-level keys that federated marketplaces (including our own seed
+# publisher) may surface for scoring purposes, but which the orchestrator's
+# manifest schemas (2025-01 / 2025-02 / 2026-05 / 2026-06) reject because
+# every schema declares ``additionalProperties: false`` at the root. The
+# canonical homes are nested:
+#   * forkable           → ``app.forkable``
+#   * required_features  → ``compatibility.required_features``
+# ``source_visibility`` is special: the 2025-01 / 2025-02 / 2026-06 schemas
+# declare a top-level ``source_visibility`` of type ``object``. The scoring
+# overlay writes it as the string ``"public"``. We strip only the string
+# form so a properly-shaped object survives.
+_SCORING_OVERLAY_ROOT_KEYS: Final[tuple[str, ...]] = (
+    "forkable",
+    "required_features",
+)
+
+
+def _sanitize_manifest_for_persistence(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Strip top-level scoring-overlay keys before persisting ``manifest_json``.
+
+    Federated marketplace publishers may decorate the manifest with
+    top-level keys (``forkable``, ``required_features``, scalar
+    ``source_visibility``) so the marketplace's score function can read
+    them cheaply. The orchestrator's manifest validator rejects those
+    extras at install time, so leaving them in ``app_versions.manifest_json``
+    makes the version uninstallable. We sanitize at the sync boundary —
+    the orchestrator's local copy of the manifest is for its own
+    consumption (install + projection), not a cryptographic mirror of
+    what the marketplace stores. Bundle integrity is enforced by
+    ``bundle_hash`` against the Volume Hub CAS; ``manifest_hash`` is
+    re-derived from this sanitized copy.
+
+    Idempotent: a manifest that's already clean is returned as a
+    shallow-copied dict so callers can mutate freely without aliasing.
+    """
+    cleaned = dict(manifest)
+    for key in _SCORING_OVERLAY_ROOT_KEYS:
+        cleaned.pop(key, None)
+    sv = cleaned.get("source_visibility")
+    if isinstance(sv, str):
+        cleaned.pop("source_visibility", None)
+    return cleaned
+
+
 # Type aliases for the factories the worker accepts (testable injection).
 SessionFactory = Callable[[], AsyncSession]
 ClientFactory = Callable[[MarketplaceSource, str | None], MarketplaceClient]
@@ -1119,10 +1163,21 @@ class MarketplaceSyncWorker:
                         finally:
                             await hub_client.close()
 
-            manifest_hash = _stable_manifest_hash(manifest)
+            # Read required_features BEFORE sanitizing so we still capture
+            # the value from upstream's scoring overlay if that's the only
+            # place it appears. Fall back to compatibility.required_features
+            # (the canonical home declared by 2025-01 / 2025-02 / 2026-06).
             required_features = manifest.get("required_features")
             if not isinstance(required_features, list):
-                required_features = []
+                compat = manifest.get("compatibility")
+                nested = compat.get("required_features") if isinstance(compat, dict) else None
+                required_features = nested if isinstance(nested, list) else []
+
+            # Strip scoring-overlay roots before persisting + hashing so
+            # ``manifest_json`` validates against the orchestrator's schema
+            # at install time. See ``_sanitize_manifest_for_persistence``.
+            manifest = _sanitize_manifest_for_persistence(manifest)
+            manifest_hash = _stable_manifest_hash(manifest)
             schema_version = (
                 manifest.get("manifest_schema_version")
                 or (manifest.get("compatibility") or {}).get("manifest_schema")

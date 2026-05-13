@@ -54,7 +54,7 @@ from __future__ import annotations
 import logging
 import socket
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -631,13 +631,22 @@ async def _dispatch_app_action(
         run_id=run.id,
         invocation_subject_id=invocation_subject_id,
     )
-    if hasattr(result, "model_dump"):
-        return result.model_dump()  # type: ignore[no-any-return]
-    if hasattr(result, "dict"):
-        return result.dict()  # type: ignore[no-any-return]
-    if isinstance(result, dict):
-        return result
-    return {"action_type": "app.invoke", "result": str(result)}
+    # Normalize result into a JSON-friendly envelope so raw_output stays
+    # parseable downstream (audit export, cost dashboards, UI rendering).
+    # ``ActionDispatchResult`` is a plain ``@dataclass`` — preferred path.
+    if is_dataclass(result) and not isinstance(result, type):
+        body: dict[str, Any] = asdict(result)
+    elif hasattr(result, "model_dump"):
+        body = result.model_dump()  # type: ignore[no-any-return]
+    elif hasattr(result, "dict"):
+        body = result.dict()  # type: ignore[no-any-return]
+    elif isinstance(result, dict):
+        body = dict(result)
+    else:
+        # Last-resort: a non-dataclass, non-mapping result. Wrap the
+        # string form so callers can still distinguish the action_type.
+        body = {"raw": str(result)}
+    return {"action_type": "app.invoke", "result": body, "app_version_id": str(app_action_row.app_version_id), "action_name": app_action_row.name}
 
 
 async def _dispatch_gateway_send(
@@ -986,7 +995,7 @@ async def dispatch_automation(
             return await _mark_failed_preflight(
                 db,
                 run=run,
-                reason=f"lazy workspace creation crashed: {exc!r}",
+                reason=f"lazy workspace creation crashed: {exc}",
                 paused_status=DispatchStatus.FAILED,
             )
 
@@ -1101,7 +1110,7 @@ async def dispatch_automation(
             return await _mark_failed_preflight(
                 db,
                 run=run,
-                reason=f"budget allocation failed: {exc!r}",
+                reason=f"budget allocation failed: {exc}",
                 paused_status=DispatchStatus.FAILED,
             )
 
@@ -1232,7 +1241,7 @@ async def dispatch_automation(
             event_id,
             run.id,
         )
-        return await _finalize_failure(db, run=run, reason=repr(exc)[:1000])
+        return await _finalize_failure(db, run=run, reason=str(exc)[:1000])
 
     # ---- Phase D: delivery + finalization ------------------------------
     try:
@@ -1251,7 +1260,7 @@ async def dispatch_automation(
         return await _finalize_failure(
             db,
             run=run,
-            reason=f"delivery failed: {exc!r}",
+            reason=f"delivery failed: {exc}",
         )
 
     # Branch on whether the action handler ran synchronously (real
@@ -1667,7 +1676,7 @@ async def resume_run(
             checkpoint.automation_id,
             run.id,
         )
-        return await _finalize_failure(db, run=run, reason=repr(exc)[:1000])
+        return await _finalize_failure(db, run=run, reason=str(exc)[:1000])
 
     # For redispatch app.invoke / gateway.send paths the action completes
     # synchronously here; finalize as success. Agent flows kick a worker
@@ -1681,7 +1690,7 @@ async def resume_run(
         except Exception as exc:
             logger.exception("[dispatcher] resume delivery failed run=%s", run.id)
             return await _finalize_failure(
-                db, run=run, reason=f"delivery failed on resume: {exc!r}"
+                db, run=run, reason=f"delivery failed on resume: {exc}"
             )
 
         ended_at = datetime.now(tz=UTC)

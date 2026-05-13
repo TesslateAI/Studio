@@ -175,6 +175,31 @@ export default function AutomationCreatePage() {
             return loc ? `${loc}: ${text}` : text;
           })
           .join('; ');
+      } else if (detail && typeof detail === 'object') {
+        // Structured detail: {message, errors[]} — emitted by save-time
+        // input-schema validators. Show the message and append the
+        // first few field-level errors so the user can fix in place.
+        const d = detail as {
+          message?: unknown;
+          errors?: Array<{ path?: unknown; message?: unknown }>;
+        };
+        const baseMsg = typeof d.message === 'string' ? d.message : 'Validation failed';
+        const errs = Array.isArray(d.errors) ? d.errors : [];
+        if (errs.length === 0) {
+          msg = baseMsg;
+        } else {
+          msg = baseMsg + ' — ' + errs
+            .slice(0, 4)
+            .map((e) => {
+              const path = Array.isArray(e.path) && e.path.length > 0
+                ? e.path.join('.')
+                : '';
+              const text = typeof e.message === 'string' ? e.message : '';
+              return path ? `${path}: ${text}` : text;
+            })
+            .filter(Boolean)
+            .join('; ');
+        }
       }
       toast.error(msg);
     } finally {

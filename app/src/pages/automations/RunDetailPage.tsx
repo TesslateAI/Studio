@@ -218,7 +218,21 @@ export default function RunDetailPage() {
               <Field label="Contract breaches">{run.contract_breaches}</Field>
               <Field label="Event ID">{run.event_id?.slice(0, 8) ?? '—'}…</Field>
               {run.paused_reason && (
-                <Field label="Paused reason">
+                <Field
+                  label={
+                    // The ``paused_reason`` column is used as a generic
+                    // human-readable reason field; for terminal failures
+                    // labelling it "Paused reason" misleads operators
+                    // triaging a failed run. Use a status-aware label.
+                    run.status === 'failed' || run.status === 'failed_preflight'
+                      ? 'Failure reason'
+                      : run.status === 'cancelled'
+                        ? 'Cancellation reason'
+                        : run.status === 'expired'
+                          ? 'Expiration reason'
+                          : 'Paused reason'
+                  }
+                >
                   <span className="text-[var(--status-error)]">{run.paused_reason}</span>
                 </Field>
               )}
@@ -327,30 +341,88 @@ interface StepsPanelProps {
 }
 
 function StepsPanel({ run, steps, error }: StepsPanelProps) {
-  // Distinguish app.invoke runs by the shape of ``raw_output``: those carry
-  // a single ``{action, input, output}``-shaped blob written by the action
-  // dispatcher. Agent runs progressively persist into agent_steps and surface
-  // through ``listRunSteps``.
+  // Distinguish app.invoke runs by ``raw_output.action_type``. The action
+  // dispatcher writes a single envelope:
+  //   {action_type, result: {output, artifacts, spend_usd, duration_seconds,
+  //    error, rendered}, app_version_id, action_name}.
+  // Agent runs progressively persist into agent_steps and surface via the
+  // /steps endpoint.
   const rawOutput = run.raw_output as
-    | { action?: string; input?: unknown; output?: unknown }
+    | {
+        action_type?: string;
+        action_name?: string;
+        app_version_id?: string;
+        result?: {
+          output?: unknown;
+          error?: string | null;
+          duration_seconds?: number;
+          spend_usd?: string | number;
+          rendered?: string | null;
+        };
+      }
     | null
     | undefined;
 
-  const looksLikeAppInvoke =
+  const isAppInvoke =
     rawOutput &&
     typeof rawOutput === 'object' &&
     !Array.isArray(rawOutput) &&
-    typeof rawOutput.action === 'string';
+    rawOutput.action_type === 'app.invoke';
 
-  if (looksLikeAppInvoke) {
+  if (isAppInvoke) {
+    const result = rawOutput.result ?? {};
     return (
       <section className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
-        <header className="flex items-center justify-between">
+        <header className="flex items-center justify-between gap-3 flex-wrap">
           <h3 className="text-xs font-semibold text-[var(--text)]">App invocation</h3>
-          <code className="text-[10px] text-[var(--text-muted)]">{rawOutput.action}</code>
+          <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
+            {rawOutput.action_name && (
+              <code className="font-mono">{rawOutput.action_name}</code>
+            )}
+            {rawOutput.app_version_id && (
+              <span className="text-[var(--text-subtle)]">
+                version {rawOutput.app_version_id.slice(0, 8)}…
+              </span>
+            )}
+          </div>
         </header>
-        <KeyJson label="Input" value={rawOutput.input} />
-        <KeyJson label="Output" value={rawOutput.output} />
+        {result.error ? (
+          <div className="rounded border border-red-500/40 bg-red-500/10 p-2 text-[11px] text-red-300">
+            <div className="font-semibold text-red-200">Action error</div>
+            <div className="mt-1 whitespace-pre-wrap break-words">{result.error}</div>
+          </div>
+        ) : (
+          <KeyJson label="Output" value={result.output} />
+        )}
+        {result.rendered && (
+          <div>
+            <div className="text-[10px] font-medium text-[var(--text-subtle)] mb-1">
+              Rendered
+            </div>
+            <pre className="text-[11px] whitespace-pre-wrap break-words bg-[var(--bg)] border border-[var(--border)] rounded p-2">
+              {result.rendered}
+            </pre>
+          </div>
+        )}
+        {(typeof result.duration_seconds === 'number' ||
+          result.spend_usd !== undefined) && (
+          <dl className="text-[10px] text-[var(--text-subtle)] flex flex-wrap gap-x-4 gap-y-1">
+            {typeof result.duration_seconds === 'number' && (
+              <div>
+                <dt className="inline font-medium">Action duration:</dt>{' '}
+                <dd className="inline tabular-nums">
+                  {(result.duration_seconds * 1000).toFixed(0)} ms
+                </dd>
+              </div>
+            )}
+            {result.spend_usd !== undefined && (
+              <div>
+                <dt className="inline font-medium">Action spend:</dt>{' '}
+                <dd className="inline tabular-nums">${result.spend_usd}</dd>
+              </div>
+            )}
+          </dl>
+        )}
       </section>
     );
   }

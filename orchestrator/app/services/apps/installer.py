@@ -85,7 +85,18 @@ class AlreadyInstalledError(InstallError):
 
 
 class IncompatibleAppError(InstallError):
-    """AppVersion is not installable in this deployment right now."""
+    """AppVersion is not installable in this deployment right now.
+
+    ``errors`` carries structured field-level detail when the underlying
+    failure is a manifest schema/typed validation (populated by the
+    projection layer's ``ManifestInvalid``). Empty list for other causes.
+    """
+
+    def __init__(
+        self, message: str, errors: list[dict[str, Any]] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.errors: list[dict[str, Any]] = errors or []
 
 
 class ConsentRejectedError(InstallError):
@@ -781,7 +792,14 @@ async def install_app(
     try:
         await _projection.regenerate_projection(db, app_version_id=av.id)
     except _projection.ProjectionError as e:
-        raise IncompatibleAppError(f"AppVersion {app_version_id} projection failed: {e}") from e
+        # Surface manifest schema/typed validation errors verbatim so the
+        # API caller (and the UI) gets field-level detail instead of just
+        # "manifest failed schema validation". Other ProjectionError
+        # subclasses don't carry an errors list; the empty default is fine.
+        raise IncompatibleAppError(
+            f"AppVersion {app_version_id} projection failed: {e}",
+            errors=list(getattr(e, "errors", []) or []),
+        ) from e
 
     # 5) Resolve runtime deployment + provision the underlying project/volume.
     #

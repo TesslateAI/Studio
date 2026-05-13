@@ -49,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models import MarketplaceAgent, User
 from ..models_automations import (
+    AppAction,
     AutomationAction,
     AutomationApprovalRequest,
     AutomationDefinition,
@@ -376,6 +377,60 @@ async def _replace_actions(
             await resolve_agent_in_user_scope(db, agent_id=agent_uuid, user=user)
         except AgentScopeError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # Validate every app.invoke binding's ``config.input`` against the
+    # referenced AppAction's ``input_schema``. The dispatcher does this at
+    # run time (``services/apps/action_dispatcher._validate_schema``); doing
+    # it again at save time fails the user fast — at the edit surface —
+    # instead of N minutes later inside a queued run.
+    for action in actions:
+        if action.action_type != "app.invoke":
+            continue
+        if action.app_action_id is None:
+            # Schema-level guard would normally catch this; leave to the
+            # existing wire-shape validator and skip here. ``None`` means
+            # the user hasn't picked an action yet — defer to run-time.
+            continue
+        row = (
+            await db.execute(
+                select(AppAction).where(AppAction.id == action.app_action_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"app_action {action.app_action_id} not found",
+            )
+        schema = row.input_schema
+        if not schema:
+            continue
+        input_value = (action.config or {}).get("input")
+        if input_value is None:
+            input_value = {}
+        try:
+            import jsonschema
+            from jsonschema.exceptions import ValidationError as _JSV
+
+            jsonschema.Draft202012Validator(schema).validate(input_value)
+        except _JSV as exc:
+            # Structured-detail shape: include path + message so the UI
+            # can render a per-field error inline instead of one toast.
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": (
+                        f"action.config.input fails {row.name!r} input_schema: "
+                        f"{exc.message}"
+                    ),
+                    "errors": [
+                        {
+                            "path": list(exc.absolute_path),
+                            "message": exc.message,
+                            "validator": exc.validator,
+                        }
+                    ],
+                },
+            ) from exc
 
     await db.execute(
         delete(AutomationAction).where(AutomationAction.automation_id == automation_id)

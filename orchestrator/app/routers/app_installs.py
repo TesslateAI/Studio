@@ -251,6 +251,15 @@ async def install_endpoint(
             ) from e
         except IncompatibleAppError as e:
             await db.rollback()
+            # Surface field-level manifest validation errors when present so
+            # the UI can render which keys/paths were rejected. Fall back to
+            # a plain string when no structured errors are available.
+            errors = getattr(e, "errors", None) or []
+            if errors:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"message": str(e), "errors": errors},
+                ) from e
             raise HTTPException(status_code=422, detail=str(e)) from e
         except ConsentRejectedError as e:
             await db.rollback()
