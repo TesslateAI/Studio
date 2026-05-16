@@ -101,12 +101,60 @@ class _StubQueue:
 
 
 class _StubRedis:
+    """In-memory Redis stand-in for the dispatcher's outbound calls.
+
+    Covers the surfaces the dispatcher touches in this flow:
+    ``xadd`` (gateway delivery), and the budget-allocator's ``set`` /
+    ``get`` / ``exists`` / ``incrby`` / ``eval`` ops. ``eval`` here only
+    needs to honor the daily-budget reserve script: return ``-2`` when
+    the daily counter key is absent (no cap configured), else DECRBY
+    with a non-negative floor, returning ``-1`` on floor breach.
+    """
+
     def __init__(self) -> None:
         self.xadds: list[tuple[str, dict[str, str]]] = []
+        self._kv: dict[str, int] = {}
 
     async def xadd(self, stream: str, fields: dict[str, str], **_: Any) -> str:
         self.xadds.append((stream, dict(fields)))
         return "1-0"
+
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        *,
+        nx: bool = False,
+        ex: int | None = None,
+        **_: Any,
+    ) -> bool:
+        if nx and key in self._kv:
+            return False
+        self._kv[key] = int(value)
+        return True
+
+    async def get(self, key: str) -> int | None:
+        return self._kv.get(key)
+
+    async def exists(self, key: str) -> int:
+        return 1 if key in self._kv else 0
+
+    async def incrby(self, key: str, amount: int) -> int:
+        new = self._kv.get(key, 0) + int(amount)
+        self._kv[key] = new
+        return new
+
+    async def eval(self, _script: str, _num_keys: int, *args: Any) -> int:
+        # Mirrors _LUA_RESERVE_DAILY: KEYS[1]=counter, ARGV[1]=decrement.
+        key = args[0]
+        decrement = int(args[1])
+        cur = self._kv.get(key)
+        if cur is None:
+            return -2
+        if cur - decrement < 0:
+            return -1
+        self._kv[key] = cur - decrement
+        return self._kv[key]
 
 
 @pytest.fixture

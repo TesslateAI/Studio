@@ -171,6 +171,23 @@ _VALID_ON_BREACH = ("pause_for_approval", "hard_stop", "extend_once")
 MAX_KNOWN_COMPUTE_TIER = 2
 
 
+def _coerce_contract_decimal(value: Any, *, key: str) -> Decimal | None:
+    """Coerce a contract spend cap to ``Decimal``, raising on garbage.
+
+    Centralizes the Decimal coercion so both ``validate_contract`` and the
+    pydantic schema reconcilers fail with the same error message on
+    non-numeric input. ``None`` passes through unchanged (means "unset").
+    """
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ContractInvalid(
+            f"contract.{key} must be a numeric value"
+        ) from exc
+
+
 def validate_contract(contract: Any) -> None:
     """Raise :class:`ContractInvalid` if the contract JSONB is malformed.
 
@@ -221,17 +238,30 @@ def validate_contract(contract: Any) -> None:
             "contract.max_iterations, when set, must be a positive integer"
         )
 
-    max_spend_run = contract.get("max_spend_per_run_usd")
-    if max_spend_run is not None:
-        try:
-            if Decimal(str(max_spend_run)) < 0:
-                raise ContractInvalid(
-                    "contract.max_spend_per_run_usd must be non-negative"
-                )
-        except (InvalidOperation, TypeError, ValueError) as exc:
-            raise ContractInvalid(
-                "contract.max_spend_per_run_usd must be a numeric value"
-            ) from exc
+    per_run_d = _coerce_contract_decimal(
+        contract.get("max_spend_per_run_usd"),
+        key="max_spend_per_run_usd",
+    )
+    per_day_d = _coerce_contract_decimal(
+        contract.get("max_spend_per_day_usd"),
+        key="max_spend_per_day_usd",
+    )
+    if per_run_d is not None and per_run_d <= 0:
+        raise ContractInvalid(
+            "contract.max_spend_per_run_usd must be strictly positive; "
+            "omit the field to disable the cap."
+        )
+    if per_day_d is not None and per_day_d <= 0:
+        raise ContractInvalid(
+            "contract.max_spend_per_day_usd must be strictly positive; "
+            "omit the field to disable the cap."
+        )
+    if per_run_d is not None and per_day_d is not None and per_run_d > per_day_d:
+        raise ContractInvalid(
+            f"contract.max_spend_per_run_usd (${per_run_d}) cannot exceed "
+            f"contract.max_spend_per_day_usd (${per_day_d}); raise the "
+            f"daily cap or lower the per-run cap."
+        )
 
 
 # Backwards-compatible alias so existing dispatch-time callers keep working
@@ -1049,23 +1079,23 @@ async def dispatch_automation(
     action = actions[0]
 
     # ---- Phase B.5: budget allocation (Phase 2) ------------------------
-    # Mint a single-use LiteLLM key with budget=contract.max_spend_per_run_usd
-    # and atomically reserve daily budget against the automation + every
-    # parent in its chain. If the daily counter would go negative we fail
-    # preflight with a clear reason; the dispatcher's caller (router or
-    # ApprovalManager) is responsible for surfacing the "extend daily
-    # budget?" card.
+    # Atomically reserve daily budget against the automation + every
+    # parent in its chain. For ``agent.run`` we also mint a single-use
+    # LiteLLM key with ``budget_usd = contract.max_spend_per_run_usd`` so
+    # the proxy halts the model loop on overrun. For ``app.invoke`` /
+    # ``gateway.send`` we skip the key mint — those actions don't drive
+    # a model loop and cost is bounded by the handler itself — but we
+    # still debit the daily counter so the daily cap is enforced
+    # uniformly across action types.
     #
-    # Skipped when (a) ``contract.max_spend_per_run_usd`` is unset (e.g.,
-    # Tier 0 control-plane runs), or (b) the action does not drive a
-    # model loop (``app.invoke``/``gateway.send`` — those don't consume
-    # the per-run LiteLLM key). For ``agent.run`` we always allocate;
-    # the daily-budget refund on no-spend keeps the cap honest.
+    # If the daily counter would go negative we fail preflight with a
+    # clear reason; the dispatcher's caller (router or ApprovalManager)
+    # is responsible for surfacing the "extend daily budget?" card.
+    #
+    # Skipped entirely when ``contract.max_spend_per_run_usd`` is unset
+    # (e.g., Tier 0 control-plane runs configured with no caps).
     budget_allocation = None
-    if (
-        action.action_type == "agent.run"
-        and automation.contract.get("max_spend_per_run_usd") is not None
-    ):
+    if automation.contract.get("max_spend_per_run_usd") is not None:
         from . import budget as budget_mod
 
         try:
@@ -1075,16 +1105,25 @@ async def dispatch_automation(
                 automation_id=automation_id,
                 contract=automation.contract,
                 parent_automation_id=automation.parent_automation_id,
+                mint_litellm_key=(action.action_type == "agent.run"),
             )
             await db.commit()
         except budget_mod.DailyBudgetExceeded as exc:
+            reason = (
+                f"daily budget exceeded for automation {exc.automation_id}: "
+                f"requested ${exc.requested_usd}, remaining ${exc.remaining_usd}"
+            )
+            await _audit_budget_rejection(
+                db,
+                automation=automation,
+                run=run,
+                reason=reason,
+                breach_kind="daily_budget_exceeded",
+            )
             return await _mark_failed_preflight(
                 db,
                 run=run,
-                reason=(
-                    f"daily budget exceeded for automation {exc.automation_id}: "
-                    f"requested ${exc.requested_usd}, remaining ${exc.remaining_usd}"
-                ),
+                reason=reason,
                 paused_status=DispatchStatus.PAUSED,
             )
         except budget_mod.CycleDetected as exc:
@@ -2005,6 +2044,41 @@ async def _resolve_arq_pool(task_queue: Any) -> Any | None:
     if get_pool is None:
         return None
     return await get_pool()
+
+
+async def _audit_budget_rejection(
+    db: AsyncSession,
+    *,
+    automation: AutomationDefinition,
+    run: AutomationRun,
+    reason: str,
+    breach_kind: str,
+) -> None:
+    """Best-effort AuditLog row for a budget-driven preflight rejection.
+
+    Skipped silently when the automation has no ``team_id`` (personal
+    automation outside any team scope) because ``audit_logs.team_id`` is
+    NOT NULL. ``services.audit_service.log_event`` swallows write
+    failures, so this never blocks the run-transition path.
+    """
+    if automation.team_id is None:
+        return
+    from ..audit_service import log_event
+
+    await log_event(
+        db,
+        team_id=automation.team_id,
+        user_id=automation.owner_user_id,
+        action="automation_run.budget_rejected",
+        resource_type="automation_run",
+        resource_id=run.id,
+        details={
+            "automation_id": str(automation.id),
+            "automation_name": automation.name,
+            "breach_kind": breach_kind,
+            "reason": reason,
+        },
+    )
 
 
 async def _mark_failed_preflight(

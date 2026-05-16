@@ -222,6 +222,86 @@ class AutomationDeliveryTargetOut(AutomationDeliveryTargetIn):
 # ---------------------------------------------------------------------------
 
 
+# Contract keys mirrored from the AutomationDefinition columns so the
+# dispatcher (which reads ``contract.get(...)``) and the column-level
+# enforcement stay in sync. Adding a new key here is a one-liner; every
+# reconciliation path picks it up automatically.
+_SPEND_CAP_CONTRACT_KEYS: tuple[str, ...] = (
+    "max_spend_per_run_usd",
+    "max_spend_per_day_usd",
+)
+
+
+def _reconcile_spend_cap(
+    *,
+    column_value: Decimal | None,
+    contract_value: Any,
+    key: str,
+) -> Decimal | None:
+    """Reconcile a single spend-cap surface between column and contract.
+
+    Returns the merged value as ``Decimal`` (or ``None`` when neither
+    side set it). Raises ``ValueError`` if both sides are set and they
+    disagree — same pattern as ``_reconcile_compute_tier``. Whichever
+    side the caller populated is honored; the other side gets the same
+    value written into it by the validators that call this helper.
+    """
+    if contract_value is None:
+        return column_value
+    try:
+        contract_decimal = Decimal(str(contract_value))
+    except (TypeError, ValueError, ArithmeticError) as exc:
+        raise ValueError(f"contract.{key} must be a numeric value") from exc
+    if column_value is None:
+        return contract_decimal
+    if Decimal(column_value) != contract_decimal:
+        raise ValueError(
+            f"contract.{key}={contract_decimal} disagrees with column "
+            f"{key}={column_value}; remove one or set them equal."
+        )
+    return contract_decimal
+
+
+def _decimal_to_json_safe(value: Decimal | None) -> float | None:
+    """Convert a ``Decimal`` cap to a JSON-serializable scalar.
+
+    The ``automation_definitions.contract`` column is a JSON dict that
+    serializes via ``json.dumps`` — which has no native ``Decimal`` codec.
+    Cast to ``float`` so the value round-trips through Postgres and the
+    dispatcher's ``Decimal(str(value))`` coercion picks it back up
+    cleanly. ``None`` passes through.
+    """
+    return None if value is None else float(value)
+
+
+def _enforce_spend_cap_invariants(
+    *,
+    per_run: Decimal | None,
+    per_day: Decimal | None,
+) -> None:
+    """Reject zero caps and per-run > per-day inversions.
+
+    Called from both Create and Update validators. Keeping the rule set in
+    one place means the same 422 surface appears for both write paths.
+    """
+    if per_run is not None and per_run <= 0:
+        raise ValueError(
+            "max_spend_per_run_usd must be strictly positive; omit the "
+            "field to disable the cap."
+        )
+    if per_day is not None and per_day <= 0:
+        raise ValueError(
+            "max_spend_per_day_usd must be strictly positive; omit the "
+            "field to disable the cap."
+        )
+    if per_run is not None and per_day is not None and per_run > per_day:
+        raise ValueError(
+            f"max_spend_per_run_usd (${per_run}) cannot exceed "
+            f"max_spend_per_day_usd (${per_day}); raise the daily cap "
+            f"or lower the per-run cap."
+        )
+
+
 class AutomationDefinitionIn(BaseModel):
     """Create payload. Owner is taken from the authenticated user, never the body."""
 
@@ -327,6 +407,46 @@ class AutomationDefinitionIn(BaseModel):
         # Mirror the column into the contract so the gate cap and the
         # dispatcher routing always match for downstream readers.
         self.contract["max_compute_tier"] = self.max_compute_tier
+        return self
+
+    @model_validator(mode="after")
+    def _reconcile_spend_caps(self) -> AutomationDefinitionIn:
+        # Mirror the AutomationDefinition column values into the contract
+        # JSONB so the dispatcher's ``contract.get("max_spend_per_run_usd")``
+        # gate (services/automations/dispatcher.py and budget.py) sees what
+        # the user actually configured. Without this mirror the UI form
+        # silently dropped budget caps because it submits the column-level
+        # field outside the contract dict.
+        column_pair = {
+            "max_spend_per_run_usd": self.max_spend_per_run_usd,
+            "max_spend_per_day_usd": self.max_spend_per_day_usd,
+        }
+        merged: dict[str, Decimal | None] = {}
+        for key in _SPEND_CAP_CONTRACT_KEYS:
+            merged[key] = _reconcile_spend_cap(
+                column_value=column_pair[key],
+                contract_value=self.contract.get(key),
+                key=key,
+            )
+
+        _enforce_spend_cap_invariants(
+            per_run=merged["max_spend_per_run_usd"],
+            per_day=merged["max_spend_per_day_usd"],
+        )
+
+        # Propagate merged values to both surfaces so downstream readers
+        # (which may use either) stay in lockstep. The contract dict is
+        # JSON-serialized; use a float scalar so ``json.dumps`` doesn't
+        # choke on ``Decimal`` — the dispatcher re-coerces via
+        # ``Decimal(str(value))`` on read so precision is preserved.
+        self.max_spend_per_run_usd = merged["max_spend_per_run_usd"]
+        self.max_spend_per_day_usd = merged["max_spend_per_day_usd"]
+        for key, value in merged.items():
+            json_value = _decimal_to_json_safe(value)
+            if json_value is None:
+                self.contract.pop(key, None)
+            else:
+                self.contract[key] = json_value
         return self
 
     @model_validator(mode="after")
@@ -447,6 +567,58 @@ class AutomationDefinitionUpdate(BaseModel):
                 )
         elif column_tier is not None and self.contract is not None:
             self.contract["max_compute_tier"] = column_tier
+        return self
+
+    @model_validator(mode="after")
+    def _reconcile_spend_caps(self) -> AutomationDefinitionUpdate:
+        # Mirror of the create-time spend-cap reconciliation. PATCH semantics:
+        # only enforce when the caller actually touched at least one of the
+        # four surfaces (column per-run, column per-day, or either contract
+        # key). If the caller only patches ``contract`` and leaves the
+        # columns out, we still mirror the contract values back into the
+        # column-typed fields so the projector / dispatcher see a single
+        # source of truth.
+        column_pair = {
+            "max_spend_per_run_usd": self.max_spend_per_run_usd,
+            "max_spend_per_day_usd": self.max_spend_per_day_usd,
+        }
+        contract_pair = {
+            key: (self.contract.get(key) if self.contract is not None else None)
+            for key in _SPEND_CAP_CONTRACT_KEYS
+        }
+        if all(v is None for v in column_pair.values()) and all(
+            v is None for v in contract_pair.values()
+        ):
+            return self
+
+        merged: dict[str, Decimal | None] = {}
+        for key in _SPEND_CAP_CONTRACT_KEYS:
+            merged[key] = _reconcile_spend_cap(
+                column_value=column_pair[key],
+                contract_value=contract_pair[key],
+                key=key,
+            )
+
+        _enforce_spend_cap_invariants(
+            per_run=merged["max_spend_per_run_usd"],
+            per_day=merged["max_spend_per_day_usd"],
+        )
+
+        # Propagate merged values back into the patch payload so the router
+        # writes both surfaces consistently. The router applies non-None
+        # fields, so we only set what we have. The contract dict is JSON-
+        # serialized; mirror the Decimal as a float so ``json.dumps``
+        # round-trips safely.
+        for key, value in merged.items():
+            if value is not None:
+                setattr(self, key, value)
+        if self.contract is not None:
+            for key, value in merged.items():
+                json_value = _decimal_to_json_safe(value)
+                if json_value is None:
+                    self.contract.pop(key, None)
+                else:
+                    self.contract[key] = json_value
         return self
 
 

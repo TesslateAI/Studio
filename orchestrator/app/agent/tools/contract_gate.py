@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -414,7 +414,12 @@ class ContractGate:
 
         try:
             max_per_run_d = Decimal(str(max_per_run))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, InvalidOperation):
+            # ``decimal.InvalidOperation`` is an ``ArithmeticError``, not a
+            # subclass of ValueError, so it must be named explicitly.
+            # Without this the bad-value path raises through to the agent's
+            # blanket ``except Exception`` and surfaces as the Python class
+            # repr ``[<class 'decimal.ConversionSyntax'>]`` in tool results.
             logger.warning(
                 "[ContractGate] non-numeric max_spend_per_run_usd=%r; skipping estimate",
                 max_per_run,
@@ -425,7 +430,7 @@ class ContractGate:
         if not isinstance(current, Decimal):
             try:
                 current = Decimal(str(current))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, InvalidOperation):
                 current = Decimal(0)
 
         remaining = max_per_run_d - current
