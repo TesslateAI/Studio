@@ -2140,6 +2140,22 @@ async def _mark_failed_preflight(
         )
     )
     await db.commit()
+
+    # Doctor should see preflight failures too — they're a real signal
+    # (e.g. workspace can't be provisioned, budget breach).
+    try:
+        from ..workflows.event_log import emit_run_finished
+
+        await emit_run_finished(
+            db,
+            run_id=run.id,
+            automation_id=run.automation_id,
+            status="failed_preflight",
+            reason=reason,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.debug("emit_run_finished failed on _mark_failed_preflight", exc_info=True)
+
     return DispatchResult(
         status=paused_status,
         run_id=run.id,
@@ -2167,6 +2183,23 @@ async def _finalize_failure(
         )
     )
     await db.commit()
+
+    # G5 (#469): emit run.finished + fan out workflow_event subscribers
+    # so per-workflow doctors fire on terminal failures, not just on
+    # mid-run per-step errors.
+    try:
+        from ..workflows.event_log import emit_run_finished
+
+        await emit_run_finished(
+            db,
+            run_id=run.id,
+            automation_id=run.automation_id,
+            status="failed",
+            reason=reason,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.debug("emit_run_finished failed on _finalize_failure", exc_info=True)
+
     return DispatchResult(
         status=DispatchStatus.FAILED,
         run_id=run.id,

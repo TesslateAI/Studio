@@ -190,9 +190,7 @@ export default function AutomationsListPage() {
                             <span>{row.name}</span>
                             <ProposalAndDoctorBadges
                               automationId={row.id}
-                              doctorEnabled={Boolean(
-                                (detail as unknown as { doctor_enabled?: boolean })?.doctor_enabled
-                              )}
+                              doctorEnabled={Boolean(detail?.doctor_enabled)}
                             />
                           </div>
                         </td>

@@ -181,6 +181,10 @@ const ACTION_TYPE_LABELS: Record<AutomationActionType, string> = {
   'agent.run': 'Run an AI agent',
   'app.invoke': 'Use one of my apps',
   'gateway.send': 'Send a message',
+  deliver: 'Deliver to inbox / webhook',
+  sub_workflow: 'Run another automation',
+  branch: 'Branch on a condition',
+  parallel: 'Run steps in parallel',
 };
 
 export function humanizeActionType(type: AutomationActionType | string): string {

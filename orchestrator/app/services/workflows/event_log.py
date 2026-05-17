@@ -299,6 +299,48 @@ async def emit_budget_consumed(
     )
 
 
+async def emit_run_finished(
+    db: AsyncSession,
+    *,
+    run_id: Any,
+    automation_id: Any,
+    status: str,
+    reason: str | None = None,
+) -> None:
+    """Terminal run event + workflow_event fan-out (G5 #469).
+
+    ``status`` is the final ``automation_runs.status`` value
+    (``succeeded``, ``failed``, ``failed_preflight``, ``cancelled``,
+    ``timed_out``). When the run did not succeed, we synthesise a
+    ``run.failed`` workflow_event so per-workflow doctor subscribers
+    fire on terminal failures — not just per-step ``error.raised``.
+
+    Fan-out is best-effort and never raises out of the helper.
+    """
+    payload: dict[str, Any] = {"status": status}
+    if reason:
+        payload["reason"] = reason
+    await record(db, run_id=run_id, kind=EventKind.RUN_FINISHED, payload=payload)
+
+    if status not in ("succeeded",) and automation_id is not None:
+        try:
+            from ..triggers.workflow_event import route_workflow_event
+
+            await route_workflow_event(
+                db,
+                source_automation_id=automation_id,
+                source_run_id=run_id,
+                event_kind="run.failed",
+                payload=payload,
+            )
+        except Exception as exc:
+            logger.warning(
+                "emit_run_finished.workflow_event_dispatch_failed run=%s err=%r",
+                run_id,
+                exc,
+            )
+
+
 async def emit_error(
     db: AsyncSession,
     *,

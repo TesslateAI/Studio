@@ -428,19 +428,27 @@ async def _finalize_automation_run(
     from .models_automations import AutomationRun
 
     now = datetime.now(tz=UTC)
+    automation_id_for_event: UUID | None = None
     try:
         async with AsyncSessionLocal() as db:
-            await db.execute(
-                _sa_update(AutomationRun)
-                .where(AutomationRun.id == automation_run_id)
-                .where(AutomationRun.status.in_(_AUTOMATION_RUN_NON_TERMINAL))
-                .values(
-                    status=status,
-                    ended_at=now,
-                    heartbeat_at=now,
-                    raw_output=raw_output,
+            # Re-read the row so we can carry automation_id into the
+            # workflow_event fan-out below.
+            row = (
+                await db.execute(
+                    _sa_update(AutomationRun)
+                    .where(AutomationRun.id == automation_run_id)
+                    .where(AutomationRun.status.in_(_AUTOMATION_RUN_NON_TERMINAL))
+                    .values(
+                        status=status,
+                        ended_at=now,
+                        heartbeat_at=now,
+                        raw_output=raw_output,
+                    )
+                    .returning(AutomationRun.automation_id)
                 )
-            )
+            ).first()
+            if row is not None:
+                automation_id_for_event = row[0]
             await db.commit()
     except Exception:
         logger.exception(
@@ -448,6 +456,34 @@ async def _finalize_automation_run(
             automation_run_id,
             status,
         )
+
+    # G5 (#469): fan out workflow_event subscribers (e.g. per-workflow
+    # doctor) when a tier-2 async agent run lands on a terminal status.
+    # The synchronous dispatcher path goes through `_finalize_failure` /
+    # `_finalize_success`; this is the async equivalent. Best-effort.
+    if automation_id_for_event is not None and status in (
+        "failed",
+        "failed_preflight",
+        "timed_out",
+        "expired",
+    ):
+        try:
+            from .services.workflows.event_log import emit_run_finished
+
+            async with AsyncSessionLocal() as db2:
+                await emit_run_finished(
+                    db2,
+                    run_id=automation_run_id,
+                    automation_id=automation_id_for_event,
+                    status=status,
+                )
+        except Exception:
+            logger.debug(
+                "[WORKER] emit_run_finished failed run=%s status=%s",
+                automation_run_id,
+                status,
+                exc_info=True,
+            )
 
 
 async def execute_agent_task(ctx: dict, payload_dict: dict):

@@ -1429,18 +1429,26 @@ async def list_versions(
 async def list_run_events(
     automation_id: UUID,
     run_id: UUID,
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    since: datetime | None = Query(
+        default=None,
+        description="Only return events after this ISO-8601 timestamp (exclusive). "
+        "Use the last seen `ts` to tail the timeline incrementally.",
+    ),
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Append-only run-event timeline (Phase C, issue #472).
 
-    Returns the full event log for one run, ordered by timestamp.
-    Each row is one state transition or notable boundary
-    (step started / finished, tool called, connector touched,
-    approval requested / resolved, artifact produced, delivery sent,
-    budget consumed, error raised). The timeline is the single source
-    of truth for the run-history detail view, the audit trail, and
-    cost rollup.
+    Each row is one state transition or notable boundary (step started
+    / finished, tool called, connector touched, approval requested /
+    resolved, artifact produced, delivery sent, budget consumed, error
+    raised). The timeline is the single source of truth for the
+    run-history detail view, the audit trail, and cost rollup.
+
+    Paginated: agent runs can produce thousands of rows. Clients
+    should either page (``limit`` / ``offset``) or tail (``since``).
     """
     from ..models_automations import AutomationRunEvent
 
@@ -1458,28 +1466,32 @@ async def list_run_events(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    events = (
-        (
-            await db.execute(
-                select(AutomationRunEvent)
-                .where(AutomationRunEvent.automation_run_id == run_id)
-                .order_by(AutomationRunEvent.ts.asc())
-            )
-        )
-        .scalars()
-        .all()
+    stmt = (
+        select(AutomationRunEvent)
+        .where(AutomationRunEvent.automation_run_id == run_id)
+        .order_by(AutomationRunEvent.ts.asc())
     )
-    return [
-        {
-            "id": str(e.id),
-            "step_run_id": str(e.step_run_id) if e.step_run_id else None,
-            "ts": e.ts.isoformat() if e.ts else None,
-            "kind": e.kind,
-            "actor": e.actor,
-            "payload": e.payload or {},
-        }
-        for e in events
-    ]
+    if since is not None:
+        stmt = stmt.where(AutomationRunEvent.ts > since)
+    stmt = stmt.offset(offset).limit(limit)
+
+    events = (await db.execute(stmt)).scalars().all()
+    return {
+        "events": [
+            {
+                "id": str(e.id),
+                "step_run_id": str(e.step_run_id) if e.step_run_id else None,
+                "ts": e.ts.isoformat() if e.ts else None,
+                "kind": e.kind,
+                "actor": e.actor,
+                "payload": e.payload or {},
+            }
+            for e in events
+        ],
+        "limit": limit,
+        "offset": offset,
+        "has_more": len(events) == limit,
+    }
 
 
 @router.get(

@@ -718,16 +718,9 @@ export default function AutomationDetailPage() {
           {/* G1 / G2 / G5: workflow evolution surface */}
           <WorkflowEvolutionPanel
             automationId={definition.id}
-            headVersionId={
-              (definition as unknown as { head_version_id?: string | null }).head_version_id ?? null
-            }
-            doctorAutomationId={
-              (definition as unknown as { doctor_automation_id?: string | null })
-                .doctor_automation_id ?? null
-            }
-            doctorEnabled={Boolean(
-              (definition as unknown as { doctor_enabled?: boolean }).doctor_enabled
-            )}
+            headVersionId={definition.head_version_id ?? null}
+            doctorAutomationId={definition.doctor_automation_id ?? null}
+            doctorEnabled={Boolean(definition.doctor_enabled)}
             onProposalApplied={reload}
             onDoctorChanged={reload}
           />

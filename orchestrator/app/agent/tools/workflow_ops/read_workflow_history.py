@@ -47,6 +47,7 @@ async def read_workflow_history_executor(
 
     db = context.get("db")
     user_id = context.get("user_id")
+    contract = context.get("contract") or {}
 
     if not automation_id_raw:
         return error_output(message="automation_id is required")
@@ -57,6 +58,14 @@ async def read_workflow_history_executor(
         automation_id = UUID(str(automation_id_raw))
     except (TypeError, ValueError):
         return error_output(message=f"invalid automation_id {automation_id_raw!r}")
+
+    # Scope: a contract carrying ``allowed_workflow_ids`` (the G5 doctor)
+    # constrains which automations are readable even though the caller
+    # may own others.
+    raw_allowed = contract.get("allowed_workflow_ids") if isinstance(contract, dict) else None
+    allowed_workflow_ids: set[str] | None = None
+    if isinstance(raw_allowed, list) and raw_allowed:
+        allowed_workflow_ids = {str(x) for x in raw_allowed}
 
     from ....models_automations import (
         AutomationDefinition,
@@ -75,6 +84,8 @@ async def read_workflow_history_executor(
         return error_output(message=f"automation {automation_id} not found")
     if user_id is not None and str(automation.owner_user_id) != str(user_id):
         return error_output(message="automation not visible to caller")
+    if allowed_workflow_ids is not None and str(automation.id) not in allowed_workflow_ids:
+        return error_output(message="automation not in caller's allowed scope")
 
     head_payload = None
     if automation.head_version_id is not None:

@@ -39,6 +39,7 @@ async def manage_workflow_proposal_executor(
     db = context.get("db")
     user_id = context.get("user_id")
     run_id = context.get("automation_run_id")
+    contract = context.get("contract") or {}
 
     if not action:
         return error_output(message="action parameter is required")
@@ -46,6 +47,15 @@ async def manage_workflow_proposal_executor(
         return error_output(message="database session not available in context")
     if user_id is None and run_id is None:
         return error_output(message="agent context has no user_id or automation_run_id")
+
+    # Scope: a contract carrying ``allowed_workflow_ids`` (e.g. the G5
+    # doctor) constrains which automations this tool can touch even
+    # though the calling user might own others. None / [] / missing
+    # means "no extra scope" (regular owner agents).
+    raw_allowed = contract.get("allowed_workflow_ids") if isinstance(contract, dict) else None
+    allowed_workflow_ids: set[str] | None = None
+    if isinstance(raw_allowed, list) and raw_allowed:
+        allowed_workflow_ids = {str(x) for x in raw_allowed}
 
     from ....models_automations import AutomationDefinition
     from ....services.workflows.proposals import (
@@ -68,8 +78,9 @@ async def manage_workflow_proposal_executor(
         ).scalar_one_or_none()
         if row is None:
             return None
-        # Owner-only for now. G5 doctor will scope via contract.allowed_workflow_ids.
         if user_id is not None and str(row.owner_user_id) != str(user_id):
+            return None
+        if allowed_workflow_ids is not None and str(row.id) not in allowed_workflow_ids:
             return None
         return row
 

@@ -21,7 +21,14 @@ export type AutomationTriggerKind =
   | 'slack_message'
   | 'email_inbound'
   | 'workflow_event';
-export type AutomationActionType = 'agent.run' | 'app.invoke' | 'gateway.send';
+export type AutomationActionType =
+  | 'agent.run'
+  | 'app.invoke'
+  | 'gateway.send'
+  | 'deliver'
+  | 'sub_workflow'
+  | 'branch'
+  | 'parallel';
 export type AutomationWorkspaceScope =
   | 'none'
   | 'user_automation_workspace'
@@ -101,6 +108,9 @@ export interface AutomationDefinitionUpdate {
   max_compute_tier?: number;
   max_spend_per_run_usd?: string | number | null;
   max_spend_per_day_usd?: string | number | null;
+  // B2 (#473): compute_profile is patchable but value-validated server-side
+  // (connector_only | ephemeral_workspace | persistent_workspace).
+  compute_profile?: string;
   triggers?: AutomationTriggerIn[];
   actions?: AutomationActionIn[];
   delivery_targets?: AutomationDeliveryTargetIn[];
@@ -138,6 +148,9 @@ export interface AutomationDefinitionOut {
   // G1 (#469): live workflow version pointer. Null only for definitions
   // that pre-date G1 and haven't dispatched yet.
   head_version_id?: string | null;
+  // G5 (#469): per-workflow self-healing doctor wiring.
+  doctor_enabled?: boolean;
+  doctor_automation_id?: string | null;
   parent_automation_id: string | null;
   depth: number;
   is_active: boolean;

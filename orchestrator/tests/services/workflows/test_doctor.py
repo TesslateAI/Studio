@@ -190,3 +190,117 @@ async def test_disable_doctor_for_flips_flag(session_maker):
             .all()
         )
         assert all(t.is_active is False for t in trigs)
+
+
+@pytest.mark.asyncio
+async def test_emit_run_finished_fires_doctor_on_run_failed(session_maker):
+    """G5 #469 blocker: doctor must fire on terminal run.failed, not
+    just per-step error.raised. The synthetic run.failed workflow_event
+    emission lives in services.workflows.event_log.emit_run_finished.
+    """
+    from app.models_automations import AutomationDefinition, AutomationEvent
+    from app.services.workflows.doctor import ensure_doctor_for
+    from app.services.workflows.event_log import emit_run_finished
+
+    async with session_maker() as db:
+        owner_id = await seed_user(db)
+        target_id = await seed_automation(db, owner_user_id=owner_id)
+        await db.commit()
+
+    async with session_maker() as db:
+        target = (
+            await db.execute(
+                select(AutomationDefinition).where(AutomationDefinition.id == target_id)
+            )
+        ).scalar_one()
+        await ensure_doctor_for(db, target_automation=target)
+        await db.commit()
+
+    # Fire emit_run_finished with status=failed. The doctor's
+    # workflow_event trigger subscribes to "run.failed" so it should
+    # mint an AutomationEvent on the doctor automation.
+    import uuid as _uuid
+
+    async with session_maker() as db:
+        await emit_run_finished(
+            db,
+            run_id=_uuid.uuid4(),
+            automation_id=target_id,
+            status="failed",
+            reason="boom",
+        )
+        await db.commit()
+
+        # The doctor automation should have an AutomationEvent waiting.
+        target_after = (
+            await db.execute(
+                select(AutomationDefinition).where(AutomationDefinition.id == target_id)
+            )
+        ).scalar_one()
+        doctor_id = target_after.doctor_automation_id
+        assert doctor_id is not None
+
+        events = (
+            (
+                await db.execute(
+                    select(AutomationEvent).where(AutomationEvent.automation_id == doctor_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(events) == 1
+        assert events[0].payload.get("event_kind") == "run.failed"
+        assert events[0].payload.get("event_payload", {}).get("status") == "failed"
+        assert events[0].payload.get("event_payload", {}).get("reason") == "boom"
+
+
+@pytest.mark.asyncio
+async def test_emit_run_finished_skips_fan_out_on_success(session_maker):
+    """Success runs record run.finished but don't fire doctors —
+    otherwise every healthy run would page the doctor."""
+    from app.models_automations import AutomationDefinition, AutomationEvent
+    from app.services.workflows.doctor import ensure_doctor_for
+    from app.services.workflows.event_log import emit_run_finished
+
+    async with session_maker() as db:
+        owner_id = await seed_user(db)
+        target_id = await seed_automation(db, owner_user_id=owner_id)
+        await db.commit()
+
+    async with session_maker() as db:
+        target = (
+            await db.execute(
+                select(AutomationDefinition).where(AutomationDefinition.id == target_id)
+            )
+        ).scalar_one()
+        await ensure_doctor_for(db, target_automation=target)
+        await db.commit()
+
+    import uuid as _uuid
+
+    async with session_maker() as db:
+        await emit_run_finished(
+            db,
+            run_id=_uuid.uuid4(),
+            automation_id=target_id,
+            status="succeeded",
+        )
+        await db.commit()
+
+        target_after = (
+            await db.execute(
+                select(AutomationDefinition).where(AutomationDefinition.id == target_id)
+            )
+        ).scalar_one()
+        doctor_id = target_after.doctor_automation_id
+        events = (
+            (
+                await db.execute(
+                    select(AutomationEvent).where(AutomationEvent.automation_id == doctor_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert events == []

@@ -41,6 +41,8 @@ class SubWorkflowHandler(StepHandler):
     kind: ClassVar[str] = "sub_workflow"
 
     async def execute(self, ctx: StepContext) -> StepResult:
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
         from ...automations.dispatcher import dispatch_automation
 
         cfg = ctx.action.config or {}
@@ -59,8 +61,7 @@ class SubWorkflowHandler(StepHandler):
                 "sub_workflow refuses to invoke itself; use a different automation id for the child"
             )
 
-        # Verify the child exists and is active. 404-like errors here
-        # bubble up as engine failures with a clear reason.
+        # Verify the child exists (read-only on the parent session — safe).
         child = (
             await ctx.db.execute(
                 select(AutomationDefinition).where(AutomationDefinition.id == child_id)
@@ -69,46 +70,61 @@ class SubWorkflowHandler(StepHandler):
         if child is None:
             raise ValueError(f"sub_workflow child_automation_id {child_id} not found")
 
-        # Mint a fresh event for the child run with the configured input
-        # as its payload. trigger_kind=manual records that the parent
-        # workflow invoked it (cron / webhook / app_invocation are not
-        # applicable for sub-runs).
+        # Isolate the child invocation in a fresh DB session. The child's
+        # dispatcher runs the full pipeline (preflight → step rows →
+        # event commits → finalize), each of which commits on its own.
+        # Sharing ``ctx.db`` would interleave those commits with the
+        # parent step row writes in ``engine.py`` and corrupt the parent's
+        # transaction boundaries — most visibly on child failure where
+        # the parent's exception handler would operate on a session whose
+        # state was mutated by N child commits/rollbacks.
         child_input = cfg.get("input") or {}
-        event = AutomationEvent(
-            id=uuid.uuid4(),
-            automation_id=child.id,
-            payload=dict(child_input),
-            trigger_kind="manual",
-        )
-        ctx.db.add(event)
-        await ctx.db.commit()
+        child_run_id = None
+        child_run_status = None
+        terminal_output: dict = {}
 
-        result = await dispatch_automation(
-            ctx.db,
-            automation_id=child.id,
-            event_id=event.id,
-        )
+        # Build a fresh session bound to the same async engine as the
+        # parent. Reusing the engine (not the session) keeps the parent's
+        # transaction isolated from the child's commits while staying
+        # within whichever DB the test harness or runtime is wired to
+        # (SQLite for unit tests, Postgres in deploy). ``ctx.db.bind``
+        # returns the AsyncEngine directly; ``get_bind()`` unwraps to
+        # the sync proxy which async_sessionmaker rejects.
+        parent_engine = ctx.db.bind
+        ChildSession = async_sessionmaker(parent_engine, expire_on_commit=False)
 
-        # Pull the child run's terminal raw_output so the parent step
-        # carries it as output. If the child paused (waiting_approval)
-        # the parent step is treated as failed for now; resumable
-        # sub_workflow chaining is a Phase F follow-up.
-        child_run = (
-            await ctx.db.execute(select(AutomationRun).where(AutomationRun.id == result.run_id))
-        ).scalar_one_or_none()
+        async with ChildSession() as child_db:
+            event = AutomationEvent(
+                id=uuid.uuid4(),
+                automation_id=child.id,
+                payload=dict(child_input),
+                trigger_kind="manual",
+            )
+            child_db.add(event)
+            await child_db.commit()
 
-        terminal_output = (
-            child_run.raw_output
-            if child_run is not None and child_run.raw_output is not None
-            else {}
-        )
+            result = await dispatch_automation(
+                child_db,
+                automation_id=child.id,
+                event_id=event.id,
+            )
+            child_run_id = result.run_id
+            child_run_status = result.run_status
+
+            child_run = (
+                await child_db.execute(
+                    select(AutomationRun).where(AutomationRun.id == result.run_id)
+                )
+            ).scalar_one_or_none()
+            if child_run is not None and child_run.raw_output is not None:
+                terminal_output = child_run.raw_output
 
         return StepResult(
             output={
                 "action_type": "sub_workflow",
                 "child_automation_id": str(child.id),
-                "child_run_id": str(result.run_id) if result.run_id else None,
-                "child_status": result.run_status,
+                "child_run_id": str(child_run_id) if child_run_id else None,
+                "child_status": child_run_status,
                 "child_output": terminal_output,
             },
             async_handoff=False,
