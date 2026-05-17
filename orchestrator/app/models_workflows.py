@@ -20,6 +20,7 @@ import uuid
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -120,4 +121,104 @@ class WorkflowVersion(Base):
             "automation_id",
             "generation",
         ),
+    )
+
+
+class WorkflowProposal(Base):
+    """Draft change to an AutomationDefinition awaiting decision (G2, issue #469).
+
+    The author (agent or human) writes the proposal; the platform
+    decides how to apply it:
+
+    * approval-required → an :class:`AutomationApprovalRequest` row
+      surfaces the proposal in the existing Slack / email / web
+      approval queue. On approve, the proposal applies: write a new
+      WorkflowVersion (or reuse if SHA-deduped), flip head_version_id,
+      replace child rows. Reject closes the proposal without effect.
+    * auto-apply (G3) → bypass the approval card after a dry-run
+      against ``automation_definitions.auto_apply_policy`` (which
+      lands in G3). G2 always routes through approval.
+
+    The diff_summary is structured (list of {path, op, before, after})
+    so the UI can render a compact diff. The to_payload is the FULL
+    proposed shape, identical schema to ``WorkflowVersion.payload``,
+    so applying is "write a version with this payload."
+    """
+
+    __tablename__ = "workflow_proposals"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    automation_id = Column(
+        GUID(),
+        ForeignKey("automation_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    from_version_id = Column(
+        GUID(),
+        ForeignKey("workflow_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    to_payload = Column(JSON, nullable=False)
+    diff_summary = Column(JSON, nullable=False)
+    rationale = Column(Text, nullable=False)
+    # low | medium | high. Used by G3 auto-apply to decide whether
+    # to bypass approval; G2 surfaces it on the approval card for
+    # the user's context.
+    risk_class = Column(String(16), nullable=False, default="medium", server_default="medium")
+
+    # submitted | approved | rejected | applied | reverted | expired | withdrawn.
+    status = Column(String(16), nullable=False, default="submitted", server_default="submitted")
+    approval_request_id = Column(
+        GUID(),
+        ForeignKey("automation_approval_requests.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    applied_version_id = Column(
+        GUID(),
+        ForeignKey("workflow_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Provenance: exactly one of proposer_run_id / proposer_user_id is
+    # non-null. Both null is rejected at create time.
+    proposer_run_id = Column(
+        GUID(),
+        ForeignKey("automation_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    proposer_user_id = Column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    reviewer_user_id = Column(
+        GUID(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reviewer_comment = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    # The expiry sweep marks stale rows so the queue can't grow
+    # unbounded. Default at create time is +7 days.
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('submitted', 'approved', 'rejected', 'applied', "
+            "'reverted', 'expired', 'withdrawn')",
+            name="ck_workflow_proposals_status",
+        ),
+        CheckConstraint(
+            "risk_class IN ('low', 'medium', 'high')",
+            name="ck_workflow_proposals_risk_class",
+        ),
+        Index(
+            "ix_workflow_proposals_automation_status",
+            "automation_id",
+            "status",
+        ),
+        Index("ix_workflow_proposals_expires", "expires_at"),
     )

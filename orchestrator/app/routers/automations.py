@@ -40,7 +40,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -1137,6 +1137,202 @@ async def get_run(
         agent_id=agent_id,
         agent_name=agent_name,
     )
+
+
+@router.post("/{automation_id}/proposals", status_code=status.HTTP_201_CREATED)
+async def create_workflow_proposal(
+    automation_id: UUID,
+    payload: dict = Body(...),
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a WorkflowProposal (G2, issue #469).
+
+    Body shape:
+        {
+          "to_payload": {...},  # full proposed shape (same as WorkflowVersion.payload)
+          "rationale": "string",
+          "risk_class": "low|medium|high",  # default medium
+          "from_version_id": "<uuid>"        # optional; defaults to head
+        }
+
+    Returns the created proposal. G2 always routes to manual approval;
+    G3 will wire the auto-apply path.
+    """
+    from ..services.workflows.proposals import (
+        ProposalError,
+        create_proposal,
+    )
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=True)
+
+    to_payload = payload.get("to_payload")
+    if not isinstance(to_payload, dict) or not to_payload:
+        raise HTTPException(status_code=400, detail="to_payload (object) is required")
+    rationale = payload.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise HTTPException(status_code=400, detail="rationale (string) is required")
+
+    from_version_id = payload.get("from_version_id")
+    fv_uuid = UUID(str(from_version_id)) if from_version_id else None
+    try:
+        result = await create_proposal(
+            db,
+            automation=automation,
+            to_payload=to_payload,
+            rationale=rationale,
+            risk_class=str(payload.get("risk_class") or "medium"),
+            proposer_user_id=user.id,
+            from_version_id=fv_uuid,
+        )
+    except ProposalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await db.commit()
+    await db.refresh(result.proposal)
+    p = result.proposal
+    return {
+        "id": str(p.id),
+        "automation_id": str(p.automation_id),
+        "from_version_id": str(p.from_version_id) if p.from_version_id else None,
+        "status": p.status,
+        "risk_class": p.risk_class,
+        "rationale": p.rationale,
+        "diff_summary": p.diff_summary,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "expires_at": p.expires_at.isoformat() if p.expires_at else None,
+        "created": result.created,
+    }
+
+
+@router.get("/{automation_id}/proposals")
+async def list_workflow_proposals(
+    automation_id: UUID,
+    status_filter: str | None = Query(None, alias="status"),
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List proposals for an automation. Optionally filter by status."""
+    from ..services.workflows.proposals import list_proposals
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    rows = await list_proposals(db, automation_id=automation_id, status=status_filter)
+    return [
+        {
+            "id": str(p.id),
+            "status": p.status,
+            "risk_class": p.risk_class,
+            "rationale": p.rationale,
+            "from_version_id": str(p.from_version_id) if p.from_version_id else None,
+            "applied_version_id": (str(p.applied_version_id) if p.applied_version_id else None),
+            "proposer_user_id": (str(p.proposer_user_id) if p.proposer_user_id else None),
+            "proposer_run_id": (str(p.proposer_run_id) if p.proposer_run_id else None),
+            "reviewer_user_id": (str(p.reviewer_user_id) if p.reviewer_user_id else None),
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "decided_at": p.decided_at.isoformat() if p.decided_at else None,
+        }
+        for p in rows
+    ]
+
+
+@router.get("/{automation_id}/proposals/{proposal_id}")
+async def get_workflow_proposal(
+    automation_id: UUID,
+    proposal_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get one proposal with full to_payload and diff_summary."""
+    from ..services.workflows.proposals import ProposalNotFound, get_proposal
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    try:
+        p = await get_proposal(db, proposal_id=proposal_id)
+    except ProposalNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if p.automation_id != automation_id:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    return {
+        "id": str(p.id),
+        "automation_id": str(p.automation_id),
+        "status": p.status,
+        "risk_class": p.risk_class,
+        "rationale": p.rationale,
+        "from_version_id": str(p.from_version_id) if p.from_version_id else None,
+        "applied_version_id": (str(p.applied_version_id) if p.applied_version_id else None),
+        "to_payload": p.to_payload,
+        "diff_summary": p.diff_summary,
+        "proposer_user_id": str(p.proposer_user_id) if p.proposer_user_id else None,
+        "proposer_run_id": str(p.proposer_run_id) if p.proposer_run_id else None,
+        "reviewer_user_id": str(p.reviewer_user_id) if p.reviewer_user_id else None,
+        "reviewer_comment": p.reviewer_comment,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "decided_at": p.decided_at.isoformat() if p.decided_at else None,
+        "expires_at": p.expires_at.isoformat() if p.expires_at else None,
+    }
+
+
+@router.post("/{automation_id}/proposals/{proposal_id}/decide")
+async def decide_workflow_proposal(
+    automation_id: UUID,
+    proposal_id: UUID,
+    payload: dict = Body(...),
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve or reject a proposal. On approve, the change is applied
+    immediately: new WorkflowVersion + head pointer flip + live rows
+    replaced. The proposal status moves to ``applied``."""
+    from ..services.workflows.proposals import (
+        ProposalAlreadyDecided,
+        ProposalError,
+        ProposalNotFound,
+        decide_proposal,
+    )
+
+    automation = await _load_definition_or_404(db, automation_id)
+    # Only write-permission users can decide proposals.
+    await _authorize_definition(db, automation, user, write=True)
+
+    decision = payload.get("decision")
+    comment = payload.get("comment")
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'reject'")
+
+    try:
+        decided = await decide_proposal(
+            db,
+            proposal_id=proposal_id,
+            decision=decision,
+            reviewer_user_id=user.id,
+            comment=comment,
+        )
+    except ProposalNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProposalAlreadyDecided as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ProposalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if decided.automation_id != automation_id:
+        raise HTTPException(status_code=404, detail="proposal not found")
+
+    await db.commit()
+    await db.refresh(decided)
+    return {
+        "id": str(decided.id),
+        "status": decided.status,
+        "applied_version_id": (
+            str(decided.applied_version_id) if decided.applied_version_id else None
+        ),
+        "decided_at": decided.decided_at.isoformat() if decided.decided_at else None,
+    }
 
 
 @router.get("/{automation_id}/versions")

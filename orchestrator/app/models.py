@@ -3357,4 +3357,7 @@ from .models_team import (  # noqa: F401, E402
     TeamInvitation,
     TeamMembership,
 )
-from .models_workflows import WorkflowVersion  # noqa: F401, E402
+from .models_workflows import (  # noqa: F401, E402
+    WorkflowProposal,
+    WorkflowVersion,
+)
