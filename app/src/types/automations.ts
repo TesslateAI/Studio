@@ -13,7 +13,14 @@
  * component drives the UI; types live below.
  */
 
-export type AutomationTriggerKind = 'cron' | 'webhook' | 'app_invocation' | 'manual';
+export type AutomationTriggerKind =
+  | 'cron'
+  | 'webhook'
+  | 'app_invocation'
+  | 'manual'
+  | 'slack_message'
+  | 'email_inbound'
+  | 'workflow_event';
 export type AutomationActionType = 'agent.run' | 'app.invoke' | 'gateway.send';
 export type AutomationWorkspaceScope =
   | 'none'

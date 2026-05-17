@@ -53,18 +53,33 @@ class AutomationTriggerIn(BaseModel):
     scoped but the app_invocation producer never landed).
     """
 
-    kind: str = Field(..., description="cron | webhook | manual")
+    kind: str = Field(
+        ...,
+        description="cron | webhook | manual | slack_message | email_inbound | workflow_event",
+    )
     config: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("kind")
     @classmethod
     def _validate_kind(cls, v: str) -> str:
         # Phase E (#474) added slack_message + email_inbound as
-        # user-facing trigger kinds. Internally these will be wrapped on
+        # user-facing trigger kinds. Internally those will be wrapped on
         # save into the canonical kind='webhook' with config.source so
         # they ride on develop's per-automation /webhook/{token} +
         # HMAC infrastructure (follow-up adapter refactor).
-        allowed = {"cron", "webhook", "manual", "slack_message", "email_inbound"}
+        # Phase G6 (#473) added workflow_event for inter-workflow
+        # subscriptions (used by the per-workflow doctor and any
+        # sub-workflow that watches another's lifecycle events). This
+        # one is internal pub/sub, NOT an HTTP transport, so it stays a
+        # first-class kind.
+        allowed = {
+            "cron",
+            "webhook",
+            "manual",
+            "slack_message",
+            "email_inbound",
+            "workflow_event",
+        }
         if v == "app_invocation":
             # See class docstring + TesslateAI/OpenSail-Enterprise#408.
             raise ValueError(
@@ -678,6 +693,11 @@ class AutomationDefinitionOut(BaseModel):
     # G1 (#469): live version pointer. Null only for definitions
     # that pre-date G1 and haven't dispatched yet.
     head_version_id: UUID | None = None
+    # G5 (#473): self-healing doctor wiring. doctor_enabled mirrors the
+    # column; doctor_automation_id points at the child workflow that
+    # watches this one's failures.
+    doctor_enabled: bool = False
+    doctor_automation_id: UUID | None = None
     parent_automation_id: UUID | None
     depth: int
     is_active: bool

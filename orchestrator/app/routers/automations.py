@@ -201,6 +201,8 @@ async def _project_definition(
         max_spend_per_day_usd=definition.max_spend_per_day_usd,
         compute_profile=getattr(definition, "compute_profile", None) or "persistent_workspace",
         head_version_id=getattr(definition, "head_version_id", None),
+        doctor_enabled=bool(getattr(definition, "doctor_enabled", False)),
+        doctor_automation_id=getattr(definition, "doctor_automation_id", None),
         parent_automation_id=definition.parent_automation_id,
         depth=definition.depth,
         is_active=definition.is_active,

@@ -168,6 +168,9 @@ const TRIGGER_KIND_LABELS: Record<AutomationTriggerKind, string> = {
   webhook: 'When a URL receives data',
   manual: 'Only when I run it',
   app_invocation: 'When an app calls it',
+  slack_message: 'When a Slack message arrives',
+  email_inbound: 'When an email arrives',
+  workflow_event: 'When another workflow emits an event',
 };
 
 export function humanizeTriggerKind(kind: AutomationTriggerKind | string): string {
