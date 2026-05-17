@@ -31,7 +31,6 @@ Out of scope for Phase 1
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import secrets as _stdlib_secrets
 from datetime import UTC, datetime
@@ -273,25 +272,33 @@ async def _replace_triggers(
 ) -> None:
     """Replace the trigger rows for an automation.
 
-    Standalone webhook triggers (``kind='webhook'`` and no
-    ``config.app_instance_id``) are auto-provisioned with a URL path
-    ``token`` and an HMAC ``webhook_secrets[]`` entry on first save. The
-    pair is **preserved across PATCH**: we read existing webhook rows
-    before the wholesale delete and reuse their token/secrets when the
-    incoming config doesn't carry them. Without this preservation, every
-    PATCH to a webhook automation would rotate the URL and break
+    HTTP-fed trigger kinds (``webhook``, ``slack_message``, ``email_inbound``)
+    are auto-provisioned with an HMAC ``webhook_secrets[]`` entry on first
+    save so they share the rotation-friendly secret-storage shape that
+    :func:`app.services.triggers.webhook_hmac.verify_webhook_signature`
+    knows how to read. ``webhook`` additionally gets a URL path ``token``
+    minted (the public ingest URL is keyed off it).
+
+    Both the token (webhook only) and the webhook_secrets list are
+    **preserved across PATCH**: we read existing rows before the
+    wholesale delete and reuse their secrets when the incoming config
+    doesn't carry them. Without this preservation, every PATCH to a
+    webhook-fed automation would rotate the URL/secret and break
     deployed callers — silently.
     """
-    # Snapshot existing webhook tokens/secrets BEFORE the wholesale delete
-    # so PATCH calls that round-trip the trigger don't regenerate them.
+    # Snapshot existing webhook tokens / shared HMAC secrets BEFORE the
+    # wholesale delete so PATCH calls don't regenerate them. We carry a
+    # per-kind secrets map so slack_message and email_inbound rotations
+    # don't accidentally inherit the standalone-webhook secret.
     existing_webhook_token: str | None = None
-    existing_webhook_secrets: list[Any] | None = None
+    existing_secrets_by_kind: dict[str, list[Any]] = {}
+    _HMAC_KINDS = ("webhook", "slack_message", "email_inbound")
     existing_rows = (
         (
             await db.execute(
                 select(AutomationTrigger).where(
                     AutomationTrigger.automation_id == automation_id,
-                    AutomationTrigger.kind == "webhook",
+                    AutomationTrigger.kind.in_(_HMAC_KINDS),
                 )
             )
         )
@@ -302,13 +309,14 @@ async def _replace_triggers(
         cfg = row.config or {}
         if not isinstance(cfg, dict):
             continue
-        if existing_webhook_token is None and isinstance(cfg.get("token"), str):
-            existing_webhook_token = cfg["token"]
-        if existing_webhook_secrets is None and isinstance(
-            cfg.get("webhook_secrets"), list
+        if (
+            row.kind == "webhook"
+            and existing_webhook_token is None
+            and isinstance(cfg.get("token"), str)
         ):
-            existing_webhook_secrets = cfg["webhook_secrets"]
-
+            existing_webhook_token = cfg["token"]
+        if isinstance(cfg.get("webhook_secrets"), list) and cfg["webhook_secrets"]:
+            existing_secrets_by_kind.setdefault(row.kind, cfg["webhook_secrets"])
 
     await db.execute(
         delete(AutomationTrigger).where(AutomationTrigger.automation_id == automation_id)
@@ -319,25 +327,30 @@ async def _replace_triggers(
         # treat the row as "due now" on the next leader-tick. Without
         # this, a freshly-saved cron fires once ~30-60s after save
         # regardless of schedule.
-        next_run_at = (
-            _compute_next_run_at(config) if trig.kind == "cron" else None
-        )
+        next_run_at = _compute_next_run_at(config) if trig.kind == "cron" else None
         if trig.kind == "webhook" and not config.get("app_instance_id"):
             # Standalone webhook — keyed by automation_id + path token. The
             # public ingest route is mounted by ``routers/app_triggers.py``
             # at ``POST /api/automations/{automation_id}/webhook/{token}``.
             if not isinstance(config.get("token"), str) or not config["token"].strip():
-                config["token"] = (
-                    existing_webhook_token or _stdlib_secrets.token_urlsafe(16)
-                )
+                config["token"] = existing_webhook_token or _stdlib_secrets.token_urlsafe(16)
             has_list = isinstance(config.get("webhook_secrets"), list) and config["webhook_secrets"]
             has_legacy = isinstance(config.get("webhook_secret"), str) and config["webhook_secret"]
             if not has_list and not has_legacy:
-                config["webhook_secrets"] = (
-                    existing_webhook_secrets
-                    if existing_webhook_secrets
-                    else [_mint_webhook_secret()]
-                )
+                config["webhook_secrets"] = existing_secrets_by_kind.get("webhook") or [
+                    _mint_webhook_secret()
+                ]
+        elif trig.kind in ("slack_message", "email_inbound"):
+            # Phase E typed inbound — same HMAC rotation model, no path
+            # token (the URL is keyed off channel_config_id / recipient).
+            # The shared verifier reads ``webhook_secrets[]`` so we
+            # auto-provision one on first save and preserve across PATCH.
+            has_list = isinstance(config.get("webhook_secrets"), list) and config["webhook_secrets"]
+            has_legacy = isinstance(config.get("webhook_secret"), str) and config["webhook_secret"]
+            if not has_list and not has_legacy:
+                config["webhook_secrets"] = existing_secrets_by_kind.get(trig.kind) or [
+                    _mint_webhook_secret()
+                ]
         db.add(
             AutomationTrigger(
                 id=uuid4(),
@@ -397,9 +410,7 @@ async def _replace_actions(
             # the user hasn't picked an action yet — defer to run-time.
             continue
         row = (
-            await db.execute(
-                select(AppAction).where(AppAction.id == action.app_action_id)
-            )
+            await db.execute(select(AppAction).where(AppAction.id == action.app_action_id))
         ).scalar_one_or_none()
         if row is None:
             raise HTTPException(
@@ -424,8 +435,7 @@ async def _replace_actions(
                 status_code=422,
                 detail={
                     "message": (
-                        f"action.config.input fails {row.name!r} input_schema: "
-                        f"{exc.message}"
+                        f"action.config.input fails {row.name!r} input_schema: {exc.message}"
                     ),
                     "errors": [
                         {
@@ -946,9 +956,9 @@ async def run_automation(
         # the descriptor entirely.
         row = (
             await db.execute(
-                select(
-                    AutomationEvent.id, AutomationEvent.automation_id
-                ).where(AutomationEvent.idempotency_key == payload.idempotency_key)
+                select(AutomationEvent.id, AutomationEvent.automation_id).where(
+                    AutomationEvent.idempotency_key == payload.idempotency_key
+                )
             )
         ).first()
         if row is None:
@@ -970,8 +980,7 @@ async def run_automation(
             ) from None
         event_id = existing_event_id
         logger.info(
-            "[AUTOMATIONS] manual run idempotent replay automation=%s "
-            "event=%s key=%r user=%s",
+            "[AUTOMATIONS] manual run idempotent replay automation=%s event=%s key=%r user=%s",
             automation_id,
             event_id,
             payload.idempotency_key,
@@ -1110,9 +1119,7 @@ async def get_run(
     subject_row = (
         await db.execute(
             select(InvocationSubject.agent_id, MarketplaceAgent.name)
-            .outerjoin(
-                MarketplaceAgent, MarketplaceAgent.id == InvocationSubject.agent_id
-            )
+            .outerjoin(MarketplaceAgent, MarketplaceAgent.id == InvocationSubject.agent_id)
             .where(InvocationSubject.automation_run_id == run_id)
             .order_by(InvocationSubject.created_at.asc())
             .limit(1)
