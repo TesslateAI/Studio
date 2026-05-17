@@ -22,6 +22,7 @@ import { ConfirmDialog } from '../../components/modals/ConfirmDialog';
 import { RunStatusBadge } from './components/RunStatusBadge';
 import { ContractEditor } from './components/ContractEditor';
 import { DestinationPicker } from './components/DestinationPicker';
+import WorkflowEvolutionPanel from './components/WorkflowEvolutionPanel';
 import type { AutomationDeliveryTargetIn } from '../../types/automations';
 import {
   humanizeActionType,
@@ -159,7 +160,11 @@ export default function AutomationDetailPage() {
           offset,
         };
         if (statusFilter !== 'all') params.status = statusFilter;
-        const list = await automationsApi.listRuns(id, params);
+        // Defensive: backend MUST return an array, but an unexpected
+        // shape used to crash the page with "o.filter is not a function"
+        // in the filteredRuns memo when runs got set to a non-array.
+        const raw = await automationsApi.listRuns(id, params);
+        const list = Array.isArray(raw) ? raw : [];
         setRuns((prev) => (offset === 0 ? list : [...(prev ?? []), ...list]));
         setRunHasMore(list.length === PAGE_SIZE);
         setRunOffset(offset + list.length);
@@ -198,7 +203,7 @@ export default function AutomationDetailPage() {
     communicationDestinationsApi
       .list()
       .then((data) => {
-        if (!cancelled) setDestinations(data);
+        if (!cancelled) setDestinations(Array.isArray(data) ? data : []);
       })
       .catch(() => {});
     return () => {
@@ -709,6 +714,23 @@ export default function AutomationDetailPage() {
               </div>
             </div>
           </section>
+
+          {/* G1 / G2 / G5: workflow evolution surface */}
+          <WorkflowEvolutionPanel
+            automationId={definition.id}
+            headVersionId={
+              (definition as unknown as { head_version_id?: string | null }).head_version_id ?? null
+            }
+            doctorAutomationId={
+              (definition as unknown as { doctor_automation_id?: string | null })
+                .doctor_automation_id ?? null
+            }
+            doctorEnabled={Boolean(
+              (definition as unknown as { doctor_enabled?: boolean }).doctor_enabled
+            )}
+            onProposalApplied={reload}
+            onDoctorChanged={reload}
+          />
 
           {/* Run history */}
           <section className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] overflow-hidden">

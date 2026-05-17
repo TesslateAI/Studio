@@ -2327,11 +2327,7 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  installSkillOnAgent: async (
-    skillId: string,
-    agentId: string,
-    opts?: { confirmed?: boolean }
-  ) => {
+  installSkillOnAgent: async (skillId: string, agentId: string, opts?: { confirmed?: boolean }) => {
     const queryParams = new URLSearchParams();
     if (opts?.confirmed) queryParams.append('confirmed', 'true');
     const query = queryParams.toString();
@@ -2362,11 +2358,11 @@ export const marketplaceApi = {
 
 /** Trust classification for a federated source row. */
 export type MarketplaceSourceTrustLevel =
-  | 'official'       // tesslate-official seed; never user-editable
-  | 'admin_trusted'  // promoted by superuser via /promote
-  | 'local'          // local:// system source (filesystem-backed)
-  | 'private'        // user/team source with bearer token
-  | 'untrusted';     // user/team source with no token (installs blocked)
+  | 'official' // tesslate-official seed; never user-editable
+  | 'admin_trusted' // promoted by superuser via /promote
+  | 'local' // local:// system source (filesystem-backed)
+  | 'private' // user/team source with bearer token
+  | 'untrusted'; // user/team source with no token (installs blocked)
 
 /** Visibility scope for a marketplace source. */
 export type MarketplaceSourceScope = 'system' | 'user' | 'team';
@@ -2458,16 +2454,16 @@ export const marketplaceSourcesApi = {
    * for the requester's active memberships. Inactive non-system rows are
    * hidden by default.
    */
-  list: async (
-    options?: { include_inactive?: boolean; signal?: AbortSignal }
-  ): Promise<MarketplaceSourceResponse[]> => {
+  list: async (options?: {
+    include_inactive?: boolean;
+    signal?: AbortSignal;
+  }): Promise<MarketplaceSourceResponse[]> => {
     const params = new URLSearchParams();
     if (options?.include_inactive) params.append('include_inactive', 'true');
     const query = params.toString();
-    const response = await api.get(
-      `/api/marketplace/sources${query ? `?${query}` : ''}`,
-      { signal: options?.signal }
-    );
+    const response = await api.get(`/api/marketplace/sources${query ? `?${query}` : ''}`, {
+      signal: options?.signal,
+    });
     return response.data;
   },
 
@@ -2495,9 +2491,7 @@ export const marketplaceSourcesApi = {
     const params = new URLSearchParams();
     if (options?.hard) params.append('hard', 'true');
     const query = params.toString();
-    await api.delete(
-      `/api/marketplace/sources/${sourceId}${query ? `?${query}` : ''}`
-    );
+    await api.delete(`/api/marketplace/sources/${sourceId}${query ? `?${query}` : ''}`);
   },
 
   /**
@@ -5367,6 +5361,68 @@ export const automationsApi = {
       );
       return response.data;
     },
+  },
+
+  // -------------------------------------------------------------------
+  // G1 — WorkflowVersion
+  // -------------------------------------------------------------------
+  async listVersions(automationId: string) {
+    const response = await api.get(`/api/automations/${automationId}/versions`);
+    const data = response.data;
+    return Array.isArray(data) ? data : [];
+  },
+
+  // -------------------------------------------------------------------
+  // G2 — WorkflowProposal
+  // -------------------------------------------------------------------
+  async listProposals(automationId: string, status?: string) {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    const response = await api.get(`/api/automations/${automationId}/proposals${qs}`);
+    const data = response.data;
+    return Array.isArray(data) ? data : [];
+  },
+
+  async getProposal(automationId: string, proposalId: string) {
+    const response = await api.get(`/api/automations/${automationId}/proposals/${proposalId}`);
+    return response.data;
+  },
+
+  async createProposal(
+    automationId: string,
+    payload: {
+      to_payload: Record<string, unknown>;
+      rationale: string;
+      risk_class?: 'low' | 'medium' | 'high';
+      from_version_id?: string | null;
+    }
+  ) {
+    const response = await api.post(`/api/automations/${automationId}/proposals`, payload);
+    return response.data;
+  },
+
+  async decideProposal(
+    automationId: string,
+    proposalId: string,
+    payload: { decision: 'approve' | 'reject'; comment?: string }
+  ) {
+    const response = await api.post(
+      `/api/automations/${automationId}/proposals/${proposalId}/decide`,
+      payload
+    );
+    return response.data;
+  },
+
+  // -------------------------------------------------------------------
+  // G5 — Doctor (per-workflow self-healing agent)
+  // -------------------------------------------------------------------
+  async enableDoctor(automationId: string) {
+    const response = await api.post(`/api/automations/${automationId}/doctor/enable`);
+    return response.data;
+  },
+
+  async disableDoctor(automationId: string) {
+    const response = await api.post(`/api/automations/${automationId}/doctor/disable`);
+    return response.data;
   },
 };
 

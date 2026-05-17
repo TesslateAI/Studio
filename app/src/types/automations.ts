@@ -127,6 +127,10 @@ export interface AutomationDefinitionOut {
   max_compute_tier: number;
   max_spend_per_run_usd: string | null;
   max_spend_per_day_usd: string | null;
+  compute_profile?: string;
+  // G1 (#469): live workflow version pointer. Null only for definitions
+  // that pre-date G1 and haven't dispatched yet.
+  head_version_id?: string | null;
   parent_automation_id: string | null;
   depth: number;
   is_active: boolean;
@@ -138,6 +142,121 @@ export interface AutomationDefinitionOut {
   triggers: AutomationTriggerOut[];
   actions: AutomationActionOut[];
   delivery_targets: AutomationDeliveryTargetOut[];
+}
+
+// ---------------------------------------------------------------------------
+// G1 — WorkflowVersion (immutable snapshots)
+// ---------------------------------------------------------------------------
+
+export interface WorkflowVersionPayload {
+  contract?: Record<string, unknown>;
+  max_compute_tier?: number;
+  max_spend_per_run_usd?: string | null;
+  max_spend_per_day_usd?: string | null;
+  compute_profile?: string;
+  workspace_scope?: string;
+  name?: string;
+  actions?: Array<{
+    id?: string;
+    ordinal: number;
+    action_type: string;
+    config: Record<string, unknown>;
+    app_action_id?: string | null;
+    parent_action_id?: string | null;
+    branch_condition?: unknown;
+  }>;
+  triggers?: Array<{
+    id?: string;
+    kind: string;
+    config: Record<string, unknown>;
+    is_active?: boolean;
+  }>;
+  delivery_targets?: Array<{
+    id?: string;
+    destination_id: string;
+    ordinal: number;
+    on_failure?: Record<string, unknown>;
+    artifact_filter?: string;
+  }>;
+}
+
+export interface WorkflowVersionRow {
+  id: string;
+  generation: number;
+  parent_version_id: string | null;
+  payload_sha256: string;
+  created_by_user_id: string | null;
+  created_by_run_id: string | null;
+  rationale: string | null;
+  created_at: string | null;
+  is_head: boolean;
+  payload: WorkflowVersionPayload;
+}
+
+// ---------------------------------------------------------------------------
+// G2 — WorkflowProposal (agent or human-authored draft changes)
+// ---------------------------------------------------------------------------
+
+export type WorkflowProposalStatus =
+  | 'submitted'
+  | 'approved'
+  | 'rejected'
+  | 'applied'
+  | 'reverted'
+  | 'expired'
+  | 'withdrawn';
+
+export type WorkflowProposalRisk = 'low' | 'medium' | 'high';
+
+export interface WorkflowDiffEntry {
+  path: string;
+  op: 'add' | 'remove' | 'replace';
+  before?: unknown;
+  after?: unknown;
+}
+
+export interface WorkflowProposalSummary {
+  id: string;
+  status: WorkflowProposalStatus;
+  risk_class: WorkflowProposalRisk;
+  rationale: string;
+  from_version_id: string | null;
+  applied_version_id: string | null;
+  proposer_user_id: string | null;
+  proposer_run_id: string | null;
+  reviewer_user_id: string | null;
+  created_at: string | null;
+  decided_at: string | null;
+}
+
+export interface WorkflowProposalDetail extends WorkflowProposalSummary {
+  automation_id: string;
+  to_payload: WorkflowVersionPayload;
+  diff_summary: WorkflowDiffEntry[];
+  reviewer_comment: string | null;
+  expires_at: string | null;
+}
+
+export interface WorkflowProposalCreateIn {
+  to_payload: WorkflowVersionPayload;
+  rationale: string;
+  risk_class?: WorkflowProposalRisk;
+  from_version_id?: string | null;
+}
+
+export interface WorkflowProposalDecideIn {
+  decision: 'approve' | 'reject';
+  comment?: string;
+}
+
+// ---------------------------------------------------------------------------
+// G5 — Doctor (per-workflow self-healing agent)
+// ---------------------------------------------------------------------------
+
+export interface DoctorStatusOut {
+  target_automation_id: string;
+  doctor_automation_id: string | null;
+  doctor_enabled: boolean;
 }
 
 export interface AutomationRunRequest {
@@ -253,13 +372,11 @@ export interface ApprovalRequest {
   /** Allowed resolutions for this specific request. */
   options: ApprovalChoice[];
   delivered_to: ApprovalDeliveryReceipt[];
-  response:
-    | {
-        choice: ApprovalChoice;
-        notes?: string;
-        scope_modifications?: Record<string, unknown>;
-      }
-    | null;
+  response: {
+    choice: ApprovalChoice;
+    notes?: string;
+    scope_modifications?: Record<string, unknown>;
+  } | null;
 }
 
 export interface ApprovalResponse {
