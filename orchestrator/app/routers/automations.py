@@ -200,6 +200,7 @@ async def _project_definition(
         max_spend_per_run_usd=definition.max_spend_per_run_usd,
         max_spend_per_day_usd=definition.max_spend_per_day_usd,
         compute_profile=getattr(definition, "compute_profile", None) or "persistent_workspace",
+        head_version_id=getattr(definition, "head_version_id", None),
         parent_automation_id=definition.parent_automation_id,
         depth=definition.depth,
         is_active=definition.is_active,
@@ -680,6 +681,17 @@ async def create_automation(
     await _replace_actions(db, automation.id, payload.actions, user=user)
     await _replace_delivery_targets(db, automation.id, payload.delivery_targets)
 
+    # G1 (#469): snapshot the brand-new definition as generation 1.
+    from ..services.workflows.versions import snapshot_definition_to_version
+
+    await snapshot_definition_to_version(
+        db,
+        definition=automation,
+        rationale="initial version (created via API)",
+        actor_user_id=user.id,
+        update_head=True,
+    )
+
     await db.commit()
     await db.refresh(automation)
 
@@ -777,6 +789,18 @@ async def update_automation(
                 f"the power level to Light (max_compute_tier=0)."
             ),
         )
+
+    # G1 (#469): snapshot the post-patch state as a new WorkflowVersion.
+    # Idempotent on payload SHA — a no-op PATCH won't multiply rows.
+    from ..services.workflows.versions import snapshot_definition_to_version
+
+    await snapshot_definition_to_version(
+        db,
+        definition=automation,
+        rationale="updated via API",
+        actor_user_id=user.id,
+        update_head=True,
+    )
 
     await db.commit()
     await db.refresh(automation)
@@ -1113,6 +1137,52 @@ async def get_run(
         agent_id=agent_id,
         agent_name=agent_name,
     )
+
+
+@router.get("/{automation_id}/versions")
+async def list_versions(
+    automation_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List WorkflowVersion rows for an automation (G1, issue #469).
+
+    Newest first. Each row has the generation, parent, SHA, rationale,
+    actor (user or run), and the snapshot payload. Used by the UI to
+    render a version history + diff view, and by the agent to read the
+    current canonical shape.
+    """
+    from ..models_workflows import WorkflowVersion
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    versions = (
+        (
+            await db.execute(
+                select(WorkflowVersion)
+                .where(WorkflowVersion.automation_id == automation_id)
+                .order_by(WorkflowVersion.generation.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "id": str(v.id),
+            "generation": v.generation,
+            "parent_version_id": str(v.parent_version_id) if v.parent_version_id else None,
+            "payload_sha256": v.payload_sha256,
+            "created_by_user_id": str(v.created_by_user_id) if v.created_by_user_id else None,
+            "created_by_run_id": str(v.created_by_run_id) if v.created_by_run_id else None,
+            "rationale": v.rationale,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "is_head": v.id == automation.head_version_id,
+            "payload": v.payload or {},
+        }
+        for v in versions
+    ]
 
 
 @router.get("/{automation_id}/runs/{run_id}/events")

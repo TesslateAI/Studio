@@ -123,6 +123,14 @@ class AutomationDefinition(Base):
     created_by_user_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_by_automation_id = Column(GUID(), nullable=True)
 
+    # G1 (#469): pointer to the live WorkflowVersion. Nullable for
+    # backfill: pre-G1 rows lazy-create generation 1 on first read.
+    head_version_id = Column(
+        GUID(),
+        ForeignKey("workflow_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -339,6 +347,16 @@ class AutomationRun(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     ended_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # G1 (#469): which WorkflowVersion this run executed against.
+    # Nullable for backfill: runs created before G1 have no version
+    # pointer; the engine falls back to the live AutomationAction rows
+    # for those runs.
+    workflow_version_id = Column(
+        GUID(),
+        ForeignKey("workflow_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     __table_args__ = (
         UniqueConstraint("automation_id", "event_id", name="uq_automation_runs_automation_event"),

@@ -42,6 +42,7 @@ from ...models_automations import (
 from . import event_log
 from .handlers import StepContext, registry  # noqa: F401  ensures handlers are imported
 from .handlers.base import get_handler
+from .versions import materialize_actions_from_version
 
 logger = logging.getLogger(__name__)
 
@@ -88,17 +89,53 @@ async def execute_workflow(
         UnknownStepKindError: an action's ``action_type`` has no
             registered handler.
     """
-    actions = (
-        (
+    # G1 (#469): if the run is version-bound, read the actions from
+    # the WorkflowVersion snapshot instead of the live rows. The
+    # snapshot is authoritative for past runs — live rows may have
+    # moved on since this run was queued. Single code path until we
+    # hit the materialize fork.
+    actions: list[Any]
+    if getattr(run, "workflow_version_id", None) is not None:
+        from ...models_workflows import WorkflowVersion
+
+        version = (
             await db.execute(
-                select(AutomationAction)
-                .where(AutomationAction.automation_id == automation.id)
-                .order_by(AutomationAction.ordinal.asc())
+                select(WorkflowVersion).where(WorkflowVersion.id == run.workflow_version_id)
             )
+        ).scalar_one_or_none()
+        if version is None:
+            # Stamped a version id we can't find. Fall back to live
+            # rows so the run still completes rather than orphaning.
+            logger.warning(
+                "workflow_engine.version_missing run=%s version_id=%s falling back to live actions",
+                run.id,
+                run.workflow_version_id,
+            )
+            actions = list(
+                (
+                    await db.execute(
+                        select(AutomationAction)
+                        .where(AutomationAction.automation_id == automation.id)
+                        .order_by(AutomationAction.ordinal.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        else:
+            actions = list(materialize_actions_from_version(version))
+    else:
+        actions = list(
+            (
+                await db.execute(
+                    select(AutomationAction)
+                    .where(AutomationAction.automation_id == automation.id)
+                    .order_by(AutomationAction.ordinal.asc())
+                )
+            )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
     if len(actions) <= 1:
         raise WorkflowEngineError(
             "execute_workflow called with a single-action automation; "

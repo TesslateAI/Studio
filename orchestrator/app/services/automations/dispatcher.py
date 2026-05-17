@@ -957,6 +957,28 @@ async def dispatch_automation(
             paused_status=DispatchStatus.PAUSED,
         )
 
+    # G1 (#469): stamp the run with the head WorkflowVersion. Lazy-
+    # create generation 1 for definitions that pre-date G1 so every
+    # dispatch from here on is version-bound. The bootstrap snapshot
+    # is read-only — the live rows are still the editing surface
+    # until a router (or proposal) writes a new version.
+    if getattr(run, "workflow_version_id", None) is None:
+        from ..workflows.versions import ensure_head_version
+
+        try:
+            version = await ensure_head_version(db, definition=automation)
+            run.workflow_version_id = version.id
+            await db.commit()
+        except Exception as exc:
+            # Bootstrap is best-effort. If it fails the engine falls
+            # back to live rows; we log but don't abort the dispatch.
+            logger.warning(
+                "dispatcher.workflow_version_bootstrap_failed automation=%s run=%s err=%r",
+                automation_id,
+                run.id,
+                exc,
+            )
+
     try:
         _validate_contract(automation.contract)
     except ContractInvalid as exc:

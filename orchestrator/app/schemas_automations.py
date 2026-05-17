@@ -675,6 +675,9 @@ class AutomationDefinitionOut(BaseModel):
     max_spend_per_run_usd: Decimal | None
     max_spend_per_day_usd: Decimal | None
     compute_profile: str = "persistent_workspace"
+    # G1 (#469): live version pointer. Null only for definitions
+    # that pre-date G1 and haven't dispatched yet.
+    head_version_id: UUID | None = None
     parent_automation_id: UUID | None
     depth: int
     is_active: bool
