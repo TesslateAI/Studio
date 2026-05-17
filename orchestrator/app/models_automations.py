@@ -143,6 +143,27 @@ class AutomationDefinition(Base):
     # so agents can't death-by-1000-cuts.
     diff_budget_consumed = Column(Integer, nullable=False, default=0, server_default="0")
 
+    # G5 (#469): per-workflow doctor opt-in. When enabled, a child
+    # automation (doctor_automation_id) subscribes to this workflow's
+    # run.failed events and runs the diagnose-then-propose loop. Both
+    # default to "no doctor" so existing workflows are unaffected.
+    doctor_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    doctor_automation_id = Column(
+        GUID(),
+        ForeignKey("automation_definitions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # G7 (#469): convergence guards. Cooldown stops back-to-back
+    # agent edits; diff_budget_max caps auto-apply edits before
+    # forcing human approval; last_self_edit_at is bumped by the
+    # auto-apply path so the cooldown check has a timestamp.
+    min_seconds_between_self_edits = Column(
+        Integer, nullable=False, default=86400, server_default="86400"
+    )
+    diff_budget_max = Column(Integer, nullable=False, default=5, server_default="5")
+    last_self_edit_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -206,7 +227,7 @@ class AutomationTrigger(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('cron', 'webhook', 'app_invocation', 'manual', "
-            "'slack_message', 'email_inbound')",
+            "'slack_message', 'email_inbound', 'workflow_event')",
             name="ck_automation_triggers_kind",
         ),
     )

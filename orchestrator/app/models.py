@@ -3358,6 +3358,8 @@ from .models_team import (  # noqa: F401, E402
     TeamMembership,
 )
 from .models_workflows import (  # noqa: F401, E402
+    WorkflowHealthSnapshot,
+    WorkflowLearning,
     WorkflowProposal,
     WorkflowVersion,
 )

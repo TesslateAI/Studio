@@ -191,19 +191,52 @@ def evaluate_for_auto_apply(
     automation: AutomationDefinition,
     diff: list[dict[str, Any]],
     risk_class: str,
+    proposer_run_id: UUID | None = None,
 ) -> tuple[bool, str | None]:
-    """Decide whether a proposal qualifies for auto-apply (G3, #469).
+    """Decide whether a proposal qualifies for auto-apply (G3+G7, #469).
 
     Returns (auto_apply, reason). ``reason`` is a human-readable
     rejection string when auto_apply is False; null when True.
 
     Rules (any failure → manual approval):
-      * policy is set (auto_apply_policy not None / empty)
-      * every diff path matches one of policy.allowed_changes prefixes
-      * len(diff) <= policy.max_changes_per_proposal
-      * risk_class in {low, medium} (high always requires approval)
-      * no diff path appears in policy.hard_blocked
+      * G7 cooldown: if agent-authored AND last_self_edit_at is
+        within min_seconds_between_self_edits, refuse.
+      * G7 diff-budget: if diff_budget_consumed >= diff_budget_max,
+        refuse — agents must wait for a human to approve before more
+        auto-applies are eligible.
+      * G3 policy is set (auto_apply_policy not None / empty)
+      * G3 risk_class in {low, medium} (high always requires approval)
+      * G3 every diff path matches one of policy.allowed_changes prefixes
+      * G3 len(diff) <= policy.max_changes_per_proposal
+      * G3 no diff path appears in policy.hard_blocked
     """
+    # G7 cooldown: only enforced for agent-authored proposals.
+    if proposer_run_id is not None:
+        last = getattr(automation, "last_self_edit_at", None)
+        cooldown = int(getattr(automation, "min_seconds_between_self_edits", 0) or 0)
+        if last is not None and cooldown > 0:
+            from datetime import UTC, datetime
+
+            now = datetime.now(tz=UTC)
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=UTC)
+            elapsed = (now - last).total_seconds()
+            if elapsed < cooldown:
+                return (
+                    False,
+                    f"cooldown active: {int(cooldown - elapsed)}s remaining "
+                    f"(min_seconds_between_self_edits={cooldown})",
+                )
+
+    # G7 diff budget.
+    consumed = int(getattr(automation, "diff_budget_consumed", 0) or 0)
+    budget_max = int(getattr(automation, "diff_budget_max", 0) or 0)
+    if budget_max > 0 and consumed >= budget_max:
+        return (
+            False,
+            f"diff budget exhausted ({consumed}/{budget_max}); requires human approval to reset",
+        )
+
     policy = getattr(automation, "auto_apply_policy", None)
     if not policy or not isinstance(policy, dict):
         return False, "no auto_apply_policy set on automation"
@@ -314,7 +347,10 @@ async def create_proposal(
     # diff budget. Otherwise the proposal stays in 'submitted' and
     # waits for human review.
     auto_apply, reason = evaluate_for_auto_apply(
-        automation=automation, diff=diff, risk_class=risk_class
+        automation=automation,
+        diff=diff,
+        risk_class=risk_class,
+        proposer_run_id=proposer_run_id,
     )
     if auto_apply:
         dr: DryRunResult = evaluate_dry_run(to_payload)
@@ -326,6 +362,9 @@ async def create_proposal(
                     actor_user_id=proposer_user_id,
                 )
                 automation.diff_budget_consumed = int(automation.diff_budget_consumed or 0) + 1
+                # G7: bump last_self_edit_at so the cooldown check
+                # has a timestamp for the next agent edit.
+                automation.last_self_edit_at = datetime.now(tz=UTC)
                 proposal.reviewer_comment = "auto-applied: " + (
                     rationale[:200] if rationale else ""
                 )
@@ -580,6 +619,14 @@ async def decide_proposal(
 
     # Approve → apply.
     await apply_proposal(db, proposal=proposal, actor_user_id=reviewer_user_id)
+    # G7: human approval resets the agent's diff budget so the
+    # doctor can keep helping after a checkpoint.
+    automation = (
+        await db.execute(
+            select(AutomationDefinition).where(AutomationDefinition.id == proposal.automation_id)
+        )
+    ).scalar_one()
+    automation.diff_budget_consumed = 0
     if comment:
         proposal.reviewer_comment = comment
     return proposal

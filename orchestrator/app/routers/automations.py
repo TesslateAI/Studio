@@ -1335,6 +1335,48 @@ async def decide_workflow_proposal(
     }
 
 
+@router.post("/{automation_id}/doctor/enable")
+async def enable_doctor(
+    automation_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable the per-workflow doctor (G5, issue #469). Idempotent."""
+    from ..services.workflows.doctor import ensure_doctor_for
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=True)
+    doctor = await ensure_doctor_for(db, target_automation=automation)
+    await db.commit()
+    return {
+        "target_automation_id": str(automation.id),
+        "doctor_automation_id": str(doctor.id),
+        "doctor_enabled": True,
+    }
+
+
+@router.post("/{automation_id}/doctor/disable")
+async def disable_doctor(
+    automation_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Disable the doctor. Leaves the row in place so re-enable is one flag."""
+    from ..services.workflows.doctor import disable_doctor_for
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=True)
+    await disable_doctor_for(db, target_automation=automation)
+    await db.commit()
+    return {
+        "target_automation_id": str(automation.id),
+        "doctor_automation_id": (
+            str(automation.doctor_automation_id) if automation.doctor_automation_id else None
+        ),
+        "doctor_enabled": False,
+    }
+
+
 @router.get("/{automation_id}/versions")
 async def list_versions(
     automation_id: UUID,

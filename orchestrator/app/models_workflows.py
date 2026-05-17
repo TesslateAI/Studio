@@ -26,6 +26,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -222,3 +223,97 @@ class WorkflowProposal(Base):
         ),
         Index("ix_workflow_proposals_expires", "expires_at"),
     )
+
+
+class WorkflowHealthSnapshot(Base):
+    """Periodic per-workflow health rollup (G4, issue #469).
+
+    The doctor agent (G5) reads from here to decide whether
+    intervention is needed. A small cron sweep recomputes per
+    (automation_id, window) pair on a schedule (short ~ every
+    15 min, long ~ hourly). UNIQUE on (automation_id, window) so
+    the sweep upserts in place.
+    """
+
+    __tablename__ = "workflow_health_snapshots"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    automation_id = Column(
+        GUID(),
+        ForeignKey("automation_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # 'short' (last 24h) or 'long' (last 7d).
+    window = Column(String(16), nullable=False)
+    computed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    run_count = Column(Integer, nullable=False, default=0, server_default="0")
+    success_count = Column(Integer, nullable=False, default=0, server_default="0")
+    failure_count = Column(Integer, nullable=False, default=0, server_default="0")
+    awaiting_approval_count = Column(Integer, nullable=False, default=0, server_default="0")
+    success_rate = Column(Numeric(4, 3), nullable=True)
+    median_duration_ms = Column(Integer, nullable=True)
+    p95_duration_ms = Column(Integer, nullable=True)
+    spend_p50_usd = Column(Numeric(12, 4), nullable=True)
+    spend_p95_usd = Column(Numeric(12, 4), nullable=True)
+    most_common_error_kind = Column(Text, nullable=True)
+    most_common_failed_step_ordinal = Column(Integer, nullable=True)
+    last_failed_run_id = Column(
+        GUID(),
+        ForeignKey("automation_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_failed_step_ordinal = Column(Integer, nullable=True)
+    last_error_message = Column(Text, nullable=True)
+    runs_since_last_change = Column(Integer, nullable=False, default=0, server_default="0")
+    open_proposal_count = Column(Integer, nullable=False, default=0, server_default="0")
+    generation_at_window_start = Column(Integer, nullable=True)
+    generation_at_window_end = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("automation_id", "window", name="uq_workflow_health_automation_window"),
+        CheckConstraint(
+            "\"window\" IN ('short', 'long')",
+            name="ck_workflow_health_window",
+        ),
+    )
+
+
+class WorkflowLearning(Base):
+    """Cross-workflow pattern memory (G6, issue #469).
+
+    The doctor agent records what worked on workflow X (after a
+    proposal it applied succeeds N times); future doctor runs on
+    workflow Y can look it up by tag and try a similar fix. Team-
+    scoped by default; cross-team sharing is opt-in (not in this
+    phase).
+    """
+
+    __tablename__ = "workflow_learnings"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    team_id = Column(GUID(), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
+    tag = Column(String(64), nullable=False)
+    symptom_pattern = Column(JSON, nullable=True)
+    proposed_fix = Column(JSON, nullable=True)
+    success_count = Column(Integer, nullable=False, default=0, server_default="0")
+    failure_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_applied_run_id = Column(
+        GUID(),
+        ForeignKey("automation_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_by_run_id = Column(
+        GUID(),
+        ForeignKey("automation_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (Index("ix_workflow_learnings_team_tag", "team_id", "tag"),)

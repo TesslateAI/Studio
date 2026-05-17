@@ -307,6 +307,7 @@ async def emit_error(
     error_type: str,
     message: str,
     actor: str | None = None,
+    automation_id: Any | None = None,
 ) -> None:
     await record(
         db,
@@ -316,6 +317,26 @@ async def emit_error(
         actor=actor,
         payload={"error_type": error_type, "message": message[:1000]},
     )
+    # G5 (#469): fire workflow_event subscribers on error. The doctor
+    # for this automation (if any) gets dispatched. Best-effort —
+    # subscriber failures must not propagate back to the failing run.
+    if automation_id is not None:
+        try:
+            from ..triggers.workflow_event import route_workflow_event
+
+            await route_workflow_event(
+                db,
+                source_automation_id=automation_id,
+                source_run_id=run_id,
+                event_kind="error.raised",
+                payload={"error_type": error_type, "message": message[:1000]},
+            )
+        except Exception as exc:
+            logger.warning(
+                "emit_error.workflow_event_dispatch_failed automation=%s err=%r",
+                automation_id,
+                exc,
+            )
 
 
 def _safe_json(value: Any) -> Any:
