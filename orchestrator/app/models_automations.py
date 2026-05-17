@@ -131,6 +131,18 @@ class AutomationDefinition(Base):
         nullable=True,
     )
 
+    # G3 (#469): auto-apply policy for agent-authored proposals. Null
+    # means "always require approval" (G2 default). When set, low-risk
+    # proposals whose changes match allowed_changes bypass the approval
+    # card after a successful dry-run. See services/workflows/proposals.py
+    # ``evaluate_for_auto_apply``.
+    auto_apply_policy = Column(JSON, nullable=True)
+
+    # G3 + G7 (#469): increments on every auto-applied proposal;
+    # human approval resets to 0. Feeds the G7 diff-budget guard
+    # so agents can't death-by-1000-cuts.
+    diff_budget_consumed = Column(Integer, nullable=False, default=0, server_default="0")
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

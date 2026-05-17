@@ -46,6 +46,7 @@ from ...models_automations import (
     AutomationTrigger,
 )
 from ...models_workflows import WorkflowProposal, WorkflowVersion
+from .dry_run import DryRunResult, evaluate_dry_run
 from .versions import canonical_sha256, snapshot_definition_to_version
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,12 @@ def compute_diff(*, before: dict[str, Any] | None, after: dict[str, Any]) -> lis
         "name",
     }
     for key in scalar_keys:
+        # Treat absence in ``after`` as "unchanged" rather than "set to null".
+        # Proposals routinely only include the fields they want to change;
+        # forcing every diff to enumerate the whole shape would defeat the
+        # purpose of a partial proposal.
+        if key not in after:
+            continue
         b = before.get(key)
         a = after.get(key)
         if b != a:
@@ -179,6 +186,55 @@ class CreateResult:
     created: bool
 
 
+def evaluate_for_auto_apply(
+    *,
+    automation: AutomationDefinition,
+    diff: list[dict[str, Any]],
+    risk_class: str,
+) -> tuple[bool, str | None]:
+    """Decide whether a proposal qualifies for auto-apply (G3, #469).
+
+    Returns (auto_apply, reason). ``reason`` is a human-readable
+    rejection string when auto_apply is False; null when True.
+
+    Rules (any failure → manual approval):
+      * policy is set (auto_apply_policy not None / empty)
+      * every diff path matches one of policy.allowed_changes prefixes
+      * len(diff) <= policy.max_changes_per_proposal
+      * risk_class in {low, medium} (high always requires approval)
+      * no diff path appears in policy.hard_blocked
+    """
+    policy = getattr(automation, "auto_apply_policy", None)
+    if not policy or not isinstance(policy, dict):
+        return False, "no auto_apply_policy set on automation"
+
+    if risk_class == "high":
+        return False, "risk_class=high always routes to approval"
+
+    allowed = policy.get("allowed_changes") or []
+    if not isinstance(allowed, list) or not allowed:
+        return False, "policy.allowed_changes empty or missing"
+
+    hard_blocked = policy.get("hard_blocked") or []
+    max_changes = int(policy.get("max_changes_per_proposal") or 0)
+    if max_changes > 0 and len(diff) > max_changes:
+        return (
+            False,
+            f"diff has {len(diff)} changes; policy max is {max_changes}",
+        )
+
+    for entry in diff:
+        path = str(entry.get("path", ""))
+        if any(path.startswith(b) for b in hard_blocked):
+            return False, f"path {path!r} is hard-blocked by policy"
+        if not any(path.startswith(a) for a in allowed):
+            return (
+                False,
+                f"path {path!r} not in policy.allowed_changes",
+            )
+    return True, None
+
+
 async def create_proposal(
     db: AsyncSession,
     *,
@@ -252,6 +308,57 @@ async def create_proposal(
     )
     db.add(proposal)
     await db.flush()
+
+    # G3 (#469): auto-apply path. If the policy allows this change,
+    # run the dry-run; if both pass, apply immediately and bump the
+    # diff budget. Otherwise the proposal stays in 'submitted' and
+    # waits for human review.
+    auto_apply, reason = evaluate_for_auto_apply(
+        automation=automation, diff=diff, risk_class=risk_class
+    )
+    if auto_apply:
+        dr: DryRunResult = evaluate_dry_run(to_payload)
+        if dr.ok:
+            try:
+                await apply_proposal(
+                    db,
+                    proposal=proposal,
+                    actor_user_id=proposer_user_id,
+                )
+                automation.diff_budget_consumed = int(automation.diff_budget_consumed or 0) + 1
+                proposal.reviewer_comment = "auto-applied: " + (
+                    rationale[:200] if rationale else ""
+                )
+                logger.info(
+                    "workflow_proposal.auto_applied automation=%s proposal=%s "
+                    "diff_budget_consumed=%d",
+                    automation.id,
+                    proposal.id,
+                    int(automation.diff_budget_consumed),
+                )
+            except Exception as exc:
+                # If apply fails after auto-approval, leave the proposal
+                # submitted so a human can still approve manually. Log
+                # the reason so it's visible.
+                logger.exception(
+                    "workflow_proposal.auto_apply_failed automation=%s proposal=%s err=%r",
+                    automation.id,
+                    proposal.id,
+                    exc,
+                )
+                proposal.reviewer_comment = f"auto_apply_failed: {exc!r}"
+        else:
+            proposal.reviewer_comment = f"auto_apply_skipped (dry_run failed): {dr.refusal_reason}"
+            logger.info(
+                "workflow_proposal.auto_apply_skipped automation=%s proposal=%s dry_run_refusal=%s",
+                automation.id,
+                proposal.id,
+                dr.refusal_reason,
+            )
+    else:
+        # Recording the reason on the proposal makes it visible to the
+        # approver UI (and to the agent if it queries the proposal back).
+        proposal.reviewer_comment = f"auto_apply_not_eligible: {reason}" if reason else None
 
     logger.info(
         "workflow_proposal.created automation=%s proposal=%s diff_entries=%d "
