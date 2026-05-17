@@ -1,6 +1,6 @@
 """Backfill webhook_secrets[] for existing slack_message/email_inbound triggers.
 
-Revision ID: 0114_backfill_typed_trigger_secrets
+Revision ID: 0114_backfill_typed_secrets
 Revises: 0113_workflow_event_index
 Create Date: 2026-05-17
 
@@ -33,7 +33,7 @@ from alembic import op
 from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
-revision = "0114_backfill_typed_trigger_secrets"
+revision = "0114_backfill_typed_secrets"
 down_revision = "0113_workflow_event_index"
 branch_labels = None
 depends_on = None
