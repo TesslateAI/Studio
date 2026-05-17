@@ -154,9 +154,7 @@ class Settings(BaseSettings):
         """
         if self.is_connector_proxy_dedicated:
             return "http://opensail-runtime:8400"
-        return (
-            "http://tesslate-backend-service:8000/api/v1/connector-proxy"
-        )
+        return "http://tesslate-backend-service:8000/api/v1/connector-proxy"
 
     # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_level: str = "INFO"
@@ -296,6 +294,17 @@ class Settings(BaseSettings):
     # CSRF Protection
     csrf_secret_key: str = ""  # Separate secret for CSRF tokens (defaults to secret_key if not set)
     csrf_token_max_age: int = 86400  # CSRF token expiration in seconds (default: 24 hours)
+
+    # Phase E (#474) inbound trigger signing — HMAC-SHA256 secrets used to
+    # authenticate POSTs to /api/triggers/inbound/email and
+    # /api/triggers/inbound/slack/{cc_id}. Without these set, the
+    # endpoints refuse traffic with 503 so a misconfigured deploy can't
+    # silently accept anonymous internet traffic.
+    inbound_email_signing_secret: str = ""
+    inbound_slack_signing_secret: str = ""
+    # Replay window in seconds for inbound signed requests. Slack
+    # recommends 5 min; we apply the same bound to the email path.
+    inbound_signature_max_age: int = 300
 
     # Cookie Security Settings
     cookie_secure: bool = True  # HTTPS-only cookies; set to False for local dev without TLS

@@ -444,7 +444,10 @@ def test_compute_diff_scalar_and_list_changes():
     }
     diffs = compute_diff(before=before, after=after)
     paths = [d["path"] for d in diffs]
-    assert "contract" in paths
+    # Post-#473-should-fix: contract child keys are walked individually
+    # so policy allow-lists like "contract.a" are reachable. The bare
+    # "contract" path no longer appears for dict-shaped contracts.
+    assert "contract.a" in paths
     assert "max_compute_tier" in paths
     assert any(p.startswith("actions[ordinal=0]") for p in paths)
     assert any(p.startswith("actions[ordinal=1]") for p in paths)

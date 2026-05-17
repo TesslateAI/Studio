@@ -51,9 +51,18 @@ class BranchHandler(StepHandler):
 
         # Coerce to int when present; ignore invalid values rather than
         # blowing up the run (engine treats "no jump" as "advance by 1").
+        # Log the bad value so a malformed branch config is debuggable
+        # — silently dropping it used to swallow real bugs.
+        raw_next = next_ordinal
         try:
             next_ordinal = int(next_ordinal) if next_ordinal is not None else None
         except (TypeError, ValueError):
+            logger.warning(
+                "branch.invalid_next_ordinal automation=%s action=%s value=%r — falling back to sequential advance",
+                ctx.automation.id,
+                ctx.action.ordinal,
+                raw_next,
+            )
             next_ordinal = None
 
         return StepResult(

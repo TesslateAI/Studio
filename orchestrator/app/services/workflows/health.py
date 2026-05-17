@@ -6,10 +6,12 @@ Single public function: :func:`compute_snapshot` reads
 the corresponding :class:`WorkflowHealthSnapshot` row.
 
 Used by:
-* a background sweep that walks every active automation periodically
-  (G5's doctor cron); shipping the sweep itself is a Phase G5 follow-up.
-* the ``watch_workflow_health`` step handler (also G5) which reads the
-  snapshot to decide whether the doctor needs to take action.
+* the G5 doctor agent (loaded into its tool context via
+  ``read_workflow_history`` + ``manage_workflow_proposal``) so the
+  agent can inspect failure trends before drafting a proposal.
+* a planned background sweep that walks every active automation
+  periodically and writes one snapshot per workflow per window — the
+  sweep itself is a follow-up.
 """
 
 from __future__ import annotations

@@ -260,8 +260,8 @@ async def execute_workflow(
             )
             raise AsyncStepInMultiStepError(
                 f"step ordinal={action.ordinal} kind={action.action_type!r} "
-                "returned an async handoff; phase A multi-step workflows "
-                "require synchronous steps"
+                "returned an async handoff; multi-step workflows require "
+                "synchronous steps (worker-callback resumption lands later)"
             )
 
         await _mark_step_status(

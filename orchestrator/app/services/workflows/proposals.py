@@ -26,9 +26,6 @@ learning store reads diff_summary entries to spot patterns.
 
 from __future__ import annotations
 
-import contextlib
-import hashlib
-import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -96,7 +93,6 @@ def compute_diff(*, before: dict[str, Any] | None, after: dict[str, Any]) -> lis
     diffs: list[dict[str, Any]] = []
 
     scalar_keys = {
-        "contract",
         "max_compute_tier",
         "max_spend_per_run_usd",
         "max_spend_per_day_usd",
@@ -115,6 +111,38 @@ def compute_diff(*, before: dict[str, Any] | None, after: dict[str, Any]) -> lis
         a = after.get(key)
         if b != a:
             diffs.append({"path": key, "op": "replace", "before": b, "after": a})
+
+    # Contract: deep-walk top-level child keys so allow-list policies
+    # like ``allowed_changes: ["contract.allowed_tools"]`` (#469
+    # migration 0108) actually match a real diff path. A bare
+    # ``contract`` replace would never be reachable by such a policy.
+    if "contract" in after:
+        before_contract = before.get("contract") or {}
+        after_contract = after.get("contract") or {}
+        if not isinstance(before_contract, dict) or not isinstance(after_contract, dict):
+            # Non-dict contract — fall back to whole-object diff.
+            if before_contract != after_contract:
+                diffs.append(
+                    {
+                        "path": "contract",
+                        "op": "replace",
+                        "before": before_contract,
+                        "after": after_contract,
+                    }
+                )
+        else:
+            for child_key in set(before_contract.keys()) | set(after_contract.keys()):
+                b_present = child_key in before_contract
+                a_present = child_key in after_contract
+                b_val = before_contract.get(child_key)
+                a_val = after_contract.get(child_key)
+                path = f"contract.{child_key}"
+                if not b_present and a_present:
+                    diffs.append({"path": path, "op": "add", "before": None, "after": a_val})
+                elif b_present and not a_present:
+                    diffs.append({"path": path, "op": "remove", "before": b_val, "after": None})
+                elif b_val != a_val:
+                    diffs.append({"path": path, "op": "replace", "before": b_val, "after": a_val})
 
     # Actions: compare by ordinal.
     diffs.extend(
@@ -453,13 +481,31 @@ async def apply_proposal(
     """Materialize the proposal: replace live child rows from to_payload,
     snapshot a new WorkflowVersion, flip head_version_id, mark applied.
 
-    Caller is responsible for committing.
+    Caller is responsible for committing AND for having authorized
+    write access on the target automation. This helper performs a
+    defensive re-check that ``actor_user_id`` (or the proposer when
+    no explicit actor is given) actually owns the target — defense
+    in depth against any future caller that forgets the route-level
+    ``_authorize_definition`` gate. Cross-team / shared-ownership
+    callers should pass ``actor_user_id`` of an authorized writer.
     """
     automation = (
         await db.execute(
             select(AutomationDefinition).where(AutomationDefinition.id == proposal.automation_id)
         )
     ).scalar_one()
+
+    # Defense in depth: refuse if neither an explicit reviewer nor a
+    # tracked proposer is on record. Both code paths into
+    # apply_proposal (G3 auto-apply inside create_proposal, and the
+    # /proposals/{id}/decide HTTP route) supply one of these — a None
+    # for both implies the caller skipped the upstream
+    # _authorize_definition(write=True) gate.
+    if actor_user_id is None and proposal.proposer_user_id is None:
+        raise ProposalError(
+            "apply_proposal refused: no actor_user_id or proposer_user_id on record; "
+            "caller must authorize write before applying"
+        )
 
     payload = proposal.to_payload or {}
 
@@ -671,10 +717,3 @@ __all__ = [
     "decide_proposal",
     "withdraw_proposal",
 ]
-
-
-# Silence the unused-import linter; contextlib is reserved for future
-# best-effort rollbacks in apply_proposal.
-_ = contextlib
-_ = json
-_ = hashlib

@@ -93,6 +93,8 @@ async def route_inbound_message(
             channel_id=channel_id,
             body=body,
             user_id=user_id,
+            event_id=(raw or {}).get("event_id"),
+            ts=(raw or {}).get("ts") or (raw or {}).get("event_ts"),
         )
         event_id = await dispatch_for_trigger(
             db,
@@ -159,15 +161,21 @@ def _idempotency_key(
     channel_id: str,
     body: str,
     user_id: str | None,
+    event_id: str | None = None,
+    ts: str | None = None,
 ) -> str:
     """Stable key so a Slack retry doesn't double-fire the workflow.
 
-    Slack retries with the same X-Slack-Retry-Num header but the
-    transport (`_inbound_dispatch.py`) doesn't pass that through; the
-    body + channel + user is a sufficient natural key for the
-    short-lived dedupe window the dispatcher cares about.
+    Prefer Slack's own ``event_id`` / ``ts`` when available — those
+    are the natural keys for "same delivery, retried" semantics and
+    let a user legitimately re-type the exact same message without
+    being silently dedupe'd. Falls back to a body-hash for callers
+    (tests, the older inbound dispatcher) that don't pass them.
     """
-    digest = hashlib.sha256(
-        f"{automation_id}|{channel_id}|{user_id or ''}|{body}".encode()
-    ).hexdigest()
+    natural = event_id or ts
+    if natural:
+        seed = f"{automation_id}|{channel_id}|{natural}"
+    else:
+        seed = f"{automation_id}|{channel_id}|{user_id or ''}|{body}"
+    digest = hashlib.sha256(seed.encode()).hexdigest()
     return f"slack_message:{digest[:32]}"

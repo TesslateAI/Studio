@@ -105,7 +105,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         "/api/track-landing",  # Referral tracking endpoint
         "/api/webhooks/stripe",  # Stripe webhooks need to bypass CSRF
         "/api/app-instances/",  # App webhook triggers: /api/app-instances/{id}/trigger/{name} — HMAC-authed, external callers
-        "/api/triggers/",  # Phase E inbound triggers (email SES, slack message) — external callers, no user session
+        "/api/triggers/inbound/",  # Phase E inbound triggers (email SES, slack) — HMAC-signed external callers only; sibling routes under /api/triggers/* keep CSRF
         "/api/internal/",  # Cluster-internal endpoints (NetworkPolicy protected, no user auth)
         "/api/version",  # Deployment metadata + compat check: read-only, no user state
         "/docs",

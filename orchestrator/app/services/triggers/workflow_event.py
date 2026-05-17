@@ -46,6 +46,13 @@ async def route_workflow_event(
     """Match an event from source_automation_id against workflow_event
     triggers. Returns the list of minted AutomationEvent ids.
     """
+    # Push the watched_automation_id filter into the database via the
+    # JSON ``->>`` operator so we only return triggers that actually
+    # subscribe to this source. With the partial expression index added
+    # in migration 0117 this turns a full table-scan per emit into a
+    # cheap lookup. The cast keeps the comparison robust against
+    # UUID/str representation drift in stored configs.
+    source_id_str = str(source_automation_id)
     triggers = (
         await db.execute(
             select(AutomationTrigger, AutomationDefinition)
@@ -57,6 +64,10 @@ async def route_workflow_event(
                 AutomationTrigger.kind == "workflow_event",
                 AutomationTrigger.is_active.is_(True),
                 AutomationDefinition.is_active.is_(True),
+                # JSON ``->>`` returns text; works on both Postgres JSON
+                # and JSONB. SQLite's JSON1 implements the same operator
+                # so tests continue to pass.
+                AutomationTrigger.config["watched_automation_id"].as_string() == source_id_str,
             )
         )
     ).all()
