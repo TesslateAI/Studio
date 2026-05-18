@@ -357,7 +357,11 @@ def test_create_rejects_zero_actions(app_client) -> None:
 
 
 @pytest.mark.unit
-def test_create_rejects_multi_actions(app_client) -> None:
+def test_create_accepts_multi_actions(app_client) -> None:
+    """Multi-step automations are accepted as of issue #469 / Phase A —
+    the workflow engine walks ordinals when len(actions) > 1. This
+    test used to assert 422; relaxing it to 201 codifies the new
+    contract."""
     client, _, _ = app_client
     payload = _good_create_payload()
     payload["actions"] = [
@@ -373,7 +377,9 @@ def test_create_rejects_multi_actions(app_client) -> None:
         },
     ]
     resp = client.post("/api/automations", json=payload)
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert len(body["actions"]) == 2
 
 
 @pytest.mark.unit
@@ -486,9 +492,7 @@ def test_create_rejects_cron_without_timezone(app_client) -> None:
     """Empty / missing timezone used to silently default to UTC."""
     client, _, _ = app_client
     payload = _good_create_payload()
-    payload["triggers"] = [
-        {"kind": "cron", "config": {"expression": "*/5 * * * *"}}
-    ]
+    payload["triggers"] = [{"kind": "cron", "config": {"expression": "*/5 * * * *"}}]
     resp = client.post("/api/automations", json=payload)
     assert resp.status_code == 422, resp.text
     assert "timezone" in resp.text.lower()
@@ -613,9 +617,7 @@ def test_create_rejects_gateway_send_with_empty_body(app_client) -> None:
     """gateway.send used to accept config={}."""
     client, _, _ = app_client
     payload = _good_create_payload()
-    payload["actions"] = [
-        {"action_type": "gateway.send", "config": {}, "ordinal": 0}
-    ]
+    payload["actions"] = [{"action_type": "gateway.send", "config": {}, "ordinal": 0}]
     resp = client.post("/api/automations", json=payload)
     assert resp.status_code == 422, resp.text
     assert "body" in resp.text.lower()

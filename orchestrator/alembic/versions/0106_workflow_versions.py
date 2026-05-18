@@ -91,30 +91,47 @@ def upgrade() -> None:
         ["automation_id", sa.text("generation DESC")],
     )
 
-    # Live-pointer column on the definition + per-run reference.
-    op.add_column(
-        "automation_definitions",
-        sa.Column(
-            "head_version_id",
-            GUID(),
-            sa.ForeignKey("workflow_versions.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-    )
-    op.add_column(
-        "automation_runs",
-        sa.Column(
-            "workflow_version_id",
-            GUID(),
-            sa.ForeignKey("workflow_versions.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-    )
+    # Live-pointer columns on the definition + per-run reference. Wrapped
+    # in batch_alter_table because SQLite (desktop sidecar + CI test DB)
+    # can't ALTER TABLE ADD a column with a FOREIGN KEY constraint
+    # without falling back to the copy-and-move strategy.
+    # batch_alter_table on SQLite rebuilds the table via copy-and-move
+    # and requires every constraint on the new column to have an
+    # explicit name (alembic raises ``Constraint must have a name``
+    # otherwise). Postgres ignores the name, so naming is free here.
+    with op.batch_alter_table("automation_definitions") as batch:
+        batch.add_column(
+            sa.Column(
+                "head_version_id",
+                GUID(),
+                sa.ForeignKey(
+                    "workflow_versions.id",
+                    name="fk_automation_definitions_head_version_id",
+                    ondelete="SET NULL",
+                ),
+                nullable=True,
+            )
+        )
+    with op.batch_alter_table("automation_runs") as batch:
+        batch.add_column(
+            sa.Column(
+                "workflow_version_id",
+                GUID(),
+                sa.ForeignKey(
+                    "workflow_versions.id",
+                    name="fk_automation_runs_workflow_version_id",
+                    ondelete="SET NULL",
+                ),
+                nullable=True,
+            )
+        )
 
 
 def downgrade() -> None:
-    op.drop_column("automation_runs", "workflow_version_id")
-    op.drop_column("automation_definitions", "head_version_id")
+    with op.batch_alter_table("automation_runs") as batch:
+        batch.drop_column("workflow_version_id")
+    with op.batch_alter_table("automation_definitions") as batch:
+        batch.drop_column("head_version_id")
     op.drop_index(
         "ix_workflow_versions_automation_generation",
         table_name="workflow_versions",

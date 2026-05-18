@@ -58,7 +58,11 @@ def upgrade() -> None:
             sa.Column(
                 "doctor_automation_id",
                 GUID(),
-                sa.ForeignKey("automation_definitions.id", ondelete="SET NULL"),
+                sa.ForeignKey(
+                    "automation_definitions.id",
+                    name="fk_automation_definitions_doctor_automation_id",
+                    ondelete="SET NULL",
+                ),
                 nullable=True,
             )
         )
