@@ -53,13 +53,33 @@ class AutomationTriggerIn(BaseModel):
     scoped but the app_invocation producer never landed).
     """
 
-    kind: str = Field(..., description="cron | webhook | manual")
+    kind: str = Field(
+        ...,
+        description="cron | webhook | manual | slack_message | email_inbound | workflow_event",
+    )
     config: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("kind")
     @classmethod
     def _validate_kind(cls, v: str) -> str:
-        allowed = {"cron", "webhook", "manual"}
+        # Phase E (#474) added slack_message + email_inbound as
+        # user-facing trigger kinds. Internally those will be wrapped on
+        # save into the canonical kind='webhook' with config.source so
+        # they ride on develop's per-automation /webhook/{token} +
+        # HMAC infrastructure (follow-up adapter refactor).
+        # Phase G6 (#473) added workflow_event for inter-workflow
+        # subscriptions (used by the per-workflow doctor and any
+        # sub-workflow that watches another's lifecycle events). This
+        # one is internal pub/sub, NOT an HTTP transport, so it stays a
+        # first-class kind.
+        allowed = {
+            "cron",
+            "webhook",
+            "manual",
+            "slack_message",
+            "email_inbound",
+            "workflow_event",
+        }
         if v == "app_invocation":
             # See class docstring + TesslateAI/OpenSail-Enterprise#408.
             raise ValueError(
@@ -143,7 +163,18 @@ class AutomationActionIn(BaseModel):
     @field_validator("action_type")
     @classmethod
     def _validate_type(cls, v: str) -> str:
-        allowed = {"agent.run", "app.invoke", "gateway.send"}
+        # Phase D (#473) added ``deliver``. Phase F (#475) added
+        # ``sub_workflow`` and ``branch`` (engine wires them);
+        # ``parallel`` is reserved for a Phase F follow-up.
+        allowed = {
+            "agent.run",
+            "app.invoke",
+            "gateway.send",
+            "deliver",
+            "sub_workflow",
+            "branch",
+            "parallel",
+        }
         if v not in allowed:
             raise ValueError(f"action.action_type must be one of {sorted(allowed)!r}, got {v!r}")
         return v
@@ -328,8 +359,15 @@ class AutomationDefinitionIn(BaseModel):
     max_spend_per_run_usd: Decimal | None = None
     max_spend_per_day_usd: Decimal | None = None
 
+    # Phase B (#471). Default persistent_workspace keeps existing
+    # callers unchanged; connector_only opts into the lightweight tier.
+    compute_profile: str = "persistent_workspace"
+
     triggers: list[AutomationTriggerIn] = Field(..., min_length=1)
-    actions: list[AutomationActionIn] = Field(..., min_length=1, max_length=1)
+    # Phase A (#470) lifted the 1-action cap. The workflow engine in
+    # services/workflows/ walks ordinal-ordered actions when there are
+    # more than one; single-action automations stay on the legacy path.
+    actions: list[AutomationActionIn] = Field(..., min_length=1, max_length=64)
     delivery_targets: list[AutomationDeliveryTargetIn] = Field(default_factory=list)
 
     @field_validator("contract")
@@ -363,6 +401,15 @@ class AutomationDefinitionIn(BaseModel):
         }
         if v not in allowed:
             raise ValueError(f"workspace_scope must be one of {sorted(allowed)!r}, got {v!r}")
+        return v
+
+    @field_validator("compute_profile")
+    @classmethod
+    def _validate_profile(cls, v: str) -> str:
+        # Phase B (#471). Mirrors the CHECK on automation_definitions.
+        allowed = {"connector_only", "ephemeral_workspace", "persistent_workspace"}
+        if v not in allowed:
+            raise ValueError(f"compute_profile must be one of {sorted(allowed)!r}, got {v!r}")
         return v
 
     @model_validator(mode="after")
@@ -479,6 +526,7 @@ class AutomationDefinitionUpdate(BaseModel):
     max_compute_tier: int | None = None
     max_spend_per_run_usd: Decimal | None = None
     max_spend_per_day_usd: Decimal | None = None
+    compute_profile: str | None = None
 
     triggers: list[AutomationTriggerIn] | None = None
     actions: list[AutomationActionIn] | None = None
@@ -508,13 +556,15 @@ class AutomationDefinitionUpdate(BaseModel):
 
     @field_validator("actions")
     @classmethod
-    def _exactly_one_action(
+    def _actions_within_cap(
         cls, v: list[AutomationActionIn] | None
     ) -> list[AutomationActionIn] | None:
+        # Phase A (#470) lifted the 1-action cap. The workflow engine
+        # walks ordinal-ordered actions when there is more than one.
         if v is None:
             return v
-        if len(v) != 1:
-            raise ValueError("phase 1 supports exactly one action per automation")
+        if len(v) > 64:
+            raise ValueError("automation may not have more than 64 actions")
         return v
 
     @model_validator(mode="after")
@@ -639,6 +689,15 @@ class AutomationDefinitionOut(BaseModel):
     max_compute_tier: int
     max_spend_per_run_usd: Decimal | None
     max_spend_per_day_usd: Decimal | None
+    compute_profile: str = "persistent_workspace"
+    # G1 (#469): live version pointer. Null only for definitions
+    # that pre-date G1 and haven't dispatched yet.
+    head_version_id: UUID | None = None
+    # G5 (#473): self-healing doctor wiring. doctor_enabled mirrors the
+    # column; doctor_automation_id points at the child workflow that
+    # watches this one's failures.
+    doctor_enabled: bool = False
+    doctor_automation_id: UUID | None = None
     parent_automation_id: UUID | None
     depth: int
     is_active: bool

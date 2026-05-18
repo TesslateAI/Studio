@@ -11,6 +11,7 @@ import type {
 } from '../../types/automations';
 import { ConfirmDialog } from '../../components/modals/ConfirmDialog';
 import { humanizeActionType, humanizeCron, humanizeTriggerKind } from './utils/humanize';
+import ProposalAndDoctorBadges from './components/ProposalAndDoctorBadges';
 
 /**
  * /automations — list view. Lightweight summary list + lazy detail
@@ -30,11 +31,16 @@ export default function AutomationsListPage() {
     setError(null);
     try {
       const data = await automationsApi.list();
-      setRows(data);
+      // Defensive: the backend MUST return an array, but an unexpected
+      // shape (e.g. a stale gateway returning an error envelope on 200)
+      // used to crash the page with "w.forEach is not a function"
+      // because the success path didn't validate the response shape.
+      const list = Array.isArray(data) ? data : [];
+      setRows(list);
       // Fan out detail fetches non-blockingly so the table can show trigger
       // / action summaries. Individual failures are swallowed — the row
       // simply renders with "—" placeholders.
-      data.forEach((row) => {
+      list.forEach((row) => {
         automationsApi
           .get(row.id)
           .then((detail) => setDetails((prev) => ({ ...prev, [row.id]: detail })))
@@ -179,7 +185,15 @@ export default function AutomationsListPage() {
                         className="border-t border-[var(--border)] hover:bg-[var(--surface-hover)] cursor-pointer"
                         onClick={() => navigate(`/automations/${row.id}`)}
                       >
-                        <td className="px-3 py-2 text-[var(--text)] font-medium">{row.name}</td>
+                        <td className="px-3 py-2 text-[var(--text)] font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{row.name}</span>
+                            <ProposalAndDoctorBadges
+                              automationId={row.id}
+                              doctorEnabled={Boolean(detail?.doctor_enabled)}
+                            />
+                          </div>
+                        </td>
                         <td className="px-3 py-2 text-[var(--text-muted)]">
                           {trig ? summarizeTrigger(trig.kind, trig.config) : '—'}
                         </td>

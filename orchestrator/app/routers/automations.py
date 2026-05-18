@@ -31,7 +31,6 @@ Out of scope for Phase 1
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import secrets as _stdlib_secrets
 from datetime import UTC, datetime
@@ -40,7 +39,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -199,6 +198,10 @@ async def _project_definition(
         max_compute_tier=definition.max_compute_tier,
         max_spend_per_run_usd=definition.max_spend_per_run_usd,
         max_spend_per_day_usd=definition.max_spend_per_day_usd,
+        compute_profile=getattr(definition, "compute_profile", None) or "persistent_workspace",
+        head_version_id=getattr(definition, "head_version_id", None),
+        doctor_enabled=bool(getattr(definition, "doctor_enabled", False)),
+        doctor_automation_id=getattr(definition, "doctor_automation_id", None),
         parent_automation_id=definition.parent_automation_id,
         depth=definition.depth,
         is_active=definition.is_active,
@@ -269,25 +272,33 @@ async def _replace_triggers(
 ) -> None:
     """Replace the trigger rows for an automation.
 
-    Standalone webhook triggers (``kind='webhook'`` and no
-    ``config.app_instance_id``) are auto-provisioned with a URL path
-    ``token`` and an HMAC ``webhook_secrets[]`` entry on first save. The
-    pair is **preserved across PATCH**: we read existing webhook rows
-    before the wholesale delete and reuse their token/secrets when the
-    incoming config doesn't carry them. Without this preservation, every
-    PATCH to a webhook automation would rotate the URL and break
+    HTTP-fed trigger kinds (``webhook``, ``slack_message``, ``email_inbound``)
+    are auto-provisioned with an HMAC ``webhook_secrets[]`` entry on first
+    save so they share the rotation-friendly secret-storage shape that
+    :func:`app.services.triggers.webhook_hmac.verify_webhook_signature`
+    knows how to read. ``webhook`` additionally gets a URL path ``token``
+    minted (the public ingest URL is keyed off it).
+
+    Both the token (webhook only) and the webhook_secrets list are
+    **preserved across PATCH**: we read existing rows before the
+    wholesale delete and reuse their secrets when the incoming config
+    doesn't carry them. Without this preservation, every PATCH to a
+    webhook-fed automation would rotate the URL/secret and break
     deployed callers — silently.
     """
-    # Snapshot existing webhook tokens/secrets BEFORE the wholesale delete
-    # so PATCH calls that round-trip the trigger don't regenerate them.
+    # Snapshot existing webhook tokens / shared HMAC secrets BEFORE the
+    # wholesale delete so PATCH calls don't regenerate them. We carry a
+    # per-kind secrets map so slack_message and email_inbound rotations
+    # don't accidentally inherit the standalone-webhook secret.
     existing_webhook_token: str | None = None
-    existing_webhook_secrets: list[Any] | None = None
+    existing_secrets_by_kind: dict[str, list[Any]] = {}
+    _HMAC_KINDS = ("webhook", "slack_message", "email_inbound")
     existing_rows = (
         (
             await db.execute(
                 select(AutomationTrigger).where(
                     AutomationTrigger.automation_id == automation_id,
-                    AutomationTrigger.kind == "webhook",
+                    AutomationTrigger.kind.in_(_HMAC_KINDS),
                 )
             )
         )
@@ -298,12 +309,14 @@ async def _replace_triggers(
         cfg = row.config or {}
         if not isinstance(cfg, dict):
             continue
-        if existing_webhook_token is None and isinstance(cfg.get("token"), str):
-            existing_webhook_token = cfg["token"]
-        if existing_webhook_secrets is None and isinstance(
-            cfg.get("webhook_secrets"), list
+        if (
+            row.kind == "webhook"
+            and existing_webhook_token is None
+            and isinstance(cfg.get("token"), str)
         ):
-            existing_webhook_secrets = cfg["webhook_secrets"]
+            existing_webhook_token = cfg["token"]
+        if isinstance(cfg.get("webhook_secrets"), list) and cfg["webhook_secrets"]:
+            existing_secrets_by_kind.setdefault(row.kind, cfg["webhook_secrets"])
 
     await db.execute(
         delete(AutomationTrigger).where(AutomationTrigger.automation_id == automation_id)
@@ -314,25 +327,30 @@ async def _replace_triggers(
         # treat the row as "due now" on the next leader-tick. Without
         # this, a freshly-saved cron fires once ~30-60s after save
         # regardless of schedule.
-        next_run_at = (
-            _compute_next_run_at(config) if trig.kind == "cron" else None
-        )
+        next_run_at = _compute_next_run_at(config) if trig.kind == "cron" else None
         if trig.kind == "webhook" and not config.get("app_instance_id"):
             # Standalone webhook — keyed by automation_id + path token. The
             # public ingest route is mounted by ``routers/app_triggers.py``
             # at ``POST /api/automations/{automation_id}/webhook/{token}``.
             if not isinstance(config.get("token"), str) or not config["token"].strip():
-                config["token"] = (
-                    existing_webhook_token or _stdlib_secrets.token_urlsafe(16)
-                )
+                config["token"] = existing_webhook_token or _stdlib_secrets.token_urlsafe(16)
             has_list = isinstance(config.get("webhook_secrets"), list) and config["webhook_secrets"]
             has_legacy = isinstance(config.get("webhook_secret"), str) and config["webhook_secret"]
             if not has_list and not has_legacy:
-                config["webhook_secrets"] = (
-                    existing_webhook_secrets
-                    if existing_webhook_secrets
-                    else [_mint_webhook_secret()]
-                )
+                config["webhook_secrets"] = existing_secrets_by_kind.get("webhook") or [
+                    _mint_webhook_secret()
+                ]
+        elif trig.kind in ("slack_message", "email_inbound"):
+            # Phase E typed inbound — same HMAC rotation model, no path
+            # token (the URL is keyed off channel_config_id / recipient).
+            # The shared verifier reads ``webhook_secrets[]`` so we
+            # auto-provision one on first save and preserve across PATCH.
+            has_list = isinstance(config.get("webhook_secrets"), list) and config["webhook_secrets"]
+            has_legacy = isinstance(config.get("webhook_secret"), str) and config["webhook_secret"]
+            if not has_list and not has_legacy:
+                config["webhook_secrets"] = existing_secrets_by_kind.get(trig.kind) or [
+                    _mint_webhook_secret()
+                ]
         db.add(
             AutomationTrigger(
                 id=uuid4(),
@@ -392,9 +410,7 @@ async def _replace_actions(
             # the user hasn't picked an action yet — defer to run-time.
             continue
         row = (
-            await db.execute(
-                select(AppAction).where(AppAction.id == action.app_action_id)
-            )
+            await db.execute(select(AppAction).where(AppAction.id == action.app_action_id))
         ).scalar_one_or_none()
         if row is None:
             raise HTTPException(
@@ -419,8 +435,7 @@ async def _replace_actions(
                 status_code=422,
                 detail={
                     "message": (
-                        f"action.config.input fails {row.name!r} input_schema: "
-                        f"{exc.message}"
+                        f"action.config.input fails {row.name!r} input_schema: {exc.message}"
                     ),
                     "errors": [
                         {
@@ -666,6 +681,7 @@ async def create_automation(
         max_compute_tier=payload.max_compute_tier,
         max_spend_per_run_usd=payload.max_spend_per_run_usd,
         max_spend_per_day_usd=payload.max_spend_per_day_usd,
+        compute_profile=payload.compute_profile,
         is_active=True,
         created_by_user_id=user.id,
         depth=0,
@@ -676,6 +692,17 @@ async def create_automation(
     await _replace_triggers(db, automation.id, payload.triggers)
     await _replace_actions(db, automation.id, payload.actions, user=user)
     await _replace_delivery_targets(db, automation.id, payload.delivery_targets)
+
+    # G1 (#469): snapshot the brand-new definition as generation 1.
+    from ..services.workflows.versions import snapshot_definition_to_version
+
+    await snapshot_definition_to_version(
+        db,
+        definition=automation,
+        rationale="initial version (created via API)",
+        actor_user_id=user.id,
+        update_head=True,
+    )
 
     await db.commit()
     await db.refresh(automation)
@@ -734,6 +761,22 @@ async def update_automation(
         automation.max_spend_per_run_usd = payload.max_spend_per_run_usd
     if payload.max_spend_per_day_usd is not None:
         automation.max_spend_per_day_usd = payload.max_spend_per_day_usd
+    if payload.compute_profile is not None:
+        # Phase B (#471). The CHECK constraint on the column rejects
+        # invalid values; the schema validator catches it earlier.
+        if payload.compute_profile not in (
+            "connector_only",
+            "ephemeral_workspace",
+            "persistent_workspace",
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "compute_profile must be connector_only, "
+                    "ephemeral_workspace, or persistent_workspace"
+                ),
+            )
+        automation.compute_profile = payload.compute_profile
 
     if payload.triggers is not None:
         await _replace_triggers(db, automation.id, payload.triggers)
@@ -758,6 +801,18 @@ async def update_automation(
                 f"the power level to Light (max_compute_tier=0)."
             ),
         )
+
+    # G1 (#469): snapshot the post-patch state as a new WorkflowVersion.
+    # Idempotent on payload SHA — a no-op PATCH won't multiply rows.
+    from ..services.workflows.versions import snapshot_definition_to_version
+
+    await snapshot_definition_to_version(
+        db,
+        definition=automation,
+        rationale="updated via API",
+        actor_user_id=user.id,
+        update_head=True,
+    )
 
     await db.commit()
     await db.refresh(automation)
@@ -901,9 +956,9 @@ async def run_automation(
         # the descriptor entirely.
         row = (
             await db.execute(
-                select(
-                    AutomationEvent.id, AutomationEvent.automation_id
-                ).where(AutomationEvent.idempotency_key == payload.idempotency_key)
+                select(AutomationEvent.id, AutomationEvent.automation_id).where(
+                    AutomationEvent.idempotency_key == payload.idempotency_key
+                )
             )
         ).first()
         if row is None:
@@ -925,8 +980,7 @@ async def run_automation(
             ) from None
         event_id = existing_event_id
         logger.info(
-            "[AUTOMATIONS] manual run idempotent replay automation=%s "
-            "event=%s key=%r user=%s",
+            "[AUTOMATIONS] manual run idempotent replay automation=%s event=%s key=%r user=%s",
             automation_id,
             event_id,
             payload.idempotency_key,
@@ -947,7 +1001,7 @@ async def run_automation(
             event_id=event_id,
             worker_id=f"manual:{user_id}",
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "[AUTOMATIONS] manual dispatch failed automation=%s event=%s "
             "user=%s — event row persists; controller sweep will retry",
@@ -958,12 +1012,14 @@ async def run_automation(
         # Best-effort rollback of any half-applied dispatcher state. The event
         # row is already committed above, so the missed-event drain
         # (``services.automations.missed_event_drain``) will pick it up.
-        with contextlib.suppress(Exception):  # pragma: no cover — defensive
+        import contextlib as _contextlib_local
+
+        with _contextlib_local.suppress(Exception):  # pragma: no cover - defensive
             await db.rollback()
         raise HTTPException(
             status_code=500,
             detail="dispatch failed — run will be retried by the controller",
-        ) from None
+        ) from exc
 
     logger.info(
         "[AUTOMATIONS] manual run automation=%s run=%s event=%s status=%s by user=%s",
@@ -1063,9 +1119,7 @@ async def get_run(
     subject_row = (
         await db.execute(
             select(InvocationSubject.agent_id, MarketplaceAgent.name)
-            .outerjoin(
-                MarketplaceAgent, MarketplaceAgent.id == InvocationSubject.agent_id
-            )
+            .outerjoin(MarketplaceAgent, MarketplaceAgent.id == InvocationSubject.agent_id)
             .where(InvocationSubject.automation_run_id == run_id)
             .order_by(InvocationSubject.created_at.asc())
             .limit(1)
@@ -1092,6 +1146,359 @@ async def get_run(
         agent_id=agent_id,
         agent_name=agent_name,
     )
+
+
+@router.post("/{automation_id}/proposals", status_code=status.HTTP_201_CREATED)
+async def create_workflow_proposal(
+    automation_id: UUID,
+    payload: dict = Body(...),
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a WorkflowProposal (G2, issue #469).
+
+    Body shape:
+        {
+          "to_payload": {...},  # full proposed shape (same as WorkflowVersion.payload)
+          "rationale": "string",
+          "risk_class": "low|medium|high",  # default medium
+          "from_version_id": "<uuid>"        # optional; defaults to head
+        }
+
+    Returns the created proposal. G2 always routes to manual approval;
+    G3 will wire the auto-apply path.
+    """
+    from ..services.workflows.proposals import (
+        ProposalError,
+        create_proposal,
+    )
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=True)
+
+    to_payload = payload.get("to_payload")
+    if not isinstance(to_payload, dict) or not to_payload:
+        raise HTTPException(status_code=400, detail="to_payload (object) is required")
+    rationale = payload.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise HTTPException(status_code=400, detail="rationale (string) is required")
+
+    from_version_id = payload.get("from_version_id")
+    fv_uuid = UUID(str(from_version_id)) if from_version_id else None
+    try:
+        result = await create_proposal(
+            db,
+            automation=automation,
+            to_payload=to_payload,
+            rationale=rationale,
+            risk_class=str(payload.get("risk_class") or "medium"),
+            proposer_user_id=user.id,
+            from_version_id=fv_uuid,
+        )
+    except ProposalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await db.commit()
+    await db.refresh(result.proposal)
+    p = result.proposal
+    return {
+        "id": str(p.id),
+        "automation_id": str(p.automation_id),
+        "from_version_id": str(p.from_version_id) if p.from_version_id else None,
+        "status": p.status,
+        "risk_class": p.risk_class,
+        "rationale": p.rationale,
+        "diff_summary": p.diff_summary,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "expires_at": p.expires_at.isoformat() if p.expires_at else None,
+        "created": result.created,
+    }
+
+
+@router.get("/{automation_id}/proposals")
+async def list_workflow_proposals(
+    automation_id: UUID,
+    status_filter: str | None = Query(None, alias="status"),
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List proposals for an automation. Optionally filter by status."""
+    from ..services.workflows.proposals import list_proposals
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    rows = await list_proposals(db, automation_id=automation_id, status=status_filter)
+    return [
+        {
+            "id": str(p.id),
+            "status": p.status,
+            "risk_class": p.risk_class,
+            "rationale": p.rationale,
+            "from_version_id": str(p.from_version_id) if p.from_version_id else None,
+            "applied_version_id": (str(p.applied_version_id) if p.applied_version_id else None),
+            "proposer_user_id": (str(p.proposer_user_id) if p.proposer_user_id else None),
+            "proposer_run_id": (str(p.proposer_run_id) if p.proposer_run_id else None),
+            "reviewer_user_id": (str(p.reviewer_user_id) if p.reviewer_user_id else None),
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "decided_at": p.decided_at.isoformat() if p.decided_at else None,
+        }
+        for p in rows
+    ]
+
+
+@router.get("/{automation_id}/proposals/{proposal_id}")
+async def get_workflow_proposal(
+    automation_id: UUID,
+    proposal_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get one proposal with full to_payload and diff_summary."""
+    from ..services.workflows.proposals import ProposalNotFound, get_proposal
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    try:
+        p = await get_proposal(db, proposal_id=proposal_id)
+    except ProposalNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if p.automation_id != automation_id:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    return {
+        "id": str(p.id),
+        "automation_id": str(p.automation_id),
+        "status": p.status,
+        "risk_class": p.risk_class,
+        "rationale": p.rationale,
+        "from_version_id": str(p.from_version_id) if p.from_version_id else None,
+        "applied_version_id": (str(p.applied_version_id) if p.applied_version_id else None),
+        "to_payload": p.to_payload,
+        "diff_summary": p.diff_summary,
+        "proposer_user_id": str(p.proposer_user_id) if p.proposer_user_id else None,
+        "proposer_run_id": str(p.proposer_run_id) if p.proposer_run_id else None,
+        "reviewer_user_id": str(p.reviewer_user_id) if p.reviewer_user_id else None,
+        "reviewer_comment": p.reviewer_comment,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "decided_at": p.decided_at.isoformat() if p.decided_at else None,
+        "expires_at": p.expires_at.isoformat() if p.expires_at else None,
+    }
+
+
+@router.post("/{automation_id}/proposals/{proposal_id}/decide")
+async def decide_workflow_proposal(
+    automation_id: UUID,
+    proposal_id: UUID,
+    payload: dict = Body(...),
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve or reject a proposal. On approve, the change is applied
+    immediately: new WorkflowVersion + head pointer flip + live rows
+    replaced. The proposal status moves to ``applied``."""
+    from ..services.workflows.proposals import (
+        ProposalAlreadyDecided,
+        ProposalError,
+        ProposalNotFound,
+        decide_proposal,
+    )
+
+    automation = await _load_definition_or_404(db, automation_id)
+    # Only write-permission users can decide proposals.
+    await _authorize_definition(db, automation, user, write=True)
+
+    decision = payload.get("decision")
+    comment = payload.get("comment")
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'reject'")
+
+    try:
+        decided = await decide_proposal(
+            db,
+            proposal_id=proposal_id,
+            decision=decision,
+            reviewer_user_id=user.id,
+            comment=comment,
+        )
+    except ProposalNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProposalAlreadyDecided as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ProposalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if decided.automation_id != automation_id:
+        raise HTTPException(status_code=404, detail="proposal not found")
+
+    await db.commit()
+    await db.refresh(decided)
+    return {
+        "id": str(decided.id),
+        "status": decided.status,
+        "applied_version_id": (
+            str(decided.applied_version_id) if decided.applied_version_id else None
+        ),
+        "decided_at": decided.decided_at.isoformat() if decided.decided_at else None,
+    }
+
+
+@router.post("/{automation_id}/doctor/enable")
+async def enable_doctor(
+    automation_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable the per-workflow doctor (G5, issue #469). Idempotent."""
+    from ..services.workflows.doctor import ensure_doctor_for
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=True)
+    doctor = await ensure_doctor_for(db, target_automation=automation)
+    await db.commit()
+    return {
+        "target_automation_id": str(automation.id),
+        "doctor_automation_id": str(doctor.id),
+        "doctor_enabled": True,
+    }
+
+
+@router.post("/{automation_id}/doctor/disable")
+async def disable_doctor(
+    automation_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Disable the doctor. Leaves the row in place so re-enable is one flag."""
+    from ..services.workflows.doctor import disable_doctor_for
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=True)
+    await disable_doctor_for(db, target_automation=automation)
+    await db.commit()
+    return {
+        "target_automation_id": str(automation.id),
+        "doctor_automation_id": (
+            str(automation.doctor_automation_id) if automation.doctor_automation_id else None
+        ),
+        "doctor_enabled": False,
+    }
+
+
+@router.get("/{automation_id}/versions")
+async def list_versions(
+    automation_id: UUID,
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List WorkflowVersion rows for an automation (G1, issue #469).
+
+    Newest first. Each row has the generation, parent, SHA, rationale,
+    actor (user or run), and the snapshot payload. Used by the UI to
+    render a version history + diff view, and by the agent to read the
+    current canonical shape.
+    """
+    from ..models_workflows import WorkflowVersion
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    versions = (
+        (
+            await db.execute(
+                select(WorkflowVersion)
+                .where(WorkflowVersion.automation_id == automation_id)
+                .order_by(WorkflowVersion.generation.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "id": str(v.id),
+            "generation": v.generation,
+            "parent_version_id": str(v.parent_version_id) if v.parent_version_id else None,
+            "payload_sha256": v.payload_sha256,
+            "created_by_user_id": str(v.created_by_user_id) if v.created_by_user_id else None,
+            "created_by_run_id": str(v.created_by_run_id) if v.created_by_run_id else None,
+            "rationale": v.rationale,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "is_head": v.id == automation.head_version_id,
+            "payload": v.payload or {},
+        }
+        for v in versions
+    ]
+
+
+@router.get("/{automation_id}/runs/{run_id}/events")
+async def list_run_events(
+    automation_id: UUID,
+    run_id: UUID,
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    since: datetime | None = Query(
+        default=None,
+        description="Only return events after this ISO-8601 timestamp (exclusive). "
+        "Use the last seen `ts` to tail the timeline incrementally.",
+    ),
+    user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Append-only run-event timeline (Phase C, issue #472).
+
+    Each row is one state transition or notable boundary (step started
+    / finished, tool called, connector touched, approval requested /
+    resolved, artifact produced, delivery sent, budget consumed, error
+    raised). The timeline is the single source of truth for the
+    run-history detail view, the audit trail, and cost rollup.
+
+    Paginated: agent runs can produce thousands of rows. Clients
+    should either page (``limit`` / ``offset``) or tail (``since``).
+    """
+    from ..models_automations import AutomationRunEvent
+
+    automation = await _load_definition_or_404(db, automation_id)
+    await _authorize_definition(db, automation, user, write=False)
+
+    run = (
+        await db.execute(
+            select(AutomationRun).where(
+                AutomationRun.id == run_id,
+                AutomationRun.automation_id == automation_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    stmt = (
+        select(AutomationRunEvent)
+        .where(AutomationRunEvent.automation_run_id == run_id)
+        .order_by(AutomationRunEvent.ts.asc())
+    )
+    if since is not None:
+        stmt = stmt.where(AutomationRunEvent.ts > since)
+    stmt = stmt.offset(offset).limit(limit)
+
+    events = (await db.execute(stmt)).scalars().all()
+    return {
+        "events": [
+            {
+                "id": str(e.id),
+                "step_run_id": str(e.step_run_id) if e.step_run_id else None,
+                "ts": e.ts.isoformat() if e.ts else None,
+                "kind": e.kind,
+                "actor": e.actor,
+                "payload": e.payload or {},
+            }
+            for e in events
+        ],
+        "limit": limit,
+        "offset": offset,
+        "has_more": len(events) == limit,
+    }
 
 
 @router.get(

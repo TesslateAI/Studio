@@ -957,6 +957,28 @@ async def dispatch_automation(
             paused_status=DispatchStatus.PAUSED,
         )
 
+    # G1 (#469): stamp the run with the head WorkflowVersion. Lazy-
+    # create generation 1 for definitions that pre-date G1 so every
+    # dispatch from here on is version-bound. The bootstrap snapshot
+    # is read-only — the live rows are still the editing surface
+    # until a router (or proposal) writes a new version.
+    if getattr(run, "workflow_version_id", None) is None:
+        from ..workflows.versions import ensure_head_version
+
+        try:
+            version = await ensure_head_version(db, definition=automation)
+            run.workflow_version_id = version.id
+            await db.commit()
+        except Exception as exc:
+            # Bootstrap is best-effort. If it fails the engine falls
+            # back to live rows; we log but don't abort the dispatch.
+            logger.warning(
+                "dispatcher.workflow_version_bootstrap_failed automation=%s run=%s err=%r",
+                automation_id,
+                run.id,
+                exc,
+            )
+
     try:
         _validate_contract(automation.contract)
     except ContractInvalid as exc:
@@ -1065,17 +1087,17 @@ async def dispatch_automation(
             paused_status=DispatchStatus.FAILED,
         )
 
-    if len(actions) > 1:
-        # Phase 1 only supports a single action (ordinal=0). The DAG form
-        # ships in v2; until then we fail loudly rather than silently
-        # executing only the first row.
-        return await _mark_failed_preflight(
-            db,
-            run=run,
-            reason=(f"phase 1 supports a single action; got {len(actions)} (DAG form lands in v2)"),
-            paused_status=DispatchStatus.FAILED,
-        )
+    # Multi-step automations (more than one action) delegate to the
+    # workflow engine. Single-action stays on the legacy path so existing
+    # production workloads run unchanged. The engine still uses the same
+    # contract preflight, budget allocation, status transitions, and
+    # delivery / finalize at the tail of this function — it only owns
+    # the per-step walk and per-step persistence.
+    is_multi_step = len(actions) > 1
 
+    # The legacy single-action path uses ``action`` directly; for
+    # multi-step we keep it as a representative (the first action) so
+    # the budget allocation logic below stays correct without branching.
     action = actions[0]
 
     # ---- Phase B.5: budget allocation (Phase 2) ------------------------
@@ -1095,7 +1117,11 @@ async def dispatch_automation(
     # Skipped entirely when ``contract.max_spend_per_run_usd`` is unset
     # (e.g., Tier 0 control-plane runs configured with no caps).
     budget_allocation = None
-    if automation.contract.get("max_spend_per_run_usd") is not None:
+    needs_run_budget = (
+        any(a.action_type == "agent.run" for a in actions)
+        and automation.contract.get("max_spend_per_run_usd") is not None
+    )
+    if needs_run_budget:
         from . import budget as budget_mod
 
         try:
@@ -1173,7 +1199,20 @@ async def dispatch_automation(
     event_payload = await _load_event_payload(db, event_id)
 
     try:
-        if action.action_type == "agent.run":
+        if is_multi_step:
+            # Lazy import: the engine is independent of the dispatcher
+            # but the dispatcher is the only caller for multi-step. Lazy
+            # keeps the module-import graph one-way.
+            from ..workflows.engine import execute_workflow
+
+            action_result = await execute_workflow(
+                db,
+                run=run,
+                automation=automation,
+                event_payload=event_payload,
+                budget_allocation=budget_allocation,
+            )
+        elif action.action_type == "agent.run":
             # Tier-1 ephemeral pod path (Phase 4). Tier-0 stays on the
             # in-process worker enqueue; Tier-2+ goes through wake.py.
             # Dispatcher branches on ``automation.max_compute_tier`` (the
@@ -2101,6 +2140,22 @@ async def _mark_failed_preflight(
         )
     )
     await db.commit()
+
+    # Doctor should see preflight failures too — they're a real signal
+    # (e.g. workspace can't be provisioned, budget breach).
+    try:
+        from ..workflows.event_log import emit_run_finished
+
+        await emit_run_finished(
+            db,
+            run_id=run.id,
+            automation_id=run.automation_id,
+            status="failed_preflight",
+            reason=reason,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.debug("emit_run_finished failed on _mark_failed_preflight", exc_info=True)
+
     return DispatchResult(
         status=paused_status,
         run_id=run.id,
@@ -2128,6 +2183,23 @@ async def _finalize_failure(
         )
     )
     await db.commit()
+
+    # G5 (#469): emit run.finished + fan out workflow_event subscribers
+    # so per-workflow doctors fire on terminal failures, not just on
+    # mid-run per-step errors.
+    try:
+        from ..workflows.event_log import emit_run_finished
+
+        await emit_run_finished(
+            db,
+            run_id=run.id,
+            automation_id=run.automation_id,
+            status="failed",
+            reason=reason,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.debug("emit_run_finished failed on _finalize_failure", exc_info=True)
+
     return DispatchResult(
         status=DispatchStatus.FAILED,
         run_id=run.id,

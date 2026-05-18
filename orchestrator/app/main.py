@@ -90,6 +90,9 @@ from .routers import (
     webhooks,
     workspace_attach,
 )
+from .routers import (
+    triggers as triggers_router,
+)
 from .schemas_auth import UserCreate, UserRead, UserUpdate
 from .services.volume_manager import VolumeRestoringError, VolumeUnavailableError
 from .users import bearer_backend, cookie_backend, fastapi_users, get_user_manager
@@ -671,9 +674,7 @@ async def startup():
     try:
         from .services.apps import app_version_source_consistency  # noqa: F401
     except Exception:
-        logger.exception(
-            "Failed to wire AppVersion source_id consistency listener (non-fatal)"
-        )
+        logger.exception("Failed to wire AppVersion source_id consistency listener (non-fatal)")
 
     # Seed database (bases, agents, themes, workflows) — non-blocking background task
     from .seeds import run_all_seeds
@@ -1415,6 +1416,9 @@ app.include_router(
 
 # --- Automation Runtime + typed App Actions (Phase 1) ----------------------
 app.include_router(automations.router)  # /api/automations - definitions, runs, artifacts
+app.include_router(
+    triggers_router.router
+)  # /api/triggers - email + slack-message inbound (Phase E)
 app.include_router(app_actions.router)  # /api/apps/{instance}/actions/{name}
 app.include_router(
     communication_destinations.router

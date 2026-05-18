@@ -628,6 +628,13 @@ def _register_all_tools(registry: ToolRegistry):
 
     register_all_marketplace_ops_tools(registry)
 
+    # Workflow ops (G2+ self-evolving workflow track): agent drafts
+    # WorkflowProposals and reads run history to diagnose. G3 adds
+    # test_run_workflow; G6 adds learning lookup/record.
+    from .workflow_ops import register_all_workflow_ops_tools
+
+    register_all_workflow_ops_tools(registry)
+
     logger.info(f"Registered {len(registry._tools)} tools total")
 
 

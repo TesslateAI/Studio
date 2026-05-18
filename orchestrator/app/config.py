@@ -154,9 +154,7 @@ class Settings(BaseSettings):
         """
         if self.is_connector_proxy_dedicated:
             return "http://opensail-runtime:8400"
-        return (
-            "http://tesslate-backend-service:8000/api/v1/connector-proxy"
-        )
+        return "http://tesslate-backend-service:8000/api/v1/connector-proxy"
 
     # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_level: str = "INFO"
@@ -296,6 +294,12 @@ class Settings(BaseSettings):
     # CSRF Protection
     csrf_secret_key: str = ""  # Separate secret for CSRF tokens (defaults to secret_key if not set)
     csrf_token_max_age: int = 86400  # CSRF token expiration in seconds (default: 24 hours)
+
+    # Phase E (#474) inbound trigger signing migrated to per-trigger
+    # secrets stored in ``trigger.config["webhook_secrets"][]`` so they
+    # share the rotation-friendly model that develop's per-automation
+    # webhook uses (see services/triggers/webhook_hmac.py). The global
+    # env-var secrets that lived here are intentionally removed.
 
     # Cookie Security Settings
     cookie_secure: bool = True  # HTTPS-only cookies; set to False for local dev without TLS

@@ -147,6 +147,31 @@ class BreachKind:
     SKILL_DISALLOWED = "skill_disallowed"
     TIER_TOO_HIGH = "tier_too_high"
     BUDGET_EXCEEDED = "budget_exceeded"
+    WORKSPACE_REQUIRED = "workspace_required"
+
+
+# Phase B (issue #471): tools allowed in the ``connector_only`` compute
+# profile. This profile runs the agent on a shared, warm pool with no
+# project / PVC / container, so anything that touches a filesystem,
+# shell, container, or kanban must be refused. MCP-bridged tools
+# (``mcp__*``) and ``call_agent`` go through their own contract gates
+# and are checked elsewhere; the registered ones in this list are the
+# bare minimum the connector_only path needs.
+_CONNECTOR_ONLY_ALLOWED_TOOLS: frozenset[str] = frozenset(
+    {
+        "send_message",
+        "invoke_app_action",
+        "web_fetch",
+        "web_search",
+        "load_skill",
+        "schedule_create",
+        "schedule_update",
+        "schedule_delete",
+        "schedule_list",
+        "schedule_pause",
+        "schedule_resume",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -212,6 +237,10 @@ class ContractGate:
         self.run_context = run_context or {}
         self._automation_run_id = self.run_context.get("automation_run_id")
         self._automation_id = self.run_context.get("automation_id")
+        # Phase B: empty / unset means the legacy persistent-workspace path.
+        self._compute_profile: str = (
+            self.run_context.get("compute_profile") or "persistent_workspace"
+        )
 
     # ------------------------------------------------------------------
     # Public surface
@@ -230,14 +259,23 @@ class ContractGate:
         The first failing check short-circuits — we want the most specific
         reason in the approval card, not the most expensive one.
         """
-        # 1. Allow-list check (tool, MCP, skill).
+        # 1. Compute-profile check (Phase B). connector_only refuses any
+        # tool that needs a workspace (filesystem, shell, container,
+        # kanban, project-scoped wrappers). Runs first so the user sees
+        # the workspace-required reason rather than a tool-allow-list
+        # miss when both would fire on the same call.
+        denial = self._check_compute_profile(tool_name=tool_name)
+        if denial is not None:
+            return denial
+
+        # 2. Allow-list check (tool, MCP, skill).
         denial = self._check_allow_lists(
             tool_name=tool_name, tool_call_params=tool_call_params, tool=tool
         )
         if denial is not None:
             return denial
 
-        # 2. Compute-tier check.
+        # 3. Compute-tier check.
         denial = self._check_compute_tier(tool_name=tool_name, tool=tool)
         if denial is not None:
             return denial
@@ -359,6 +397,43 @@ class ContractGate:
                 )
 
         return None
+
+    def _check_compute_profile(self, *, tool_name: str) -> ContractGateDecision | None:
+        """Phase B (#471): refuse workspace-bound tools in the connector-only
+        profile.
+
+        ``connector_only`` runs the agent on a shared, warm pool with no
+        project / PVC / container. MCP-bridged tools (``mcp__*``) and
+        the Phase A-allowed connector / app / messaging tools pass; any
+        tool that would touch a filesystem, shell, kanban, or container
+        gets refused with a clear ``WORKSPACE_REQUIRED`` reason.
+
+        The check is a pure no-op for the other two profiles
+        (``persistent_workspace`` is today's behavior;
+        ``ephemeral_workspace`` falls back to it in Phase B).
+        """
+        if self._compute_profile != "connector_only":
+            return None
+
+        # MCP-bridged tools have a separate gating path
+        # (``allowed_mcps``). They never need a workspace by themselves;
+        # the remote MCP server is responsible for its own scoping.
+        if tool_name.startswith("mcp__"):
+            return None
+
+        if tool_name in _CONNECTOR_ONLY_ALLOWED_TOOLS:
+            return None
+
+        return ContractGateDecision(
+            allowed=False,
+            reason=(
+                f"tool '{tool_name}' requires a project workspace; the "
+                "automation's compute_profile is 'connector_only' which "
+                "has no PVC / container. Switch the workflow to "
+                "'persistent_workspace' or remove this tool from the step."
+            ),
+            breach_kind=BreachKind.WORKSPACE_REQUIRED,
+        )
 
     def _check_compute_tier(self, *, tool_name: str, tool: Tool) -> ContractGateDecision | None:
         """Reject tools that demand a higher compute tier than the contract allows.
