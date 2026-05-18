@@ -34,20 +34,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "automation_definitions",
-        sa.Column(
-            "compute_profile",
-            sa.String(32),
-            nullable=False,
-            server_default="persistent_workspace",
-        ),
-    )
-    op.create_check_constraint(
-        "ck_automation_definitions_compute_profile",
-        "automation_definitions",
-        "compute_profile IN ('connector_only', 'ephemeral_workspace', 'persistent_workspace')",
-    )
+    # Add the column + CHECK in a single batch so SQLite test runs work
+    # (alembic on SQLite can't ALTER an existing table to add a CHECK
+    # constraint without falling back to the copy-and-move strategy
+    # batch_alter_table emits). Postgres treats the batch as a normal
+    # transaction, so production behaviour is unchanged. Mirrors the
+    # pattern in 0103/0104/0105 (also CHECK rewrites on automation_*).
+    with op.batch_alter_table("automation_definitions") as batch:
+        batch.add_column(
+            sa.Column(
+                "compute_profile",
+                sa.String(32),
+                nullable=False,
+                server_default="persistent_workspace",
+            )
+        )
+        batch.create_check_constraint(
+            "ck_automation_definitions_compute_profile",
+            "compute_profile IN ('connector_only', 'ephemeral_workspace', 'persistent_workspace')",
+        )
 
 
 def downgrade() -> None:
