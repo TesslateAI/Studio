@@ -158,6 +158,41 @@ async def seed_action(
     return act.id
 
 
+async def seed_marketplace_agent(
+    db,
+    *,
+    is_system: bool = True,
+) -> uuid.UUID:
+    """Seed a runnable system MarketplaceAgent used by doctor tests.
+
+    The G5 doctor needs a real ``agent_id`` to satisfy develop's
+    TC-03 validator on ``agent.run`` actions. Tests that exercise
+    ``ensure_doctor_for`` must have at least one runnable agent in
+    the DB; this helper seeds the minimal row.
+    """
+    from sqlalchemy import insert as core_insert
+
+    from app.models import MarketplaceAgent
+
+    agent_id = uuid.uuid4()
+    suffix = uuid.uuid4().hex[:8]
+    await db.execute(
+        core_insert(MarketplaceAgent.__table__).values(
+            id=agent_id,
+            name=f"test-agent-{suffix}",
+            slug=f"test-agent-{suffix}",
+            description="seeded for doctor tests",
+            category="builder",
+            item_type="agent",
+            is_active=True,
+            is_system=is_system,
+            pricing_type="free",
+        )
+    )
+    await db.flush()
+    return agent_id
+
+
 async def seed_run(
     db,
     *,

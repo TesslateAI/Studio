@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from .conftest import (
     seed_automation,
+    seed_marketplace_agent,
     seed_user,
 )
 
@@ -31,6 +32,7 @@ async def test_ensure_doctor_for_creates_doctor_and_trigger(session_maker):
 
     async with session_maker() as db:
         owner_id = await seed_user(db)
+        await seed_marketplace_agent(db)
         target_id = await seed_automation(db, owner_user_id=owner_id)
         await db.commit()
 
@@ -65,6 +67,38 @@ async def test_ensure_doctor_for_creates_doctor_and_trigger(session_maker):
             )
         ).scalar_one()
         assert action.action_type == "agent.run"
+        # TC-03 compat: agent.run config carries a real agent_id so the
+        # response projection's Pydantic validator (require config.agent_id
+        # to be a UUID string) is satisfied. Without this, GET on the
+        # doctor would 500.
+        cfg = action.config or {}
+        assert cfg.get("agent_id"), "doctor agent.run must carry agent_id"
+        from uuid import UUID as _UUID
+
+        _UUID(str(cfg["agent_id"]))  # parses
+
+
+@pytest.mark.asyncio
+async def test_ensure_doctor_for_raises_without_agent_in_library(session_maker):
+    """No system agent + no library agent → clear error at enable time
+    instead of a deferred 500 on first detail GET."""
+    from app.models_automations import AutomationDefinition
+    from app.services.workflows.doctor import DoctorNoAgentAvailable, ensure_doctor_for
+
+    async with session_maker() as db:
+        owner_id = await seed_user(db)
+        target_id = await seed_automation(db, owner_user_id=owner_id)
+        # NB: deliberately NO seed_marketplace_agent call.
+        await db.commit()
+
+    async with session_maker() as db:
+        target = (
+            await db.execute(
+                select(AutomationDefinition).where(AutomationDefinition.id == target_id)
+            )
+        ).scalar_one()
+        with pytest.raises(DoctorNoAgentAvailable):
+            await ensure_doctor_for(db, target_automation=target)
 
 
 @pytest.mark.asyncio
@@ -74,6 +108,7 @@ async def test_ensure_doctor_for_idempotent(session_maker):
 
     async with session_maker() as db:
         owner_id = await seed_user(db)
+        await seed_marketplace_agent(db)
         target_id = await seed_automation(db, owner_user_id=owner_id)
         await db.commit()
 
@@ -110,6 +145,7 @@ async def test_route_workflow_event_fires_subscribers(session_maker):
 
     async with session_maker() as db:
         owner_id = await seed_user(db)
+        await seed_marketplace_agent(db)
         target_id = await seed_automation(db, owner_user_id=owner_id)
         await db.commit()
 
@@ -155,6 +191,7 @@ async def test_disable_doctor_for_flips_flag(session_maker):
 
     async with session_maker() as db:
         owner_id = await seed_user(db)
+        await seed_marketplace_agent(db)
         target_id = await seed_automation(db, owner_user_id=owner_id)
         await db.commit()
 
@@ -204,6 +241,7 @@ async def test_emit_run_finished_fires_doctor_on_run_failed(session_maker):
 
     async with session_maker() as db:
         owner_id = await seed_user(db)
+        await seed_marketplace_agent(db)
         target_id = await seed_automation(db, owner_user_id=owner_id)
         await db.commit()
 
@@ -265,6 +303,7 @@ async def test_emit_run_finished_skips_fan_out_on_success(session_maker):
 
     async with session_maker() as db:
         owner_id = await seed_user(db)
+        await seed_marketplace_agent(db)
         target_id = await seed_automation(db, owner_user_id=owner_id)
         await db.commit()
 

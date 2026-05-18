@@ -39,11 +39,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...models import MarketplaceAgent, UserPurchasedAgent
 from ...models_automations import (
     AutomationAction,
     AutomationDefinition,
     AutomationTrigger,
 )
+from ...services.marketplace_agent_scope import RUNNABLE_AGENT_ITEM_TYPE
 from .versions import snapshot_definition_to_version
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,70 @@ def _doctor_contract(target_id: UUID) -> dict[str, Any]:
         "allowed_workflow_ids": [str(target_id)],
         "rationale": "doctor scope: only the target workflow",
     }
+
+
+class DoctorNoAgentAvailable(Exception):
+    """No runnable agent in the user's library + no system agent.
+
+    Doctor creation can't proceed without a real ``agent_id`` since
+    develop's #469 / TC-03 validator (``agent.run action requires
+    'config.agent_id'``) rejects the action otherwise. Surfaced at
+    enable-time so the user gets a clear 4xx instead of the doctor
+    later 500'ing on every read.
+    """
+
+
+async def _pick_default_doctor_agent_id(db: AsyncSession, *, owner_user_id: UUID) -> UUID:
+    """Pick a ``MarketplaceAgent`` the owner can bind for the doctor.
+
+    Preference order:
+      1. Any ``is_system=True`` runnable agent (works for all users
+         without a per-user library install).
+      2. Any agent the owner has purchased / installed.
+
+    The doctor only needs ANY agent — the contract narrows what
+    tools it can call, not which model. Raises
+    :class:`DoctorNoAgentAvailable` when neither match.
+    """
+    system_agent_id = (
+        await db.execute(
+            select(MarketplaceAgent.id)
+            .where(
+                MarketplaceAgent.item_type == RUNNABLE_AGENT_ITEM_TYPE,
+                MarketplaceAgent.is_active.is_(True),
+                MarketplaceAgent.is_system.is_(True),
+            )
+            .order_by(MarketplaceAgent.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if system_agent_id is not None:
+        return system_agent_id
+
+    owned_agent_id = (
+        await db.execute(
+            select(MarketplaceAgent.id)
+            .join(
+                UserPurchasedAgent,
+                UserPurchasedAgent.agent_id == MarketplaceAgent.id,
+            )
+            .where(
+                MarketplaceAgent.item_type == RUNNABLE_AGENT_ITEM_TYPE,
+                MarketplaceAgent.is_active.is_(True),
+                UserPurchasedAgent.user_id == owner_user_id,
+            )
+            .order_by(MarketplaceAgent.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if owned_agent_id is not None:
+        return owned_agent_id
+
+    raise DoctorNoAgentAvailable(
+        "no runnable marketplace agent available for the doctor — install "
+        "one from the marketplace first, or contact your admin to ship a "
+        "system agent"
+    )
 
 
 def _doctor_prompt(target_id: UUID) -> str:
@@ -99,6 +165,15 @@ async def ensure_doctor_for(
             return existing
 
     target_id = target_automation.id
+
+    # Doctor needs a real ``agent_id`` to satisfy develop's #469 / TC-03
+    # validator (``agent.run action requires 'config.agent_id'``). The
+    # contract still scopes which TOOLS the agent can call —
+    # ``agent_id`` here is just the LLM / runtime to use.
+    default_agent_id = await _pick_default_doctor_agent_id(
+        db, owner_user_id=target_automation.owner_user_id
+    )
+
     doctor = AutomationDefinition(
         id=uuid.uuid4(),
         name=f"doctor:{target_automation.name}",
@@ -134,6 +209,7 @@ async def ensure_doctor_for(
             ordinal=0,
             action_type="agent.run",
             config={
+                "agent_id": str(default_agent_id),
                 "prompt": _doctor_prompt(target_id),
                 "target_automation_id": str(target_id),
             },
