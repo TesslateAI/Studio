@@ -1,4 +1,5 @@
 """Integration tests for /api/v1/agents/handoff/* endpoints."""
+
 from __future__ import annotations
 
 import os
@@ -54,9 +55,18 @@ def mock_db():
 
 @pytest.fixture
 def mock_arq_pool():
+    # The handler awaits _get_arq_pool() only as a Redis-availability guard;
+    # the actual enqueue goes through get_task_queue().enqueue(...).
     pool = MagicMock()
     pool.enqueue_job = AsyncMock()
     return pool
+
+
+@pytest.fixture
+def mock_task_queue():
+    tq = MagicMock()
+    tq.enqueue = AsyncMock()
+    return tq
 
 
 @pytest.fixture
@@ -109,23 +119,24 @@ class TestUpload:
         assert resp.status_code == 403
 
     async def test_upload_enqueues_new_task(
-        self, client_factory, mock_arq_pool, mock_task_manager
+        self, client_factory, mock_arq_pool, mock_task_queue, mock_task_manager
     ):
         from app.permissions import Permission
 
-        user = _user(
-            scopes=[Permission.AGENTS_HANDOFF.value, Permission.PROJECT_EDIT.value]
-        )
+        user = _user(scopes=[Permission.AGENTS_HANDOFF.value, Permission.PROJECT_EDIT.value])
         project, access = _mock_project_access()
 
-        with patch(
-            "app.routers.public.agents_handoff.get_project_with_access", new=access
-        ), patch(
-            "app.routers.public.agents_handoff._get_arq_pool",
-            new=AsyncMock(return_value=mock_arq_pool),
-        ), patch(
-            "app.routers.public.agents_handoff.get_task_manager",
-            return_value=mock_task_manager,
+        with (
+            patch("app.routers.public.agents_handoff.get_project_with_access", new=access),
+            patch(
+                "app.routers.public.agents_handoff._get_arq_pool",
+                new=AsyncMock(return_value=mock_arq_pool),
+            ),
+            patch("app.services.task_queue.get_task_queue", return_value=mock_task_queue),
+            patch(
+                "app.routers.public.agents_handoff.get_task_manager",
+                return_value=mock_task_manager,
+            ),
         ):
             client = await client_factory(user)
             async with client as ac:
@@ -143,27 +154,26 @@ class TestUpload:
         body = resp.json()
         assert body["status"] == "queued"
         assert uuid.UUID(body["task_id"])
-        mock_arq_pool.enqueue_job.assert_awaited_once()
+        mock_task_queue.enqueue.assert_awaited_once()
+        assert mock_task_queue.enqueue.await_args.args[0] == "execute_agent_task"
         mock_task_manager.create_task.assert_called_once()
 
-    async def test_upload_503_when_redis_unavailable(
-        self, client_factory, mock_task_manager
-    ):
+    async def test_upload_503_when_redis_unavailable(self, client_factory, mock_task_manager):
         from app.permissions import Permission
 
-        user = _user(
-            scopes=[Permission.AGENTS_HANDOFF.value, Permission.PROJECT_EDIT.value]
-        )
+        user = _user(scopes=[Permission.AGENTS_HANDOFF.value, Permission.PROJECT_EDIT.value])
         project, access = _mock_project_access()
 
-        with patch(
-            "app.routers.public.agents_handoff.get_project_with_access", new=access
-        ), patch(
-            "app.routers.public.agents_handoff._get_arq_pool",
-            new=AsyncMock(return_value=None),
-        ), patch(
-            "app.routers.public.agents_handoff.get_task_manager",
-            return_value=mock_task_manager,
+        with (
+            patch("app.routers.public.agents_handoff.get_project_with_access", new=access),
+            patch(
+                "app.routers.public.agents_handoff._get_arq_pool",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.routers.public.agents_handoff.get_task_manager",
+                return_value=mock_task_manager,
+            ),
         ):
             client = await client_factory(user)
             async with client as ac:
@@ -247,10 +257,13 @@ class TestPause:
         pubsub = MagicMock()
         pubsub.request_cancellation = AsyncMock()
 
-        with patch(
-            "app.routers.public.agents_handoff.get_task_manager",
-            return_value=mock_task_manager,
-        ), patch("app.services.pubsub.get_pubsub", return_value=pubsub):
+        with (
+            patch(
+                "app.routers.public.agents_handoff.get_task_manager",
+                return_value=mock_task_manager,
+            ),
+            patch("app.services.pubsub.get_pubsub", return_value=pubsub),
+        ):
             client = await client_factory(user)
             async with client as ac:
                 resp = await ac.post("/api/v1/agents/handoff/t-1/pause")
@@ -287,14 +300,12 @@ class TestPause:
 
 class TestResume:
     async def test_resume_enqueues_new_task_from_paused(
-        self, client_factory, mock_db, mock_arq_pool, mock_task_manager
+        self, client_factory, mock_db, mock_arq_pool, mock_task_queue, mock_task_manager
     ):
         from app.permissions import Permission
         from app.services.task_manager import TaskStatus
 
-        user = _user(
-            scopes=[Permission.AGENTS_HANDOFF.value, Permission.PROJECT_EDIT.value]
-        )
+        user = _user(scopes=[Permission.AGENTS_HANDOFF.value, Permission.PROJECT_EDIT.value])
         chat_id = uuid.uuid4()
         project, access = _mock_project_access()
 
@@ -313,14 +324,17 @@ class TestResume:
         result.scalars.return_value.all.return_value = []
         mock_db.execute = AsyncMock(return_value=result)
 
-        with patch(
-            "app.routers.public.agents_handoff.get_project_with_access", new=access
-        ), patch(
-            "app.routers.public.agents_handoff._get_arq_pool",
-            new=AsyncMock(return_value=mock_arq_pool),
-        ), patch(
-            "app.routers.public.agents_handoff.get_task_manager",
-            return_value=mock_task_manager,
+        with (
+            patch("app.routers.public.agents_handoff.get_project_with_access", new=access),
+            patch(
+                "app.routers.public.agents_handoff._get_arq_pool",
+                new=AsyncMock(return_value=mock_arq_pool),
+            ),
+            patch("app.services.task_queue.get_task_queue", return_value=mock_task_queue),
+            patch(
+                "app.routers.public.agents_handoff.get_task_manager",
+                return_value=mock_task_manager,
+            ),
         ):
             client = await client_factory(user)
             async with client as ac:
@@ -331,4 +345,4 @@ class TestResume:
         assert body["status"] == "queued"
         new_id = body["task_id"]
         assert new_id != "paused-1"
-        mock_arq_pool.enqueue_job.assert_awaited_once()
+        mock_task_queue.enqueue.assert_awaited_once()

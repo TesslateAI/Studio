@@ -91,6 +91,8 @@ def _make_agent(**overrides) -> MagicMock:
     agent.skill_body = overrides.get("skill_body", "# skill body")
     agent.config = overrides.get("config", {"transport": "stdio"})
     agent.tool_configs = overrides.get("tool_configs")
+    # None → detail handlers skip the secondary MarketplaceSource fetch.
+    agent.source_id = overrides.get("source_id")
     return agent
 
 
@@ -120,6 +122,7 @@ def _make_base(**overrides) -> MagicMock:
     base.long_description = overrides.get("long_description", "Longer base desc")
     base.features = overrides.get("features", ["hot-reload"])
     base.source_type = overrides.get("source_type", "official")
+    base.source_id = overrides.get("source_id")
     return base
 
 
@@ -160,6 +163,7 @@ def _make_theme(**overrides) -> MagicMock:
     theme.long_description = overrides.get("long_description", "Full theme desc")
     theme.source_type = overrides.get("source_type", "official")
     theme.parent_theme_id = overrides.get("parent_theme_id")
+    theme.source_id = overrides.get("source_id")
     return theme
 
 
@@ -229,6 +233,32 @@ def mock_database(mock_api_user):
     app.dependency_overrides[get_db] = override_get_db
     yield mock_db
     # Don't clear here -- client fixture clears all overrides
+
+
+@pytest.fixture(autouse=True)
+def _bypass_auth_infra_queries():
+    """Neutralize two infrastructure DB queries that run before each endpoint's
+    own queries, so every test's ``db.execute`` side_effect maps 1:1 to its
+    handler:
+
+      - ``require_api_scope`` role-ceiling check (``get_team_membership``), and
+      - the Wave-4 public source-handle resolution (``_resolve_public_source_filter``).
+
+    Both have dedicated unit tests; the integration suite exercises the
+    router + auth + serialization pipeline, not source filtering or role
+    ceilings. ``(None, None)`` is the documented "no source seeded" fall-through.
+    """
+    with (
+        patch(
+            "app.auth_external.get_team_membership",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.routers.public.marketplace._resolve_public_source_filter",
+            new=AsyncMock(return_value=(None, None)),
+        ),
+    ):
+        yield
 
 
 @pytest.fixture
