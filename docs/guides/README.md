@@ -7,6 +7,7 @@ Practical how-to guides for developing, deploying, and extending OpenSail.
 | Guide | Description | When to Use |
 |-------|-------------|-------------|
 | [Docker Setup](docker-setup.md) | Set up OpenSail from scratch with Docker Compose | **Start here**. First-time setup, new developers |
+| [Desktop Install](desktop-install.md) | Install the desktop app or run the desktop client from source | Local-first use, desktop packaging, installer testing |
 | [Local Development](local-development.md) | Run backend/frontend natively (without Docker) | Faster iteration, debugging |
 | [Minikube Setup](minikube-setup.md) | Deploy to local Kubernetes cluster | Testing K8s features locally |
 | [AWS Deployment](aws-deployment.md) | Deploy to AWS EKS production | Production deployment |
