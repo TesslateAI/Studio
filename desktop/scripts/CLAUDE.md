@@ -19,6 +19,10 @@ remember the sidecar rebuild / cargo-tauri install / vite-start dance.
 - `install.ps1` — end-user installer for Windows, served for
   `irm <host>/install.ps1 | iex`. Downloads the NSIS `-setup.exe` and
   runs it silently (per-user, no admin). Download host is a placeholder.
+- `ci-local-test.sh` — runs the `Desktop Release` workflow's Linux build
+  job locally via `act`, in a Docker container that mirrors the GitHub
+  runner. Validates `.github/workflows/desktop-release.yml` before push.
+  Windows/macOS legs can't run in a Linux container.
 
 ## Full setup
 New developers should start at
