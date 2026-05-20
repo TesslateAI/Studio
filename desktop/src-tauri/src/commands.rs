@@ -102,6 +102,35 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+/// Open an external `http`/`https` URL in the user's default browser.
+///
+/// Used by the cloud sign-in flow to launch the pairing page; the resulting
+/// `tesslate://auth/callback?token=...` deep link is caught by `deep_link.rs`.
+/// Non-HTTP schemes are rejected so the renderer cannot coax the OS opener
+/// into handling `file://` or other local handlers.
+#[tauri::command]
+pub async fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|e| format!("invalid url: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("only http/https URLs may be opened".to_string());
+    }
+
+    let shell = app.shell();
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    shell
+        .command(opener)
+        .args([parsed.as_str()])
+        .spawn()
+        .map_err(|e| format!("spawn {opener} failed: {e}"))?;
+    Ok(())
+}
+
 /// Open a filesystem path in a user's preferred IDE.
 ///
 /// `ide` accepts the CLI entrypoint for VS Code (`code`), Cursor (`cursor`),

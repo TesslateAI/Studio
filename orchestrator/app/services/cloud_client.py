@@ -28,8 +28,8 @@ from typing import Any
 
 import httpx
 
-from ..config import get_settings
 from . import token_store
+from .cloud_config import get_cloud_url
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +105,7 @@ class CloudClient:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        settings = get_settings()
-        self._base_url = (base_url or settings.tesslate_cloud_url).rstrip("/")
+        self._base_url = (base_url or get_cloud_url()).rstrip("/")
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             timeout=_DEFAULT_TIMEOUT,
@@ -290,17 +289,23 @@ async def get_cloud_client() -> CloudClient:
         return _singleton
 
 
-def reset_cloud_client_for_tests() -> None:
+def reset_cloud_client() -> None:
     """Drop the singleton so the next ``get_cloud_client()`` rebuilds it.
 
-    Tests that monkeypatch ``settings.tesslate_cloud_url`` or inject a custom
-    transport should call this in teardown.
+    Call this after the cloud URL changes (``cloud_config.set_cloud_url``) so
+    the next request targets the new endpoint. Also used by tests that
+    monkeypatch the URL or inject a custom transport.
     """
     global _singleton
     if _singleton is not None:
-        # Best-effort sync close; tests typically own their own client anyway.
+        # Best-effort async close; the caller's loop drains the task. Tests
+        # typically own their own client anyway.
         import contextlib
 
         with contextlib.suppress(RuntimeError):
             asyncio.get_event_loop().create_task(_singleton.aclose())
     _singleton = None
+
+
+# Back-compat alias for existing test teardown call sites.
+reset_cloud_client_for_tests = reset_cloud_client

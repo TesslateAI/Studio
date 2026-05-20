@@ -5611,4 +5611,68 @@ export const adminSpendApi = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Desktop sidecar (Tauri shell only)
+// ---------------------------------------------------------------------------
+
+export interface DesktopAuthStatus {
+  paired: boolean;
+  cloud_url: string;
+  default_cloud_url: string;
+}
+
+/**
+ * Desktop-only endpoints exposed by the local sidecar under `/api/desktop`.
+ * These 404 in cloud web deployments — callers must gate on the Tauri shell.
+ */
+export const desktopApi = {
+  async getAuthStatus(): Promise<DesktopAuthStatus> {
+    const response = await api.get('/api/desktop/auth/status');
+    return response.data;
+  },
+  async signOut(): Promise<void> {
+    await api.delete('/api/desktop/auth/token');
+  },
+  async setCloudUrl(url: string): Promise<{ cloud_url: string }> {
+    const response = await api.put('/api/desktop/cloud-url', { url });
+    return response.data;
+  },
+  async clearCloudUrl(): Promise<{ cloud_url: string }> {
+    const response = await api.delete('/api/desktop/cloud-url');
+    return response.data;
+  },
+  async getFirstRun(): Promise<{ completed: boolean }> {
+    const response = await api.get('/api/desktop/first-run');
+    return response.data;
+  },
+  async completeFirstRun(): Promise<{ completed: boolean }> {
+    const response = await api.post('/api/desktop/first-run');
+    return response.data;
+  },
+};
+
+export interface PairCompleteResponse {
+  device_id: string;
+  api_key_id: string;
+  token: string;
+  scopes: string[];
+  expires_at: string | null;
+}
+
+/**
+ * Cloud-side desktop pairing. Called from the `/desktop/pair` page that the
+ * desktop app opens in the system browser; the caller must hold a cloud
+ * session. Mints a `tsk_` device key returned exactly once.
+ */
+export const desktopPairApi = {
+  async complete(body: {
+    device_name: string;
+    device_platform?: string;
+    app_version?: string;
+  }): Promise<PairCompleteResponse> {
+    const response = await api.post('/api/desktop/pair/complete', body);
+    return response.data;
+  },
+};
+
 export default api;

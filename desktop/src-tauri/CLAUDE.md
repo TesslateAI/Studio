@@ -24,7 +24,7 @@ harness or `../scripts/dev.sh`.
 - `src/tokens.rs` — Stronghold-backed token get/set (paired cloud credentials).
 - `src/deep_link.rs` — `tesslate://auth/callback?token=...` handler.
 - `src/updater.rs` — auto-update wiring.
-- `src/commands.rs` — `invoke` commands (`get_api_url`, `get_bearer`, `open_folder`, `pick_dir`, etc.).
+- `src/commands.rs` — `invoke` commands (`get_api_url`, `get_bearer`, `open_in_ide`, `open_external_url`, window controls, etc.). `open_external_url` opens http(s) URLs in the system browser — used by the cloud sign-in flow.
 
 ## Related contexts
 - `../sidecar/CLAUDE.md` — sidecar packaging

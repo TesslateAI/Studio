@@ -602,10 +602,34 @@ async def get_llm_client(
 
         if not user.litellm_api_key or not settings.litellm_api_base:
             # Desktop / standalone: no per-user LiteLLM key provisioned.
-            # If the proxy is configured (LITELLM_API_BASE + LITELLM_MASTER_KEY
-            # both set — e.g. from $OPENSAIL_HOME/.env), use the master
-            # key directly so the proxy is reachable without requiring the full
-            # cloud user-key provisioning flow.
+
+            # Desktop + paired to a Tesslate Cloud account: route system
+            # models through the cloud companion's OpenAI-compatible proxy
+            # (POST {cloud}/api/v1/chat/completions) so the user spends their
+            # account credits. The proxy runs credit checks and forwards to
+            # the internal LiteLLM — LiteLLM itself is never exposed to the
+            # desktop client. Pairing is a deliberate action, so it wins over
+            # the env-var / BYOK fallbacks below.
+            if settings.is_desktop_mode:
+                from . import token_store  # noqa: PLC0415
+                from .cloud_config import get_cloud_url  # noqa: PLC0415
+
+                cloud_token = token_store.get_cloud_token()
+                if cloud_token:
+                    logger.info(
+                        "Desktop paired; routing model %s through cloud proxy",
+                        model_name,
+                    )
+                    return AsyncOpenAI(
+                        api_key=cloud_token,
+                        base_url=f"{get_cloud_url()}/api/v1",
+                        max_retries=1,
+                    )
+
+            # If a LiteLLM proxy is configured (LITELLM_API_BASE +
+            # LITELLM_MASTER_KEY both set — e.g. from $OPENSAIL_HOME/.env),
+            # use the master key directly so the proxy is reachable without
+            # the full cloud user-key provisioning flow.
             if settings.litellm_api_base and settings.litellm_master_key:
                 logger.info(
                     "User has no litellm_api_key; using master key for LiteLLM proxy (model=%s)",
@@ -664,9 +688,10 @@ async def get_llm_client(
                     )
 
             raise ValueError(
-                "No LLM API key configured. "
-                "Add a provider key in Library → API Keys, or set OPENAI_API_KEY / "
-                "ANTHROPIC_API_KEY / OPENROUTER_API_KEY in "
+                "No LLM access configured. "
+                "Sign in to Tesslate Cloud in Settings → Cloud to use your "
+                "account credits, add a provider key in Library → API Keys, or "
+                "set OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY in "
                 "$OPENSAIL_HOME/.env."
             )
 

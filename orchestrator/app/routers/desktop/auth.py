@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...config import get_settings
 from ...database import get_db
 from ...models import User
-from ...services import token_store
+from ...services import cloud_config, desktop_state, token_store
+from ...services.cloud_client import reset_cloud_client
+from ...services.cloud_config import InvalidCloudUrlError
 from ...services.desktop_auth import desktop_loopback_only, desktop_loopback_or_session
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,10 @@ router = APIRouter()
 
 class CloudTokenBody(BaseModel):
     token: str = Field(..., min_length=1, max_length=512)
+
+
+class CloudUrlBody(BaseModel):
+    url: str = Field(..., min_length=1, max_length=512)
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +167,57 @@ async def auth_status(_user: User = Depends(desktop_loopback_or_session)) -> dic
     """Cheap, network-free pairing probe."""
     return {
         "paired": token_store.is_paired(),
-        "cloud_url": get_settings().tesslate_cloud_url,
+        "cloud_url": cloud_config.get_cloud_url(),
+        "default_cloud_url": cloud_config.normalize_cloud_url(
+            get_settings().tesslate_cloud_url
+        ),
     }
+
+
+@router.put("/cloud-url")
+async def set_cloud_url(
+    body: CloudUrlBody,
+    _user: User = Depends(desktop_loopback_or_session),
+) -> dict[str, Any]:
+    """Override the cloud companion endpoint (self-host / beta).
+
+    Resets the shared :class:`CloudClient` so subsequent calls hit the new
+    endpoint. Rejects malformed or non-HTTP URLs with 400.
+    """
+    try:
+        normalized = cloud_config.set_cloud_url(body.url)
+    except InvalidCloudUrlError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from None
+    reset_cloud_client()
+    logger.info("Desktop cloud URL set to %s", normalized)
+    return {"cloud_url": normalized}
+
+
+@router.delete("/cloud-url")
+async def clear_cloud_url(_user: User = Depends(desktop_loopback_or_session)) -> dict[str, Any]:
+    """Drop the cloud URL override, reverting to the built-in default."""
+    cloud_config.clear_cloud_url()
+    reset_cloud_client()
+    return {"cloud_url": cloud_config.get_cloud_url()}
+
+
+@router.get("/first-run")
+async def first_run_status(
+    _user: User = Depends(desktop_loopback_or_session),
+) -> dict[str, bool]:
+    """Whether the user has completed (or dismissed) first-run setup."""
+    return {"completed": desktop_state.is_first_run_complete()}
+
+
+@router.post("/first-run")
+async def complete_first_run(
+    _user: User = Depends(desktop_loopback_or_session),
+) -> dict[str, bool]:
+    """Mark first-run setup as completed so the dialog stops appearing."""
+    desktop_state.mark_first_run_complete()
+    return {"completed": True}
 
 
 @router.post("/auth/token")

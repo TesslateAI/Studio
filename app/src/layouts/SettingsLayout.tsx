@@ -2,6 +2,10 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { NavigationSidebar } from '../components/ui';
 import { useTeam } from '../contexts/TeamContext';
 
+// The Cloud tab is only meaningful inside the Tauri desktop shell — its
+// endpoints live on the local sidecar and 404 in cloud web deployments.
+const IS_TAURI = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+
 const settingsTabs = [
   { label: 'Profile', path: '/settings/profile' },
   { label: 'Preferences', path: '/settings/preferences' },
@@ -9,6 +13,7 @@ const settingsTabs = [
   { label: 'Deployment', path: '/settings/deployment' },
   { label: 'API Keys', path: '/settings/api-keys' },
   { label: 'Marketplace Sources', path: '/settings/marketplace-sources' },
+  ...(IS_TAURI ? [{ label: 'Cloud', path: '/settings/cloud' }] : []),
 ];
 // Connectors moved to Library → Connectors (#307).
 // The /settings/connectors route is aliased to a redirect in App.tsx so

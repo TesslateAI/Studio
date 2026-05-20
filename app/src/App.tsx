@@ -46,12 +46,15 @@ import DeploymentSettings from './pages/settings/DeploymentSettings';
 import BillingSettings from './pages/settings/BillingSettings';
 import ApiKeysSettings from './pages/settings/ApiKeysSettings';
 import MarketplaceSourcesSettings from './pages/settings/MarketplaceSourcesSettings';
+import CloudSettings from './pages/settings/CloudSettings';
 import TeamSettingsPage from './pages/settings/TeamSettingsPage';
 import TeamMembersPage from './pages/settings/TeamMembersPage';
 import AuditLogPage from './pages/settings/AuditLogPage';
 import ConnectionsSettings from './pages/settings/ConnectionsSettings';
 import SchedulesSettings from './pages/settings/SchedulesSettings';
 import InviteAcceptPage from './pages/InviteAcceptPage';
+import DesktopPairPage from './pages/DesktopPairPage';
+import { FirstRunDialog } from './components/desktop/FirstRunDialog';
 import { useReferralTracking } from './hooks/useReferralTracking';
 import { useTaskNotifications } from './hooks/useTaskNotifications';
 import { CommandPalette } from './components/CommandPalette';
@@ -185,6 +188,9 @@ function AppContent() {
 
       {/* Keyboard Shortcuts Modal */}
       <KeyboardShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+
+      {/* Desktop first-run setup choice — self-gates on the Tauri shell */}
+      <FirstRunDialog />
 
       <Toaster
         position="top-right"
@@ -442,6 +448,7 @@ function AppContent() {
           <Route path="connectors" element={<Navigate to="/library?tab=connectors" replace />} />
           <Route path="api-keys" element={<ApiKeysSettings />} />
           <Route path="marketplace-sources" element={<MarketplaceSourcesSettings />} />
+          <Route path="cloud" element={<CloudSettings />} />
           <Route path="billing" element={<Navigate to="/settings/team/billing" replace />} />
           <Route path="messaging" element={<ConnectionsSettings />} />
           {/* Channels moved to Library → Channels. Old route stays as a redirect for bookmarks. */}
@@ -467,6 +474,14 @@ function AppContent() {
           }
         />
         <Route path="/oauth/callback" element={<OAuthLoginCallback />} />
+        <Route
+          path="/desktop/pair"
+          element={
+            <PrivateRoute>
+              <DesktopPairPage />
+            </PrivateRoute>
+          }
+        />
         <Route path="/invite/:token" element={<InviteAcceptPage />} />
       </Routes>
 

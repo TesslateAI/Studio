@@ -92,6 +92,7 @@ fn main() {
             commands::clear_cloud_token,
             commands::is_cloud_paired,
             commands::open_in_ide,
+            commands::open_external_url,
             commands::start_dragging,
             commands::minimize_window,
             commands::toggle_maximize_window,

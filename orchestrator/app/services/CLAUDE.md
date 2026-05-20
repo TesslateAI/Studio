@@ -18,7 +18,7 @@ human-readable `reason`.
 
 Used by `app/routers/desktop.py` to power the tray/runtime-probe endpoints.
 
-## cloud_client.py + token_store.py
+## cloud_client.py + cloud_config.py + token_store.py + desktop_state.py
 
 Desktop sidecar HTTP transport to the cloud companion. `CloudClient` is an
 `httpx.AsyncClient` wrapper with bearer injection (sourced lazily from
@@ -27,13 +27,21 @@ consecutive-failure circuit breaker (5 failures in 60s → open for 30s).
 4xx never retries; `asyncio.CancelledError` propagates. Streaming requests
 skip the retry loop but still respect the breaker. Use `get_cloud_client()`
 for the process singleton, or instantiate directly in tests with a custom
-`transport=httpx.MockTransport(...)` / `respx` router.
+`transport=httpx.MockTransport(...)` / `respx` router. `reset_cloud_client()`
+drops the singleton when the cloud URL changes.
 
-`token_store` is the on-disk contract for the eventual Tauri shell:
+`cloud_config` resolves the cloud companion base URL: `$TESSLATE_CLOUD_URL`
+env > `cache/cloud_url.json` override > `settings.tesslate_cloud_url` default.
+`normalize_cloud_url` enforces an http(s) scheme + host; `CloudClient` and the
+`get_llm_client` cloud-proxy branch both read `get_cloud_url()`.
+
+`token_store` is the on-disk contract for the Tauri shell:
 `$TESSLATE_CLOUD_TOKEN` env var wins, else `cache/cloud_token.json` under
-`$OPENSAIL_HOME` (atomic write, 0600 on POSIX). No network I/O.
+`$OPENSAIL_HOME` (atomic write, 0600 on POSIX). `desktop_state` holds the
+`first_run_complete` onboarding flag in `cache/desktop_state.json`. No
+network I/O in either.
 
-Both modules are non-blocking on failure: routers should `try/except` and
+All modules are non-blocking on failure: routers should `try/except` and
 fall back to cached/empty data so the desktop UI stays responsive when the
 cloud is unreachable.
 
