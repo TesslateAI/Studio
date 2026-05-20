@@ -176,3 +176,21 @@ async def test_success_resets_failure_counter(paired, fast_sleep) -> None:
                 pytest.fail("circuit should have been reset by success")
     finally:
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_anonymous_get_skips_bearer(opensail_home: Path) -> None:
+    """anonymous=True: no token required, no Authorization header sent — the
+    path for browsing the public marketplace before pairing."""
+    client = _make_client()
+    try:
+        with respx.mock(base_url="https://cloud.test") as router:
+            route = router.get("/api/marketplace/public/agents").mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            resp = await client.get("/api/marketplace/public/agents", anonymous=True)
+            assert resp.status_code == 200
+            assert route.called
+            assert "authorization" not in route.calls.last.request.headers
+    finally:
+        await client.aclose()

@@ -68,15 +68,29 @@ def app_client(opensail_home: Path, monkeypatch: pytest.MonkeyPatch):
     yield TestClient(app)
 
 
-def test_local_only_when_unpaired(app_client: TestClient, opensail_home: Path) -> None:
+def test_unpaired_still_merges_public_catalog(
+    app_client: TestClient, opensail_home: Path
+) -> None:
+    """The production marketplace catalog is public, so an unpaired desktop
+    (no cloud token) still merges the cloud catalog via the anonymous
+    /api/marketplace/public endpoint."""
     _write_local_item(opensail_home, "agents", "local-agent", "Local Agent")
-    r = app_client.get("/api/desktop/marketplace/items?kind=agent")
+
+    with respx.mock(base_url="https://cloud.test") as router:
+        route = router.get("/api/marketplace/public/agents").mock(
+            return_value=httpx.Response(
+                200,
+                json={"items": [{"slug": "cloud-agent", "name": "Cloud", "version": "2"}]},
+            )
+        )
+        r = app_client.get("/api/desktop/marketplace/items?kind=agent")
     assert r.status_code == 200
-    body = r.json()
-    assert body["kind"] == "agent"
-    slugs = {i["slug"] for i in body["items"]}
-    assert slugs == {"local-agent"}
-    assert all(i["source"] == "local" for i in body["items"])
+    # The anonymous endpoint was called with no Authorization header.
+    assert route.called
+    assert "authorization" not in route.calls.last.request.headers
+    by_slug = {i["slug"]: i for i in r.json()["items"]}
+    assert by_slug["local-agent"]["source"] == "local"
+    assert by_slug["cloud-agent"]["source"] == "cloud"
 
 
 def test_dual_source_merge_when_paired(app_client: TestClient, opensail_home: Path) -> None:
@@ -86,7 +100,7 @@ def test_dual_source_merge_when_paired(app_client: TestClient, opensail_home: Pa
     _write_local_item(opensail_home, "agents", "local-agent", "Local")
 
     with respx.mock(base_url="https://cloud.test") as router:
-        router.get("/api/public/marketplace/agents").mock(
+        router.get("/api/marketplace/public/agents").mock(
             return_value=httpx.Response(
                 200,
                 json={"items": [{"slug": "cloud-agent", "name": "Cloud", "version": "2"}]},
@@ -107,7 +121,7 @@ def test_cloud_500_degrades_to_local(app_client: TestClient, opensail_home: Path
     _write_local_item(opensail_home, "skills", "skill-a", "Skill A")
 
     with respx.mock(base_url="https://cloud.test") as router:
-        router.get("/api/public/marketplace/skills").mock(return_value=httpx.Response(500))
+        router.get("/api/marketplace/public/skills").mock(return_value=httpx.Response(500))
         r = app_client.get("/api/desktop/marketplace/items?kind=skill")
     assert r.status_code == 200
     items = r.json()["items"]
@@ -168,7 +182,7 @@ def test_stale_cache_serves_then_refreshes(app_client: TestClient, opensail_home
     _write_local_item(opensail_home, "bases", "fresh-base", "Fresh")
 
     with respx.mock(base_url="https://cloud.test") as router:
-        router.get("/api/public/marketplace/bases").mock(
+        router.get("/api/marketplace/public/bases").mock(
             return_value=httpx.Response(
                 200, json={"items": [{"slug": "cloud-base", "name": "Cb", "version": "1"}]}
             )

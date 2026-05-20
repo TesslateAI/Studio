@@ -19,7 +19,7 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     from app.config import get_settings
     from app.routers import desktop
-    from app.users import current_active_user
+    from app.services.desktop_auth import desktop_loopback_or_session
 
     get_settings.cache_clear()
 
@@ -28,7 +28,9 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     app = FastAPI()
     app.include_router(desktop.router)
-    app.dependency_overrides[current_active_user] = lambda: fake_user
+    # The /api/desktop/auth/* endpoints authenticate via desktop_loopback_or_session,
+    # not current_active_user — override the dependency actually in use.
+    app.dependency_overrides[desktop_loopback_or_session] = lambda: fake_user
 
     yield TestClient(app)
     get_settings.cache_clear()

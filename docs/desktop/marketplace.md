@@ -10,10 +10,14 @@ lives under `$OPENSAIL_HOME/{kind}s/{slug}/manifest.json`.
 
 Sources:
 
-| `source` tag | Origin                                                              |
-| ------------ | ------------------------------------------------------------------- |
-| `"local"`    | Scanned from `$OPENSAIL_HOME/{kind}s/*/manifest.json`.       |
-| `"cloud"`    | Fetched via `CloudClient.get("/api/public/marketplace/{kind}s")`.   |
+| `source` tag | Origin                                                                       |
+| ------------ | ---------------------------------------------------------------------------- |
+| `"local"`    | Scanned from `$OPENSAIL_HOME/{kind}s/*/manifest.json`.                       |
+| `"cloud"`    | Fetched via `CloudClient.get("/api/marketplace/public/{kind}s", anonymous=True)`. |
+
+The cloud catalog is fetched from the **unauthenticated** public browse API
+(`/api/marketplace/public/*`), so an unpaired desktop still sees the
+production marketplace. `anonymous=True` sends no cloud bearer.
 
 Router: `/orchestrator/app/routers/marketplace_local.py`. Installer service:
 `/orchestrator/app/services/marketplace_installer.py`.
@@ -42,8 +46,9 @@ present in local are dropped.
 - No cache + cloud disabled → local scan only, written to cache.
 - No cache + cloud enabled → synchronous fetch + merge + cache write.
 
-Cloud is considered enabled when `settings.pull_from_cloud` AND
-`token_store.is_paired()`.
+Cloud is considered enabled when `settings.pull_from_cloud` is on. Pairing is
+**not** required: the catalog browse endpoint is public, so an unpaired
+desktop merges the cloud catalog too.
 
 ### Failure behavior
 

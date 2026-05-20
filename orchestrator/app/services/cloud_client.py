@@ -125,8 +125,18 @@ class CloudClient:
     # Public verbs
     # ------------------------------------------------------------------
 
-    async def get(self, path: str, *, params: dict[str, Any] | None = None) -> httpx.Response:
-        return await self._request("GET", path, params=params)
+    async def get(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        anonymous: bool = False,
+    ) -> httpx.Response:
+        """GET ``path``. With ``anonymous=True`` no bearer is attached and a
+        missing cloud token does NOT raise — used for the unauthenticated
+        public marketplace endpoints so unpaired desktops can still browse.
+        """
+        return await self._request("GET", path, params=params, anonymous=anonymous)
 
     async def post(self, path: str, *, json: Any = None) -> httpx.Response:
         return await self._request("POST", path, json=json)
@@ -207,7 +217,9 @@ class CloudClient:
     # Internals
     # ------------------------------------------------------------------
 
-    def _build_headers(self) -> dict[str, str]:
+    def _build_headers(self, *, anonymous: bool = False) -> dict[str, str]:
+        if anonymous:
+            return {"Accept": "application/json"}
         token = token_store.get_cloud_token()
         if not token:
             raise NotPairedError("no cloud token; pair the desktop first")
@@ -223,11 +235,12 @@ class CloudClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any = None,
+        anonymous: bool = False,
     ) -> httpx.Response:
         if not self._breaker.allow():
             raise CircuitOpenError("cloud circuit open")
 
-        headers = self._build_headers()
+        headers = self._build_headers(anonymous=anonymous)
         last_exc: Exception | None = None
 
         # First attempt + len(_RETRY_DELAYS) retries

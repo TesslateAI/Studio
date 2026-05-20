@@ -36,6 +36,11 @@ Public API: `await client.get(path, params=…)`, `await client.post(path, json=
 `async with client.stream(path, method=…) as resp:` (streams skip the retry
 loop — the body would be partially consumed — but still enforce the breaker).
 
+`client.get(path, anonymous=True)` skips bearer injection entirely and does
+NOT raise `NotPairedError` when there is no token — used for the public
+marketplace browse endpoints (`/api/marketplace/public/*`) so an unpaired
+desktop can still fetch the production catalog.
+
 Use `await get_cloud_client()` for the process-wide singleton.
 `reset_cloud_client()` drops the singleton — call it after the cloud URL
 changes so the next request targets the new endpoint (the `PUT /cloud-url`

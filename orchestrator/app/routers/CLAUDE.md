@@ -19,14 +19,27 @@ Tray/runtime endpoints plus the **cloud auth shim**:
 The token never leaves the sidecar process via these endpoints — only `paired`
 is ever returned.
 
+## marketplace_public.py
+
+`/api/marketplace/public/*` — **unauthenticated** read-only marketplace browse
+(list + detail for agents/skills/bases/mcp-servers/themes). Anonymous mirror of
+the `tsk_`-authed `routers/public/marketplace.py`; each handler delegates to
+that router's browse function (those handlers never read `user`). Adds a per-IP
+token-bucket rate limit in place of the per-API-key limit. Mounted in
+`main.py` **before** the wildcard `/api/marketplace` router. CORS for this path
+is wildcard (`Access-Control-Allow-Origin: *`, no credentials) via
+`DynamicCORSMiddleware`. Purchase-gated endpoints (`/manifest`, `/body`,
+bundle downloads) stay on the authed router only.
+
 ## marketplace_local.py
 
 `/api/desktop/marketplace/items?kind=agent|skill|base|theme` — lists installed
 items from `$OPENSAIL_HOME/{agents,skills,bases,themes}/*/manifest.json`
-(`source: "local"`). When `settings.pull_from_cloud` is on AND a cloud token
-exists, ALSO fetches the cloud catalog via `services.cloud_client.CloudClient`
-(`source: "cloud"`). Cloud failures are swallowed (NotPaired, CircuitOpen,
-5xx, transport error → log.debug, return local-only).
+(`source: "local"`). When `settings.pull_from_cloud` is on, ALSO fetches the
+cloud catalog via `CloudClient.get(..., anonymous=True)` against the public
+`/api/marketplace/public/*` endpoint (`source: "cloud"`) — no pairing required.
+Cloud failures are swallowed (NotPaired, CircuitOpen, 5xx, transport error →
+log.debug, return local-only).
 
 1h on-disk cache at `$OPENSAIL_HOME/cache/marketplace.json` with
 stale-while-revalidate: stale entries return immediately and trigger a

@@ -68,6 +68,7 @@ from .routers import (
     marketplace,
     marketplace_apps,
     marketplace_local,
+    marketplace_public,
     marketplace_sources,
     mcp,
     mcp_oauth,
@@ -209,6 +210,28 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin")
+
+        # Anonymous public marketplace browse is meant to be consumable from
+        # any origin (embeds, third-party sites, the desktop webview). It is
+        # read-only and unauthenticated, so a wildcard origin is safe here.
+        # Credentials are intentionally NOT allowed (incompatible with "*").
+        if request.url.path.startswith("/api/marketplace/public"):
+            if request.method == "OPTIONS":
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Accept, Origin",
+                        "Access-Control-Max-Age": "600",
+                    },
+                )
+            public_response = await call_next(request)
+            public_response.headers["Access-Control-Allow-Origin"] = "*"
+            public_response.headers["Access-Control-Expose-Headers"] = (
+                "Content-Length, X-Total-Count, ETag"
+            )
+            return public_response
 
         # Get app domain from settings (e.g., "studio-demo.tesslate.com")
         app_domain = settings.app_domain
@@ -1314,11 +1337,12 @@ app.include_router(workspace_attach.router, prefix="/api", tags=["workspace-atta
 app.include_router(sidebar.router)  # prefix set on the router itself (/api/sidebar)
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
-app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
-# Federated marketplace source CRUD (Wave 5). Mounted before the wildcard
-# /api/marketplace router so /api/marketplace/sources resolves to this
-# router rather than the legacy bare-slug fall-through.
+# Anonymous marketplace browse + the federated source CRUD are both mounted
+# before the wildcard /api/marketplace router so their specific paths resolve
+# to them rather than the legacy bare-slug fall-through.
+app.include_router(marketplace_public.router)  # /api/marketplace/public (no auth)
 app.include_router(marketplace_sources.router)  # /api/marketplace/sources
+app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
 app.include_router(creators.router)  # /api/creators - already prefixed in router
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(admin_spend.router, tags=["admin-spend"])  # /api/admin/spend
