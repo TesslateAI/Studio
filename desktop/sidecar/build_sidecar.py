@@ -72,7 +72,13 @@ def _run_pyinstaller(spec: Path) -> Path:
     ]
     print("running:", " ".join(cmd))
     subprocess.run(cmd, check=True)
-    return _HERE / "dist" / "tesslate-studio-orchestrator"
+    base = _HERE / "dist" / "tesslate-studio-orchestrator"
+    # PyInstaller appends `.exe` on Windows; Tauri's externalBin also
+    # expects the trailing `.exe`, so carry the suffix through both
+    # _run_pyinstaller and _install_into_tauri on Windows.
+    if platform.system().lower() == "windows":
+        return base.with_suffix(".exe")
+    return base
 
 
 def _install_into_tauri(executable: Path, target_triple: str) -> Path:
@@ -89,7 +95,10 @@ def _install_into_tauri(executable: Path, target_triple: str) -> Path:
         shutil.rmtree(legacy_dir)
     if not executable.exists():
         raise SystemExit(f"sidecar executable not produced at {executable}")
-    target_exe = _TAURI_BINARIES / f"tesslate-studio-orchestrator-{target_triple}"
+    target_name = f"tesslate-studio-orchestrator-{target_triple}"
+    if platform.system().lower() == "windows":
+        target_name += ".exe"
+    target_exe = _TAURI_BINARIES / target_name
     if target_exe.exists() or target_exe.is_symlink():
         target_exe.unlink()
     shutil.copy2(executable, target_exe)

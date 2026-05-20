@@ -26,6 +26,27 @@ from pathlib import Path
 READY_LINE_PREFIX = "TESSLATE_READY"
 
 
+def _force_utf8_stdio() -> None:
+    """Reconfigure stdio to UTF-8 so non-ASCII output never crashes the sidecar.
+
+    Windows defaults stdout/stderr to the legacy ANSI code page (cp1252),
+    so any ``print()`` of an emoji or non-Latin-1 character anywhere in the
+    orchestrator raises ``UnicodeEncodeError`` and kills the frozen binary.
+    Forcing UTF-8 here — before any ``app.*`` import runs module-level
+    prints — fixes every current and future Unicode print in one place.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError):
+            # Stream is None (windowed build) or not reconfigurable — the
+            # `errors` fallback below still protects the ready-line write.
+            pass
+
+
+_force_utf8_stdio()
+
+
 def format_ready_line(port: int, bearer: str) -> str:
     """Format the stdout handshake line read by the Tauri supervisor."""
     return f"{READY_LINE_PREFIX} {port} {bearer}"
@@ -136,13 +157,69 @@ def _alembic_dir() -> Path:
 
 
 def _run_migrations_in_process() -> None:
-    """Drive alembic upgrade head without shelling out."""
+    """Drive alembic upgrade head without shelling out.
+
+    Recovers from a half-built schema left by a previous crashed boot: if
+    ``upgrade head`` fails with a `table already exists` SQLite error AND
+    ``alembic_version`` is empty (no migration ever committed), we drop the
+    orphan tables and retry. This keeps the desktop app usable after the
+    first run is interrupted by a crash/Ctrl-C/network blip instead of
+    requiring the user to manually wipe ``$OPENSAIL_HOME``.
+    """
     from alembic import command
     from alembic.config import Config
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import OperationalError
 
     cfg = Config()
     cfg.set_main_option("script_location", str(_alembic_dir()))
-    cfg.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+    db_url = os.environ["DATABASE_URL"]
+    cfg.set_main_option("sqlalchemy.url", db_url)
+
+    try:
+        command.upgrade(cfg, "head")
+        return
+    except OperationalError as exc:
+        if "already exists" not in str(exc).lower():
+            raise
+        if not db_url.startswith(("sqlite", "sqlite+aiosqlite")):
+            # Recovery only applies to the desktop SQLite path. Postgres etc.
+            # surface the real error so an operator can investigate.
+            raise
+
+    sync_url = db_url.replace("sqlite+aiosqlite", "sqlite")
+    engine = create_engine(sync_url)
+    try:
+        with engine.begin() as conn:
+            version_row = conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='alembic_version'"
+            ).first()
+            if version_row is not None:
+                committed = conn.exec_driver_sql(
+                    "SELECT version_num FROM alembic_version LIMIT 1"
+                ).first()
+                if committed is not None:
+                    # User data exists at a real version — schema mismatch is
+                    # a real bug, not a first-run crash. Surface it loudly.
+                    raise SystemExit(
+                        f"sidecar: database at version {committed[0]!r} but "
+                        "the bundled schema cannot apply on top of it. "
+                        "Restore from backup or wipe $OPENSAIL_HOME and "
+                        "relaunch."
+                    )
+            sys.stderr.write(
+                "sidecar: detected partial schema from a prior crashed boot; "
+                "resetting and re-running migrations.\n"
+            )
+            for (tbl,) in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            ).all():
+                conn.exec_driver_sql(f'DROP TABLE IF EXISTS "{tbl}"')
+    finally:
+        engine.dispose()
+
     command.upgrade(cfg, "head")
 
 

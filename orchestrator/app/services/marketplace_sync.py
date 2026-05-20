@@ -43,6 +43,7 @@ from datetime import UTC, datetime
 from typing import Any, Final
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -397,7 +398,15 @@ class MarketplaceSyncWorker:
                     )[:1000]
                 else:
                     error_text = str(exc)[:1000]
-                logger.warning("marketplace_sync: source %s failed: %s", handle, error_text)
+                # Transport failures (DNS, connect, timeout) are routine when
+                # offline or before initial pairing — log at INFO so the
+                # desktop tray doesn't surface them as scary warnings.
+                # Semantic failures (auth, malformed, hub-id drift) stay at
+                # WARNING because the user needs to act on them.
+                cause = getattr(exc, "__cause__", None)
+                is_transport = isinstance(cause, (httpx.TransportError, httpx.TimeoutException))
+                log_at = logger.info if is_transport and not is_hub_id_drift else logger.warning
+                log_at("marketplace_sync: source %s failed: %s", handle, error_text)
                 # Roll back any partial changes from this batch.
                 await session.rollback()
                 # Re-fetch source for a clean update tx.
