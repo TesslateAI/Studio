@@ -12,7 +12,7 @@
   "runtime": {
     "tenancy_model": "per_install",
     "state_model": "per_install_volume",
-    "scaling": {"min_replicas": 1, "max_replicas": 1, "target_concurrency": 4, "idle_timeout_seconds": 600},
+    "scaling": {"min_replicas": 1, "max_replicas": 1, "target_concurrency": 4, "idle_timeout_seconds": 172800},
     "storage": {"write_scope": ["/app/data"]}
   },
   "billing": {

@@ -16,7 +16,7 @@
       "min_replicas": 1,
       "max_replicas": 1,
       "target_concurrency": 4,
-      "idle_timeout_seconds": 600
+      "idle_timeout_seconds": 172800
     },
     "storage": {
       "write_scope": [

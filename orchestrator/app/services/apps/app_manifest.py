@@ -256,7 +256,7 @@ class RuntimeScalingSpec(_StrictModel):
     min_replicas: int = 0
     max_replicas: int = 1
     target_concurrency: int = 10
-    idle_timeout_seconds: int = 600
+    idle_timeout_seconds: int = 172800  # 2 days
 
 
 class RuntimeStorageSpec(_StrictModel):

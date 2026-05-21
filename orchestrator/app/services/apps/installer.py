@@ -92,9 +92,7 @@ class IncompatibleAppError(InstallError):
     projection layer's ``ManifestInvalid``). Empty list for other causes.
     """
 
-    def __init__(
-        self, message: str, errors: list[dict[str, Any]] | None = None
-    ) -> None:
+    def __init__(self, message: str, errors: list[dict[str, Any]] | None = None) -> None:
         super().__init__(message)
         self.errors: list[dict[str, Any]] = errors or []
 
@@ -292,7 +290,7 @@ def _extract_runtime_contract(manifest_json: dict[str, Any]) -> _RuntimeContract
         min_replicas=min_r,
         max_replicas=max_r,
         desired_replicas=desired_r,
-        idle_timeout_seconds=int(scaling.get("idle_timeout_seconds", 600)),
+        idle_timeout_seconds=int(scaling.get("idle_timeout_seconds", 172800)),
         concurrency_target=int(
             scaling.get("target_concurrency", scaling.get("concurrency_target", 10))
         ),

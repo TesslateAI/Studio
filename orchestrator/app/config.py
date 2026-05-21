@@ -512,7 +512,9 @@ class Settings(BaseSettings):
     k8s_snapshot_ready_timeout_seconds: int = (
         300  # EBS/CSI snapshot readiness can exceed 90s under load; keep hibernation reliable
     )
-    k8s_hibernation_idle_minutes: int = 10  # Hibernate pods after X minutes of inactivity
+    k8s_hibernation_idle_minutes: int = (
+        2880  # Hibernate pods after X minutes of inactivity (2 days)
+    )
 
     # ==========================================================================
     # Kubernetes Storage Settings
@@ -696,7 +698,7 @@ class Settings(BaseSettings):
         2  # How often to run cleanup (default: every 2 minutes)
     )
     container_cleanup_tier1_idle_minutes: int = (
-        15  # Tier 1: Pause containers idle for X minutes (default: 15)
+        2880  # Tier 1: Pause containers idle for X minutes (default: 2880 = 2 days)
     )
     container_cleanup_tier2_paused_hours: int = (
         24  # Tier 2: Remove containers paused for X hours (default: 24)

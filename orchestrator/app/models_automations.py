@@ -976,7 +976,7 @@ class AppRuntimeDeployment(Base):
     min_replicas = Column(Integer, nullable=False, default=0, server_default="0")
     max_replicas = Column(Integer, nullable=False, default=1, server_default="1")
     desired_replicas = Column(Integer, nullable=False, default=1, server_default="1")
-    idle_timeout_seconds = Column(Integer, nullable=False, default=600, server_default="600")
+    idle_timeout_seconds = Column(Integer, nullable=False, default=172800, server_default="172800")
     concurrency_target = Column(Integer, nullable=False, default=10, server_default="10")
 
     # HPA config, custom metrics, and other non-CHECK-enforced scaling

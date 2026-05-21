@@ -43,7 +43,7 @@
             "min_replicas": {"type": "integer", "minimum": 0, "default": 0},
             "max_replicas": {"type": "integer", "minimum": 0, "default": 1},
             "target_concurrency": {"type": "integer", "minimum": 1, "default": 10},
-            "idle_timeout_seconds": {"type": "integer", "minimum": 0, "default": 600}
+            "idle_timeout_seconds": {"type": "integer", "minimum": 0, "default": 172800}
           }
         },
         "storage": {

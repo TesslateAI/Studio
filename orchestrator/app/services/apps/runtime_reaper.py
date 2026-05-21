@@ -72,7 +72,7 @@ _NON_TERMINAL_RUN_STATUSES = frozenset(
     }
 )
 
-_DEFAULT_IDLE_TIMEOUT_SECONDS = 600
+_DEFAULT_IDLE_TIMEOUT_SECONDS = 172800  # 2 days
 _GRACE_POLL_INTERVAL_SECONDS = 5
 _GRACE_DEADLINE_SECONDS = 60
 
@@ -123,9 +123,7 @@ async def _select_candidates(db: AsyncSession) -> list[AppRuntimeDeployment]:
     return list((await db.execute(stmt)).scalars().all())
 
 
-async def _active_runs_for_deployment(
-    db: AsyncSession, deployment_id: UUID
-) -> list[AutomationRun]:
+async def _active_runs_for_deployment(db: AsyncSession, deployment_id: UUID) -> list[AutomationRun]:
     """Find non-terminal AutomationRun rows that reference this deployment.
 
     The join goes through :class:`InvocationSubject`:
@@ -177,9 +175,7 @@ def _compute_last_activity(
     return max(candidates)
 
 
-def _idle_timeout_for(
-    deployment: AppRuntimeDeployment, default_seconds: int
-) -> int:
+def _idle_timeout_for(deployment: AppRuntimeDeployment, default_seconds: int) -> int:
     """Per-deployment idle timeout with a sane fallback."""
     if deployment.idle_timeout_seconds and deployment.idle_timeout_seconds > 0:
         return int(deployment.idle_timeout_seconds)
@@ -375,9 +371,7 @@ async def reap_idle_runtimes(
 
         # No recorded activity at all → safe to reap (the deployment has
         # been sitting at desired_replicas>0 with nothing happening).
-        if last_activity is not None and (now - last_activity) <= timedelta(
-            seconds=idle_timeout
-        ):
+        if last_activity is not None and (now - last_activity) <= timedelta(seconds=idle_timeout):
             continue
 
         namespace = deployment.namespace
