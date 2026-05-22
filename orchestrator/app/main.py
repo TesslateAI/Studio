@@ -233,6 +233,25 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             )
             return public_response
 
+        # The public Workspace Data API is called cross-origin from deployed
+        # user frontends (Vercel/Cloudflare) on arbitrary domains. Auth is a
+        # per-project API key in the Authorization header, so a wildcard
+        # origin is safe — credentials/cookies are intentionally NOT allowed.
+        if request.url.path.startswith("/api/data/"):
+            if request.method == "OPTIONS":
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin",
+                        "Access-Control-Max-Age": "600",
+                    },
+                )
+            data_response = await call_next(request)
+            data_response.headers["Access-Control-Allow-Origin"] = "*"
+            return data_response
+
         # Get app domain from settings (e.g., "studio-demo.tesslate.com")
         app_domain = settings.app_domain
         # Escape dots for regex pattern matching
@@ -1408,6 +1427,12 @@ app.include_router(feature_flags.router, tags=["feature-flags"])  # /api/feature
 app.include_router(
     version.router, prefix="/api", tags=["version"]
 )  # /api/version - Deployment metadata + compat check
+
+# --- Workspace Data Store (built-in per-project KV/document database) -------
+from .routers import workspace_data as _workspace_data  # noqa: E402
+
+app.include_router(_workspace_data.mgmt_router)  # /api/workspace-data - data store mgmt
+app.include_router(_workspace_data.data_router)  # /api/data/v1 - public Data API (key auth)
 
 # --- Tesslate Apps (Waves 1-3) ---------------------------------------------
 app.include_router(

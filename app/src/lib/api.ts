@@ -1087,13 +1087,7 @@ export const chatApi = {
   },
   sendApprovalResponse: async (
     approvalId: string,
-    response:
-      | 'allow_once'
-      | 'allow_all'
-      | 'stop'
-      | 'publish_and_activate'
-      | 'save_draft'
-      | 'cancel'
+    response: 'allow_once' | 'allow_all' | 'stop' | 'publish_and_activate' | 'save_draft' | 'cancel'
   ): Promise<void> => {
     await api.post('/api/chat/agent/approval', {
       approval_id: approvalId,
@@ -5672,6 +5666,125 @@ export const desktopPairApi = {
   }): Promise<PairCompleteResponse> {
     const response = await api.post('/api/desktop/pair/complete', body);
     return response.data;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Workspace Data Store — built-in per-project KV/document database.
+// ---------------------------------------------------------------------------
+export interface WorkspaceCollection {
+  id: string;
+  project_id: string;
+  name: string;
+  public_insert: boolean;
+  public_read: boolean;
+  public_update: boolean;
+  public_delete: boolean;
+  record_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WorkspaceRecord {
+  id: string;
+  collection_id: string;
+  data: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WorkspaceRecordPage {
+  records: WorkspaceRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface WorkspaceDataKey {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: string;
+  key_prefix: string;
+  is_active: boolean;
+  last_used_at: string | null;
+  created_at: string | null;
+  key?: string | null;
+}
+
+export interface WorkspaceDataUsage {
+  collection_count: number;
+  record_count: number;
+  max_collections: number;
+  max_records: number;
+  max_record_bytes: number;
+}
+
+type CollectionFlags = Pick<
+  WorkspaceCollection,
+  'public_insert' | 'public_read' | 'public_update' | 'public_delete'
+>;
+
+export const workspaceDataApi = {
+  async listCollections(projectSlug: string): Promise<WorkspaceCollection[]> {
+    const r = await api.get(`/api/workspace-data/projects/${projectSlug}/collections`);
+    return r.data;
+  },
+  async createCollection(
+    projectSlug: string,
+    body: { name: string } & Partial<CollectionFlags>
+  ): Promise<WorkspaceCollection> {
+    const r = await api.post(`/api/workspace-data/projects/${projectSlug}/collections`, body);
+    return r.data;
+  },
+  async updateCollection(
+    projectSlug: string,
+    collectionId: string,
+    body: Partial<CollectionFlags>
+  ): Promise<WorkspaceCollection> {
+    const r = await api.patch(
+      `/api/workspace-data/projects/${projectSlug}/collections/${collectionId}`,
+      body
+    );
+    return r.data;
+  },
+  async deleteCollection(projectSlug: string, collectionId: string): Promise<void> {
+    await api.delete(`/api/workspace-data/projects/${projectSlug}/collections/${collectionId}`);
+  },
+  async listRecords(
+    projectSlug: string,
+    collectionId: string,
+    limit = 50,
+    offset = 0
+  ): Promise<WorkspaceRecordPage> {
+    const r = await api.get(
+      `/api/workspace-data/projects/${projectSlug}/collections/${collectionId}/records`,
+      { params: { limit, offset } }
+    );
+    return r.data;
+  },
+  async deleteRecord(projectSlug: string, collectionId: string, recordId: string): Promise<void> {
+    await api.delete(
+      `/api/workspace-data/projects/${projectSlug}/collections/${collectionId}/records/${recordId}`
+    );
+  },
+  async listKeys(projectSlug: string): Promise<WorkspaceDataKey[]> {
+    const r = await api.get(`/api/workspace-data/projects/${projectSlug}/keys`);
+    return r.data;
+  },
+  async createKey(
+    projectSlug: string,
+    body: { name: string; kind: string }
+  ): Promise<WorkspaceDataKey> {
+    const r = await api.post(`/api/workspace-data/projects/${projectSlug}/keys`, body);
+    return r.data;
+  },
+  async revokeKey(projectSlug: string, keyId: string): Promise<void> {
+    await api.delete(`/api/workspace-data/projects/${projectSlug}/keys/${keyId}`);
+  },
+  async getUsage(projectSlug: string): Promise<WorkspaceDataUsage> {
+    const r = await api.get(`/api/workspace-data/projects/${projectSlug}/usage`);
+    return r.data;
   },
 };
 

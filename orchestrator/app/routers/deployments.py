@@ -302,6 +302,46 @@ async def _execute_provider_deploy(
 # ============================================================================
 
 
+async def _inject_workspace_data_env(
+    db: AsyncSession, project, env_vars: dict[str, str], user_id: UUID
+) -> dict[str, str]:
+    """Merge the Workspace Data Store connection into deploy env vars.
+
+    When the project has a built-in data store (>=1 collection), this mints a
+    fresh anon key and adds the Data API URL + key under the ``OPENSAIL_*``,
+    ``VITE_OPENSAIL_*`` and ``NEXT_PUBLIC_OPENSAIL_*`` names so a deployed
+    frontend can read/write it without any manual wiring. Caller-supplied env
+    vars always win. Fully guarded — a failure here never blocks a deploy.
+    """
+    try:
+        from ..config import get_settings
+        from ..services import workspace_data as wd
+
+        if not await wd.list_collections(db, project.id):
+            return env_vars or {}  # no data store — nothing to inject
+
+        domain = (get_settings().app_domain or "").strip()
+        if not domain:
+            return env_vars or {}
+        scheme = "http" if "localhost" in domain else "https"
+        api_url = f"{scheme}://{domain}/api/data/v1"
+        _key, raw = await wd.rotate_deploy_key(db, project.id, user_id)
+
+        injected: dict[str, str] = {}
+        for prefix in ("OPENSAIL", "VITE_OPENSAIL", "NEXT_PUBLIC_OPENSAIL"):
+            injected[f"{prefix}_DATA_API_URL"] = api_url
+            injected[f"{prefix}_DATA_KEY"] = raw
+        # Caller-supplied env vars take precedence over injected defaults.
+        return {**injected, **(env_vars or {})}
+    except Exception:
+        logger.warning(
+            "Workspace Data env injection skipped for project %s",
+            getattr(project, "id", "?"),
+            exc_info=True,
+        )
+        return env_vars or {}
+
+
 @router.post(
     "/{project_slug}/deploy",
     response_model=DeploymentResponse,
@@ -341,6 +381,12 @@ async def deploy_project(
 
         project, _role = await get_project_with_access(
             db, project_slug, current_user.id, Permission.DEPLOYMENT_CREATE
+        )
+
+        # Inject the Workspace Data Store connection (Data API URL + a fresh
+        # anon key) so the deployed frontend can reach the built-in database.
+        request.env_vars = await _inject_workspace_data_env(
+            db, project, request.env_vars, current_user.id
         )
 
         # 2. Fetch credentials

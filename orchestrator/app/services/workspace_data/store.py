@@ -1,0 +1,325 @@
+"""Workspace Data Store — collection + record CRUD.
+
+Pure data-access layer over the ``WorkspaceCollection`` / ``WorkspaceRecord``
+models. Used by *both* the HTTP routers and the agent tool, so every access
+rule, validation check and quota lives here in exactly one place.
+
+All functions are dialect-agnostic (Postgres + desktop SQLite).
+"""
+
+import json
+import re
+from uuid import UUID
+
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ...models_workspace_data import WorkspaceCollection, WorkspaceRecord
+
+# --- Limits -----------------------------------------------------------------
+# v1 module constants. Named + centralised so they can be promoted to
+# Settings (per-env / per-tier tuning) without touching call sites.
+MAX_COLLECTIONS_PER_PROJECT = 50
+MAX_RECORDS_PER_PROJECT = 10_000
+MAX_RECORD_BYTES = 64 * 1024
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
+
+_COLLECTION_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+
+
+# --- Errors -----------------------------------------------------------------
+class WorkspaceDataError(Exception):
+    """Base class for workspace-data store errors."""
+
+
+class CollectionNotFoundError(WorkspaceDataError):
+    """The named/identified collection does not exist in this project."""
+
+
+class CollectionExistsError(WorkspaceDataError):
+    """A collection with this name already exists in the project."""
+
+
+class RecordNotFoundError(WorkspaceDataError):
+    """The identified record does not exist in this collection."""
+
+
+class InvalidNameError(WorkspaceDataError):
+    """Collection name failed validation."""
+
+
+class InvalidRecordError(WorkspaceDataError):
+    """Record payload is not a valid / sized JSON object."""
+
+
+class QuotaExceededError(WorkspaceDataError):
+    """A per-project collection or record limit has been reached."""
+
+
+# --- Validation helpers -----------------------------------------------------
+def _maybe_uuid(value: object) -> UUID | None:
+    """Best-effort coerce a value to UUID; ``None`` if it is not one."""
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def validate_collection_name(name: str) -> str:
+    """Normalise + validate a collection name, or raise ``InvalidNameError``."""
+    cleaned = (name or "").strip()
+    if not _COLLECTION_NAME_RE.match(cleaned):
+        raise InvalidNameError(
+            "Collection name must be 1-64 characters, start with a letter or "
+            "digit, and contain only letters, digits, '-' and '_'."
+        )
+    return cleaned
+
+
+def validate_record_data(data: object) -> dict:
+    """Validate a record payload is a JSON object within the size cap."""
+    if not isinstance(data, dict):
+        raise InvalidRecordError("Record data must be a JSON object.")
+    try:
+        encoded = json.dumps(data)
+    except (TypeError, ValueError) as exc:
+        raise InvalidRecordError(f"Record data is not JSON-serialisable: {exc}") from exc
+    if len(encoded.encode("utf-8")) > MAX_RECORD_BYTES:
+        raise InvalidRecordError(f"Record exceeds the {MAX_RECORD_BYTES // 1024} KB size limit.")
+    return data
+
+
+# --- Collections ------------------------------------------------------------
+async def list_collections(db: AsyncSession, project_id: UUID) -> list[WorkspaceCollection]:
+    """All collections in a project, ordered by name."""
+    result = await db.execute(
+        select(WorkspaceCollection)
+        .where(WorkspaceCollection.project_id == project_id)
+        .order_by(WorkspaceCollection.name)
+    )
+    return list(result.scalars().all())
+
+
+async def get_collection(
+    db: AsyncSession, project_id: UUID, ref: object
+) -> WorkspaceCollection | None:
+    """Resolve a collection within a project by UUID or by name."""
+    query = select(WorkspaceCollection).where(WorkspaceCollection.project_id == project_id)
+    coll_id = _maybe_uuid(ref)
+    if coll_id is not None:
+        query = query.where(WorkspaceCollection.id == coll_id)
+    else:
+        query = query.where(WorkspaceCollection.name == str(ref))
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def require_collection(
+    db: AsyncSession, project_id: UUID, ref: object
+) -> WorkspaceCollection:
+    """Like :func:`get_collection` but raises ``CollectionNotFoundError``."""
+    coll = await get_collection(db, project_id, ref)
+    if coll is None:
+        raise CollectionNotFoundError(f"Collection '{ref}' not found.")
+    return coll
+
+
+async def create_collection(
+    db: AsyncSession,
+    project_id: UUID,
+    name: str,
+    *,
+    public_insert: bool = True,
+    public_read: bool = False,
+    public_update: bool = False,
+    public_delete: bool = False,
+) -> WorkspaceCollection:
+    """Create a new collection. Raises on bad name, duplicate, or quota."""
+    name = validate_collection_name(name)
+    if await get_collection(db, project_id, name) is not None:
+        raise CollectionExistsError(f"Collection '{name}' already exists.")
+    if await _count_collections(db, project_id) >= MAX_COLLECTIONS_PER_PROJECT:
+        raise QuotaExceededError(
+            f"Project has reached the {MAX_COLLECTIONS_PER_PROJECT}-collection limit."
+        )
+    coll = WorkspaceCollection(
+        project_id=project_id,
+        name=name,
+        public_insert=public_insert,
+        public_read=public_read,
+        public_update=public_update,
+        public_delete=public_delete,
+    )
+    db.add(coll)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        # A concurrent creator won the race for this (project_id, name) —
+        # the uq_workspace_collections_project_name constraint caught it.
+        await db.rollback()
+        raise CollectionExistsError(f"Collection '{name}' already exists.") from exc
+    await db.refresh(coll)
+    return coll
+
+
+async def update_collection(
+    db: AsyncSession, collection: WorkspaceCollection, **flags: bool | None
+) -> WorkspaceCollection:
+    """Update a collection's public access flags (only provided keys)."""
+    for field in ("public_insert", "public_read", "public_update", "public_delete"):
+        value = flags.get(field)
+        if value is not None:
+            setattr(collection, field, bool(value))
+    await db.commit()
+    await db.refresh(collection)
+    return collection
+
+
+async def delete_collection(db: AsyncSession, collection: WorkspaceCollection) -> None:
+    """Delete a collection and all of its records.
+
+    Records are bulk-deleted explicitly so the behaviour is identical on
+    Postgres and SQLite regardless of the ``foreign_keys`` pragma, and to
+    avoid an async-unsafe lazy load of the relationship on parent delete.
+    """
+    await db.execute(
+        sa_delete(WorkspaceRecord).where(WorkspaceRecord.collection_id == collection.id)
+    )
+    await db.delete(collection)
+    await db.commit()
+
+
+# --- Records ----------------------------------------------------------------
+async def insert_record(
+    db: AsyncSession, collection: WorkspaceCollection, data: object
+) -> WorkspaceRecord:
+    """Insert a JSON document into a collection. Raises on bad data or quota."""
+    data = validate_record_data(data)
+    if await project_record_count(db, collection.project_id) >= MAX_RECORDS_PER_PROJECT:
+        raise QuotaExceededError(f"Project has reached the {MAX_RECORDS_PER_PROJECT}-record limit.")
+    record = WorkspaceRecord(
+        collection_id=collection.id,
+        project_id=collection.project_id,
+        data=data,
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+async def list_records(
+    db: AsyncSession,
+    collection_id: UUID,
+    *,
+    limit: int = DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+) -> tuple[list[WorkspaceRecord], int]:
+    """Return ``(page, total)`` — records newest-first, paginated.
+
+    ``limit``/``offset`` are clamped, not rejected: ``None`` means "use the
+    default", any supplied integer is clamped into ``[1, MAX_PAGE_SIZE]`` /
+    ``[0, ∞)`` — so ``limit=0`` yields one row rather than the default page.
+    """
+    limit = DEFAULT_PAGE_SIZE if limit is None else int(limit)
+    limit = max(1, min(limit, MAX_PAGE_SIZE))
+    offset = max(0, 0 if offset is None else int(offset))
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(WorkspaceRecord)
+            .where(WorkspaceRecord.collection_id == collection_id)
+        )
+    ).scalar_one()
+    result = await db.execute(
+        select(WorkspaceRecord)
+        .where(WorkspaceRecord.collection_id == collection_id)
+        .order_by(WorkspaceRecord.created_at.desc(), WorkspaceRecord.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(result.scalars().all()), int(total)
+
+
+async def get_record(
+    db: AsyncSession, collection_id: UUID, record_id: object
+) -> WorkspaceRecord | None:
+    """Fetch one record by id, scoped to its collection."""
+    rec_id = _maybe_uuid(record_id)
+    if rec_id is None:
+        return None
+    result = await db.execute(
+        select(WorkspaceRecord).where(
+            WorkspaceRecord.collection_id == collection_id,
+            WorkspaceRecord.id == rec_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def require_record(
+    db: AsyncSession, collection_id: UUID, record_id: object
+) -> WorkspaceRecord:
+    """Like :func:`get_record` but raises ``RecordNotFoundError``."""
+    rec = await get_record(db, collection_id, record_id)
+    if rec is None:
+        raise RecordNotFoundError(f"Record '{record_id}' not found.")
+    return rec
+
+
+async def update_record(db: AsyncSession, record: WorkspaceRecord, data: object) -> WorkspaceRecord:
+    """Replace a record's JSON document."""
+    record.data = validate_record_data(data)
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+async def delete_record(db: AsyncSession, record: WorkspaceRecord) -> None:
+    """Delete a single record."""
+    await db.delete(record)
+    await db.commit()
+
+
+# --- Counts / quota ---------------------------------------------------------
+async def _count_collections(db: AsyncSession, project_id: UUID) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(WorkspaceCollection)
+                .where(WorkspaceCollection.project_id == project_id)
+            )
+        ).scalar_one()
+    )
+
+
+async def collection_record_count(db: AsyncSession, collection_id: UUID) -> int:
+    """Number of records in a single collection."""
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(WorkspaceRecord)
+                .where(WorkspaceRecord.collection_id == collection_id)
+            )
+        ).scalar_one()
+    )
+
+
+async def project_record_count(db: AsyncSession, project_id: UUID) -> int:
+    """Total records across all collections in a project (quota check)."""
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(WorkspaceRecord)
+                .where(WorkspaceRecord.project_id == project_id)
+            )
+        ).scalar_one()
+    )

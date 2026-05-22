@@ -14,3 +14,4 @@ export { ConfigPanel } from './ConfigPanel';
 export type { ConfigPanelProps } from './ConfigPanel';
 export { ConfigCard } from './ConfigCard';
 export type { ConfigCardProps } from './ConfigCard';
+export { DataPanel } from './DataPanel';

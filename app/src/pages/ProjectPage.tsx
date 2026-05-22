@@ -20,6 +20,7 @@ import {
   BookOpen,
   Gear,
   SlidersHorizontal,
+  Database,
 } from '@phosphor-icons/react';
 import { Tooltip } from '../components/ui/Tooltip';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
@@ -41,16 +42,14 @@ import {
   RepositoryPanel,
   NodeConfigPanel,
   ConfigPanel,
+  DataPanel,
 } from '../components/panels';
 import {
   NodeConfigPendingProvider,
   useNodeConfigPending,
 } from '../contexts/NodeConfigPendingContext';
 import { AgentRunsProvider } from '../contexts/AgentRunsProvider';
-import {
-  useBuilderShell,
-  useRegisterBuilderSection,
-} from '../contexts/BuilderShellContext';
+import { useBuilderShell, useRegisterBuilderSection } from '../contexts/BuilderShellContext';
 import { nodeConfigEvents } from '../utils/nodeConfigEvents';
 import { nodeConfigApi } from '../lib/api';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
@@ -94,6 +93,7 @@ const TOOL_LABELS: Record<ToolType, string> = {
   repository: 'Repository',
   'node-config': 'Configure',
   config: 'Config',
+  data: 'Data',
   volume: 'Snapshots',
   notes: 'Notes',
   settings: 'Settings',
@@ -1544,6 +1544,7 @@ function ProjectPageInner() {
     },
     { id: 'repository', icon: <GithubLogo size={14} weight="bold" />, hotkey: '⌘8' },
     { id: 'config', icon: <SlidersHorizontal size={14} weight="bold" />, hotkey: '⌘⇧K' },
+    { id: 'data', icon: <Database size={14} weight="bold" />, hotkey: '' },
     { id: 'volume', icon: <Clock size={14} weight="bold" />, hotkey: '' },
     { id: 'notes', icon: <BookOpen size={14} weight="bold" />, hotkey: '⌘⇧N' },
     {
@@ -1620,8 +1621,9 @@ function ProjectPageInner() {
   // row we navigate here with `state: { sessionId }`. ChatContainer seeds
   // its currentChatId from this and re-syncs whenever it changes (so
   // clicking another chat in the same project swaps sessions in place).
-  const initialChatIdFromRoute =
-    (location.state as Record<string, unknown> | null)?.sessionId as string | undefined;
+  const initialChatIdFromRoute = (location.state as Record<string, unknown> | null)?.sessionId as
+    | string
+    | undefined;
 
   const chatProps = {
     projectId: project?.id as number,
@@ -1773,6 +1775,14 @@ function ProjectPageInner() {
     config: (_tab: TabInstance, _idx: number) =>
       project?.id ? (
         <ConfigPanel projectId={project.id as string} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <p className="text-xs text-[var(--text-muted)]">Loading project…</p>
+        </div>
+      ),
+    data: (_tab: TabInstance, _idx: number) =>
+      slug ? (
+        <DataPanel projectSlug={slug} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <p className="text-xs text-[var(--text-muted)]">Loading project…</p>
@@ -2173,8 +2183,7 @@ function ProjectPageInner() {
             toast.success('Deployment started successfully!');
           }}
           defaultProvider={
-            deployModalProvider ??
-            (container?.deployment_provider as string | undefined)
+            deployModalProvider ?? (container?.deployment_provider as string | undefined)
           }
         />
       )}

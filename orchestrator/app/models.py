@@ -3363,3 +3363,10 @@ from .models_workflows import (  # noqa: F401, E402
     WorkflowProposal,
     WorkflowVersion,
 )
+
+# Workspace Data Store — built-in per-project KV/document database.
+from .models_workspace_data import (  # noqa: F401, E402
+    WorkspaceCollection,
+    WorkspaceDataKey,
+    WorkspaceRecord,
+)
