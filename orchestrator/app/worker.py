@@ -1605,6 +1605,38 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                     lines.append(
                                         "    data_resources: " + ", ".join(d.name for d in drs)
                                     )
+
+                                # Bridge to the project's workspace-data store
+                                # so the agent knows it can READ + ANALYZE what
+                                # this app has stored, not just invoke its
+                                # actions. Apps installed in a project share
+                                # the project's OPENSAIL_DATA_* env contract
+                                # via the auto-inject path — the data they
+                                # write is queryable via the workspace_data
+                                # tool. Surfaces collection names + counts
+                                # only when the project actually has any.
+                                try:
+                                    from .services import workspace_data as wd
+
+                                    coll_rows = await wd.list_collections(db, inst.project_id)
+                                    if coll_rows:
+                                        coll_summaries: list[str] = []
+                                        for c in coll_rows[:10]:
+                                            n = await wd.collection_record_count(db, c.id)
+                                            coll_summaries.append(f"{c.name} ({n})")
+                                        lines.append(
+                                            "    workspace_data collections "
+                                            "(this app shares the project's "
+                                            "built-in data store — use the "
+                                            "workspace_data tool's summarize / "
+                                            "schema / aggregate / query actions "
+                                            "to read or analyze): " + ", ".join(coll_summaries)
+                                        )
+                                except Exception as wd_err:
+                                    logger.debug(
+                                        "[WORKER] @app data-store hint skipped: %s",
+                                        wd_err,
+                                    )
                                 sections.append("\n".join(lines))
 
                     if sections:

@@ -47,6 +47,52 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## Reading + writing the project's Workspace Data Store
+
+Every Tesslate App installed into a project automatically inherits the
+project's built-in Workspace Data Store env-var contract. The platform
+auto-injects these on container start AND on every external deploy:
+
+| Runtime           | URL var                  | Key var               |
+| ----------------- | ------------------------ | --------------------- |
+| Server-side       | `OPENSAIL_DATA_API_URL`  | `OPENSAIL_DATA_KEY`   |
+
+(Vite + Next.js prefixed variants — `VITE_*` / `NEXT_PUBLIC_*` — are
+also set for browser-side code.)
+
+The key is a stable per-project HMAC-derived anon key — it survives
+container restarts and deploys.
+
+HTTP shape (no `/collections/` prefix, no `/records` suffix):
+
+```
+POST   ${URL}/{collection}                 JSON body  -> 201 {id, data, ...}
+GET    ${URL}/{collection}?limit=&offset=  -> 200 {records, total, limit, offset}
+GET    ${URL}/{collection}/{record_id}
+PATCH  ${URL}/{collection}/{record_id}     JSON body  (replaces document)
+DELETE ${URL}/{collection}/{record_id}     -> 204
+```
+
+Minimal Python client:
+
+```python
+import os, httpx
+URL = os.environ["OPENSAIL_DATA_API_URL"]
+KEY = os.environ["OPENSAIL_DATA_KEY"]
+_c = httpx.Client(headers={"Authorization": f"Bearer {KEY}"}, timeout=30.0)
+
+def insert(coll: str, doc: dict) -> dict:
+    r = _c.post(f"{URL}/{coll}", json=doc); r.raise_for_status(); return r.json()
+
+def list_records(coll: str, *, limit: int = 50) -> dict:
+    r = _c.get(f"{URL}/{coll}", params={"limit": limit}); r.raise_for_status(); return r.json()
+```
+
+The same data your app writes is queryable by the user's Tesslate Agent
+via the `workspace_data` tool — `@app:<your-slug>` in chat surfaces the
+project's collections to the agent so it can summarize/aggregate without
+leaving the conversation.
+
 ## Development
 
 ```bash

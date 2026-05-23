@@ -47,3 +47,39 @@ const session = await client.beginSession({
 // Use session.api_key against LiteLLM, then:
 await client.endSession(session.session_id);
 ```
+
+## Reading + writing the project's Workspace Data Store
+
+Every Tesslate App installed into a project automatically inherits the
+project's built-in Workspace Data Store env-var contract. The platform
+auto-injects these on container start AND on every external deploy:
+
+| Runtime               | URL var                                 | Key var                            |
+| --------------------- | --------------------------------------- | ---------------------------------- |
+| Server (Node, Python, Go) | `OPENSAIL_DATA_API_URL`             | `OPENSAIL_DATA_KEY`                |
+| Vite browser bundle   | `VITE_OPENSAIL_DATA_API_URL`            | `VITE_OPENSAIL_DATA_KEY`           |
+| Next.js client comp   | `NEXT_PUBLIC_OPENSAIL_DATA_API_URL`     | `NEXT_PUBLIC_OPENSAIL_DATA_KEY`    |
+
+The key is a stable per-project HMAC-derived anon key — it survives
+container restarts and deploys (no need to refresh it after rotation).
+
+HTTP shape (no `/collections/` prefix, no `/records` suffix):
+
+```
+POST   ${URL}/{collection}                 JSON body         -> 201 {id, data, ...}
+GET    ${URL}/{collection}?limit=&offset=  -> 200 {records, total, limit, offset}
+GET    ${URL}/{collection}/{record_id}
+PATCH  ${URL}/{collection}/{record_id}     JSON body         (replaces document)
+DELETE ${URL}/{collection}/{record_id}     -> 204
+```
+
+A drop-in TypeScript helper exists at `packages/tesslate-marketplace`'s
+`workspace-data-sdk` skill (`load_skill workspace-data-sdk`) and is
+auto-scaffolded into every project created from a Next.js / Vite base.
+App authors writing custom code should mirror that helper — see
+`docs/apps/CLAUDE.md` for the architecture notes.
+
+The same data your app writes is queryable by the user's Tesslate Agent
+via the `workspace_data` tool (`@app:<your-slug>` in chat surfaces the
+collections to the agent so it can summarize/aggregate without leaving
+the conversation).
