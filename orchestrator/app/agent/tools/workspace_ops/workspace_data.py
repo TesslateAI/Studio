@@ -197,7 +197,8 @@ async def _create_key(params: dict[str, Any], context: dict[str, Any]) -> dict[s
             f"Created {key.kind} key '{key.name}'. The secret is shown only once — to let "
             f"a deployed frontend reach the data store, write it into the app's env file "
             f"(e.g. VITE_OPENSAIL_DATA_KEY in .env) next to the Data API URL. anon keys are "
-            f"browser-safe; service keys are server-side only."
+            f"browser-safe; service keys are server-side only. For the exact client "
+            f"snippet to drop into the app, call load_skill 'workspace-data-sdk'."
         ),
         id=str(key.id),
         kind=key.kind,
@@ -352,7 +353,12 @@ def register_workspace_data_tool(registry) -> None:
                 "with no running compute. Collection/record actions: list_collections, "
                 "create_collection, insert, query, get, update, delete. Key management: "
                 "list_keys, create_key, revoke_key — mint an anon key and write it into "
-                "the app's env file so a deployed frontend can reach the data store."
+                "the app's env file so a deployed frontend can reach the data store. "
+                "When building an app that USES this store from the frontend (form, "
+                "dashboard, etc.), first call load_skill with skill_name "
+                "'workspace-data-sdk' — it returns drop-in client code for TypeScript/"
+                "Vite, Next.js, vanilla JS, Python, Go and curl, plus the exact env-var "
+                "names the deploy flow auto-injects."
             ),
             parameters=_PARAMETERS,
             executor=workspace_data_executor,
