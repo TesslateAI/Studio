@@ -1298,7 +1298,7 @@ export interface SidebarTreeResponse {
 // category, never an exception, so the picker stays responsive
 // even if (e.g.) the MCP service is briefly unreachable.
 
-export type MentionItemKind = 'agent' | 'mcp' | 'app';
+export type MentionItemKind = 'agent' | 'mcp' | 'app' | 'data' | 'project';
 
 export interface MentionItem {
   kind: MentionItemKind;
@@ -1320,6 +1320,8 @@ export interface MentionSearchResponse {
   agents: MentionItem[];
   mcps: MentionItem[];
   apps: MentionItem[];
+  data: MentionItem[];
+  projects: MentionItem[];
 }
 
 export const mentionApi = {
@@ -1329,7 +1331,9 @@ export const mentionApi = {
    * we don't push the search query to the server because the lists
    * are small and a single fetch primes all three sections at once.
    */
-  search: async (): Promise<MentionSearchResponse> => {
+  search: async (
+    opts: { projectSlug?: string } = {}
+  ): Promise<MentionSearchResponse> => {
     const safeGet = async <T>(url: string, params?: Record<string, unknown>) => {
       try {
         const r = await api.get(url, { params });
@@ -1364,15 +1368,25 @@ export const mentionApi = {
       state?: string | null;
     };
 
-    const [agentsRaw, mcpsRaw, appsRaw] = await Promise.all([
+    // Per-section row shapes declared near the consumers below.
+    type RawColl = { id: string; name: string; record_count?: number | null };
+    type RawProject = { id: string; slug?: string | null; name?: string | null };
+
+    // Single Promise.all dispatches every section's fetch in parallel —
+    // moving the data + projects requests off the critical path that the
+    // first three were already on. Sections that don't apply (data when
+    // there's no project scope) resolve to null and become empty arrays.
+    const [agentsRaw, mcpsRaw, appsRaw, collsRaw, projectsRaw] = await Promise.all([
       // /my-agents wraps in {agents:[...]} on cloud and returns a flat
       // list on some routes — accept both shapes so a single normaliser
       // works against any backend variant the user lands on.
       safeGet<{ agents?: RawAgent[] } | RawAgent[]>('/api/marketplace/my-agents'),
       safeGet<RawMcp[]>('/api/mcp/installed'),
-      safeGet<{ items?: RawApp[] } | RawApp[]>('/api/app-installs/mine', {
-        limit: 200,
-      }),
+      safeGet<{ items?: RawApp[] } | RawApp[]>('/api/app-installs/mine', { limit: 200 }),
+      opts.projectSlug
+        ? safeGet<RawColl[]>(`/api/workspace-data/projects/${opts.projectSlug}/collections`)
+        : Promise.resolve(null),
+      safeGet<RawProject[]>('/api/projects/'),
     ]);
 
     const agentsList: RawAgent[] = Array.isArray(agentsRaw)
@@ -1425,7 +1439,35 @@ export const mentionApi = {
           a.state && a.state !== 'installed' && a.state !== 'running' ? a.state : undefined,
       }));
 
-    return { agents, mcps, apps };
+    // --- data: collections in the current project ------------------------
+    // The picker only needs name + record_count to render. ``collsRaw`` is
+    // null when there's no project scope OR when the fetch failed; both
+    // collapse to an empty section.
+    const data: MentionItem[] = (collsRaw ?? []).map((c) => ({
+      kind: 'data' as const,
+      ref_id: c.name,
+      slug: c.name,
+      name: c.name,
+      enabled: true,
+      state_label:
+        c.record_count != null
+          ? `${c.record_count} record${c.record_count === 1 ? '' : 's'}`
+          : undefined,
+    }));
+
+    // --- project: every project the user can see -------------------------
+    // ``ref_id`` is the Project.id; ``slug`` drives the display @-token.
+    // Not team-scoped — the agent should be able to load data from any
+    // project the user has access to.
+    const projects: MentionItem[] = (projectsRaw ?? []).map((p) => ({
+      kind: 'project' as const,
+      ref_id: p.id,
+      slug: p.slug ?? p.id,
+      name: p.name ?? p.slug ?? 'Project',
+      enabled: true,
+    }));
+
+    return { agents, mcps, apps, data, projects };
   },
 };
 

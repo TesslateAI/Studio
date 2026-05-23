@@ -100,6 +100,16 @@ class AgentTaskPayload:
     """AppInstance.id values surfaced as a system-prompt context hint.
     The agent already has invoke_app_action; this just tells it which instance to use."""
 
+    mention_data_collection_refs: list[str] = field(default_factory=list)
+    """WorkspaceCollection names from @data: mentions in the current project.
+    "*" widens to every collection. Worker uses these to fold focused
+    summarize/schema text into the system prompt for THIS run."""
+
+    mention_project_ids: list[str] = field(default_factory=list)
+    """Project IDs from @project: mentions whose data store should surface
+    in this run's context. "*" / "workspace" means "all visible projects"
+    (capped server-side to keep prompts bounded)."""
+
     parent_task_id: str | None = None
     """Set by the call_agent tool when dispatching a sub-run. Lets the
     sub-chat row link back to the parent for the drill-in UI."""

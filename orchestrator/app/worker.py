@@ -1173,6 +1173,28 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 if tesslate_ctx:
                     project_context["tesslate_context"] = tesslate_ctx
 
+            # Single-call run-context enrichment (data store overview,
+            # @data / @project deep-dive). Idempotent — if chat.py already
+            # populated either block on the inline path, RunContextEnrichment
+            # rewrites it from the same inputs so the worker never sees a
+            # stale view of the data store.
+            if project:
+                from .services.agent_context import (
+                    MentionPayload,
+                    enrich_project_context_for_run,
+                )
+
+                _run_ctx = await enrich_project_context_for_run(
+                    db=db,
+                    project=project,
+                    user_id=UUID(payload.user_id),
+                    mentions=MentionPayload.from_lists(
+                        data_collection_refs=payload.mention_data_collection_refs,
+                        project_ids=payload.mention_project_ids,
+                    ),
+                )
+                _run_ctx.apply(project_context)
+
             # Warm the local plan mirror from Redis before the agent builds its prompt.
             from .services.plan_manager import PlanManager
 

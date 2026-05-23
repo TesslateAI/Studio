@@ -174,7 +174,7 @@ def validate_startup_command(command: str) -> tuple[bool, str | None]:
 
 def get_node_modules_fix_prefix() -> str:
     """Public API for K8s orchestrator."""
-    return _install_deps_if_missing_command()
+    return _materialize_dotenv_local_command() + _install_deps_if_missing_command()
 
 
 def _install_deps_if_missing_command() -> str:
@@ -194,6 +194,52 @@ def _install_deps_if_missing_command() -> str:
         "  else npm install; "
         "  fi; "
         "fi && "
+    )
+
+
+def _materialize_dotenv_local_command() -> str:
+    """Write a ``.env.development.local`` snapshot of every public env var.
+
+    Why this exists: Next.js dev (Turbopack) and Vite both load
+    ``NEXT_PUBLIC_*`` / ``VITE_*`` env vars from project-root .env* files
+    at bundler boot, NOT from the OS environment of the dev process. So
+    even though we inject the right env vars into the pod spec, the
+    browser bundles see ``undefined`` because the bundler's polyfill
+    object isn't populated.
+
+    The fix: every container start writes a fresh
+    ``.env.development.local`` from the pod's environ before the framework
+    boots. Idempotent — overwritten on every restart, so rotated keys
+    always reach the bundler.
+
+    Design choices, deliberately:
+
+    * **``.env.development.local``, not ``.env.local``.** ``.env.local`` is
+      what humans hand-edit; we don't own that filename. Both Next.js and
+      Vite load ``.env.development.local`` in dev mode at a higher
+      precedence than ``.env.development`` and at the same precedence as
+      ``.env.local`` (but for dev only), so users get the same behaviour
+      AND their ``.env.local`` is never clobbered.
+
+    * **Broad allowlist: any ``NEXT_PUBLIC_*``, ``VITE_*``, or
+      ``OPENSAIL_*``.** Every connector that emits a client-readable env
+      var (Stripe ``NEXT_PUBLIC_STRIPE_PK``, Supabase ``VITE_SUPABASE_URL``,
+      etc.) gets materialised. Narrowing this to ``OPENSAIL_*`` only fixed
+      the data store and silently broke every other connector with the
+      same root cause — don't repeat that smell.
+
+    * **Single-quoted values via printf %q-style.** Values with whitespace
+      or special chars stay safe through the dotenv parser.
+
+    * **Skip when allowlist matches nothing.** Projects without any of
+      these env vars don't grow a phantom file.
+    """
+    return (
+        '(env_lines=$(printenv | grep -E "^(OPENSAIL_|VITE_|NEXT_PUBLIC_)" || true) && '
+        'if [ -n "$env_lines" ]; then '
+        '  echo "[TESSLATE] Materializing .env.development.local for Next/Vite bundler" && '
+        '  printf "%s\\n" "$env_lines" > .env.development.local; '
+        "fi) && "
     )
 
 

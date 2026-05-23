@@ -44,9 +44,11 @@ from ..permissions import Permission, get_effective_project_role
 from ..schemas import AgentChatRequest, AgentChatResponse, AgentStepResponse
 from ..schemas import Chat as ChatSchema
 from ..services.agent_context import (
+    MentionPayload,
     _build_tesslate_context,
     _get_chat_history,
     _resolve_container_name,
+    enrich_project_context_for_run,
 )
 from ..services.model_adapters import create_model_adapter
 from ..users import current_superuser
@@ -1306,6 +1308,14 @@ async def agent_chat(
         if _tesslate_ctx:
             context["project_context"]["tesslate_context"] = _tesslate_ctx
 
+        # Single-call run-context enrichment (data store overview etc.).
+        # The WebSocket path has no mention payload — this branch only ever
+        # adds passive blocks. See services.agent_context for the contract.
+        _run_ctx = await enrich_project_context_for_run(
+            db=db, project=project, user_id=current_user.id, mentions=None,
+        )
+        _run_ctx.apply(context["project_context"])
+
         # ============================================================================
         # NEW: Run Agent and Collect Events (HTTP Adapter for AsyncIterator)
         # ============================================================================
@@ -1858,6 +1868,27 @@ async def agent_chat_stream(
             _ctx_mention_app_instance_ids = [
                 m.ref_id for m in _ctx_mentions if m.kind == "app" and m.ref_id
             ]
+            _ctx_mention_data_refs = [
+                m.ref_id for m in _ctx_mentions if m.kind == "data" and m.ref_id
+            ]
+            _ctx_mention_project_ids = [
+                m.ref_id for m in _ctx_mentions if m.kind == "project" and m.ref_id
+            ]
+
+            # Single-call run-context enrichment for the in-process path —
+            # mirrors the WebSocket branch above. The worker path enriches
+            # again on the worker pod from payload.mention_* so the queue
+            # round-trip stays stateless.
+            _run_ctx = await enrich_project_context_for_run(
+                db=db,
+                project=project,
+                user_id=current_user.id,
+                mentions=MentionPayload.from_lists(
+                    data_collection_refs=_ctx_mention_data_refs,
+                    project_ids=_ctx_mention_project_ids,
+                ),
+            )
+            _run_ctx.apply(project_context)
 
             context = {
                 "user_id": current_user.id,
@@ -1886,6 +1917,8 @@ async def agent_chat_stream(
                 "mention_agent_ids": _ctx_mention_agent_ids,
                 "mention_mcp_config_ids": _ctx_mention_mcp_config_ids,
                 "mention_app_instance_ids": _ctx_mention_app_instance_ids,
+                "mention_data_collection_refs": _ctx_mention_data_refs,
+                "mention_project_ids": _ctx_mention_project_ids,
             }
 
             # ================================================================
@@ -1943,13 +1976,22 @@ async def agent_chat_stream(
                 _mention_app_instance_ids = [
                     m.ref_id for m in _mentions if m.kind == "app" and m.ref_id
                 ]
+                _mention_data_collection_refs = [
+                    m.ref_id for m in _mentions if m.kind == "data" and m.ref_id
+                ]
+                _mention_project_ids = [
+                    m.ref_id for m in _mentions if m.kind == "project" and m.ref_id
+                ]
 
                 if _mentions:
                     logger.info(
-                        "[SSE-AGENT] @-mentions: agents=%d mcps=%d apps=%d",
+                        "[SSE-AGENT] @-mentions: agents=%d mcps=%d apps=%d "
+                        "data=%d projects=%d",
                         len(_mention_agent_ids),
                         len(_mention_mcp_config_ids),
                         len(_mention_app_instance_ids),
+                        len(_mention_data_collection_refs),
+                        len(_mention_project_ids),
                     )
 
                 payload = AgentTaskPayload(
@@ -1972,6 +2014,8 @@ async def agent_chat_stream(
                     mention_agent_ids=_mention_agent_ids,
                     mention_mcp_config_ids=_mention_mcp_config_ids,
                     mention_app_instance_ids=_mention_app_instance_ids,
+                    mention_data_collection_refs=_mention_data_collection_refs,
+                    mention_project_ids=_mention_project_ids,
                 )
 
                 # Enqueue the job

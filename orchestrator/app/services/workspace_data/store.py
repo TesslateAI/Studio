@@ -323,3 +323,191 @@ async def project_record_count(db: AsyncSession, project_id: UUID) -> int:
             )
         ).scalar_one()
     )
+
+
+# --- Discovery / analysis helpers ------------------------------------------
+SUMMARY_SAMPLE = 20
+SCHEMA_SAMPLE = 50
+AGGREGATE_SAMPLE = 500
+AGGREGATE_TOPN_DEFAULT = 10
+AGGREGATE_OPS = ("count_present", "count_unique", "value_distribution")
+
+
+async def _sample_records(
+    db: AsyncSession, collection_id: UUID, limit: int
+) -> list[WorkspaceRecord]:
+    """Newest-first sample, bounded — for summary / schema / aggregation."""
+    limit = max(1, min(int(limit), MAX_PAGE_SIZE))
+    result = await db.execute(
+        select(WorkspaceRecord)
+        .where(WorkspaceRecord.collection_id == collection_id)
+        .order_by(WorkspaceRecord.created_at.desc(), WorkspaceRecord.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+def _field_frequencies(records: list[WorkspaceRecord]) -> dict[str, int]:
+    """Count top-level field occurrences across the sample."""
+    freq: dict[str, int] = {}
+    for r in records:
+        for k in (r.data or {}).keys():
+            freq[k] = freq.get(k, 0) + 1
+    return dict(sorted(freq.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _type_name(v: object) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "boolean"
+    if isinstance(v, int):
+        return "integer"
+    if isinstance(v, float):
+        return "number"
+    if isinstance(v, str):
+        return "string"
+    if isinstance(v, list):
+        return "array"
+    if isinstance(v, dict):
+        return "object"
+    return type(v).__name__
+
+
+def _hashable(v: object):
+    """Make any JSON value hashable for set/dict-key usage."""
+    if isinstance(v, list):
+        return tuple(_hashable(x) for x in v)
+    if isinstance(v, dict):
+        return tuple(sorted((k, _hashable(val)) for k, val in v.items()))
+    return v
+
+
+async def summarize_collection(
+    db: AsyncSession, collection: WorkspaceCollection, sample_size: int = SUMMARY_SAMPLE
+) -> dict:
+    """One-call discovery payload — total + sample + field frequencies."""
+    sample = await _sample_records(db, collection.id, sample_size)
+    total = await collection_record_count(db, collection.id)
+    return {
+        "collection": collection.name,
+        "collection_id": str(collection.id),
+        "total_records": total,
+        "sample_size": len(sample),
+        "field_frequencies": _field_frequencies(sample),
+        "sample": [
+            {
+                "id": str(r.id),
+                "data": r.data,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in sample
+        ],
+        "public_insert": collection.public_insert,
+        "public_read": collection.public_read,
+        "public_update": collection.public_update,
+        "public_delete": collection.public_delete,
+    }
+
+
+async def project_data_summary(
+    db: AsyncSession, project_id: UUID, *, sample_size: int = 3
+) -> dict:
+    """Tiny per-project overview for passive discovery in agent context.
+
+    Returns ``{collections: [...], total_records: N}``. Each collection entry
+    has ``name``, ``total_records`` and ``top_fields`` (up to 6 most-common
+    top-level keys from a tiny sample).
+    """
+    colls = await list_collections(db, project_id)
+    out_colls: list[dict] = []
+    total = 0
+    for c in colls:
+        n = await collection_record_count(db, c.id)
+        total += n
+        sample = await _sample_records(db, c.id, sample_size) if n else []
+        out_colls.append(
+            {
+                "name": c.name,
+                "total_records": n,
+                "top_fields": list(_field_frequencies(sample).keys())[:6],
+            }
+        )
+    return {
+        "collections": out_colls,
+        "collection_count": len(out_colls),
+        "total_records": total,
+    }
+
+
+async def infer_schema(
+    db: AsyncSession, collection: WorkspaceCollection, sample_size: int = SCHEMA_SAMPLE
+) -> dict:
+    """Infer field types from a sample. Returns per-field type set + counts."""
+    sample = await _sample_records(db, collection.id, sample_size)
+    fields: dict[str, dict] = {}
+    for r in sample:
+        for k, v in (r.data or {}).items():
+            entry = fields.setdefault(k, {"types": set(), "present_in": 0})
+            entry["types"].add(_type_name(v))
+            entry["present_in"] += 1
+    return {
+        "collection": collection.name,
+        "sampled": len(sample),
+        "fields": {
+            k: {"types": sorted(v["types"]), "present_in": v["present_in"]}
+            for k, v in sorted(fields.items())
+        },
+    }
+
+
+async def aggregate_field(
+    db: AsyncSession,
+    collection: WorkspaceCollection,
+    field: str,
+    op: str,
+    *,
+    top_n: int = AGGREGATE_TOPN_DEFAULT,
+    sample_size: int = AGGREGATE_SAMPLE,
+) -> dict:
+    """Bounded aggregate over the most-recent ``sample_size`` records.
+
+    ``op`` ∈ {``count_present``, ``count_unique``, ``value_distribution``}.
+    Sets ``is_full_scan`` so the agent knows when the result is exact.
+    """
+    if op not in AGGREGATE_OPS:
+        raise InvalidRecordError(
+            f"Unsupported aggregate op '{op}'. Choose one of: {', '.join(AGGREGATE_OPS)}."
+        )
+    if not field or not isinstance(field, str):
+        raise InvalidRecordError("'field' must be a non-empty string.")
+    sample = await _sample_records(db, collection.id, sample_size)
+    total = await collection_record_count(db, collection.id)
+    values: list = []
+    for r in sample:
+        v = (r.data or {}).get(field, None)
+        if v is not None:
+            values.append(v)
+    out: dict = {
+        "collection": collection.name,
+        "field": field,
+        "op": op,
+        "sampled": len(sample),
+        "total_records": total,
+        "is_full_scan": total <= len(sample),
+    }
+    if op == "count_present":
+        out["count_present"] = len(values)
+    elif op == "count_unique":
+        out["count_unique"] = len({_hashable(v) for v in values})
+    elif op == "value_distribution":
+        counts: dict = {}
+        for v in values:
+            key = _hashable(v)
+            counts[key] = counts.get(key, 0) + 1
+        top_n = max(1, min(int(top_n), 100))
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0])))[:top_n]
+        out["top_values"] = [{"value": list(k) if isinstance(k, tuple) else k, "count": n}
+                              for k, n in ranked]
+        out["distinct_count_in_sample"] = len(counts)
+    return out

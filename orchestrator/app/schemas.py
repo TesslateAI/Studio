@@ -758,18 +758,30 @@ class ChatMentionSchema(BaseModel):
     Carried alongside ``message`` rather than parsed out of it. The display
     token (e.g. ``@coworker``) stays in ``message`` for chat history; the
     backend uses this structured array for run semantics.
+
+    Kinds:
+      * ``agent`` — ``ref_id`` is a ``MarketplaceAgent.id``
+      * ``mcp``   — ``ref_id`` is a ``UserMcpConfig.id``
+      * ``app``   — ``ref_id`` is an ``AppInstance.id``
+      * ``data``  — ``ref_id`` is a ``WorkspaceCollection.name`` (current project)
+                    or ``"*"`` to attach every collection
+      * ``project`` — ``ref_id`` is a ``Project.id``; surfaces that project's
+                    data store summary into the run's context. ``"*"`` /
+                    ``"workspace"`` means "all of my visible projects".
     """
 
-    kind: str  # 'agent' | 'mcp' | 'app'
-    ref_id: str  # MarketplaceAgent.id | UserMcpConfig.id | AppInstance.id
+    kind: str  # 'agent' | 'mcp' | 'app' | 'data' | 'project'
+    ref_id: str
     display: str = ""
     offset: int = 0
 
     @field_validator("kind")
     @classmethod
     def validate_kind(cls, v):
-        if v not in ("agent", "mcp", "app"):
-            raise ValueError("mention kind must be 'agent', 'mcp', or 'app'")
+        if v not in ("agent", "mcp", "app", "data", "project"):
+            raise ValueError(
+                "mention kind must be 'agent', 'mcp', 'app', 'data', or 'project'"
+            )
         return v
 
 

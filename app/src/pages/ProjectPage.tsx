@@ -25,6 +25,7 @@ import {
 import { Tooltip } from '../components/ui/Tooltip';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { ChatContainer } from '../components/chat/ChatContainer';
+import type { ChatMention } from '../types/agent';
 import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
 import { TimelinePanel } from '../components/panels/TimelinePanel';
 import { NoComputePlaceholder } from '../components/NoComputePlaceholder';
@@ -317,6 +318,7 @@ function ProjectPageInner() {
   } | null>(null);
   const [deployHubRefreshNonce, setDeployHubRefreshNonce] = useState(0);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
+  const [prefillChatMentions, setPrefillChatMentions] = useState<ChatMention[] | null>(null);
 
   // Preview port picker
   const [previewableContainers, setPreviewableContainers] = useState<PreviewableContainer[]>([]);
@@ -485,9 +487,17 @@ function ProjectPageInner() {
     [slug]
   );
 
-  const handleAskAgent = useCallback((message: string) => {
-    setPrefillChatMessage(message);
-  }, []);
+  /** Callers MAY pass structured mentions alongside the prefill text so
+   *  the backend doesn't need to re-parse @-tokens. DataPanel uses this
+   *  for "Ask agent" on a Data row → the agent sees a real @data: mention
+   *  rather than just a slug in plain prose. */
+  const handleAskAgent = useCallback(
+    (message: string, mentions?: ChatMention[]) => {
+      setPrefillChatMessage(message);
+      setPrefillChatMentions(mentions && mentions.length ? mentions : null);
+    },
+    []
+  );
 
   // Selection-aware chat: DesignView dispatches `tesslate:design-ask-ai`
   // when the user asks the AI about the currently selected element.
@@ -1638,7 +1648,11 @@ function ProjectPageInner() {
     sidebarExpanded: isLeftSidebarExpanded,
     isPointerOverPreviewRef,
     prefillMessage: prefillChatMessage,
-    onPrefillConsumed: () => setPrefillChatMessage(null),
+    prefillMentions: prefillChatMentions,
+    onPrefillConsumed: () => {
+      setPrefillChatMessage(null);
+      setPrefillChatMentions(null);
+    },
     onIdleWarning: handleIdleWarning,
     onEnvironmentStopping: handleEnvironmentStopping,
     onEnvironmentStopped: handleEnvironmentStopped,
@@ -1782,7 +1796,7 @@ function ProjectPageInner() {
       ),
     data: (_tab: TabInstance, _idx: number) =>
       slug ? (
-        <DataPanel projectSlug={slug} />
+        <DataPanel projectSlug={slug} onAskAgent={handleAskAgent} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <p className="text-xs text-[var(--text-muted)]">Loading project…</p>

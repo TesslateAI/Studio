@@ -217,6 +217,96 @@ async def test_require_helpers_raise(maker) -> None:
             await wd.require_record(db, coll.id, uuid.uuid4())
 
 
+# --- Discovery / analysis ---------------------------------------------------
+async def test_summarize_collection_shape(maker) -> None:
+    from app.services import workspace_data as wd
+
+    project_id = uuid.uuid4()
+    async with maker() as db:
+        coll = await wd.create_collection(db, project_id, "events")
+        for i in range(7):
+            await wd.insert_record(
+                db, coll, {"kind": "click", "user": f"u{i % 3}", "n": i}
+            )
+
+        summary = await wd.summarize_collection(db, coll, sample_size=5)
+        assert summary["total_records"] == 7
+        assert summary["sample_size"] == 5
+        assert summary["collection"] == "events"
+        # field frequencies cover the three top-level keys we wrote.
+        freqs = summary["field_frequencies"]
+        for key in ("kind", "user", "n"):
+            assert freqs.get(key) == 5
+
+
+async def test_project_data_summary_collection_count(maker) -> None:
+    from app.services import workspace_data as wd
+
+    project_id = uuid.uuid4()
+    async with maker() as db:
+        c1 = await wd.create_collection(db, project_id, "subs")
+        await wd.create_collection(db, project_id, "tasks")
+        await wd.insert_record(db, c1, {"email": "a@b.com"})
+
+        summary = await wd.project_data_summary(db, project_id, sample_size=3)
+        assert summary["collection_count"] == 2
+        assert summary["total_records"] == 1
+        names = {c["name"] for c in summary["collections"]}
+        assert names == {"subs", "tasks"}
+        # The collection with a record reports its top fields.
+        subs_entry = next(c for c in summary["collections"] if c["name"] == "subs")
+        assert "email" in (subs_entry.get("top_fields") or [])
+
+
+async def test_infer_schema_per_field_types(maker) -> None:
+    from app.services import workspace_data as wd
+
+    project_id = uuid.uuid4()
+    async with maker() as db:
+        coll = await wd.create_collection(db, project_id, "mixed")
+        await wd.insert_record(db, coll, {"a": "x", "b": 1, "c": True})
+        await wd.insert_record(db, coll, {"a": 42, "b": 2})  # 'a' is mixed; 'c' absent
+
+        schema = await wd.infer_schema(db, coll)
+        fields = schema["fields"]
+        # 'a' has both string and integer across records.
+        assert set(fields["a"]["types"]) == {"string", "integer"}
+        assert fields["a"]["present_in"] == 2
+        # 'c' was only on one record.
+        assert fields["c"]["present_in"] == 1
+
+
+async def test_aggregate_field_ops(maker) -> None:
+    from app.services import workspace_data as wd
+
+    project_id = uuid.uuid4()
+    async with maker() as db:
+        coll = await wd.create_collection(db, project_id, "votes")
+        for v in ("yes", "yes", "no", "yes", "abstain", "no"):
+            await wd.insert_record(db, coll, {"choice": v})
+
+        # count_present
+        present = await wd.aggregate_field(db, coll, "choice", "count_present")
+        assert present["count_present"] == 6
+        assert present["is_full_scan"] is True
+
+        # count_unique
+        uniq = await wd.aggregate_field(db, coll, "choice", "count_unique")
+        assert uniq["count_unique"] == 3
+
+        # value_distribution
+        dist = await wd.aggregate_field(
+            db, coll, "choice", "value_distribution", top_n=2
+        )
+        top = {entry["value"]: entry["count"] for entry in dist["top_values"]}
+        assert top == {"yes": 3, "no": 2}
+        assert dist["distinct_count_in_sample"] == 3
+
+        # Unknown op raises a clear store error.
+        with pytest.raises(wd.InvalidRecordError):
+            await wd.aggregate_field(db, coll, "choice", "median")
+
+
 # --- Access-flag enforcement (Data API gate) --------------------------------
 def test_enforce_access_flags() -> None:
     from fastapi import HTTPException

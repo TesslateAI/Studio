@@ -16,6 +16,7 @@ import {
   Database,
   Key,
   Plus,
+  Robot,
   Trash,
 } from '@phosphor-icons/react';
 import {
@@ -25,9 +26,21 @@ import {
   type WorkspaceDataUsage,
   type WorkspaceRecord,
 } from '../../lib/api';
+import type { ChatMention } from '../../types/agent';
 
 interface DataPanelProps {
   projectSlug: string;
+  /**
+   * Drop a pre-canned prompt into the chat input. Called by the per-row
+   * and panel-level "Ask agent" affordances. Optional — when absent, the
+   * Ask-agent buttons are hidden so the panel still renders standalone.
+   *
+   * ``mentions`` rides alongside the prose so the backend receives a
+   * structured ``{kind:'data', ref_id:<collection>}`` entry and doesn't
+   * have to re-parse the slug out of the message. The host page
+   * (ProjectPage) seeds both into ChatInput via its prefill channel.
+   */
+  onAskAgent?: (message: string, mentions?: ChatMention[]) => void;
 }
 
 type View = 'collections' | 'keys';
@@ -46,7 +59,7 @@ function apiError(err: unknown, fallback: string): string {
   return e?.response?.data?.detail || fallback;
 }
 
-export function DataPanel({ projectSlug }: DataPanelProps) {
+export function DataPanel({ projectSlug, onAskAgent }: DataPanelProps) {
   const [view, setView] = useState<View>('collections');
   const [collections, setCollections] = useState<WorkspaceCollection[]>([]);
   const [usage, setUsage] = useState<WorkspaceDataUsage | null>(null);
@@ -235,13 +248,42 @@ export function DataPanel({ projectSlug }: DataPanelProps) {
           {tabBtn('collections', 'Collections', <Database size={14} weight="bold" />)}
           {tabBtn('keys', 'API Keys', <Key size={14} weight="bold" />)}
         </div>
-        <button
-          onClick={() => (view === 'collections' ? loadCollections() : loadKeys())}
-          className="p-1.5 rounded-md text-[var(--text-muted)] hover:bg-[var(--surface)]"
-          title="Refresh"
-        >
-          <ArrowClockwise size={14} weight="bold" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onAskAgent && view === 'collections' && (
+            <button
+              onClick={() => {
+                if (collections.length === 0) {
+                  onAskAgent(
+                    'I want to use the workspace data store for this project. ' +
+                      'Walk me through what collections we should create for the use case in this chat, ' +
+                      'then create them with the workspace_data tool.'
+                  );
+                } else {
+                  // The "*" data mention says "every collection in this project"
+                  // — backend treats it as a wildcard in build_mention_data_context.
+                  onAskAgent(
+                    'Give me an overview of @* — what collections exist, ' +
+                      'how many records each, and the dominant fields. ' +
+                      'Use the workspace_data summarize action for each collection ' +
+                      'and quote the bounded scope.',
+                    [{ kind: 'data', ref_id: '*', display: '@*', offset: 0 }]
+                  );
+                }
+              }}
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--surface)]"
+              title="Ask the agent about this data"
+            >
+              <Robot size={13} weight="bold" /> Ask agent
+            </button>
+          )}
+          <button
+            onClick={() => (view === 'collections' ? loadCollections() : loadKeys())}
+            className="p-1.5 rounded-md text-[var(--text-muted)] hover:bg-[var(--surface)]"
+            title="Refresh"
+          >
+            <ArrowClockwise size={14} weight="bold" />
+          </button>
+        </div>
       </div>
 
       {view === 'collections' ? (
@@ -332,6 +374,29 @@ export function DataPanel({ projectSlug }: DataPanelProps) {
                           {f.label}
                         </button>
                       ))}
+                      {onAskAgent && (
+                        <button
+                          onClick={() =>
+                            onAskAgent(
+                              `Summarize @${c.name} — total records, ` +
+                                `inferred field types, and the most common values for the top field. ` +
+                                `Use the workspace_data tool's summarize + schema actions; quote the bounded scope.`,
+                              [
+                                {
+                                  kind: 'data',
+                                  ref_id: c.name,
+                                  display: `@${c.name}`,
+                                  offset: 0,
+                                },
+                              ]
+                            )
+                          }
+                          className="p-1 text-[var(--text-muted)] hover:text-[var(--primary)]"
+                          title="Ask the agent to summarize this collection"
+                        >
+                          <Robot size={13} weight="bold" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDeleteCollection(c)}
                         className="p-1 text-[var(--text-muted)] hover:text-red-400"

@@ -174,3 +174,70 @@ async def test_agent_tool_key_actions(maker) -> None:
 
         out = await workspace_data_executor({"action": "list_keys"}, ctx)
         assert out["keys"] == []
+
+
+# --- Autoinject key (stable, deterministic) --------------------------------
+async def test_autoinject_key_is_deterministic(maker, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same project_id under same SECRET_KEY → same plaintext, always."""
+    from app.services import workspace_data as wd
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-for-determinism-checks")
+    from app.config import get_settings
+    get_settings.cache_clear()
+
+    project_id = uuid.uuid4()
+    async with maker() as db:
+        raw_a = await wd.get_or_create_autoinject_key(db, project_id)
+        raw_b = await wd.get_or_create_autoinject_key(db, project_id)
+    assert raw_a == raw_b
+    assert raw_a.startswith("wsk_anon_")
+
+
+async def test_autoinject_key_differs_per_project(maker, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import workspace_data as wd
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-for-determinism-checks")
+    from app.config import get_settings
+    get_settings.cache_clear()
+
+    p1, p2 = uuid.uuid4(), uuid.uuid4()
+    async with maker() as db:
+        raw_p1 = await wd.get_or_create_autoinject_key(db, p1)
+        raw_p2 = await wd.get_or_create_autoinject_key(db, p2)
+    assert raw_p1 != raw_p2
+
+
+async def test_autoinject_key_idempotent_no_quota_blowup(maker, monkeypatch: pytest.MonkeyPatch) -> None:
+    """100 calls must NOT mint 100 keys — the prod-hazard fix being exercised."""
+    from app.services import workspace_data as wd
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-for-determinism-checks")
+    from app.config import get_settings
+    get_settings.cache_clear()
+
+    project_id = uuid.uuid4()
+    async with maker() as db:
+        for _ in range(100):
+            await wd.get_or_create_autoinject_key(db, project_id)
+        # Exactly ONE row for autoinject — quota stays safe.
+        assert await wd.count_data_keys(db, project_id) == 1
+        keys = await wd.list_data_keys(db, project_id)
+        assert keys[0].name == wd.AUTOINJECT_KEY_NAME
+
+
+async def test_autoinject_key_authenticates(maker, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The derived plaintext must resolve through resolve_data_key — i.e.
+    the SDK can actually authenticate with it."""
+    from app.services import workspace_data as wd
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret-for-determinism-checks")
+    from app.config import get_settings
+    get_settings.cache_clear()
+
+    project_id = uuid.uuid4()
+    async with maker() as db:
+        raw = await wd.get_or_create_autoinject_key(db, project_id)
+        resolved = await wd.resolve_data_key(db, raw)
+        assert resolved is not None
+        assert resolved.project_id == project_id
+        assert resolved.kind == "anon"

@@ -163,6 +163,74 @@ async def _delete(params: dict[str, Any], context: dict[str, Any]) -> dict[str, 
     return success_output(message=f"Deleted record '{record_id}' from '{collection.name}'.")
 
 
+async def _summarize(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    collection_ref = params.get("collection")
+    if not collection_ref:
+        return error_output(message="'collection' is required.")
+    collection = await store.require_collection(
+        context["db"], context["project_id"], collection_ref
+    )
+    sample_size = int(params.get("sample_size", store.SUMMARY_SAMPLE) or store.SUMMARY_SAMPLE)
+    summary = await store.summarize_collection(
+        context["db"], collection, sample_size=sample_size
+    )
+    return success_output(
+        message=(
+            f"'{collection.name}' holds {summary['total_records']} record(s); "
+            f"summary based on the latest {summary['sample_size']}."
+        ),
+        **summary,
+    )
+
+
+async def _schema(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    collection_ref = params.get("collection")
+    if not collection_ref:
+        return error_output(message="'collection' is required.")
+    collection = await store.require_collection(
+        context["db"], context["project_id"], collection_ref
+    )
+    sample_size = int(params.get("sample_size", store.SCHEMA_SAMPLE) or store.SCHEMA_SAMPLE)
+    schema = await store.infer_schema(
+        context["db"], collection, sample_size=sample_size
+    )
+    return success_output(
+        message=(
+            f"Inferred schema for '{collection.name}' from "
+            f"{schema['sampled']} record(s)."
+        ),
+        **schema,
+    )
+
+
+async def _aggregate(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    collection_ref = params.get("collection")
+    field = params.get("field")
+    op = params.get("op", "value_distribution")
+    if not collection_ref or not field:
+        return error_output(message="'collection' and 'field' are required.")
+    if op not in store.AGGREGATE_OPS:
+        return error_output(
+            message=f"Unknown aggregate op '{op}'.",
+            suggestion=f"Choose one of: {', '.join(store.AGGREGATE_OPS)}",
+        )
+    collection = await store.require_collection(
+        context["db"], context["project_id"], collection_ref
+    )
+    top_n = int(params.get("top_n", store.AGGREGATE_TOPN_DEFAULT) or store.AGGREGATE_TOPN_DEFAULT)
+    sample_size = int(params.get("sample_size", store.AGGREGATE_SAMPLE) or store.AGGREGATE_SAMPLE)
+    result = await store.aggregate_field(
+        context["db"], collection, field, op, top_n=top_n, sample_size=sample_size
+    )
+    scope = "full scan" if result.get("is_full_scan") else f"sampled {result.get('sampled')}"
+    return success_output(
+        message=(
+            f"'{op}' on '{field}' in '{collection.name}' ({scope})."
+        ),
+        **result,
+    )
+
+
 async def _list_keys(context: dict[str, Any]) -> dict[str, Any]:
     keys = await store.list_data_keys(context["db"], context["project_id"])
     return success_output(
@@ -223,6 +291,9 @@ _ACTIONS = {
     "get": _get,
     "update": _update,
     "delete": _delete,
+    "summarize": _summarize,
+    "schema": _schema,
+    "aggregate": _aggregate,
     "list_keys": lambda params, ctx: _list_keys(ctx),
     "create_key": _create_key,
     "revoke_key": _revoke_key,
@@ -277,7 +348,10 @@ _PARAMETERS = {
             "enum": list(_ACTIONS),
             "description": (
                 "Collections/records: list_collections, create_collection, insert, query, "
-                "get, update, delete. API keys: list_keys, create_key, revoke_key."
+                "get, update, delete. Analysis: summarize (sample + field frequencies), "
+                "schema (inferred per-field types), aggregate (count_present / "
+                "count_unique / value_distribution on a single field). API keys: "
+                "list_keys, create_key, revoke_key."
             ),
         },
         "collection": {
@@ -319,6 +393,31 @@ _PARAMETERS = {
             "type": "integer",
             "description": "Pagination offset (query). Default 0.",
         },
+        "field": {
+            "type": "string",
+            "description": "Top-level field name (aggregate). Nested paths not supported.",
+        },
+        "op": {
+            "type": "string",
+            "enum": ["count_present", "count_unique", "value_distribution"],
+            "description": (
+                "aggregate op. count_present: how many records have the field set. "
+                "count_unique: distinct value count. value_distribution: top-N "
+                "value→count map. Default value_distribution."
+            ),
+        },
+        "top_n": {
+            "type": "integer",
+            "description": "aggregate value_distribution: max values returned. Default 10, max 100.",
+        },
+        "sample_size": {
+            "type": "integer",
+            "description": (
+                "summarize/schema/aggregate: how many newest records to read. "
+                "Bounded by server caps. aggregate is_full_scan=true when sample "
+                "covers every record."
+            ),
+        },
         "public_insert": {
             "type": "boolean",
             "description": "create_collection: allow anonymous inserts from deployed frontends. Default true.",
@@ -346,19 +445,26 @@ def register_workspace_data_tool(registry) -> None:
         Tool(
             name="workspace_data",
             description=(
-                "Read and write the workspace's built-in data store — a per-project "
-                "KV/document database (collections of JSON records). Use it to persist "
-                "structured data (form submissions, app state, lookups, scraped results) "
-                "without an external database. Always available, including on workspaces "
-                "with no running compute. Collection/record actions: list_collections, "
-                "create_collection, insert, query, get, update, delete. Key management: "
-                "list_keys, create_key, revoke_key — mint an anon key and write it into "
-                "the app's env file so a deployed frontend can reach the data store. "
-                "When building an app that USES this store from the frontend (form, "
-                "dashboard, etc.), first call load_skill with skill_name "
-                "'workspace-data-sdk' — it returns drop-in client code for TypeScript/"
-                "Vite, Next.js, vanilla JS, Python, Go and curl, plus the exact env-var "
-                "names the deploy flow auto-injects."
+                "Read, write, and ANALYZE the workspace's built-in data store — a "
+                "per-project KV/document database (collections of JSON records). Use "
+                "it to persist structured data (form submissions, app state, lookups, "
+                "scraped results) without an external database. Always available, "
+                "including on workspaces with no running compute. "
+                "Collection/record actions: list_collections, create_collection, "
+                "insert, query, get, update, delete. Analysis (use these BEFORE "
+                "writing code that interprets the data): summarize — sample + "
+                "field-frequency overview; schema — per-field inferred types and "
+                "presence counts; aggregate — count_present / count_unique / "
+                "value_distribution on a single top-level field, bounded by sample "
+                "size with is_full_scan flag. Key management: list_keys, create_key, "
+                "revoke_key — mint an anon key and write it into the app's env file "
+                "so a deployed frontend can reach the data store. When building an "
+                "app that USES this store from the frontend (form, dashboard, etc.), "
+                "first call load_skill with skill_name 'workspace-data-sdk' — it "
+                "returns drop-in client code for TypeScript/Vite, Next.js, vanilla "
+                "JS, Python, Go and curl, plus the exact env-var names the deploy "
+                "flow auto-injects. For data analysis / dashboards / reporting, "
+                "load_skill 'workspace-data-analysis' for the analysis playbook."
             ),
             parameters=_PARAMETERS,
             executor=workspace_data_executor,
@@ -370,6 +476,9 @@ def register_workspace_data_tool(registry) -> None:
                 '{"tool_name": "workspace_data", "parameters": {"action": "create_collection", "name": "submissions"}}',
                 '{"tool_name": "workspace_data", "parameters": {"action": "insert", "collection": "submissions", "data": {"email": "a@b.com", "message": "hi"}}}',
                 '{"tool_name": "workspace_data", "parameters": {"action": "query", "collection": "submissions", "limit": 20}}',
+                '{"tool_name": "workspace_data", "parameters": {"action": "summarize", "collection": "submissions"}}',
+                '{"tool_name": "workspace_data", "parameters": {"action": "schema", "collection": "submissions"}}',
+                '{"tool_name": "workspace_data", "parameters": {"action": "aggregate", "collection": "submissions", "field": "country", "op": "value_distribution", "top_n": 5}}',
             ],
         )
     )

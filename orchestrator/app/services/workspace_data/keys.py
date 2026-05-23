@@ -8,6 +8,7 @@ HTTP router, the agent tool and the deploy-time key injection all use it.
 """
 
 import hashlib
+import hmac
 import secrets
 from datetime import UTC, datetime
 from uuid import UUID
@@ -15,14 +16,25 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...config import get_settings
 from ...models_workspace_data import WorkspaceDataKey
 from .store import QuotaExceededError, WorkspaceDataError
 
 VALID_KINDS = ("anon", "service")
 MAX_KEYS_PER_PROJECT = 20
 
-# Name of the auto-managed anon key the deploy flow injects into apps.
+# Name of the auto-managed anon key the deploy flow rotates per deploy
+# (kept for backward compat — new callers should prefer the stable
+# autoinject key below).
 DEPLOY_KEY_NAME = "deploy"
+
+# Stable per-project anon key used by both in-cluster startup AND deploy
+# injection. Plaintext is derived deterministically (HMAC of project_id
+# under SECRET_KEY) so no DB write is needed on cache-hit, and there's
+# no plaintext-storage problem. ONE row per project, never rotates
+# automatically — explicit user action only.
+AUTOINJECT_KEY_NAME = "__tesslate_autoinject__"
+_AUTOINJECT_NAMESPACE = b"workspace-data:autoinject:v1"
 
 _KIND_PREFIX = {"anon": "wsk_anon_", "service": "wsk_svc_"}
 
@@ -172,3 +184,71 @@ async def rotate_deploy_key(
             await db.delete(k)
     await db.commit()
     return await create_data_key(db, project_id, DEPLOY_KEY_NAME, "anon", created_by_id)
+
+
+# --- Auto-inject key (stable, deterministic) -------------------------------
+def _derive_autoinject_raw(project_id: UUID) -> str:
+    """HMAC-derive a stable anon-key plaintext from project_id + SECRET_KEY.
+
+    Pure function — same inputs → same plaintext. This is what lets in-cluster
+    container restarts re-mint the SAME plaintext on demand, so we never
+    invalidate a previously-issued key and we never store plaintext on disk.
+
+    Rotation surface: changing the server's ``SECRET_KEY`` invalidates ALL
+    autoinject keys cluster-wide (deliberate — same blast radius as session
+    secrets). Per-project rotation needs an explicit ``revoke`` + re-mint cycle.
+    """
+    secret = (get_settings().secret_key or "").encode("utf-8")
+    if not secret:
+        raise InvalidKeyError(
+            "SECRET_KEY is unset — workspace-data autoinject requires it."
+        )
+    msg = _AUTOINJECT_NAMESPACE + b":" + str(project_id).encode("utf-8")
+    digest = hmac.new(secret, msg, hashlib.sha256).hexdigest()
+    return f"{_KIND_PREFIX['anon']}{digest[:48]}"
+
+
+async def get_or_create_autoinject_key(
+    db: AsyncSession, project_id: UUID
+) -> str:
+    """Stable per-project autoinject anon key (plaintext).
+
+    Idempotent: safe to call on every container restart and every deploy.
+    Internally:
+      1. Derive the plaintext deterministically (no DB read).
+      2. Look up by hash — common case after the first call, no write.
+      3. Cold path: INSERT one row. Race-safe via the unique hash constraint
+         — concurrent inserts collide on hash, the loser rolls back and the
+         derived plaintext is identical so the caller is unaffected.
+
+    Does NOT count against ``MAX_KEYS_PER_PROJECT`` quota for re-derives
+    because we read first. The single one-time INSERT does count.
+    """
+    raw = _derive_autoinject_raw(project_id)
+    key_hash = hash_key(raw)
+
+    existing = await db.execute(
+        select(WorkspaceDataKey).where(
+            WorkspaceDataKey.project_id == project_id,
+            WorkspaceDataKey.key_hash == key_hash,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        return raw
+
+    row = WorkspaceDataKey(
+        project_id=project_id,
+        key_hash=key_hash,
+        key_prefix=raw[:20],
+        name=AUTOINJECT_KEY_NAME,
+        kind="anon",
+        is_active=True,
+    )
+    db.add(row)
+    try:
+        await db.commit()
+    except Exception:
+        # Concurrent worker raced us; the derived plaintext is identical so
+        # the caller is unaffected. Roll back and return.
+        await db.rollback()
+    return raw

@@ -60,43 +60,64 @@ function resolveUrl(...candidates: (string | undefined)[]): string | undefined {
   return undefined;
 }
 
-function makeClient(url: string | undefined, key: string | undefined, scope: string) {
-  if (!url || !key) {
-    throw new Error(
-      `Workspace Data ${scope} env vars are missing. The platform auto-injects them on ` +
-      `deploy under OPENSAIL_DATA_API_URL / OPENSAIL_DATA_KEY (server) and ` +
-      `NEXT_PUBLIC_OPENSAIL_DATA_API_URL / NEXT_PUBLIC_OPENSAIL_DATA_KEY (client). ` +
-      `Hit Deploy in Tesslate Studio to wire them.`
-    );
+// makeClient is LAZY: it doesn't read env vars until a method on the
+// returned object is actually called. This is the whole reason the
+// auto-scaffold is safe to import even when env vars haven't been
+// injected yet (in-cluster dev before container restart, build-time
+// during `next build`, SSR for a page that doesn't use the store, etc.).
+// Eager evaluation throws at module-load and 500s the entire app — which
+// is what we used to ship and what we no longer ship.
+function makeClient(getUrl: () => string | undefined, getKey: () => string | undefined, scope: string) {
+  function resolve(): { url: string; key: string } {
+    const url = getUrl();
+    const key = getKey();
+    if (!url || !key) {
+      throw new Error(
+        `Workspace Data ${scope} env vars are missing — this should never happen ` +
+        `on a Tesslate Studio container or deploy (the platform auto-injects them). ` +
+        `If you see this in production, create at least one collection in the Data ` +
+        `tab; if you see this locally outside the platform, set OPENSAIL_DATA_API_URL ` +
+        `(or VITE_/NEXT_PUBLIC_ prefixed variants for browsers) and OPENSAIL_DATA_KEY.`
+      );
+    }
+    return { url, key };
   }
-  const headers = { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+
+  function headers(key: string): Record<string, string> {
+    return { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+  }
 
   return {
     insert: async <T extends object>(coll: string, doc: T): Promise<DataRecord<T>> => {
-      const r = await fetch(`${url}/${coll}`, { method: 'POST', headers, body: JSON.stringify(doc), cache: 'no-store' });
+      const { url, key } = resolve();
+      const r = await fetch(`${url}/${coll}`, { method: 'POST', headers: headers(key), body: JSON.stringify(doc), cache: 'no-store' });
       if (!r.ok) throw new Error(`insert ${r.status}: ${await r.text()}`);
       return r.json();
     },
     list: async <T extends object>(coll: string, opts: { limit?: number; offset?: number } = {}): Promise<DataPage<T>> => {
+      const { url, key } = resolve();
       const qs = new URLSearchParams(
         Object.entries(opts).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])
       );
-      const r = await fetch(`${url}/${coll}?${qs}`, { headers, cache: 'no-store' });
+      const r = await fetch(`${url}/${coll}?${qs}`, { headers: headers(key), cache: 'no-store' });
       if (!r.ok) throw new Error(`list ${r.status}: ${await r.text()}`);
       return r.json();
     },
     get: async <T extends object>(coll: string, id: string): Promise<DataRecord<T>> => {
-      const r = await fetch(`${url}/${coll}/${id}`, { headers, cache: 'no-store' });
+      const { url, key } = resolve();
+      const r = await fetch(`${url}/${coll}/${id}`, { headers: headers(key), cache: 'no-store' });
       if (!r.ok) throw new Error(`get ${r.status}: ${await r.text()}`);
       return r.json();
     },
     update: async <T extends object>(coll: string, id: string, doc: T): Promise<DataRecord<T>> => {
-      const r = await fetch(`${url}/${coll}/${id}`, { method: 'PATCH', headers, body: JSON.stringify(doc), cache: 'no-store' });
+      const { url, key } = resolve();
+      const r = await fetch(`${url}/${coll}/${id}`, { method: 'PATCH', headers: headers(key), body: JSON.stringify(doc), cache: 'no-store' });
       if (!r.ok) throw new Error(`update ${r.status}: ${await r.text()}`);
       return r.json();
     },
     delete: async (coll: string, id: string): Promise<boolean> => {
-      const r = await fetch(`${url}/${coll}/${id}`, { method: 'DELETE', headers, cache: 'no-store' });
+      const { url, key } = resolve();
+      const r = await fetch(`${url}/${coll}/${id}`, { method: 'DELETE', headers: headers(key), cache: 'no-store' });
       return r.ok;
     },
   };
@@ -104,18 +125,18 @@ function makeClient(url: string | undefined, key: string | undefined, scope: str
 
 /** Server-side client — use in Route Handlers, Server Actions, server components. */
 export const serverData = makeClient(
-  resolveUrl(process.env.OPENSAIL_DATA_API_URL, process.env.OPENSAIL_DATA_URL),
-  process.env.OPENSAIL_DATA_KEY,
+  () => resolveUrl(process.env.OPENSAIL_DATA_API_URL, process.env.OPENSAIL_DATA_URL),
+  () => process.env.OPENSAIL_DATA_KEY,
   'server',
 );
 
 /** Browser client — use in 'use client' components. */
 export const browserData = makeClient(
-  resolveUrl(
+  () => resolveUrl(
     process.env.NEXT_PUBLIC_OPENSAIL_DATA_API_URL,
     process.env.NEXT_PUBLIC_OPENSAIL_DATA_URL,
   ),
-  process.env.NEXT_PUBLIC_OPENSAIL_DATA_KEY,
+  () => process.env.NEXT_PUBLIC_OPENSAIL_DATA_KEY,
   'browser',
 );
 """
