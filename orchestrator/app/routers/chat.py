@@ -181,13 +181,26 @@ async def create_chat(
 ):
     project_id = chat_data.get("project_id")
     title = chat_data.get("title")
+    explicit_project_id = project_id is not None
+
+    if not explicit_project_id:
+        from ..services.lazy_chat_workspace import ensure_user_default_workspace
+
+        try:
+            workspace = await ensure_user_default_workspace(current_user.id, db)
+            project_id = workspace.id
+        except LookupError:
+            logger.warning(
+                "create_chat: user=%s has no personal team; chat stays project-less",
+                current_user.id,
+            )
 
     db_chat = Chat(
         user_id=current_user.id,
         project_id=project_id,
         team_id=current_user.default_team_id,
         title=title,
-        origin="standalone" if not project_id else "browser",
+        origin="browser" if explicit_project_id else "standalone",
     )
     db.add(db_chat)
     await db.commit()
@@ -994,6 +1007,19 @@ async def agent_chat(
         f"[HTTP-AGENT] Starting agent chat - user: {current_user.id}, project: {request.project_id}"
     )
     try:
+        if not request.project_id:
+            from ..services.lazy_chat_workspace import ensure_user_default_workspace
+
+            try:
+                workspace = await ensure_user_default_workspace(current_user.id, db)
+                request.project_id = workspace.id
+                await db.commit()
+            except LookupError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No project specified and unable to create default workspace",
+                ) from e
+
         # Verify project access via RBAC
         try:
             from ..permissions import Permission, get_project_with_access
@@ -1545,12 +1571,24 @@ async def agent_chat_stream(
 
     async def event_generator():
         try:
-            # --- Standalone (project-less) chat support ---
             project = None
             project_slug = ""
             container_id = None
             container_name = None
             container_directory = None
+
+            if not request.project_id:
+                from ..services.lazy_chat_workspace import ensure_user_default_workspace
+
+                try:
+                    workspace = await ensure_user_default_workspace(current_user.id, db)
+                    request.project_id = workspace.id
+                    await db.commit()
+                except LookupError:
+                    logger.warning(
+                        "agent_chat_stream: user=%s has no personal team; running project-less",
+                        current_user.id,
+                    )
 
             if request.project_id:
                 # Verify project access via RBAC
@@ -2739,6 +2777,19 @@ async def handle_chat_message(data: dict, user: User, db: AsyncSession, websocke
     container_id = data.get("container_id")  # Get container_id for container-scoped agents
     edit_mode = data.get("edit_mode", "ask")  # Get edit_mode from request, default to ask
     chat_id_from_client = data.get("chat_id")  # Specific chat session from frontend
+
+    if not project_id:
+        from ..services.lazy_chat_workspace import ensure_user_default_workspace
+
+        try:
+            workspace = await ensure_user_default_workspace(user.id, db)
+            project_id = str(workspace.id)
+            await db.commit()
+        except LookupError:
+            logger.warning(
+                "[WebSocket] user=%s has no personal team; message stays project-less",
+                user.id,
+            )
 
     # ── Re-verify project access on every message (#343) ──────────────
     # Prevents an attacker from connecting with project A then switching
