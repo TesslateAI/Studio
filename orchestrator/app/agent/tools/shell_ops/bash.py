@@ -183,12 +183,9 @@ async def _run_ephemeral(context: dict[str, Any], command: str, timeout: int) ->
 def _get_k8s_api():
     """Get or create a cached CoreV1Api for Tier 2 exec (matches T1 lazy-init pattern)."""
     if not hasattr(_get_k8s_api, "_v1"):
-        from kubernetes import config as k8s_config
+        from ....services.k8s_auth import load_in_cluster_or_kube
 
-        try:
-            k8s_config.load_incluster_config()
-        except k8s_config.ConfigException:
-            k8s_config.load_kube_config()
+        load_in_cluster_or_kube()
         from kubernetes import client as k8s_client
 
         _get_k8s_api._v1 = k8s_client.CoreV1Api()

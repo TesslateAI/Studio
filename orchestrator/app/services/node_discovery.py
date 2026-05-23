@@ -66,16 +66,13 @@ class NodeDiscovery:
         if self._core_v1 is not None:
             return self._core_v1
 
+        from .k8s_auth import load_in_cluster_or_kube
+
         try:
-            config.load_incluster_config()
-            logger.info("NodeDiscovery: Loaded in-cluster Kubernetes configuration")
-        except config.ConfigException:
-            try:
-                config.load_kube_config()
-                logger.info("NodeDiscovery: Loaded kubeconfig for development")
-            except config.ConfigException as e:
-                logger.error("NodeDiscovery: Failed to load Kubernetes config: %s", e)
-                raise RuntimeError("Cannot load Kubernetes configuration") from e
+            load_in_cluster_or_kube()
+        except config.ConfigException as e:
+            logger.error("NodeDiscovery: Failed to load Kubernetes config: %s", e)
+            raise RuntimeError("Cannot load Kubernetes configuration") from e
 
         self._core_v1 = client.CoreV1Api()
         return self._core_v1
@@ -131,9 +128,7 @@ class NodeDiscovery:
                 if info.node_name:
                     self._cache[info.node_name] = (info, expires_at)
 
-            logger.info(
-                "NodeDiscovery: Refreshed cache — %d CSI nodes found", len(nodes)
-            )
+            logger.info("NodeDiscovery: Refreshed cache — %d CSI nodes found", len(nodes))
 
     async def _get_node(self, node_name: str) -> CSINodeInfo:
         """Get CSINodeInfo for a node, refreshing cache if needed."""
@@ -150,9 +145,7 @@ class NodeDiscovery:
 
         entry = self._cache.get(node_name)
         if entry is None:
-            raise ValueError(
-                f"CSI node pod not found for node '{node_name}'"
-            )
+            raise ValueError(f"CSI node pod not found for node '{node_name}'")
         return entry[0]
 
     async def get_fileops_address(self, node_name: str) -> str:
@@ -166,9 +159,7 @@ class NodeDiscovery:
         """
         info = await self._get_node(node_name)
         if not info.ready:
-            raise ValueError(
-                f"CSI node pod on '{node_name}' is not ready"
-            )
+            raise ValueError(f"CSI node pod on '{node_name}' is not ready")
         return f"{info.pod_ip}:{_FILEOPS_PORT}"
 
     async def get_nodeops_address(self, node_name: str) -> str:
@@ -182,9 +173,7 @@ class NodeDiscovery:
         """
         info = await self._get_node(node_name)
         if not info.ready:
-            raise ValueError(
-                f"CSI node pod on '{node_name}' is not ready"
-            )
+            raise ValueError(f"CSI node pod on '{node_name}' is not ready")
         return f"{info.pod_ip}:{_NODEOPS_PORT}"
 
     def _get_node_cpu_headroom_sync(self, node_name: str) -> int:
@@ -227,9 +216,7 @@ class NodeDiscovery:
         """Get all known CSI nodes, refreshing cache if empty or all expired."""
         now = time.monotonic()
         # Check if any entries are still valid
-        valid = [
-            info for info, exp in self._cache.values() if now < exp
-        ]
+        valid = [info for info, exp in self._cache.values() if now < exp]
         if not valid:
             await self._refresh_cache()
             valid = [info for info, _ in self._cache.values()]

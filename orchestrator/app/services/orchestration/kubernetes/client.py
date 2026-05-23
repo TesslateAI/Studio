@@ -35,18 +35,13 @@ class KubernetesClient:
 
         self.settings = get_settings()
 
+        from ...k8s_auth import load_in_cluster_or_kube
+
         try:
-            # Try in-cluster config first (for production)
-            config.load_incluster_config()
-            logger.info("Loaded in-cluster Kubernetes configuration")
-        except config.ConfigException:
-            try:
-                # Fall back to kubeconfig (for development)
-                config.load_kube_config()
-                logger.info("Loaded kubeconfig for development")
-            except config.ConfigException as e:
-                logger.error(f"Failed to load Kubernetes config: {e}")
-                raise RuntimeError("Cannot load Kubernetes configuration") from e
+            load_in_cluster_or_kube()
+        except config.ConfigException as e:
+            logger.error(f"Failed to load Kubernetes config: {e}")
+            raise RuntimeError("Cannot load Kubernetes configuration") from e
 
         # Initialize API clients
         self.apps_v1 = client.AppsV1Api()

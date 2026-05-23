@@ -95,6 +95,9 @@ from .routers import (
     triggers as triggers_router,
 )
 from .schemas_auth import UserCreate, UserRead, UserUpdate
+from .services import (
+    k8s_auth as _k8s_auth,  # noqa: F401 — applies BearerToken monkey-patch at import time
+)
 from .services.volume_manager import VolumeRestoringError, VolumeUnavailableError
 from .users import bearer_backend, cookie_backend, fastapi_users, get_user_manager
 

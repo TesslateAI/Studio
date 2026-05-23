@@ -53,17 +53,16 @@ class K8sLease(Lease):
 
     def __init__(self, namespace: str | None = None) -> None:
         try:
-            from kubernetes import client, config
+            from kubernetes import client
         except ImportError as exc:
             raise LeaseUnavailableError("kubernetes python client not installed") from exc
 
         try:
-            config.load_incluster_config()
-        except Exception:
-            try:
-                config.load_kube_config()
-            except Exception as exc:
-                raise LeaseUnavailableError(f"no kube config available: {exc}") from exc
+            from ...k8s_auth import load_in_cluster_or_kube
+
+            load_in_cluster_or_kube()
+        except Exception as exc:
+            raise LeaseUnavailableError(f"no kube config available: {exc}") from exc
 
         self._coord_api = client.CoordinationV1Api()
         self._models = client

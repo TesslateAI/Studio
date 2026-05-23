@@ -22,6 +22,9 @@ from uuid import UUID
 
 from arq.connections import RedisSettings
 
+from .services import (
+    k8s_auth as _k8s_auth,  # noqa: F401 — applies BearerToken monkey-patch at import time
+)
 from .services.apps.app_invocations import invoke_app_instance_task
 from .services.apps.settlement_worker import settle_spend_batch as settle_spend_batch_cron
 from .services.marketplace_sync import (
@@ -671,9 +674,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         # the assign-time path uses, so a stale or
                         # cross-team agent_id can't reach the agent loop.
                         owner = (
-                            await db.execute(
-                                select(User).where(User.id == UUID(payload.user_id))
-                            )
+                            await db.execute(select(User).where(User.id == UUID(payload.user_id)))
                         ).scalar_one_or_none()
                         if owner is None:
                             raise AgentScopeError(
@@ -747,9 +748,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             if agent_model is None:
                 # Publish the error so the chat surface / SSE can render
                 # it — same call we made before this fix.
-                await _publish_error(
-                    pubsub, task_id, f"No agent found: {agent_load_error}"
-                )
+                await _publish_error(pubsub, task_id, f"No agent found: {agent_load_error}")
                 # Critically, write the terminal automation_runs row when
                 # this was an automation-driven run. Without this the row
                 # sat at ``status='running'`` indefinitely (TC-03 Bug #20d).

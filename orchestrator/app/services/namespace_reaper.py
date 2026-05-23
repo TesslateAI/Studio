@@ -40,9 +40,9 @@ class NamespaceReaper:
 
     def __init__(self, core_v1: client.CoreV1Api | None = None):
         if core_v1 is None:
-            from kubernetes import config
+            from .k8s_auth import load_in_cluster_or_kube
 
-            config.load_incluster_config()
+            load_in_cluster_or_kube()
             core_v1 = client.CoreV1Api()
         self._v1 = core_v1
 

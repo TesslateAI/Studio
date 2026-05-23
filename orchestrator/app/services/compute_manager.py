@@ -20,7 +20,6 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from kubernetes import client as k8s_client
-from kubernetes import config as k8s_config
 from kubernetes.client.rest import ApiException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -285,10 +284,9 @@ class ComputeManager:
 
     def _api(self) -> k8s_client.CoreV1Api:
         if self._v1 is None:
-            try:
-                k8s_config.load_incluster_config()
-            except k8s_config.ConfigException:
-                k8s_config.load_kube_config()
+            from .k8s_auth import load_in_cluster_or_kube
+
+            load_in_cluster_or_kube()
             self._v1 = k8s_client.CoreV1Api()
         return self._v1
 

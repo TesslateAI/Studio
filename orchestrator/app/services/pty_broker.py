@@ -317,18 +317,13 @@ class KubernetesPTYBroker(BasePTYBroker):
     def __init__(self):
         from kubernetes import client, config
 
+        from .k8s_auth import load_in_cluster_or_kube
+
         try:
-            # Try in-cluster config first (for production)
-            config.load_incluster_config()
-            logger.info("KubernetesPTYBroker: Loaded in-cluster Kubernetes configuration")
-        except config.ConfigException:
-            try:
-                # Fall back to kubeconfig (for development)
-                config.load_kube_config()
-                logger.info("KubernetesPTYBroker: Loaded kubeconfig for development")
-            except config.ConfigException as e:
-                logger.error(f"KubernetesPTYBroker: Failed to load Kubernetes config: {e}")
-                raise RuntimeError("Cannot load Kubernetes configuration") from e
+            load_in_cluster_or_kube()
+        except config.ConfigException as e:
+            logger.error(f"KubernetesPTYBroker: Failed to load Kubernetes config: {e}")
+            raise RuntimeError("Cannot load Kubernetes configuration") from e
 
         self.core_v1 = client.CoreV1Api()
         self.sessions: dict[str, PTYSession] = {}
@@ -631,12 +626,11 @@ class TsinitPTYBroker(BasePTYBroker):
     """
 
     def __init__(self):
-        from kubernetes import client, config
+        from kubernetes import client
 
-        try:
-            config.load_incluster_config()
-        except config.ConfigException:
-            config.load_kube_config()
+        from .k8s_auth import load_in_cluster_or_kube
+
+        load_in_cluster_or_kube()
 
         self._core_v1 = client.CoreV1Api()
         self._k8s_fallback = KubernetesPTYBroker()
