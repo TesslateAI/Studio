@@ -94,7 +94,12 @@ async def _query(params: dict[str, Any], context: dict[str, Any]) -> dict[str, A
         offset=params.get("offset", 0),
     )
     return success_output(
-        message=f"Returned {len(records)} of {total} record(s) from '{collection.name}'.",
+        message=(
+            f"{len(records)} of {total} record(s) from '{collection.name}' "
+            f"are present below in the 'records' field. The list contains "
+            f"the actual id + data of each record — read it directly; do "
+            f"not summarise this message alone."
+        ),
         total=total,
         count=len(records),
         records=[
@@ -171,13 +176,13 @@ async def _summarize(params: dict[str, Any], context: dict[str, Any]) -> dict[st
         context["db"], context["project_id"], collection_ref
     )
     sample_size = int(params.get("sample_size", store.SUMMARY_SAMPLE) or store.SUMMARY_SAMPLE)
-    summary = await store.summarize_collection(
-        context["db"], collection, sample_size=sample_size
-    )
+    summary = await store.summarize_collection(context["db"], collection, sample_size=sample_size)
     return success_output(
         message=(
-            f"'{collection.name}' holds {summary['total_records']} record(s); "
-            f"summary based on the latest {summary['sample_size']}."
+            f"'{collection.name}' holds {summary['total_records']} record(s). "
+            f"The 'sample' field below contains {summary['sample_size']} actual "
+            f"records (id + data); 'field_frequencies' has the per-key occurrence "
+            f"count. Read those fields directly — don't quote this message alone."
         ),
         **summary,
     )
@@ -191,14 +196,9 @@ async def _schema(params: dict[str, Any], context: dict[str, Any]) -> dict[str, 
         context["db"], context["project_id"], collection_ref
     )
     sample_size = int(params.get("sample_size", store.SCHEMA_SAMPLE) or store.SCHEMA_SAMPLE)
-    schema = await store.infer_schema(
-        context["db"], collection, sample_size=sample_size
-    )
+    schema = await store.infer_schema(context["db"], collection, sample_size=sample_size)
     return success_output(
-        message=(
-            f"Inferred schema for '{collection.name}' from "
-            f"{schema['sampled']} record(s)."
-        ),
+        message=(f"Inferred schema for '{collection.name}' from {schema['sampled']} record(s)."),
         **schema,
     )
 
@@ -225,7 +225,9 @@ async def _aggregate(params: dict[str, Any], context: dict[str, Any]) -> dict[st
     scope = "full scan" if result.get("is_full_scan") else f"sampled {result.get('sampled')}"
     return success_output(
         message=(
-            f"'{op}' on '{field}' in '{collection.name}' ({scope})."
+            f"'{op}' on '{field}' in '{collection.name}' ({scope}). "
+            f"Answer is in 'top_values' / 'count_present' / 'count_unique' "
+            f"below — quote those fields verbatim, do not paraphrase the counts."
         ),
         **result,
     )
