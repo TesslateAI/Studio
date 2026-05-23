@@ -472,6 +472,17 @@ async def _perform_project_setup(
                 task=task,
             )
 
+            # Drop the Workspace Data Store SDK helper into the project so
+            # the AI agent has a canonical client file to import — no need
+            # to hallucinate env-var names or URL paths. Guarded: failure
+            # here never blocks creation.
+            try:
+                from ..services.workspace_data_scaffold import scaffold_workspace_data
+
+                await scaffold_workspace_data(db_project, user_id, settings)
+            except Exception:
+                logger.warning("[CREATE] workspace-data scaffold skipped", exc_info=True)
+
             db_project.environment_status = "active"
             await db.commit()
 
@@ -600,6 +611,15 @@ async def _materialize_empty_workspace(project: Project, settings: Any) -> None:
             project.id,
             exc,
         )
+
+    # Drop the Workspace Data reference doc into empty workspaces too — gives
+    # the agent the env-var contract right at the project root.
+    try:
+        from ..services.workspace_data_scaffold import scaffold_workspace_data
+
+        await scaffold_workspace_data(project, project.owner_id, settings)
+    except Exception:
+        logger.warning("[CREATE-EMPTY] workspace-data scaffold skipped", exc_info=True)
 
 
 def _materialize_imported_root(source_path: str, project_root: str) -> None:

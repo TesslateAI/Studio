@@ -425,3 +425,65 @@ async def data_delete(
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found.")
     await wd.delete_record(db, record)
+
+
+# ============================================================================
+# REST-style path aliases — `/collections/{c}/records[/{id}]`
+#
+# LLM-generated client code defaults to this REST CRUD shape from training
+# data. Rather than fight that, we accept both URL styles so generated apps
+# just work. The handlers delegate to the canonical functions above — no
+# duplicated logic.
+# ============================================================================
+@data_router.post(
+    "/collections/{collection}/records", response_model=RecordResponse, status_code=201
+)
+async def data_insert_rest(
+    collection: str,
+    payload: dict[str, Any] = Body(...),
+    key: WorkspaceDataKey = Depends(authenticate_data_key),
+    db: AsyncSession = Depends(get_db),
+):
+    return await data_insert(collection, payload, key, db)
+
+
+@data_router.get("/collections/{collection}/records", response_model=RecordListResponse)
+async def data_list_rest(
+    collection: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    key: WorkspaceDataKey = Depends(authenticate_data_key),
+    db: AsyncSession = Depends(get_db),
+):
+    return await data_list(collection, limit, offset, key, db)
+
+
+@data_router.get("/collections/{collection}/records/{record_id}", response_model=RecordResponse)
+async def data_get_rest(
+    collection: str,
+    record_id: str,
+    key: WorkspaceDataKey = Depends(authenticate_data_key),
+    db: AsyncSession = Depends(get_db),
+):
+    return await data_get(collection, record_id, key, db)
+
+
+@data_router.patch("/collections/{collection}/records/{record_id}", response_model=RecordResponse)
+async def data_update_rest(
+    collection: str,
+    record_id: str,
+    payload: dict[str, Any] = Body(...),
+    key: WorkspaceDataKey = Depends(authenticate_data_key),
+    db: AsyncSession = Depends(get_db),
+):
+    return await data_update(collection, record_id, payload, key, db)
+
+
+@data_router.delete("/collections/{collection}/records/{record_id}", status_code=204)
+async def data_delete_rest(
+    collection: str,
+    record_id: str,
+    key: WorkspaceDataKey = Depends(authenticate_data_key),
+    db: AsyncSession = Depends(get_db),
+):
+    return await data_delete(collection, record_id, key, db)

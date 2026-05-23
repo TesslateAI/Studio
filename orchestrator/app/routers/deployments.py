@@ -329,7 +329,10 @@ async def _inject_workspace_data_env(
 
         injected: dict[str, str] = {}
         for prefix in ("OPENSAIL", "VITE_OPENSAIL", "NEXT_PUBLIC_OPENSAIL"):
+            # Both the canonical name AND a `_URL` alias (no `_API_`) — LLM
+            # generators tend to drop the `_API_` token, so we set both.
             injected[f"{prefix}_DATA_API_URL"] = api_url
+            injected[f"{prefix}_DATA_URL"] = api_url
             injected[f"{prefix}_DATA_KEY"] = raw
         # Caller-supplied env vars take precedence over injected defaults.
         return {**injected, **(env_vars or {})}
