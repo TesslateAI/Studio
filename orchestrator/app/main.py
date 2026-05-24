@@ -241,6 +241,10 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         # per-project API key in the Authorization header, so a wildcard
         # origin is safe — credentials/cookies are intentionally NOT allowed.
         if request.url.path.startswith("/api/data/"):
+            # Lazy import so this module's import-graph isn't dependent on
+            # the wsdata router being ready at app construction time.
+            from .routers.workspace_data import DATA_API_VERSION
+
             if request.method == "OPTIONS":
                 return Response(
                     status_code=200,
@@ -249,10 +253,15 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
                         "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
                         "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin",
                         "Access-Control-Max-Age": "600",
+                        "X-OpenSail-Data-API-Version": DATA_API_VERSION,
                     },
                 )
             data_response = await call_next(request)
             data_response.headers["Access-Control-Allow-Origin"] = "*"
+            # Stamped here (NOT via a FastAPI route dependency) so that
+            # HTTPException short-circuits — 401 / 404 / 429 — also carry
+            # the header. Router deps don't run on the exception path.
+            data_response.headers["X-OpenSail-Data-API-Version"] = DATA_API_VERSION
             return data_response
 
         # Get app domain from settings (e.g., "studio-demo.tesslate.com")

@@ -35,13 +35,71 @@ from ..schemas_workspace_data import (
     UsageResponse,
 )
 from ..services import workspace_data as wd
+from ..services.audit_service import log_event as audit_log_event
 from ..services.rate_limit import get_token_bucket
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
 
+# Bumped only when we change the public Data API in a way that requires
+# client coordination (response shape, auth header semantics, etc.). Stamped
+# on every Data API response by the DynamicCORSMiddleware in main.py so
+# deployed apps can hard-fail on a version mismatch — even on error
+# responses (401/404/429) where router-level dependencies don't run.
+# NEVER bump for additive, backward-compatible changes.
+DATA_API_VERSION = "1"
+
+
 mgmt_router = APIRouter(prefix="/api/workspace-data", tags=["workspace-data"])
 data_router = APIRouter(prefix="/api/data/v1", tags=["workspace-data-api"])
+
+
+async def _audit(
+    db: AsyncSession,
+    request: Request,
+    project,
+    user: User,
+    action: str,
+    *,
+    resource_id=None,
+    details: dict | None = None,
+) -> None:
+    """Thin wrapper that fills in the workspace-data-specific defaults.
+
+    Opens a FRESH session for the write so the row survives the request's
+    own session-teardown (``get_db`` doesn't commit on exit, so a write on
+    the request session gets silently rolled back — mirrors the
+    ``rate_limit.py`` audit pattern). Failure NEVER blocks the primary
+    operation — ``log_event`` already swallows its own exceptions.
+
+    ``team_id`` is required by the AuditLog row; pull it off the project
+    (every project belongs to exactly one team).
+    """
+    team_id = getattr(project, "team_id", None)
+    if team_id is None:  # defensive — shouldn't happen for a fetched project
+        return
+    try:
+        from ..database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as audit_db:
+            await audit_log_event(
+                db=audit_db,
+                team_id=team_id,
+                user_id=user.id,
+                action=action,
+                resource_type="workspace_data",
+                resource_id=resource_id,
+                project_id=project.id,
+                details=details or {},
+                request=request,
+            )
+            await audit_db.commit()
+    except Exception:
+        # Never block the primary operation on an audit failure. We log
+        # at debug so a flaky DB doesn't spam ERROR; log_event already
+        # logs its own exceptions at exception level.
+        logger.debug("audit write failed for action=%s (non-blocking)", action, exc_info=True)
+
 
 # Map store/key errors to HTTP status codes (most-specific first).
 _ERROR_STATUS: list[tuple[type, int]] = [
@@ -148,6 +206,7 @@ async def list_collections(
 async def create_collection(
     project_slug: str,
     payload: CollectionCreate,
+    request: Request,
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -165,6 +224,21 @@ async def create_collection(
         )
     except wd.WorkspaceDataError as exc:
         raise _http_error(exc) from exc
+    await _audit(
+        db,
+        request,
+        project,
+        user,
+        "workspace_data.collection.create",
+        resource_id=collection.id,
+        details={
+            "name": collection.name,
+            "public_insert": collection.public_insert,
+            "public_read": collection.public_read,
+            "public_update": collection.public_update,
+            "public_delete": collection.public_delete,
+        },
+    )
     return _collection_response(collection, 0)
 
 
@@ -176,6 +250,7 @@ async def update_collection(
     project_slug: str,
     collection_id: str,
     payload: CollectionUpdate,
+    request: Request,
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -183,11 +258,31 @@ async def update_collection(
     project, _ = await get_project_with_access(db, project_slug, user.id, Permission.PROJECT_EDIT)
     try:
         collection = await wd.require_collection(db, project.id, collection_id)
+        # Capture before-state so the audit row records the actual diff.
+        before = {
+            f: getattr(collection, f)
+            for f in ("public_insert", "public_read", "public_update", "public_delete")
+        }
         collection = await wd.update_collection(
             db, collection, **payload.model_dump(exclude_unset=True)
         )
     except wd.WorkspaceDataError as exc:
         raise _http_error(exc) from exc
+    after = {
+        f: getattr(collection, f)
+        for f in ("public_insert", "public_read", "public_update", "public_delete")
+    }
+    changed = {k: {"from": before[k], "to": after[k]} for k in after if before[k] != after[k]}
+    if changed:
+        await _audit(
+            db,
+            request,
+            project,
+            user,
+            "workspace_data.collection.flags_changed",
+            resource_id=collection.id,
+            details={"name": collection.name, "changed": changed},
+        )
     count = await wd.collection_record_count(db, collection.id)
     return _collection_response(collection, count)
 
@@ -196,6 +291,7 @@ async def update_collection(
 async def delete_collection(
     project_slug: str,
     collection_id: str,
+    request: Request,
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -206,7 +302,19 @@ async def delete_collection(
         collection = await wd.require_collection(db, project.id, collection_id)
     except wd.WorkspaceDataError as exc:
         raise _http_error(exc) from exc
+    # High-blast-radius: cascades to every record + every external consumer.
+    record_count = await wd.collection_record_count(db, collection.id)
+    name = collection.name
     await wd.delete_collection(db, collection)
+    await _audit(
+        db,
+        request,
+        project,
+        user,
+        "workspace_data.collection.delete",
+        resource_id=collection.id,
+        details={"name": name, "deleted_record_count": record_count},
+    )
 
 
 @mgmt_router.get(
@@ -295,6 +403,7 @@ async def list_keys(
 async def create_key(
     project_slug: str,
     payload: DataKeyCreate,
+    request: Request,
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -306,6 +415,18 @@ async def create_key(
         )
     except wd.WorkspaceDataError as exc:
         raise _http_error(exc) from exc
+    # Most security-relevant op in this subsystem — audit on every mint.
+    # Raw secret is NEVER persisted (only the SHA-256 hash); record the
+    # non-secret prefix so post-incident teams can correlate with logs.
+    await _audit(
+        db,
+        request,
+        project,
+        user,
+        "workspace_data.key.create",
+        resource_id=key.id,
+        details={"name": key.name, "kind": key.kind, "key_prefix": key.key_prefix},
+    )
     return _key_response(key, raw=raw)
 
 
@@ -313,13 +434,29 @@ async def create_key(
 async def revoke_key(
     project_slug: str,
     key_id: str,
+    request: Request,
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Revoke (delete) a Data API key."""
+    """Revoke (soft-delete) a Data API key."""
     project, _ = await get_project_with_access(db, project_slug, user.id, Permission.PROJECT_EDIT)
+    # Look up the key BEFORE revoke so the audit row records what it was.
+    key_row = await wd.get_data_key(db, project.id, key_id)
     if not await wd.revoke_data_key(db, project.id, key_id):
         raise HTTPException(status_code=404, detail="API key not found.")
+    await _audit(
+        db,
+        request,
+        project,
+        user,
+        "workspace_data.key.revoke",
+        resource_id=key_row.id if key_row else None,
+        details={
+            "name": key_row.name if key_row else None,
+            "kind": key_row.kind if key_row else None,
+            "key_prefix": key_row.key_prefix if key_row else None,
+        },
+    )
 
 
 # ============================================================================
