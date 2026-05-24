@@ -64,13 +64,25 @@ def hash_key(raw: str) -> str:
 
 
 # --- CRUD -------------------------------------------------------------------
-async def list_data_keys(db: AsyncSession, project_id: UUID) -> list[WorkspaceDataKey]:
-    """All API keys for a project, newest first."""
-    result = await db.execute(
-        select(WorkspaceDataKey)
-        .where(WorkspaceDataKey.project_id == project_id)
-        .order_by(WorkspaceDataKey.created_at.desc())
-    )
+async def list_data_keys(
+    db: AsyncSession,
+    project_id: UUID,
+    *,
+    include_revoked: bool = False,
+) -> list[WorkspaceDataKey]:
+    """Active API keys for a project, newest first.
+
+    Soft-revoked rows (``is_active=False``) are excluded by default so the
+    mgmt UI sees the same contract it did before soft-revoke landed. Pass
+    ``include_revoked=True`` from a future audit endpoint to surface the
+    full history (``last_used_at`` on a revoked row is what makes
+    soft-revoke worth doing — it answers "when was this key last used"
+    after the fact).
+    """
+    query = select(WorkspaceDataKey).where(WorkspaceDataKey.project_id == project_id)
+    if not include_revoked:
+        query = query.where(WorkspaceDataKey.is_active.is_(True))
+    result = await db.execute(query.order_by(WorkspaceDataKey.created_at.desc()))
     return list(result.scalars().all())
 
 
@@ -136,20 +148,68 @@ async def create_data_key(
 
 
 async def revoke_data_key(db: AsyncSession, project_id: UUID, key_id: object) -> bool:
-    """Delete a key. Returns ``False`` if it did not exist in the project."""
+    """Soft-revoke a key (flip ``is_active=False``). Returns ``False`` if it
+    did not exist in the project.
+
+    Soft-revoke (not hard-delete) so the audit trail and ``key_prefix`` /
+    ``last_used_at`` history survive — useful for post-incident forensics
+    ("when was this key used last, and by whom"). ``resolve_data_key``
+    filters on ``is_active`` so revoked keys stop authenticating
+    immediately; the row hangs around for the audit team.
+    """
     key = await get_data_key(db, project_id, key_id)
-    if key is None:
+    if key is None or not key.is_active:
         return False
-    await db.delete(key)
+    key.is_active = False
     await db.commit()
     return True
+
+
+# ``last_used_at`` debounce — only one Postgres UPDATE per (key_id, window).
+# Without it every Data API request triggers a write on the hot path, which
+# both serializes the request through a DB roundtrip and creates a DoS
+# amplification vector against the platform DB. The window is short enough
+# (60s) that "last used" is still meaningful for forensics; the hot
+# in-flight path costs at most one INCR + one EXPIRE on Redis.
+_LAST_USED_DEBOUNCE_SECONDS = 60
+_LAST_USED_REDIS_KEY = "tesslate:wsdata:last_used:{key_id}"
+
+
+async def _should_stamp_last_used(key_id: UUID) -> bool:
+    """Redis-throttle helper: True iff no other request stamped within the window.
+
+    Best-effort — when Redis is unreachable we fall back to stamping every
+    request (the v1 behaviour), so the audit info stays fresh at the cost
+    of the extra writes.
+    """
+    try:
+        from ..cache_service import get_redis_client
+
+        client = await get_redis_client()
+    except Exception:
+        client = None
+    if client is None:
+        return True
+    try:
+        # SET NX EX: returns truthy only when the key didn't already exist.
+        # Equivalent to "first request in the window" → caller stamps.
+        ok = await client.set(
+            _LAST_USED_REDIS_KEY.format(key_id=key_id),
+            "1",
+            nx=True,
+            ex=_LAST_USED_DEBOUNCE_SECONDS,
+        )
+        return bool(ok)
+    except Exception:
+        return True
 
 
 async def resolve_data_key(db: AsyncSession, raw: str) -> WorkspaceDataKey | None:
     """Resolve an active key from its raw value (Data API auth).
 
-    Stamps ``last_used_at`` best-effort — never fails the lookup on a write
-    error.
+    Stamps ``last_used_at`` best-effort, debounced through Redis so the
+    hot request path doesn't serialize through a DB write on every call.
+    Never fails the lookup on a write error.
     """
     raw = (raw or "").strip()
     if not raw:
@@ -161,7 +221,7 @@ async def resolve_data_key(db: AsyncSession, raw: str) -> WorkspaceDataKey | Non
         )
     )
     key = result.scalar_one_or_none()
-    if key is not None:
+    if key is not None and await _should_stamp_last_used(key.id):
         try:
             key.last_used_at = datetime.now(UTC)
             await db.commit()
@@ -200,17 +260,13 @@ def _derive_autoinject_raw(project_id: UUID) -> str:
     """
     secret = (get_settings().secret_key or "").encode("utf-8")
     if not secret:
-        raise InvalidKeyError(
-            "SECRET_KEY is unset — workspace-data autoinject requires it."
-        )
+        raise InvalidKeyError("SECRET_KEY is unset — workspace-data autoinject requires it.")
     msg = _AUTOINJECT_NAMESPACE + b":" + str(project_id).encode("utf-8")
     digest = hmac.new(secret, msg, hashlib.sha256).hexdigest()
     return f"{_KIND_PREFIX['anon']}{digest[:48]}"
 
 
-async def get_or_create_autoinject_key(
-    db: AsyncSession, project_id: UUID
-) -> str:
+async def get_or_create_autoinject_key(db: AsyncSession, project_id: UUID) -> str:
     """Stable per-project autoinject anon key (plaintext).
 
     Idempotent: safe to call on every container restart and every deploy.

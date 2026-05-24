@@ -50,8 +50,20 @@ _PREFIXES: tuple[str, ...] = (
     "VITE_OPENSAIL",
     "NEXT_PUBLIC_OPENSAIL",
 )
+# Subset of ``_PREFIXES`` whose values are inlined into the deployed
+# browser bundle by the runtime build (Vite, Next.js). A ``service`` key
+# routed under any of these would leak project-root credentials into a
+# publicly-fetchable JS asset. ``_build_env_map`` filters these out when
+# the key is service-kind.
+_BROWSER_EXPOSED_PREFIXES: frozenset[str] = frozenset({"VITE_OPENSAIL", "NEXT_PUBLIC_OPENSAIL"})
 _URL_SUFFIXES: tuple[str, ...] = ("DATA_API_URL", "DATA_URL")
 _KEY_SUFFIXES: tuple[str, ...] = ("DATA_KEY",)
+
+
+def _is_service_key(raw: str | None) -> bool:
+    """Detect a ``wsk_svc_*`` key by prefix. ``None`` / unrecognised → False."""
+    return bool(raw) and raw.startswith("wsk_svc_")
+
 
 WORKSPACE_DATA_SERVICE_SLUG = "workspace-data"
 
@@ -90,12 +102,27 @@ def _build_env_map(url: str, key: str | None) -> dict[str, str]:
     The expansion is the canonical contract — if you add a new client
     runtime (e.g. Remix's ``REMIX_PUBLIC_*``), add a prefix to ``_PREFIXES``
     and every caller picks it up automatically.
+
+    Service-key safety: when ``key`` is a ``wsk_svc_*`` secret, the KEY
+    spread is restricted to server-only prefixes. URL is still spread
+    everywhere (URL is non-secret). This is defense-in-depth — the agent
+    tool shouldn't be wiring service keys into browser env in the first
+    place — but a misconfigured caller cannot bake a project-root secret
+    into a publicly-fetched browser bundle through this builder.
     """
+    is_service = _is_service_key(key)
+    if is_service:
+        logger.warning(
+            "workspace_data env: routing service key — KEY spread limited to "
+            "server prefixes only (browser prefixes %s would leak into the "
+            "deployed bundle).",
+            sorted(_BROWSER_EXPOSED_PREFIXES),
+        )
     out: dict[str, str] = {}
     for prefix in _PREFIXES:
         for suffix in _URL_SUFFIXES:
             out[f"{prefix}_{suffix}"] = url
-        if key is not None:
+        if key is not None and not (is_service and prefix in _BROWSER_EXPOSED_PREFIXES):
             for suffix in _KEY_SUFFIXES:
                 out[f"{prefix}_{suffix}"] = key
     return out
