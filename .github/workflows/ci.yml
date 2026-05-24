@@ -159,6 +159,9 @@ jobs:
 
       - name: Upload test results
         if: always()
+        # Quota exhaustion on the org's Actions storage must not fail the job.
+        # Tests are the contract; the artifact is convenience.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-results
@@ -257,6 +260,9 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
+        # See backend-integration above — artifact-storage quota exhaustion
+        # should not mask a green test run.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
@@ -265,6 +271,7 @@ jobs:
 
       - name: Upload Playwright traces
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: playwright-traces
