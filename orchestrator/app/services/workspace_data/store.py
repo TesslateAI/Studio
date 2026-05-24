@@ -29,6 +29,12 @@ MAX_PAGE_SIZE = 200
 
 _COLLECTION_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
+# Names reserved by the Data API's route layout — a collection named
+# ``collections`` would alias the REST-style ``/api/data/v1/collections/{c}/records``
+# prefix and become unaddressable through the canonical ``/{collection}`` shape.
+# Existing rows are left untouched; only NEW creates are blocked.
+RESERVED_COLLECTION_NAMES: frozenset[str] = frozenset({"collections"})
+
 
 # --- Errors -----------------------------------------------------------------
 class WorkspaceDataError(Exception):
@@ -77,6 +83,11 @@ def validate_collection_name(name: str) -> str:
         raise InvalidNameError(
             "Collection name must be 1-64 characters, start with a letter or "
             "digit, and contain only letters, digits, '-' and '_'."
+        )
+    if cleaned.lower() in RESERVED_COLLECTION_NAMES:
+        raise InvalidNameError(
+            f"Collection name '{cleaned}' is reserved by the Data API route "
+            "layout and would conflict with the REST-style /collections/* prefix."
         )
     return cleaned
 

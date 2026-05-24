@@ -63,6 +63,27 @@ def _http_error(exc: wd.WorkspaceDataError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
+def _require_uuid(ref: str, kind: str) -> str:
+    """Reject a destructive-route ref that isn't a UUID.
+
+    The store's name-or-UUID fallback is convenient on read paths but a
+    footgun on DELETE — a typo'd name becomes a silent wrong-object delete
+    if the project happens to have a collection by that name. Destructive
+    mgmt routes (delete collection, delete record) require the canonical
+    UUID; the studio UI already passes ``collection.id`` and ``record.id``.
+    """
+    from uuid import UUID
+
+    try:
+        UUID(str(ref))
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{kind}_id must be a UUID. Look it up first if you only have the name.",
+        ) from None
+    return ref
+
+
 def _collection_response(c: WorkspaceCollection, record_count: int) -> CollectionResponse:
     return CollectionResponse(
         id=c.id,
@@ -178,8 +199,9 @@ async def delete_collection(
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a collection and all of its records."""
+    """Delete a collection and all of its records (UUID-only)."""
     project, _ = await get_project_with_access(db, project_slug, user.id, Permission.PROJECT_EDIT)
+    collection_id = _require_uuid(collection_id, "collection")
     try:
         collection = await wd.require_collection(db, project.id, collection_id)
     except wd.WorkspaceDataError as exc:
@@ -225,8 +247,10 @@ async def delete_record(
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a single record."""
+    """Delete a single record (UUID-only on both path params)."""
     project, _ = await get_project_with_access(db, project_slug, user.id, Permission.PROJECT_EDIT)
+    collection_id = _require_uuid(collection_id, "collection")
+    record_id = _require_uuid(record_id, "record")
     try:
         collection = await wd.require_collection(db, project.id, collection_id)
         record = await wd.require_record(db, collection.id, record_id)
@@ -389,21 +413,31 @@ async def authenticate_data_key(
     return key
 
 
+# Opaque "missing-or-closed" response. Anon keys must not be able to use the
+# 404-vs-403 distinction to enumerate which collections exist in a project.
+# Service keys (which have full project access) get the same canonical 404
+# only when the collection truly does not exist — they have no public_* flags
+# to fail against, so _enforce short-circuits and they never see this code path.
+_DATA_API_NOT_FOUND = "Collection not found or not accessible to this key."
+
+
 def _enforce(key: WorkspaceDataKey, collection: WorkspaceCollection, op: str) -> None:
-    """Gate an operation: service keys bypass; anon keys obey collection flags."""
+    """Gate an operation: service keys bypass; anon keys obey collection flags.
+
+    A closed-flag rejection is returned as a 404 with the same opaque detail
+    as ``_resolve_collection``'s real 404 — so an anon-key holder cannot
+    distinguish "collection does not exist" from "exists but op disallowed".
+    """
     if key.kind == "service":
         return
     if not getattr(collection, f"public_{op}", False):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Collection '{collection.name}' does not allow public {op}.",
-        )
+        raise HTTPException(status_code=404, detail=_DATA_API_NOT_FOUND)
 
 
 async def _resolve_collection(db: AsyncSession, project_id, ref: str) -> WorkspaceCollection:
     collection = await wd.get_collection(db, project_id, ref)
     if collection is None:
-        raise HTTPException(status_code=404, detail=f"Collection '{ref}' not found.")
+        raise HTTPException(status_code=404, detail=_DATA_API_NOT_FOUND)
     return collection
 
 

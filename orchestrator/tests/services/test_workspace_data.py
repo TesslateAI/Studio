@@ -324,12 +324,16 @@ def test_enforce_access_flags() -> None:
     anon = WorkspaceDataKey(kind="anon")
     service = WorkspaceDataKey(kind="service")
 
-    # anon: allowed where the flag is set, blocked otherwise.
+    # anon: allowed where the flag is set, blocked otherwise. Blocked ops
+    # return an opaque 404 (NOT 403) so anon-key holders can't enumerate
+    # which collections exist via the status-code distinction. The detailed
+    # status / leak-free body assertions live in
+    # test_workspace_data_disclosure.test_enforce_returns_opaque_404_for_anon_on_closed_op.
     _enforce(anon, collection, "insert")  # no raise
     for blocked in ("read", "update", "delete"):
         with pytest.raises(HTTPException) as exc:
             _enforce(anon, collection, blocked)
-        assert exc.value.status_code == 403
+        assert exc.value.status_code == 404
 
     # service: bypasses every flag.
     for op in ("insert", "read", "update", "delete"):
