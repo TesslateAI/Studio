@@ -245,6 +245,19 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             # the wsdata router being ready at app construction time.
             from .routers.workspace_data import DATA_API_VERSION
 
+            # Browsers hide every non-CORS-safelisted response header from
+            # cross-origin ``fetch().headers.get(...)`` unless we list them
+            # explicitly. Without this, deployed Vercel/CF apps can't read
+            # ``Retry-After`` (to back off properly on 429), the
+            # ``X-RateLimit-*`` triple (to surface a "you're hitting limits"
+            # banner), or the API version (to fail loud on shape drift).
+            # Curl never sees this restriction — only browsers do. This is
+            # the response-header equivalent of the request-side
+            # ``Access-Control-Allow-Headers`` we set on preflights below.
+            expose_headers = (
+                "Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining, "
+                "X-RateLimit-Reset, X-OpenSail-Data-API-Version, Content-Length"
+            )
             if request.method == "OPTIONS":
                 return Response(
                     status_code=200,
@@ -252,12 +265,14 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
                         "Access-Control-Allow-Origin": "*",
                         "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
                         "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin",
+                        "Access-Control-Expose-Headers": expose_headers,
                         "Access-Control-Max-Age": "600",
                         "X-OpenSail-Data-API-Version": DATA_API_VERSION,
                     },
                 )
             data_response = await call_next(request)
             data_response.headers["Access-Control-Allow-Origin"] = "*"
+            data_response.headers["Access-Control-Expose-Headers"] = expose_headers
             # Stamped here (NOT via a FastAPI route dependency) so that
             # HTTPException short-circuits — 401 / 404 / 429 — also carry
             # the header. Router deps don't run on the exception path.
