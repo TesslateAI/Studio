@@ -50,13 +50,16 @@ def upgrade() -> None:
     if bind.dialect.name != "postgresql":
         return
 
-    op.alter_column(
-        "app_runtime_deployments",
-        "idle_timeout_seconds",
-        existing_type=sa.Integer(),
-        existing_nullable=False,
-        server_default=str(_NEW_DEFAULT),
-    )
+    # batch_alter_table keeps this cross-dialect for the CI lint that
+    # forbids bare op.alter_column at the top level; runtime is still
+    # postgres-only because of the early-return guard above.
+    with op.batch_alter_table("app_runtime_deployments") as batch_op:
+        batch_op.alter_column(
+            "idle_timeout_seconds",
+            existing_type=sa.Integer(),
+            existing_nullable=False,
+            server_default=str(_NEW_DEFAULT),
+        )
 
     result = bind.execute(
         text(
@@ -80,13 +83,13 @@ def downgrade() -> None:
     if bind.dialect.name != "postgresql":
         return
 
-    op.alter_column(
-        "app_runtime_deployments",
-        "idle_timeout_seconds",
-        existing_type=sa.Integer(),
-        existing_nullable=False,
-        server_default=str(_OLD_DEFAULT),
-    )
+    with op.batch_alter_table("app_runtime_deployments") as batch_op:
+        batch_op.alter_column(
+            "idle_timeout_seconds",
+            existing_type=sa.Integer(),
+            existing_nullable=False,
+            server_default=str(_OLD_DEFAULT),
+        )
     # Data is left as-is: a row at 172800 cannot be reliably told apart
     # from one a creator set explicitly. Re-running upgrade() is
     # idempotent if the default needs restoring.

@@ -7,7 +7,7 @@ worker tasks, and reconnect flows.
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from uuid import UUID
 
 import aiofiles
@@ -400,8 +400,8 @@ class MentionPayload:
 # in workspace_data.store) because they're prompt-shaping decisions, not
 # storage knobs — analyzing more records is cheap; spending more *tokens*
 # is what we're bounding.
-_OVERVIEW_SAMPLE = 3       # top-fields-per-collection sample for passive block
-_FOCUS_SAMPLE = 5          # per-collection sample for @data mention deep-dive
+_OVERVIEW_SAMPLE = 3  # top-fields-per-collection sample for passive block
+_FOCUS_SAMPLE = 5  # per-collection sample for @data mention deep-dive
 _PROJECT_FANOUT_LIMIT = 10  # cap for @project:* / @project:workspace
 
 
@@ -410,9 +410,7 @@ async def _build_data_overview(project: Project, db: AsyncSession) -> str | None
     from . import workspace_data as wd
 
     try:
-        summary = await wd.project_data_summary(
-            db, project.id, sample_size=_OVERVIEW_SAMPLE
-        )
+        summary = await wd.project_data_summary(db, project.id, sample_size=_OVERVIEW_SAMPLE)
     except Exception as exc:  # noqa: BLE001 - non-blocking enrichment
         logger.debug("[RUN-CONTEXT] data_overview skipped: %s", exc)
         return None
@@ -434,9 +432,7 @@ async def _build_data_overview(project: Project, db: AsyncSession) -> str | None
     ]
     for c in collections:
         fields = ", ".join(c.get("top_fields") or []) or "(empty)"
-        lines.append(
-            f"- {c['name']} — {c['total_records']} record(s); sample fields: {fields}"
-        )
+        lines.append(f"- {c['name']} — {c['total_records']} record(s); sample fields: {fields}")
     return "\n".join(lines)
 
 
@@ -461,15 +457,11 @@ async def _build_data_focus(
         else:
             wanted = sorted({r for r in mentions.data_collection_refs if r and r != "*"})
         if wanted:
-            sections.append(
-                f"=== Mentioned Collections (project '{scope_project.name}') ==="
-            )
+            sections.append(f"=== Mentioned Collections (project '{scope_project.name}') ===")
             for name in wanted:
                 try:
                     coll = await wd.require_collection(db, scope_project.id, name)
-                    summary = await wd.summarize_collection(
-                        db, coll, sample_size=_FOCUS_SAMPLE
-                    )
+                    summary = await wd.summarize_collection(db, coll, sample_size=_FOCUS_SAMPLE)
                     schema = await wd.infer_schema(db, coll, sample_size=wd.SCHEMA_SAMPLE)
                 except wd.WorkspaceDataError as exc:
                     sections.append(f"- {name}: (unavailable — {exc})")
@@ -515,9 +507,7 @@ async def _build_data_focus(
         if not wildcard and explicit_ids:
             visible_ids_sq = visible_ids_sq.where(Project.id.in_(explicit_ids))
 
-        visible_q = select(Project).where(
-            Project.id.in_(visible_ids_sq.subquery().select())
-        )
+        visible_q = select(Project).where(Project.id.in_(visible_ids_sq.subquery().select()))
         if wildcard:
             visible_q = visible_q.limit(_PROJECT_FANOUT_LIMIT)
 
@@ -532,9 +522,7 @@ async def _build_data_focus(
                         db, proj.id, sample_size=_OVERVIEW_SAMPLE
                     )
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug(
-                        "[RUN-CONTEXT] project %s skipped: %s", proj.id, exc
-                    )
+                    logger.debug("[RUN-CONTEXT] project %s skipped: %s", proj.id, exc)
                     continue
                 colls = summary.get("collections") or []
                 if not colls:

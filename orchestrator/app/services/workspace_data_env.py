@@ -102,8 +102,8 @@ def _build_env_map(url: str, key: str | None) -> dict[str, str]:
 
 
 async def _resolve_key(
-    db: "AsyncSession",
-    project: "Project",
+    db: AsyncSession,
+    project: Project,
     *,
     strategy: KeyStrategy,
     override_key: str | None,
@@ -152,8 +152,8 @@ async def _resolve_key(
 
 
 async def resolve_workspace_data_env(
-    db: "AsyncSession",
-    project: "Project",
+    db: AsyncSession,
+    project: Project,
     *,
     user_id: UUID | None = None,
     key_strategy: KeyStrategy = "autoinject",
@@ -180,7 +180,8 @@ async def resolve_workspace_data_env(
         return {}
 
     key_value = await _resolve_key(
-        db, project,
+        db,
+        project,
         strategy=key_strategy,
         override_key=override_key,
         user_id=user_id,
@@ -199,8 +200,8 @@ def is_workspace_data_service(service_slug: str | None) -> bool:
 
 
 async def compute_env_for_containers(
-    db: "AsyncSession",
-    project: "Project",
+    db: AsyncSession,
+    project: Project,
     container_ids: list[UUID],
     *,
     user_id: UUID | None = None,
@@ -262,7 +263,8 @@ async def compute_env_for_containers(
             for conn, _source in wired:
                 cfg = conn.config or {}
                 resolved = await resolve_workspace_data_env(
-                    db, project,
+                    db,
+                    project,
                     user_id=user_id,
                     key_strategy=cfg.get("key_strategy", default_key_strategy),
                     override_url=cfg.get("override_url"),
@@ -286,7 +288,8 @@ async def compute_env_for_containers(
         # No graph wiring for this container — blanket-inject the default
         # contract so projects that haven't drawn the canvas still work.
         env = await resolve_workspace_data_env(
-            db, project,
+            db,
+            project,
             user_id=user_id,
             key_strategy=default_key_strategy,
         )

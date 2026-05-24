@@ -351,7 +351,7 @@ def _field_frequencies(records: list[WorkspaceRecord]) -> dict[str, int]:
     """Count top-level field occurrences across the sample."""
     freq: dict[str, int] = {}
     for r in records:
-        for k in (r.data or {}).keys():
+        for k in r.data or {}:
             freq[k] = freq.get(k, 0) + 1
     return dict(sorted(freq.items(), key=lambda kv: (-kv[1], kv[0])))
 
@@ -410,9 +410,7 @@ async def summarize_collection(
     }
 
 
-async def project_data_summary(
-    db: AsyncSession, project_id: UUID, *, sample_size: int = 3
-) -> dict:
+async def project_data_summary(db: AsyncSession, project_id: UUID, *, sample_size: int = 3) -> dict:
     """Tiny per-project overview for passive discovery in agent context.
 
     Returns ``{collections: [...], total_records: N}``. Each collection entry
@@ -507,7 +505,8 @@ async def aggregate_field(
             counts[key] = counts.get(key, 0) + 1
         top_n = max(1, min(int(top_n), 100))
         ranked = sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0])))[:top_n]
-        out["top_values"] = [{"value": list(k) if isinstance(k, tuple) else k, "count": n}
-                              for k, n in ranked]
+        out["top_values"] = [
+            {"value": list(k) if isinstance(k, tuple) else k, "count": n} for k, n in ranked
+        ]
         out["distinct_count_in_sample"] = len(counts)
     return out
