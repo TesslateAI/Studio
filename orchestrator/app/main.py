@@ -697,11 +697,39 @@ async def startup():
     # Create users directory for Docker mode
     # In Docker mode, user project files are stored in the users directory
     # In K8s mode, files are stored on PVC and this is not needed
-    from .services.orchestration import is_docker_mode
+    from .services.orchestration import is_docker_mode, is_kubernetes_mode
 
     if is_docker_mode():
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
+
+    # ----------------------------------------------------------------------
+    # K8s auth self-test
+    # ----------------------------------------------------------------------
+    # Eagerly applies the `Configuration.auth_settings` monkey-patch from
+    # `services.k8s_auth` and confirms the SA token actually attaches to
+    # an outbound request. Catches the kubernetes-client v33+ BearerToken
+    # regression on the very first boot — before background loops
+    # (compute_reaper, idle_monitor, namespace_reaper) fail silently every
+    # minute. Crashes with EX_CONFIG (78) on failure so K8s liveness
+    # restarts the pod and the failure is loud in logs.
+    if is_kubernetes_mode():
+        try:
+            from kubernetes import client as _k8s_client
+
+            from .services import k8s_auth as _k8s_auth
+
+            _k8s_auth.load_in_cluster_or_kube()
+            _k8s_client.CoreV1Api().list_namespace(_request_timeout=5, limit=1)
+            logger.info("[K8S] Auth self-test passed — Authorization header attaches correctly")
+        except Exception:
+            logger.exception(
+                "[K8S] Auth self-test FAILED — no `Authorization` header on the wire. "
+                "This is the kubernetes-client v33+ BearerToken regression. "
+                "Check `kubernetes` package version (must be <33) AND that "
+                "`services/k8s_auth.py` is imported. Aborting startup."
+            )
+            raise SystemExit(78) from None  # EX_CONFIG — K8s will restart the pod
 
     # Wave 9 D1: register DB row event listeners (whitelisted tables → Redis Streams).
     # Idempotent; safe to call once at startup. Producer side only this wave.
