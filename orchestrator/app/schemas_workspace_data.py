@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # --- Collections ------------------------------------------------------------
@@ -14,6 +14,10 @@ class CollectionCreate(BaseModel):
     All public flags default to ``False`` (least privilege). Callers that
     want anonymous traffic from a deployed frontend MUST explicitly opt-in
     on each operation. See migration 0119 for the matching server-default.
+
+    ``schema`` is an optional JSON Schema (Draft 2020-12) every record
+    must conform to. ``None`` / omitted → no schema (any well-formed
+    object accepted).
     """
 
     name: str
@@ -21,15 +25,28 @@ class CollectionCreate(BaseModel):
     public_read: bool = False
     public_update: bool = False
     public_delete: bool = False
+    schema: dict[str, Any] | None = None
+
+
+# Sentinel used by the router so PATCH can distinguish "leave schema alone"
+# from "clear the schema back to no-schema". A plain ``None`` would
+# collapse both meanings.
+_SCHEMA_UNCHANGED: dict[str, Any] = {"__opensail_unchanged__": True}
 
 
 class CollectionUpdate(BaseModel):
-    """Partial update of a collection's public access flags."""
+    """Partial update of a collection's public access flags + optional schema.
+
+    ``schema`` defaults to a sentinel so the JSON body can express three
+    distinct intents: omit the key entirely → leave it as-is; send
+    ``null`` → clear the schema; send an object → replace the schema.
+    """
 
     public_insert: bool | None = None
     public_read: bool | None = None
     public_update: bool | None = None
     public_delete: bool | None = None
+    schema: dict[str, Any] | None = Field(default_factory=lambda: dict(_SCHEMA_UNCHANGED))
 
 
 class CollectionResponse(BaseModel):
@@ -42,6 +59,7 @@ class CollectionResponse(BaseModel):
     public_read: bool
     public_update: bool
     public_delete: bool
+    schema: dict[str, Any] | None = None
     record_count: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None

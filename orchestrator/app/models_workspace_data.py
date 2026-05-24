@@ -52,6 +52,13 @@ class WorkspaceCollection(Base):
     public_update = Column(Boolean, nullable=False, default=False)
     public_delete = Column(Boolean, nullable=False, default=False)
 
+    # Optional JSON Schema (Draft 2020-12) that every record's ``data`` must
+    # conform to. NULL means "no schema" — accept any well-formed JSON
+    # object that passes the structural guards. The schema is validated as
+    # a valid JSON Schema at write time (so a typo'd schema can't soft-brick
+    # all inserts). Backed by migration 0120.
+    schema = Column(JSON, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

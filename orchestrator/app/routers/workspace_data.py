@@ -105,6 +105,8 @@ async def _audit(
 _ERROR_STATUS: list[tuple[type, int]] = [
     (wd.InvalidNameError, 400),
     (wd.InvalidRecordError, 400),
+    (wd.InvalidSchemaError, 400),
+    (wd.SchemaValidationError, 422),
     (wd.InvalidKeyError, 400),
     (wd.CollectionExistsError, 409),
     (wd.CollectionNotFoundError, 404),
@@ -151,6 +153,7 @@ def _collection_response(c: WorkspaceCollection, record_count: int) -> Collectio
         public_read=c.public_read,
         public_update=c.public_update,
         public_delete=c.public_delete,
+        schema=c.schema,
         record_count=record_count,
         created_at=c.created_at,
         updated_at=c.updated_at,
@@ -222,6 +225,7 @@ async def create_collection(
             public_read=payload.public_read,
             public_update=payload.public_update,
             public_delete=payload.public_delete,
+            schema=payload.schema,
         )
     except wd.WorkspaceDataError as exc:
         raise _http_error(exc) from exc
@@ -264,9 +268,21 @@ async def update_collection(
             f: getattr(collection, f)
             for f in ("public_insert", "public_read", "public_update", "public_delete")
         }
-        collection = await wd.update_collection(
-            db, collection, **payload.model_dump(exclude_unset=True)
-        )
+        before_has_schema = collection.schema is not None
+        # Unpack flag fields manually so the sentinel-bearing ``schema`` can
+        # be forwarded only when the caller actually included it.
+        sent = payload.model_dump(exclude_unset=True)
+        from ..schemas_workspace_data import _SCHEMA_UNCHANGED
+
+        schema_kwarg = {}
+        if "schema" in sent and sent["schema"] != _SCHEMA_UNCHANGED:
+            schema_kwarg["schema"] = sent["schema"]
+        flag_kwargs = {
+            k: sent[k]
+            for k in ("public_insert", "public_read", "public_update", "public_delete")
+            if k in sent
+        }
+        collection = await wd.update_collection(db, collection, **schema_kwarg, **flag_kwargs)
     except wd.WorkspaceDataError as exc:
         raise _http_error(exc) from exc
     after = {
@@ -274,6 +290,8 @@ async def update_collection(
         for f in ("public_insert", "public_read", "public_update", "public_delete")
     }
     changed = {k: {"from": before[k], "to": after[k]} for k in after if before[k] != after[k]}
+    if before_has_schema != (collection.schema is not None) or "schema" in schema_kwarg:
+        changed["schema"] = {"set": collection.schema is not None}
     if changed:
         await _audit(
             db,
@@ -647,7 +665,7 @@ async def data_update(
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found.")
     try:
-        record = await wd.update_record(db, record, payload)
+        record = await wd.update_record(db, record, payload, collection=coll)
     except wd.WorkspaceDataError as exc:
         raise _http_error(exc) from exc
     return _record_response(record)

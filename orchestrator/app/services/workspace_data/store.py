@@ -73,6 +73,14 @@ class QuotaExceededError(WorkspaceDataError):
     """A per-project collection or record limit has been reached."""
 
 
+class InvalidSchemaError(WorkspaceDataError):
+    """The supplied JSON Schema is itself malformed or not a valid schema."""
+
+
+class SchemaValidationError(WorkspaceDataError):
+    """Record payload does not conform to the collection's JSON Schema."""
+
+
 # --- Validation helpers -----------------------------------------------------
 def _maybe_uuid(value: object) -> UUID | None:
     """Best-effort coerce a value to UUID; ``None`` if it is not one."""
@@ -148,6 +156,52 @@ def _has_lone_surrogate(s: str) -> bool:
     return False
 
 
+def validate_collection_schema(schema: object) -> dict | None:
+    """Validate a JSON-Schema document. ``None`` / empty dict → no schema.
+
+    Uses ``jsonschema.Draft202012Validator.check_schema`` to ensure the
+    schema is itself well-formed before we ever try to validate a record
+    against it. That avoids the soft-brick where a typo'd schema (e.g.
+    ``{"type": "objct"}``) silently fails every insert at request time
+    with an opaque error.
+    """
+    if schema is None:
+        return None
+    if not isinstance(schema, dict):
+        raise InvalidSchemaError("Collection schema must be a JSON object or null.")
+    if not schema:
+        return None
+    try:
+        from jsonschema import Draft202012Validator
+
+        Draft202012Validator.check_schema(schema)
+    except Exception as exc:  # noqa: BLE001 — surface as 400 with the upstream message
+        raise InvalidSchemaError(f"Invalid JSON Schema: {exc}") from exc
+    return schema
+
+
+def _validate_against_schema(data: dict, schema: dict | None) -> None:
+    """Validate a record payload against the collection's schema, if any.
+
+    No-op when the collection has no schema (the v1 behaviour). Raises
+    ``SchemaValidationError`` with the first failure's path + message so
+    the client knows exactly which field to fix.
+    """
+    if not schema:
+        return
+    try:
+        from jsonschema import Draft202012Validator
+    except ImportError:  # pragma: no cover - jsonschema is a hard dep
+        return
+    validator = Draft202012Validator(schema)
+    errors = list(validator.iter_errors(data))
+    if not errors:
+        return
+    first = errors[0]
+    path = "/".join(str(p) for p in first.absolute_path) or "(root)"
+    raise SchemaValidationError(f"Record violates schema at '{path}': {first.message}")
+
+
 def validate_record_data(data: object) -> dict:
     """Validate a record payload is a JSON object within size + structural caps.
 
@@ -221,14 +275,21 @@ async def create_collection(
     public_read: bool = False,
     public_update: bool = False,
     public_delete: bool = False,
+    schema: object = None,
 ) -> WorkspaceCollection:
     """Create a new collection. Raises on bad name, duplicate, or quota.
 
     All ``public_*`` flags default to ``False`` (secure default). Callers
     must explicitly opt-in to each operation they want anonymous keys to
     perform. See migration 0119 for the matching server-default.
+
+    ``schema`` is an optional JSON Schema (Draft 2020-12). When set, every
+    insert/update validates against it; when ``None`` / empty, the v1
+    structural guards alone apply. Validated at create time so a typo'd
+    schema can't soft-brick the collection.
     """
     name = validate_collection_name(name)
+    validated_schema = validate_collection_schema(schema)
     if await get_collection(db, project_id, name) is not None:
         raise CollectionExistsError(f"Collection '{name}' already exists.")
     if await _count_collections(db, project_id) >= MAX_COLLECTIONS_PER_PROJECT:
@@ -242,6 +303,7 @@ async def create_collection(
         public_read=public_read,
         public_update=public_update,
         public_delete=public_delete,
+        schema=validated_schema,
     )
     db.add(coll)
     try:
@@ -255,14 +317,29 @@ async def create_collection(
     return coll
 
 
+_SCHEMA_SENTINEL = object()
+
+
 async def update_collection(
-    db: AsyncSession, collection: WorkspaceCollection, **flags: bool | None
+    db: AsyncSession,
+    collection: WorkspaceCollection,
+    *,
+    schema: object = _SCHEMA_SENTINEL,
+    **flags: bool | None,
 ) -> WorkspaceCollection:
-    """Update a collection's public access flags (only provided keys)."""
+    """Update a collection's public access flags and/or JSON Schema.
+
+    Only provided fields are written. The ``schema`` parameter uses a
+    sentinel so ``None`` can mean "clear the schema" (open the collection
+    back up to any payload) while *omitting* the kwarg means "leave it
+    alone". The new schema is validated before write.
+    """
     for field in ("public_insert", "public_read", "public_update", "public_delete"):
         value = flags.get(field)
         if value is not None:
             setattr(collection, field, bool(value))
+    if schema is not _SCHEMA_SENTINEL:
+        collection.schema = validate_collection_schema(schema)
     await db.commit()
     await db.refresh(collection)
     return collection
@@ -286,8 +363,14 @@ async def delete_collection(db: AsyncSession, collection: WorkspaceCollection) -
 async def insert_record(
     db: AsyncSession, collection: WorkspaceCollection, data: object
 ) -> WorkspaceRecord:
-    """Insert a JSON document into a collection. Raises on bad data or quota."""
+    """Insert a JSON document into a collection.
+
+    Raises ``InvalidRecordError`` on bad structure, ``SchemaValidationError``
+    when the collection has a schema and the payload violates it, or
+    ``QuotaExceededError`` when the project's record cap is hit.
+    """
     data = validate_record_data(data)
+    _validate_against_schema(data, collection.schema)
     if await project_record_count(db, collection.project_id) >= MAX_RECORDS_PER_PROJECT:
         raise QuotaExceededError(f"Project has reached the {MAX_RECORDS_PER_PROJECT}-record limit.")
     record = WorkspaceRecord(
@@ -360,9 +443,23 @@ async def require_record(
     return rec
 
 
-async def update_record(db: AsyncSession, record: WorkspaceRecord, data: object) -> WorkspaceRecord:
-    """Replace a record's JSON document."""
+async def update_record(
+    db: AsyncSession,
+    record: WorkspaceRecord,
+    data: object,
+    collection: WorkspaceCollection | None = None,
+) -> WorkspaceRecord:
+    """Replace a record's JSON document.
+
+    Accepts an optional ``collection`` so the caller can supply the same
+    row they used to authorise the operation (avoids a redundant SELECT).
+    When provided, the payload is validated against ``collection.schema``;
+    when omitted, only the structural guards apply (back-compat path —
+    every caller in the router supplies the collection).
+    """
     record.data = validate_record_data(data)
+    if collection is not None:
+        _validate_against_schema(record.data, collection.schema)
     await db.commit()
     await db.refresh(record)
     return record

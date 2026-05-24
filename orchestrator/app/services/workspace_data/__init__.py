@@ -39,8 +39,10 @@ from .store import (
     CollectionNotFoundError,
     InvalidNameError,
     InvalidRecordError,
+    InvalidSchemaError,
     QuotaExceededError,
     RecordNotFoundError,
+    SchemaValidationError,
     WorkspaceDataError,
     aggregate_field,
     collection_record_count,
@@ -62,6 +64,7 @@ from .store import (
     update_collection,
     update_record,
     validate_collection_name,
+    validate_collection_schema,
     validate_record_data,
 )
 
@@ -87,8 +90,10 @@ __all__ = [
     "InvalidKeyError",
     "InvalidNameError",
     "InvalidRecordError",
+    "InvalidSchemaError",
     "QuotaExceededError",
     "RecordNotFoundError",
+    "SchemaValidationError",
     "WorkspaceDataError",
     "aggregate_field",
     "collection_record_count",
@@ -120,5 +125,6 @@ __all__ = [
     "update_collection",
     "update_record",
     "validate_collection_name",
+    "validate_collection_schema",
     "validate_record_data",
 ]

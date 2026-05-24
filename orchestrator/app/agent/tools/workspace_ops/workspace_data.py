@@ -147,7 +147,7 @@ async def _update(params: dict[str, Any], context: dict[str, Any]) -> dict[str, 
     record = await store.get_record(context["db"], collection.id, record_id)
     if record is None:
         return error_output(message=f"Record '{record_id}' not found in '{collection.name}'.")
-    record = await store.update_record(context["db"], record, data)
+    record = await store.update_record(context["db"], record, data, collection=collection)
     return success_output(
         message=f"Updated record '{record_id}' in '{collection.name}'.",
         id=str(record.id),
