@@ -15,10 +15,11 @@ Two surfaces, two routers:
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Security
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Security
 from fastapi.security import APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..database import get_db
 from ..models import User
 from ..models_workspace_data import WorkspaceCollection, WorkspaceDataKey
@@ -34,6 +35,7 @@ from ..schemas_workspace_data import (
     UsageResponse,
 )
 from ..services import workspace_data as wd
+from ..services.rate_limit import get_token_bucket
 from ..users import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -297,16 +299,69 @@ async def revoke_key(
 
 
 # ============================================================================
-# Public Data API — per-project key auth
+# Public Data API — per-project key auth + tiered rate limiting
 # ============================================================================
 _data_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
 
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP, trusting the proxy headers middleware.
+
+    The orchestrator runs behind NGINX Ingress (k8s) / Traefik (docker);
+    ``ProxyHeadersMiddleware`` already rewrites ``request.client.host`` to the
+    real client. Falls back to a sentinel so the bucket key is never empty
+    (Starlette can drop ``client`` on test/transport corner cases).
+    """
+    client = request.client
+    return client.host if client and client.host else "unknown"
+
+
+def _rate_limit_headers(remaining: int, reset: int, capacity: int) -> dict[str, str]:
+    return {
+        "Retry-After": str(reset),
+        "X-RateLimit-Limit": str(capacity),
+        "X-RateLimit-Remaining": str(max(0, remaining)),
+        "X-RateLimit-Reset": str(reset),
+    }
+
+
 async def authenticate_data_key(
+    request: Request,
     authorization: str | None = Security(_data_key_header),
     db: AsyncSession = Depends(get_db),
 ) -> WorkspaceDataKey:
-    """Resolve and validate a ``WorkspaceDataKey`` from the Bearer header."""
+    """Resolve + validate a ``WorkspaceDataKey`` with tiered rate limiting.
+
+    Two buckets run in order so attackers without a valid key never reach the
+    auth DB lookup, and a leaked anon key can't take out an entire project:
+
+    1. **Per-IP** (``wsdata:ip``): fires *before* the DB hit. Catches bad-key
+       spammers, OPTIONS-free amplification, and bot loops.
+    2. **Per-key** (``wsdata:key``): fires after a successful lookup. Stricter
+       than per-IP so a single leaked anon key can't burn the whole budget.
+
+    Both buckets are Redis-backed (``RedisTokenBucket``) with in-process
+    fallback when Redis is down. Limits live in ``Settings`` so per-env tuning
+    is one env var away.
+    """
+    settings = get_settings()
+    bucket = get_token_bucket()
+
+    # 1. Per-IP throttle — no auth, no DB hit. Always runs.
+    ip = _client_ip(request)
+    allowed, remaining, reset = await bucket.check_and_consume(
+        "wsdata:ip",
+        ip,
+        capacity=settings.wsdata_api_per_ip_capacity,
+        window_seconds=settings.wsdata_api_per_ip_window_seconds,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Try again shortly.",
+            headers=_rate_limit_headers(remaining, reset, settings.wsdata_api_per_ip_capacity),
+        )
+
     if not authorization:
         raise HTTPException(
             status_code=401,
@@ -316,6 +371,21 @@ async def authenticate_data_key(
     key = await wd.resolve_data_key(db, raw)
     if key is None:
         raise HTTPException(status_code=401, detail="Invalid API key.")
+
+    # 2. Per-key throttle — stricter, scoped to the resolved key.
+    allowed, remaining, reset = await bucket.check_and_consume(
+        "wsdata:key",
+        str(key.id),
+        capacity=settings.wsdata_api_per_key_capacity,
+        window_seconds=settings.wsdata_api_per_key_window_seconds,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded for this API key. Try again shortly.",
+            headers=_rate_limit_headers(remaining, reset, settings.wsdata_api_per_key_capacity),
+        )
+
     return key
 
 

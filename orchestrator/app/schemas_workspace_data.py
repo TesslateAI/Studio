@@ -9,10 +9,15 @@ from pydantic import BaseModel, field_validator
 
 # --- Collections ------------------------------------------------------------
 class CollectionCreate(BaseModel):
-    """Request body for creating a collection."""
+    """Request body for creating a collection.
+
+    All public flags default to ``False`` (least privilege). Callers that
+    want anonymous traffic from a deployed frontend MUST explicitly opt-in
+    on each operation. See migration 0119 for the matching server-default.
+    """
 
     name: str
-    public_insert: bool = True
+    public_insert: bool = False
     public_read: bool = False
     public_update: bool = False
     public_delete: bool = False

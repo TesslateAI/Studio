@@ -712,6 +712,21 @@ class Settings(BaseSettings):
     )
     channel_webhook_rate_limit: int = 60  # Max webhook calls per config per minute
 
+    # ==========================================================================
+    # Workspace Data Store — public Data API (/api/data/v1/*)
+    # ==========================================================================
+    # The Data API is internet-exposed (deployed user frontends call it across
+    # arbitrary origins with a per-project Bearer key). Two rate-limit tiers:
+    # per-IP catches bad-key spammers before any DB hit; per-key catches misuse
+    # of a leaked anon key without taking down the whole project.
+    #
+    # Defaults: 600/min per IP (10 RPS sustained), 1200/min per key (20 RPS).
+    # Tune via env vars for high-traffic projects without a code change.
+    wsdata_api_per_ip_capacity: int = 600
+    wsdata_api_per_ip_window_seconds: int = 60
+    wsdata_api_per_key_capacity: int = 1200
+    wsdata_api_per_key_window_seconds: int = 60
+
     @property
     def get_channel_encryption_key(self) -> str:
         """Get encryption key for channel credentials."""

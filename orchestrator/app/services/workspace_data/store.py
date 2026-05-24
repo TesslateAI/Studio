@@ -134,12 +134,17 @@ async def create_collection(
     project_id: UUID,
     name: str,
     *,
-    public_insert: bool = True,
+    public_insert: bool = False,
     public_read: bool = False,
     public_update: bool = False,
     public_delete: bool = False,
 ) -> WorkspaceCollection:
-    """Create a new collection. Raises on bad name, duplicate, or quota."""
+    """Create a new collection. Raises on bad name, duplicate, or quota.
+
+    All ``public_*`` flags default to ``False`` (secure default). Callers
+    must explicitly opt-in to each operation they want anonymous keys to
+    perform. See migration 0119 for the matching server-default.
+    """
     name = validate_collection_name(name)
     if await get_collection(db, project_id, name) is not None:
         raise CollectionExistsError(f"Collection '{name}' already exists.")

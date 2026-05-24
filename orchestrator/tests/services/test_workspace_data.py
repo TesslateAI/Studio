@@ -79,7 +79,9 @@ async def test_collection_crud(maker) -> None:
     async with maker() as db:
         coll = await wd.create_collection(db, project_id, "submissions")
         assert coll.name == "submissions"
-        assert coll.public_insert is True
+        # Secure default: a fresh collection accepts no anonymous traffic
+        # until the creator explicitly opts in. See migration 0119.
+        assert coll.public_insert is False
         assert coll.public_read is False
 
         assert len(await wd.list_collections(db, project_id)) == 1
@@ -89,9 +91,11 @@ async def test_collection_crud(maker) -> None:
         assert by_name is not None and by_id is not None
         assert by_name.id == by_id.id == coll.id
 
+        # Flip read open explicitly; insert must stay closed (no leak from
+        # update_collection touching unspecified flags).
         updated = await wd.update_collection(db, coll, public_read=True)
         assert updated.public_read is True
-        assert updated.public_insert is True  # untouched flag preserved
+        assert updated.public_insert is False  # untouched flag preserved
 
         await wd.delete_collection(db, coll)
         assert await wd.get_collection(db, project_id, "submissions") is None
@@ -225,9 +229,7 @@ async def test_summarize_collection_shape(maker) -> None:
     async with maker() as db:
         coll = await wd.create_collection(db, project_id, "events")
         for i in range(7):
-            await wd.insert_record(
-                db, coll, {"kind": "click", "user": f"u{i % 3}", "n": i}
-            )
+            await wd.insert_record(db, coll, {"kind": "click", "user": f"u{i % 3}", "n": i})
 
         summary = await wd.summarize_collection(db, coll, sample_size=5)
         assert summary["total_records"] == 7
@@ -295,9 +297,7 @@ async def test_aggregate_field_ops(maker) -> None:
         assert uniq["count_unique"] == 3
 
         # value_distribution
-        dist = await wd.aggregate_field(
-            db, coll, "choice", "value_distribution", top_n=2
-        )
+        dist = await wd.aggregate_field(db, coll, "choice", "value_distribution", top_n=2)
         top = {entry["value"]: entry["count"] for entry in dist["top_values"]}
         assert top == {"yes": 3, "no": 2}
         assert dist["distinct_count_in_sample"] == 3

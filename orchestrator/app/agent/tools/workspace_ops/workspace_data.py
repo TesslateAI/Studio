@@ -43,11 +43,13 @@ async def _create_collection(params: dict[str, Any], context: dict[str, Any]) ->
     name = params.get("name")
     if not name:
         return error_output(message="'name' is required to create a collection.")
+    # Default closed (secure default). Callers must explicitly opt-in to
+    # public_* flags they want — see schemas_workspace_data.CollectionCreate.
     collection = await store.create_collection(
         context["db"],
         context["project_id"],
         name,
-        public_insert=bool(params.get("public_insert", True)),
+        public_insert=bool(params.get("public_insert", False)),
         public_read=bool(params.get("public_read", False)),
         public_update=bool(params.get("public_update", False)),
         public_delete=bool(params.get("public_delete", False)),
@@ -422,7 +424,7 @@ _PARAMETERS = {
         },
         "public_insert": {
             "type": "boolean",
-            "description": "create_collection: allow anonymous inserts from deployed frontends. Default true.",
+            "description": "create_collection: allow anonymous inserts from deployed frontends. Default false (closed). Set to true ONLY when the deployed app legitimately needs anonymous write access (e.g. a public contact form).",
         },
         "public_read": {
             "type": "boolean",

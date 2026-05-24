@@ -42,7 +42,12 @@ class WorkspaceCollection(Base):
 
     # Public access flags — what an *anon* key may do from a deployed
     # frontend. A *service* key ignores these and has full project access.
-    public_insert = Column(Boolean, nullable=False, default=True)
+    #
+    # Default closed: a fresh collection accepts NO anonymous traffic. The
+    # studio UI / agent tool / API caller must explicitly flip the flag they
+    # want to open. Migration 0119 lowers the server-default to match;
+    # existing rows are left as-is so we don't silently revoke prod access.
+    public_insert = Column(Boolean, nullable=False, default=False)
     public_read = Column(Boolean, nullable=False, default=False)
     public_update = Column(Boolean, nullable=False, default=False)
     public_delete = Column(Boolean, nullable=False, default=False)
