@@ -45,6 +45,11 @@ async def _create_collection(params: dict[str, Any], context: dict[str, Any]) ->
         return error_output(message="'name' is required to create a collection.")
     # Default closed (secure default). Callers must explicitly opt-in to
     # public_* flags they want — see schemas_workspace_data.CollectionCreate.
+    schema = params.get("schema")
+    if schema is not None and not isinstance(schema, dict):
+        return error_output(
+            message="'schema' must be a JSON object (Draft 2020-12 JSON Schema), or omitted."
+        )
     collection = await store.create_collection(
         context["db"],
         context["project_id"],
@@ -53,11 +58,82 @@ async def _create_collection(params: dict[str, Any], context: dict[str, Any]) ->
         public_read=bool(params.get("public_read", False)),
         public_update=bool(params.get("public_update", False)),
         public_delete=bool(params.get("public_delete", False)),
+        schema=schema,
     )
     return success_output(
-        message=f"Created collection '{collection.name}'.",
+        message=(
+            f"Created collection '{collection.name}'"
+            + (" with schema enforced." if collection.schema else ".")
+        ),
         collection=collection.name,
         id=str(collection.id),
+        schema=collection.schema,
+    )
+
+
+# Sentinel — distinct identity, separate from any legal user value, so the
+# router/agent tool can tell "caller omitted schema" from "caller cleared
+# schema". Same shape as the Pydantic _SCHEMA_UNCHANGED sentinel.
+_SCHEMA_OMITTED = object()
+
+
+async def _update_collection(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    """Update a collection's public flags and/or its JSON Schema.
+
+    Three intents on the ``schema`` param, encoded in the JSON Schema for
+    LLM clarity (the executor enforces them at runtime too):
+      * key absent / ``null``  → leave the schema as-is
+      * ``{"clear": true}``     → clear the schema (revert to "any object")
+      * a JSON-Schema object    → validate as a JSON Schema and replace
+    """
+    ref = params.get("collection")
+    if not ref:
+        return error_output(message="'collection' is required.")
+    collection = await store.require_collection(context["db"], context["project_id"], ref)
+
+    # Schema arg — three-way: omitted / explicit-clear / replace.
+    schema_param = params.get("schema", _SCHEMA_OMITTED)
+    schema_kwarg: dict[str, Any] = {}
+    if schema_param is _SCHEMA_OMITTED or schema_param is None:
+        pass  # leave alone — store's sentinel-default handles it
+    elif isinstance(schema_param, dict) and schema_param.get("clear") is True:
+        schema_kwarg["schema"] = None
+    elif isinstance(schema_param, dict):
+        schema_kwarg["schema"] = schema_param
+    else:
+        return error_output(
+            message=(
+                "'schema' must be a JSON-Schema object, or {'clear': true} "
+                "to remove the existing schema, or omitted to leave it alone."
+            )
+        )
+
+    flag_kwargs = {
+        k: bool(params[k])
+        for k in ("public_insert", "public_read", "public_update", "public_delete")
+        if k in params
+    }
+    if not schema_kwarg and not flag_kwargs:
+        return error_output(
+            message="Nothing to update — supply at least one of: schema, public_insert, public_read, public_update, public_delete."
+        )
+
+    collection = await store.update_collection(
+        context["db"], collection, **schema_kwarg, **flag_kwargs
+    )
+    return success_output(
+        message=(
+            f"Updated collection '{collection.name}'."
+            + (f" Changed flags: {', '.join(sorted(flag_kwargs))}." if flag_kwargs else "")
+            + (f" Schema {'set' if collection.schema else 'cleared'}." if schema_kwarg else "")
+        ),
+        collection=collection.name,
+        id=str(collection.id),
+        schema=collection.schema,
+        public_insert=collection.public_insert,
+        public_read=collection.public_read,
+        public_update=collection.public_update,
+        public_delete=collection.public_delete,
     )
 
 
@@ -290,6 +366,7 @@ async def _revoke_key(params: dict[str, Any], context: dict[str, Any]) -> dict[s
 _ACTIONS = {
     "list_collections": lambda params, ctx: _list_collections(ctx),
     "create_collection": _create_collection,
+    "update_collection": _update_collection,
     "insert": _insert,
     "query": _query,
     "get": _get,
@@ -351,11 +428,12 @@ _PARAMETERS = {
             "type": "string",
             "enum": list(_ACTIONS),
             "description": (
-                "Collections/records: list_collections, create_collection, insert, query, "
-                "get, update, delete. Analysis: summarize (sample + field frequencies), "
-                "schema (inferred per-field types), aggregate (count_present / "
-                "count_unique / value_distribution on a single field). API keys: "
-                "list_keys, create_key, revoke_key."
+                "Collections/records: list_collections, create_collection, "
+                "update_collection (flip public_* flags, set/clear JSON Schema), "
+                "insert, query, get, update, delete. Analysis: summarize "
+                "(sample + field frequencies), schema (inferred per-field types), "
+                "aggregate (count_present / count_unique / value_distribution on "
+                "a single field). API keys: list_keys, create_key, revoke_key."
             ),
         },
         "collection": {
@@ -438,6 +516,22 @@ _PARAMETERS = {
             "type": "boolean",
             "description": "create_collection: allow anonymous deletes. Default false.",
         },
+        "schema": {
+            "type": "object",
+            "description": (
+                "create_collection / update_collection: optional JSON Schema "
+                "(Draft 2020-12) every record must conform to. On "
+                "create_collection: omit for no schema, or pass the schema "
+                "object (e.g. {'type': 'object', 'required': ['email'], "
+                "'properties': {'email': {'type': 'string'}}, "
+                "'additionalProperties': false}). On update_collection: omit "
+                "to leave the schema as-is, pass a schema object to replace "
+                "it, or pass {'clear': true} to remove the current schema. "
+                "Inserts and updates after this validate against it; "
+                "schema itself is validated at write time so a typo fails "
+                "immediately instead of soft-bricking the collection."
+            ),
+        },
     },
     "required": ["action"],
 }
@@ -455,10 +549,17 @@ def register_workspace_data_tool(registry) -> None:
                 "scraped results) without an external database. Always available, "
                 "including on workspaces with no running compute. "
                 "Collection/record actions: list_collections, create_collection, "
-                "insert, query, get, update, delete. Analysis (use these BEFORE "
-                "writing code that interprets the data): summarize — sample + "
-                "field-frequency overview; schema — per-field inferred types and "
-                "presence counts; aggregate — count_present / count_unique / "
+                "update_collection (flip public_* flags AND/OR set/clear an optional "
+                "JSON Schema that every record must conform to), insert, query, get, "
+                "update, delete. Use a JSON Schema when the deployed app needs to "
+                "guarantee shape — e.g. a contact form that only accepts {email, "
+                "message}, with additionalProperties:false to block spam fields. "
+                "Schema is validated at write time so a typo fails fast; subsequent "
+                "inserts return 422 with the offending field path. Analysis (use "
+                "BEFORE writing code that interprets data): summarize — sample + "
+                "field-frequency overview; schema — per-field INFERRED types and "
+                "presence counts (different from the validation schema you SET on "
+                "the collection); aggregate — count_present / count_unique / "
                 "value_distribution on a single top-level field, bounded by sample "
                 "size with is_full_scan flag. Key management: list_keys, create_key, "
                 "revoke_key — mint an anon key and write it into the app's env file "
@@ -478,6 +579,10 @@ def register_workspace_data_tool(registry) -> None:
             holds_external_state=False,
             examples=[
                 '{"tool_name": "workspace_data", "parameters": {"action": "create_collection", "name": "submissions"}}',
+                '{"tool_name": "workspace_data", "parameters": {"action": "create_collection", "name": "contacts", "schema": {"type": "object", "required": ["email"], "properties": {"email": {"type": "string", "format": "email"}, "message": {"type": "string", "maxLength": 500}}, "additionalProperties": false}}}',
+                '{"tool_name": "workspace_data", "parameters": {"action": "update_collection", "collection": "submissions", "public_insert": true}}',
+                '{"tool_name": "workspace_data", "parameters": {"action": "update_collection", "collection": "submissions", "schema": {"type": "object", "required": ["email"]}}}',
+                '{"tool_name": "workspace_data", "parameters": {"action": "update_collection", "collection": "submissions", "schema": {"clear": true}}}',
                 '{"tool_name": "workspace_data", "parameters": {"action": "insert", "collection": "submissions", "data": {"email": "a@b.com", "message": "hi"}}}',
                 '{"tool_name": "workspace_data", "parameters": {"action": "query", "collection": "submissions", "limit": 20}}',
                 '{"tool_name": "workspace_data", "parameters": {"action": "summarize", "collection": "submissions"}}',

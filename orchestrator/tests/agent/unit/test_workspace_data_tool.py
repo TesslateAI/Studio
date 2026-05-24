@@ -216,3 +216,172 @@ async def test_unknown_action_lists_available(maker) -> None:
     suggestion = out.get("suggestion") or ""
     for action in ("summarize", "schema", "aggregate"):
         assert action in suggestion
+
+
+# ---------------------------------------------------------------------------
+# Schema actions (Group G — agent-side schema editing)
+# ---------------------------------------------------------------------------
+@pytest.mark.unit
+async def test_create_collection_with_schema(maker) -> None:
+    """Agent can create a schema-enforced collection in one call."""
+    from app.agent.tools.workspace_ops.workspace_data import workspace_data_executor
+
+    pid = uuid.uuid4()
+    schema = {
+        "type": "object",
+        "required": ["email"],
+        "properties": {"email": {"type": "string", "format": "email"}},
+        "additionalProperties": False,
+    }
+    async with maker() as db:
+        out = await workspace_data_executor(
+            {"action": "create_collection", "name": "leads", "schema": schema},
+            {"db": db, "project_id": pid},
+        )
+        assert out["success"] is True
+        assert out["schema"] == schema
+
+        # Schema is actually enforced on subsequent inserts.
+        bad = await workspace_data_executor(
+            {"action": "insert", "collection": "leads", "data": {"no_email": "x"}},
+            {"db": db, "project_id": pid},
+        )
+        assert bad["success"] is False
+        assert "schema" in bad["message"].lower()
+
+
+@pytest.mark.unit
+async def test_create_collection_rejects_non_object_schema(maker) -> None:
+    from app.agent.tools.workspace_ops.workspace_data import workspace_data_executor
+
+    pid = uuid.uuid4()
+    async with maker() as db:
+        out = await workspace_data_executor(
+            {"action": "create_collection", "name": "x", "schema": "not-a-dict"},
+            {"db": db, "project_id": pid},
+        )
+        assert out["success"] is False
+        assert "JSON object" in out["message"]
+
+
+@pytest.mark.unit
+async def test_update_collection_sets_schema(maker) -> None:
+    """update_collection can attach a schema to an existing collection."""
+    from app.agent.tools.workspace_ops.workspace_data import workspace_data_executor
+
+    pid = uuid.uuid4()
+    async with maker() as db:
+        await workspace_data_executor(
+            {"action": "create_collection", "name": "items"},
+            {"db": db, "project_id": pid},
+        )
+        out = await workspace_data_executor(
+            {
+                "action": "update_collection",
+                "collection": "items",
+                "schema": {"type": "object", "required": ["name"]},
+            },
+            {"db": db, "project_id": pid},
+        )
+        assert out["success"] is True
+        assert out["schema"] == {"type": "object", "required": ["name"]}
+        # Validation now active.
+        bad = await workspace_data_executor(
+            {"action": "insert", "collection": "items", "data": {"x": 1}},
+            {"db": db, "project_id": pid},
+        )
+        assert bad["success"] is False
+
+
+@pytest.mark.unit
+async def test_update_collection_clears_schema(maker) -> None:
+    """{'clear': true} on the schema param removes the existing schema."""
+    from app.agent.tools.workspace_ops.workspace_data import workspace_data_executor
+
+    pid = uuid.uuid4()
+    async with maker() as db:
+        await workspace_data_executor(
+            {
+                "action": "create_collection",
+                "name": "items",
+                "schema": {"type": "object", "required": ["a"]},
+            },
+            {"db": db, "project_id": pid},
+        )
+        out = await workspace_data_executor(
+            {"action": "update_collection", "collection": "items", "schema": {"clear": True}},
+            {"db": db, "project_id": pid},
+        )
+        assert out["success"] is True
+        assert out["schema"] is None
+        # After clearing, the v1 'any object' contract is back.
+        ok = await workspace_data_executor(
+            {"action": "insert", "collection": "items", "data": {"freeform": True}},
+            {"db": db, "project_id": pid},
+        )
+        assert ok["success"] is True
+
+
+@pytest.mark.unit
+async def test_update_collection_changes_flags(maker) -> None:
+    """update_collection also accepts public_* flags."""
+    from app.agent.tools.workspace_ops.workspace_data import workspace_data_executor
+
+    pid = uuid.uuid4()
+    async with maker() as db:
+        await workspace_data_executor(
+            {"action": "create_collection", "name": "forms"},
+            {"db": db, "project_id": pid},
+        )
+        out = await workspace_data_executor(
+            {
+                "action": "update_collection",
+                "collection": "forms",
+                "public_insert": True,
+                "public_read": True,
+            },
+            {"db": db, "project_id": pid},
+        )
+        assert out["success"] is True
+        assert out["public_insert"] is True
+        assert out["public_read"] is True
+        assert out["public_update"] is False
+        assert out["public_delete"] is False
+
+
+@pytest.mark.unit
+async def test_update_collection_requires_at_least_one_field(maker) -> None:
+    """No-op update is a usage error, not a silent success — guards against
+    the agent calling update_collection without actually changing anything."""
+    from app.agent.tools.workspace_ops.workspace_data import workspace_data_executor
+
+    pid = uuid.uuid4()
+    async with maker() as db:
+        await workspace_data_executor(
+            {"action": "create_collection", "name": "c"},
+            {"db": db, "project_id": pid},
+        )
+        out = await workspace_data_executor(
+            {"action": "update_collection", "collection": "c"},
+            {"db": db, "project_id": pid},
+        )
+        assert out["success"] is False
+        assert "Nothing to update" in out["message"]
+
+
+@pytest.mark.unit
+async def test_update_collection_rejects_malformed_schema_param(maker) -> None:
+    from app.agent.tools.workspace_ops.workspace_data import workspace_data_executor
+
+    pid = uuid.uuid4()
+    async with maker() as db:
+        await workspace_data_executor(
+            {"action": "create_collection", "name": "c"},
+            {"db": db, "project_id": pid},
+        )
+        out = await workspace_data_executor(
+            {"action": "update_collection", "collection": "c", "schema": "not-a-dict"},
+            {"db": db, "project_id": pid},
+        )
+        assert out["success"] is False
+        assert "schema" in out["message"].lower()

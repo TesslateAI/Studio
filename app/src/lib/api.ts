@@ -1331,9 +1331,7 @@ export const mentionApi = {
    * we don't push the search query to the server because the lists
    * are small and a single fetch primes all three sections at once.
    */
-  search: async (
-    opts: { projectSlug?: string } = {}
-  ): Promise<MentionSearchResponse> => {
+  search: async (opts: { projectSlug?: string } = {}): Promise<MentionSearchResponse> => {
     const safeGet = async <T>(url: string, params?: Record<string, unknown>) => {
       try {
         const r = await api.get(url, { params });
@@ -5722,6 +5720,12 @@ export interface WorkspaceCollection {
   public_read: boolean;
   public_update: boolean;
   public_delete: boolean;
+  /**
+   * Optional JSON Schema (Draft 2020-12) every record's ``data`` must
+   * conform to. ``null`` = no schema (any well-formed object accepted,
+   * structural guards only). Set/cleared via ``updateCollection``.
+   */
+  schema: Record<string, unknown> | null;
   record_count: number;
   created_at: string | null;
   updated_at: string | null;
@@ -5774,7 +5778,10 @@ export const workspaceDataApi = {
   },
   async createCollection(
     projectSlug: string,
-    body: { name: string } & Partial<CollectionFlags>
+    body: {
+      name: string;
+      schema?: Record<string, unknown> | null;
+    } & Partial<CollectionFlags>
   ): Promise<WorkspaceCollection> {
     const r = await api.post(`/api/workspace-data/projects/${projectSlug}/collections`, body);
     return r.data;
@@ -5782,7 +5789,17 @@ export const workspaceDataApi = {
   async updateCollection(
     projectSlug: string,
     collectionId: string,
-    body: Partial<CollectionFlags>
+    body: Partial<CollectionFlags> & {
+      /**
+       * Tri-state by JSON serialisation convention:
+       *   * field omitted (``undefined``) → server leaves the schema as-is
+       *   * ``null`` → server clears the schema (reverts to "any object")
+       *   * object → server validates as JSON Schema and replaces
+       * The PATCH endpoint uses a sentinel default on the Pydantic side to
+       * preserve this distinction; we mirror it through the wire.
+       */
+      schema?: Record<string, unknown> | null;
+    }
   ): Promise<WorkspaceCollection> {
     const r = await api.patch(
       `/api/workspace-data/projects/${projectSlug}/collections/${collectionId}`,
