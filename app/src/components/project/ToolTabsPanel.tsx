@@ -3,6 +3,7 @@ import {
   BookOpen,
   Clock,
   Code as CodeIcon,
+  Database,
   Gear,
   GithubLogo,
   Image as ImageIcon,
@@ -14,12 +15,7 @@ import {
   TreeStructure,
   X,
 } from '@phosphor-icons/react';
-import {
-  DragDropContext,
-  Droppable,
-  Draggable,
-  type DropResult,
-} from '@hello-pangea/dnd';
+import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import type { TabInstance, ToolType } from '../../hooks/useToolDock';
 
 export interface ToolTabMeta {
@@ -89,6 +85,11 @@ export const TOOL_TAB_META: Record<ToolType, ToolTabMeta> = {
     id: 'notes',
     label: 'Notes',
     icon: <BookOpen size={13} weight="bold" />,
+  },
+  data: {
+    id: 'data',
+    label: 'Data',
+    icon: <Database size={13} weight="bold" />,
   },
   settings: {
     id: 'settings',
