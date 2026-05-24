@@ -400,6 +400,24 @@ async def collection_record_count(db: AsyncSession, collection_id: UUID) -> int:
     )
 
 
+async def collection_record_counts(db: AsyncSession, project_id: UUID) -> dict[UUID, int]:
+    """Project-wide ``{collection_id: count}`` in ONE query.
+
+    Replaces the N+1 pattern in the mgmt list-collections endpoint, where
+    we used to fan out one ``SELECT COUNT(*) WHERE collection_id = X``
+    per collection in a Python loop — at MAX_COLLECTIONS_PER_PROJECT=50,
+    that was 51 roundtrips per page load. Collections with zero records
+    aren't returned by the GROUP BY, so callers must default to 0 for
+    missing keys.
+    """
+    result = await db.execute(
+        select(WorkspaceRecord.collection_id, func.count())
+        .where(WorkspaceRecord.project_id == project_id)
+        .group_by(WorkspaceRecord.collection_id)
+    )
+    return {row[0]: int(row[1]) for row in result.all()}
+
+
 async def project_record_count(db: AsyncSession, project_id: UUID) -> int:
     """Total records across all collections in a project (quota check)."""
     return int(

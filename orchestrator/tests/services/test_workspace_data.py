@@ -176,6 +176,30 @@ async def test_record_validation(maker) -> None:
             await wd.insert_record(db, coll, oversized)
 
 
+async def test_collection_record_counts_single_query(maker) -> None:
+    """``collection_record_counts`` returns ``{coll_id: count}`` for every
+    collection with records in the project — and omits empty ones (callers
+    must default to 0). Backs the N+1 fix in the mgmt list_collections."""
+    from app.services import workspace_data as wd
+
+    pid = uuid.uuid4()
+    async with maker() as db:
+        c_a = await wd.create_collection(db, pid, "a")
+        c_b = await wd.create_collection(db, pid, "b")
+        c_empty = await wd.create_collection(db, pid, "empty")
+        for _ in range(3):
+            await wd.insert_record(db, c_a, {"x": 1})
+        await wd.insert_record(db, c_b, {"x": 2})
+        # Other-project records must NOT leak into the count.
+        other_pid = uuid.uuid4()
+        other_coll = await wd.create_collection(db, other_pid, "other")
+        await wd.insert_record(db, other_coll, {"y": 1})
+
+        counts = await wd.collection_record_counts(db, pid)
+        assert counts == {c_a.id: 3, c_b.id: 1}
+        assert c_empty.id not in counts  # GROUP BY omits zero-count rows
+
+
 async def test_records_scoped_per_collection(maker) -> None:
     from app.services import workspace_data as wd
 

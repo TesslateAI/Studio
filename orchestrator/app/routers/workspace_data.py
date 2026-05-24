@@ -190,12 +190,13 @@ async def list_collections(
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all data collections in a project."""
+    """List all data collections in a project (single GROUP BY for counts)."""
     project, _ = await get_project_with_access(db, project_slug, user.id, Permission.PROJECT_VIEW)
     collections = await wd.list_collections(db, project.id)
-    return [
-        _collection_response(c, await wd.collection_record_count(db, c.id)) for c in collections
-    ]
+    # One query for every collection's record count instead of N. At
+    # MAX_COLLECTIONS_PER_PROJECT=50 that's 51 → 2 DB roundtrips per page load.
+    counts = await wd.collection_record_counts(db, project.id)
+    return [_collection_response(c, counts.get(c.id, 0)) for c in collections]
 
 
 @mgmt_router.post(
