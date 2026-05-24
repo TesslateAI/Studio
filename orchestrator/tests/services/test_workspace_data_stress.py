@@ -9,7 +9,6 @@ busy-timeout so concurrent writers queue rather than fail.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import uuid
 from datetime import UTC, datetime
@@ -158,7 +157,12 @@ async def test_record_size_boundary_counts_utf8_bytes(maker) -> None:
 
 
 async def test_record_deep_nesting_does_not_crash(maker) -> None:
-    """A pathologically deep document is rejected cleanly, never a 500."""
+    """A pathologically deep document is rejected as 400 (InvalidRecordError),
+    never as 500 (RecursionError from the json encoder or _hashable).
+
+    The store's MAX_RECORD_NESTING_DEPTH cap fires well before either of
+    those C-implemented recursive paths could blow the stack.
+    """
     from app.services import workspace_data as wd
 
     pid = uuid.uuid4()
@@ -170,10 +174,10 @@ async def test_record_deep_nesting_does_not_crash(maker) -> None:
         cur = nxt
     async with maker() as db:
         coll = await wd.create_collection(db, pid, "c")
-        # Rejected cleanly (InvalidRecordError) or stored — both are fine;
-        # anything else (RecursionError, a 500) fails the test loudly.
-        with contextlib.suppress(wd.InvalidRecordError):
+        with pytest.raises(wd.InvalidRecordError) as exc:
             await wd.insert_record(db, coll, deep)
+        # Must fail on the structural cap, not somewhere downstream.
+        assert "nesting" in str(exc.value).lower()
 
 
 # ===========================================================================

@@ -27,6 +27,14 @@ MAX_RECORD_BYTES = 64 * 1024
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
+# Per-record structural limits. These bound the work that downstream
+# helpers (infer_schema, _hashable, JSON encode) do on a single document.
+# Without them a 64 KB record can still hold pathological structures —
+# 5 K one-char keys, or 1 K-deep nesting that crashes ``json.dumps`` with
+# a RecursionError before ever hitting the byte cap.
+MAX_RECORD_TOP_LEVEL_KEYS = 256
+MAX_RECORD_NESTING_DEPTH = 32
+
 _COLLECTION_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
 # Names reserved by the Data API's route layout — a collection named
@@ -92,13 +100,77 @@ def validate_collection_name(name: str) -> str:
     return cleaned
 
 
+def _check_structure(value: object, depth: int = 0) -> None:
+    """Walk a JSON value, rejecting unsafe structure.
+
+    Three guards, all O(n) over reachable nodes:
+      * **Depth cap** — prevents the C ``json`` encoder's RecursionError
+        on pathological nesting and ``_hashable``'s same-shape recursion
+        in the aggregate helpers. Raises before any work.
+      * **NUL byte / lone surrogate scrub** — Postgres ``text`` rejects
+        ``\\u0000`` mid-INSERT (turns into a 500); lone surrogates aren't
+        UTF-8 encodable. Catch them at the API boundary as 400, not 500.
+      * **Top-level key cap** — only enforced at depth 0 by the caller.
+    """
+    if depth > MAX_RECORD_NESTING_DEPTH:
+        raise InvalidRecordError(
+            f"Record nesting exceeds the {MAX_RECORD_NESTING_DEPTH}-level limit."
+        )
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if isinstance(k, str) and ("\x00" in k or _has_lone_surrogate(k)):
+                raise InvalidRecordError("Record keys cannot contain NUL bytes or lone surrogates.")
+            _check_structure(v, depth + 1)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _check_structure(v, depth + 1)
+    elif isinstance(value, str):
+        if "\x00" in value:
+            raise InvalidRecordError(
+                "Record string values cannot contain NUL bytes (Postgres rejects them)."
+            )
+        if _has_lone_surrogate(value):
+            raise InvalidRecordError("Record string values cannot contain lone UTF-16 surrogates.")
+
+
+def _has_lone_surrogate(s: str) -> bool:
+    """True if ``s`` contains an unpaired surrogate codepoint (U+D800..U+DFFF).
+
+    Lone surrogates are valid Python ``str`` but not valid Unicode — they
+    fail UTF-8 encoding (which both Postgres' text type and our size check
+    require). Detect explicitly to give a 400 with a clear message rather
+    than the cryptic UnicodeEncodeError from the json/encode layer below.
+    """
+    try:
+        s.encode("utf-8")
+    except UnicodeEncodeError:
+        return True
+    return False
+
+
 def validate_record_data(data: object) -> dict:
-    """Validate a record payload is a JSON object within the size cap."""
+    """Validate a record payload is a JSON object within size + structural caps.
+
+    Guards (in order — fail fast on the cheapest checks):
+      1. ``isinstance(dict)`` — wrong type.
+      2. Top-level key count ≤ ``MAX_RECORD_TOP_LEVEL_KEYS``.
+      3. Recursive structural walk — depth, NUL bytes, lone surrogates.
+      4. ``json.dumps`` round-trip — catches anything we missed
+         (datetime, set, etc.) as ``InvalidRecordError`` instead of 500.
+      5. UTF-8 byte size ≤ ``MAX_RECORD_BYTES``.
+    """
     if not isinstance(data, dict):
         raise InvalidRecordError("Record data must be a JSON object.")
+    if len(data) > MAX_RECORD_TOP_LEVEL_KEYS:
+        raise InvalidRecordError(
+            f"Record exceeds the {MAX_RECORD_TOP_LEVEL_KEYS} top-level-key limit."
+        )
+    # Structural walk first — cheaper than json.dumps and gives a clearer
+    # message for the specific failure (depth vs NUL vs surrogate).
+    _check_structure(data)
     try:
         encoded = json.dumps(data)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, RecursionError) as exc:
         raise InvalidRecordError(f"Record data is not JSON-serialisable: {exc}") from exc
     if len(encoded.encode("utf-8")) > MAX_RECORD_BYTES:
         raise InvalidRecordError(f"Record exceeds the {MAX_RECORD_BYTES // 1024} KB size limit.")
