@@ -198,47 +198,61 @@ def _install_deps_if_missing_command() -> str:
 
 
 def _materialize_dotenv_local_command() -> str:
-    """Write a ``.env.development.local`` snapshot of every public env var.
+    """Merge every public env var into ``.env.local`` at container start.
 
-    Why this exists: Next.js dev (Turbopack) and Vite both load
-    ``NEXT_PUBLIC_*`` / ``VITE_*`` env vars from project-root .env* files
-    at bundler boot, NOT from the OS environment of the dev process. So
-    even though we inject the right env vars into the pod spec, the
-    browser bundles see ``undefined`` because the bundler's polyfill
-    object isn't populated.
+    Why this exists: Next.js dev (Turbopack) and Vite both populate the
+    browser-side ``process.env`` polyfill from project-root .env* files
+    at bundler boot, NOT from the OS environment of the dev process. We
+    confirmed empirically on Next.js 16 + Turbopack that only
+    ``.env.local`` reliably reaches the client bundle — the
+    ``.env.development.local`` precedent is loaded for the server but
+    doesn't propagate into the client polyfill. So we have to own
+    ``.env.local``.
 
-    The fix: every container start writes a fresh
-    ``.env.development.local`` from the pod's environ before the framework
-    boots. Idempotent — overwritten on every restart, so rotated keys
-    always reach the bundler.
+    Design:
 
-    Design choices, deliberately:
+    * **Merge, never clobber.** Read existing ``.env.local`` first; strip
+      every line whose key starts with one of our platform-managed
+      prefixes (``OPENSAIL_``, ``VITE_``, ``NEXT_PUBLIC_``); append the
+      fresh platform values from the pod environ. User-added lines
+      under any OTHER prefix (e.g. ``ANALYTICS_TOKEN``) are preserved
+      verbatim.
 
-    * **``.env.development.local``, not ``.env.local``.** ``.env.local`` is
-      what humans hand-edit; we don't own that filename. Both Next.js and
-      Vite load ``.env.development.local`` in dev mode at a higher
-      precedence than ``.env.development`` and at the same precedence as
-      ``.env.local`` (but for dev only), so users get the same behaviour
-      AND their ``.env.local`` is never clobbered.
+    * **Convention is explicit.** A header comment marks the
+      platform-managed block so anyone editing the file sees that
+      ``OPENSAIL_*`` / ``VITE_*`` / ``NEXT_PUBLIC_*`` lines below it
+      are overwritten on container restart. To add a non-managed env
+      var, put it ABOVE the header (or under a different prefix).
 
-    * **Broad allowlist: any ``NEXT_PUBLIC_*``, ``VITE_*``, or
-      ``OPENSAIL_*``.** Every connector that emits a client-readable env
-      var (Stripe ``NEXT_PUBLIC_STRIPE_PK``, Supabase ``VITE_SUPABASE_URL``,
-      etc.) gets materialised. Narrowing this to ``OPENSAIL_*`` only fixed
-      the data store and silently broke every other connector with the
-      same root cause — don't repeat that smell.
+    * **Broad allowlist: any ``NEXT_PUBLIC_*`` / ``VITE_*`` / ``OPENSAIL_*``.**
+      Every connector that emits a client-readable env var (Stripe
+      ``NEXT_PUBLIC_STRIPE_PK``, Supabase ``VITE_SUPABASE_URL``, etc.)
+      flows through this materialiser — narrowing it to ``OPENSAIL_*``
+      silently breaks every other connector with the same root cause.
 
-    * **Single-quoted values via printf %q-style.** Values with whitespace
-      or special chars stay safe through the dotenv parser.
-
-    * **Skip when allowlist matches nothing.** Projects without any of
-      these env vars don't grow a phantom file.
+    * **Skip when allowlist matches nothing.** Projects without any
+      managed env vars don't grow a phantom file.
     """
+    # Shell pipeline:
+    #   1. Gather the platform-managed env into $env_lines.
+    #   2. If empty: nothing to do, exit early so we never touch the user's file.
+    #   3. Else: drop any prior platform-managed lines from existing .env.local
+    #      (keeping user-owned lines), then write the kept lines + the marker +
+    #      the fresh platform lines into .env.local.
+    # The marker grep pattern matches our owned prefixes ONLY at line start so
+    # a value that happens to contain those tokens isn't mistakenly stripped.
     return (
         '(env_lines=$(printenv | grep -E "^(OPENSAIL_|VITE_|NEXT_PUBLIC_)" || true) && '
         'if [ -n "$env_lines" ]; then '
-        '  echo "[TESSLATE] Materializing .env.development.local for Next/Vite bundler" && '
-        '  printf "%s\\n" "$env_lines" > .env.development.local; '
+        '  echo "[TESSLATE] Materializing .env.local for Next/Vite bundler" && '
+        '  existing=""; '
+        "  if [ -f .env.local ]; then "
+        '    existing=$(grep -vE "^(OPENSAIL_|VITE_|NEXT_PUBLIC_|# Tesslate-managed)" .env.local || true); '
+        "  fi; "
+        '  { [ -n "$existing" ] && printf "%s\\n" "$existing"; '
+        '    printf "%s\\n" "# Tesslate-managed (auto-overwritten on container start)"; '
+        '    printf "%s\\n" "$env_lines"; } > .env.local.new && '
+        "  mv .env.local.new .env.local; "
         "fi) && "
     )
 

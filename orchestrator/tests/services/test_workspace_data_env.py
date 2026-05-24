@@ -57,6 +57,7 @@ def maker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # globally, breaking any test that creates multiple containers per
     # project. Drop it so tests can mirror production behaviour.
     import sqlite3
+
     sqlite_path = str(tmp_path / "wsdata_env.db")
     with sqlite3.connect(sqlite_path) as raw:
         raw.execute("DROP INDEX IF EXISTS ix_containers_one_primary")
@@ -148,7 +149,9 @@ async def test_override_url_honoured(maker) -> None:
         await wd.create_collection(db, pid, "subs")
         project = await db.get(Project, pid)
         out = await resolve_workspace_data_env(
-            db, project, user_id=project.owner_id,
+            db,
+            project,
+            user_id=project.owner_id,
             override_url="https://other.example/api/data/v1",
         )
     assert out["OPENSAIL_DATA_API_URL"] == "https://other.example/api/data/v1"
@@ -164,7 +167,9 @@ async def test_override_key_honoured(maker) -> None:
         await wd.create_collection(db, pid, "subs")
         project = await db.get(Project, pid)
         out = await resolve_workspace_data_env(
-            db, project, user_id=project.owner_id,
+            db,
+            project,
+            user_id=project.owner_id,
             override_key="wsk_anon_user_supplied",
         )
     assert out["OPENSAIL_DATA_KEY"] == "wsk_anon_user_supplied"
@@ -180,7 +185,10 @@ async def test_skip_key_strategy_url_only(maker) -> None:
         await wd.create_collection(db, pid, "subs")
         project = await db.get(Project, pid)
         out = await resolve_workspace_data_env(
-            db, project, user_id=project.owner_id, key_strategy="skip_key",
+            db,
+            project,
+            user_id=project.owner_id,
+            key_strategy="skip_key",
         )
     assert "OPENSAIL_DATA_API_URL" in out
     assert "OPENSAIL_DATA_KEY" not in out
@@ -222,14 +230,16 @@ async def _wire_workspace_data_to(
     )
     db.add(src)
     await db.flush()
-    db.add(ContainerConnection(
-        id=uuid.uuid4(),
-        project_id=project_id,
-        source_container_id=src.id,
-        target_container_id=target_container_id,
-        connector_type="env_injection",
-        config=config or {},
-    ))
+    db.add(
+        ContainerConnection(
+            id=uuid.uuid4(),
+            project_id=project_id,
+            source_container_id=src.id,
+            target_container_id=target_container_id,
+            connector_type="env_injection",
+            config=config or {},
+        )
+    )
     await db.commit()
     return src.id
 
@@ -290,7 +300,11 @@ async def test_compute_env_fallback_disabled_skips(maker) -> None:
         target = await _make_base_container(db, pid, "web")
         project = await db.get(Project, pid)
         out = await compute_env_for_containers(
-            db, project, [target], user_id=project.owner_id, fallback_when_unwired=False,
+            db,
+            project,
+            [target],
+            user_id=project.owner_id,
+            fallback_when_unwired=False,
         )
     assert out == {}
 
@@ -306,7 +320,9 @@ async def test_compute_env_env_mapping_rename_on_top(maker) -> None:
         await wd.create_collection(db, pid, "subs")
         target = await _make_base_container(db, pid, "web")
         await _wire_workspace_data_to(
-            db, pid, target,
+            db,
+            pid,
+            target,
             config={"env_mapping": {"MY_DATA_URL": "OPENSAIL_DATA_API_URL"}},
         )
         project = await db.get(Project, pid)
@@ -327,7 +343,9 @@ async def test_compute_env_connection_override_url(maker) -> None:
         await wd.create_collection(db, pid, "subs")
         target = await _make_base_container(db, pid, "web")
         await _wire_workspace_data_to(
-            db, pid, target,
+            db,
+            pid,
+            target,
             config={"override_url": "https://other.example/api/data/v1"},
         )
         project = await db.get(Project, pid)
@@ -350,7 +368,10 @@ async def test_compute_env_mixed_wired_and_unwired_share_key(maker) -> None:
         await _wire_workspace_data_to(db, pid, wired)
         project = await db.get(Project, pid)
         out = await compute_env_for_containers(
-            db, project, [wired, unwired], user_id=project.owner_id,
+            db,
+            project,
+            [wired, unwired],
+            user_id=project.owner_id,
         )
 
     assert wired in out and unwired in out
@@ -359,13 +380,16 @@ async def test_compute_env_mixed_wired_and_unwired_share_key(maker) -> None:
 
 # --- materialiser shell-prefix ---------------------------------------------
 def test_materialize_dotenv_local_command_shape() -> None:
-    """Smoke: shell prefix targets .env.development.local + broad allowlist."""
+    """Smoke: shell prefix merges into .env.local + broad allowlist + marker."""
     from app.services.base_config_parser import get_node_modules_fix_prefix
 
     prefix = get_node_modules_fix_prefix()
-    assert ".env.development.local" in prefix
-    # Must not own the user-visible filename
-    assert ".env.local " not in prefix and ".env.local;" not in prefix
+    # Owns .env.local — Turbopack/Vite client polyfill only reads from here.
+    assert ".env.local" in prefix
+    # Merge marker present so a reader can tell platform-managed lines apart.
+    assert "Tesslate-managed" in prefix
+    # Atomic write via temp + rename so a partial write never corrupts the file.
+    assert ".env.local.new" in prefix and "mv .env.local.new .env.local" in prefix
     # Broad allowlist covers all three public-env conventions
     assert "OPENSAIL_" in prefix
     assert "VITE_" in prefix
