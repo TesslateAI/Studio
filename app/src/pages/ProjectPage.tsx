@@ -491,13 +491,10 @@ function ProjectPageInner() {
    *  the backend doesn't need to re-parse @-tokens. DataPanel uses this
    *  for "Ask agent" on a Data row → the agent sees a real @data: mention
    *  rather than just a slug in plain prose. */
-  const handleAskAgent = useCallback(
-    (message: string, mentions?: ChatMention[]) => {
-      setPrefillChatMessage(message);
-      setPrefillChatMentions(mentions && mentions.length ? mentions : null);
-    },
-    []
-  );
+  const handleAskAgent = useCallback((message: string, mentions?: ChatMention[]) => {
+    setPrefillChatMessage(message);
+    setPrefillChatMentions(mentions && mentions.length ? mentions : null);
+  }, []);
 
   // Selection-aware chat: DesignView dispatches `tesslate:design-ask-ai`
   // when the user asks the AI about the currently selected element.
@@ -1994,11 +1991,13 @@ function ProjectPageInner() {
   // Desktop: chat + dock horizontal split (when both visible docked) or
   // whichever is alone. Floating chat (center) renders the dock full-width
   // in the main canvas and the chat lives in a separate fixed-position layer.
+  //
+  // We DO NOT short-circuit on `!hasAgents` — the dock canvas hosts panels
+  // (Data, Code, Terminal, Repository, Snapshots, Config, …) that work
+  // without any agent and must be reachable on a fresh project. The
+  // discovery nudge for adding an agent lives in the ChatContainer's
+  // own empty state + the floating overlay below.
   const renderDesktopContent = () => {
-    if (!hasAgents) {
-      return <div className="w-full h-full" />;
-    }
-
     // Floating chat mode: main canvas is dock-only. If the dock is closed,
     // render an empty canvas — the floating chat overlays everything.
     if (chatIsFloating) {
@@ -2061,9 +2060,9 @@ function ProjectPageInner() {
   };
 
   // Mobile: dock is always the primary view; chat floats on top via a button
-  // (mirrors desktop's chatPosition === 'center' treatment).
+  // (mirrors desktop's chatPosition === 'center' treatment). Same rationale
+  // as `renderDesktopContent` — never gate the dock on `hasAgents`.
   const renderMobileContent = () => {
-    if (!hasAgents) return <div className="w-full h-full" />;
     return (
       <div className="w-full h-full">
         {dockOpen ? renderDockContainer() : <div className="w-full h-full bg-[var(--bg)]" />}
