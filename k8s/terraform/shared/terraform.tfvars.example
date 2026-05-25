@@ -39,3 +39,13 @@ eks_admin_iam_arns = [
 headscale_image_tag = "0.28.0"
 headscale_subdomain = "headscale"
 headscale_base_domain   = "vpn.tesslate.com"
+
+# Tauri desktop updater signing key (minisign private key).
+# Generate once with:
+#   cargo tauri signer generate --ci --password ""
+# Then paste the "Private:" output below. The matching public key goes in
+# desktop/src-tauri/tauri.conf.json (plugins.updater.pubkey). After populating,
+# upload to Secrets Manager:
+#   ./scripts/terraform/secrets.sh upload shared
+# Build script reads it back with: ./desktop/scripts/build-all.sh --signed
+tauri_signing_private_key = ""
