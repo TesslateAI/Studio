@@ -30,6 +30,14 @@ SIDECAR_DIR="$DESKTOP_DIR/sidecar"
 VENV_DIR="$REPO_ROOT/.venv"
 PY_VERSION="${OPENSAIL_PY_VERSION:-3.12}"
 
+# Venv layout differs across platforms: POSIX puts the interpreter at
+# `bin/python`, Windows puts it at `Scripts/python.exe`. Detect once.
+if [ -x "$VENV_DIR/Scripts/python.exe" ]; then
+  VENV_PYTHON="$VENV_DIR/Scripts/python.exe"
+else
+  VENV_PYTHON="$VENV_DIR/bin/python"
+fi
+
 # AWS Secrets Manager secret holding the shared TF tfvars. The Tauri signing
 # key is one of its variables — see k8s/terraform/shared/variables.tf.
 SHARED_TFVARS_SECRET_ID="tesslate/terraform/shared"
@@ -39,11 +47,18 @@ if ! command -v uv >/dev/null 2>&1; then
   echo "uv not on PATH — install with: brew install uv  (or curl -LsSf https://astral.sh/uv/install.sh | sh)" >&2
   exit 1
 fi
-if [ ! -x "$VENV_DIR/bin/python" ]; then
+if [ ! -x "$VENV_PYTHON" ]; then
   echo "[build-all] creating .venv via uv (python $PY_VERSION)" >&2
   uv venv --python "$PY_VERSION" "$VENV_DIR"
+  # Re-resolve interpreter path now that the venv exists (covers first-run
+  # on Windows where the Scripts/ layout only appears after `uv venv`).
+  if [ -x "$VENV_DIR/Scripts/python.exe" ]; then
+    VENV_PYTHON="$VENV_DIR/Scripts/python.exe"
+  else
+    VENV_PYTHON="$VENV_DIR/bin/python"
+  fi
 fi
-if ! VIRTUAL_ENV="$VENV_DIR" "$VENV_DIR/bin/python" -c \
+if ! VIRTUAL_ENV="$VENV_DIR" "$VENV_PYTHON" -c \
     "import PyInstaller, app, tesslate_agent" >/dev/null 2>&1; then
   echo "[build-all] installing sidecar deps via uv pip" >&2
   VIRTUAL_ENV="$VENV_DIR" uv pip install pyinstaller \
@@ -52,7 +67,7 @@ if ! VIRTUAL_ENV="$VENV_DIR" "$VENV_DIR/bin/python" -c \
 fi
 
 echo "[build-all] building sidecar" >&2
-"$VENV_DIR/bin/python" "$SIDECAR_DIR/build_sidecar.py"
+"$VENV_PYTHON" "$SIDECAR_DIR/build_sidecar.py"
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "cargo not on PATH — source \$HOME/.cargo/env or install rustup" >&2

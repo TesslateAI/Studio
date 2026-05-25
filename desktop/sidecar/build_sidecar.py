@@ -42,7 +42,14 @@ def _detect_spec() -> str:
 
 
 def _detect_target_triple() -> str:
-    """Match Cargo's host target triple convention."""
+    """Match Cargo's host target triple convention.
+
+    On Windows the suffix depends on which Rust ABI is active. rustup-gnu
+    builds against `x86_64-pc-windows-gnu` (mingw) while the default MSVC
+    toolchain produces `x86_64-pc-windows-msvc`. Tauri's externalBin lookup
+    uses the active Cargo target — so the sidecar filename has to match or
+    the Tauri build fails with "resource path … doesn't exist".
+    """
     sys_name = platform.system().lower()
     machine = platform.machine().lower()
     arch = {"x86_64": "x86_64", "amd64": "x86_64", "arm64": "aarch64", "aarch64": "aarch64"}.get(
@@ -51,6 +58,16 @@ def _detect_target_triple() -> str:
     if sys_name == "darwin":
         return f"{arch}-apple-darwin"
     if sys_name == "windows":
+        try:
+            out = subprocess.check_output(
+                ["rustup", "show", "active-toolchain"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip().lower()
+            if "windows-gnu" in out:
+                return f"{arch}-pc-windows-gnu"
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            pass
         return f"{arch}-pc-windows-msvc"
     return f"{arch}-unknown-linux-gnu"
 
