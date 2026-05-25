@@ -14,10 +14,11 @@
 set -eu
 
 # ── configuration ─────────────────────────────────────────────────────────
-# TODO(release): replace BASE_URL with the real download host once release
-# assets are published. Until then this is a placeholder and the script will
-# fail at the download step by design.
-BASE_URL="${OPENSAIL_INSTALL_BASE_URL:-https://downloads.example.com/opensail}"
+# Download host. The orchestrator at your-domain.com serves the desktop
+# release surface (see orchestrator/app/routers/desktop_releases.py) and
+# 302-redirects to the actual binary on GitHub Releases. Override with
+# OPENSAIL_INSTALL_BASE_URL for self-hosted Studio deployments.
+BASE_URL="${OPENSAIL_INSTALL_BASE_URL:-https://your-domain.com/desktop/releases}"
 VERSION="${OPENSAIL_VERSION:-0.1.0}"
 
 # ── helpers ───────────────────────────────────────────────────────────────

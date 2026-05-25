@@ -2,7 +2,7 @@
 
 The desktop sidecar talks to a Tesslate Cloud companion for the LLM proxy,
 marketplace catalog, and project sync. The endpoint defaults to the official
-``https://opensail.tesslate.com`` but is user-overridable so self-hosters and
+``https://your-domain.com`` but is user-overridable so self-hosters and
 beta testers can point the desktop at their own cloud.
 
 Resolution order (mirrors :mod:`token_store`):

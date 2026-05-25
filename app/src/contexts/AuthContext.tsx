@@ -39,21 +39,45 @@ const API_URL = config.API_URL;
 const SILENT_REFRESH_INTERVAL_MS = 12 * 60 * 1000; // 12 minutes — refresh before 15-min access token expires
 const REFRESH_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes — minimum gap between refreshes
 
+// Worst-case wall-clock budget for the Tauri host to inject the local-user JWT.
+// Matches the host's poll budget (`main.rs`: 240 × 500 ms = 120 s) plus headroom.
+const DESKTOP_TOKEN_TIMEOUT_MS = 130_000;
+
+/**
+ * Whether the frontend is running inside the Tauri WebView.
+ *
+ * Tauri v2 injects `__TAURI_INTERNALS__` (and the legacy `__TAURI__`) onto the
+ * window object BEFORE any page scripts run, so this is safe to call from
+ * module-init time (e.g. `getInitialState`).
+ */
+const isTauriDesktop = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+};
+
 // =============================================================================
 // Initial State
 // =============================================================================
 
 /**
- * Get initial state - trust localStorage token for fast initial render
+ * Get initial state - trust localStorage token for fast initial render.
+ *
+ * Exception: in Tauri the localStorage token may be stale (left over from a
+ * previous sidecar instance whose JWT secret no longer matches). The Tauri
+ * host always re-mints a fresh local-user JWT at launch and injects it, so
+ * we ignore any pre-existing token and start in 'initializing' — preventing
+ * an optimistic-authenticated → 401 → /login bounce before the fresh token
+ * arrives. The desktop-token useEffect drives the transition out of
+ * 'initializing'.
  */
 const getInitialState = (): AuthState => {
+  const inTauri = isTauriDesktop();
   const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('token');
+  const optimisticAuth = hasToken && !inTauri;
   return {
-    // If we have a token, optimistically assume authenticated
-    // This prevents flash of unauthenticated content
-    status: hasToken ? 'authenticated' : 'initializing',
+    status: optimisticAuth ? 'authenticated' : 'initializing',
     user: null,
-    authMethod: hasToken ? 'token' : null,
+    authMethod: optimisticAuth ? 'token' : null,
     error: null,
     lastChecked: null,
   };
@@ -401,21 +425,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Effects
   // ==========================================================================
 
-  // Desktop auto-login: when running inside the Tauri shell, ask the host for
-  // the local user's JWT and store it in localStorage so the normal checkAuth()
-  // flow picks it up.  No npm package needed — the Tauri host injects
-  // window.__TESSLATE_DESKTOP_TOKEN__ via JS eval AND dispatches a custom event
-  // to cover both "token ready before React" and "token arrives after React" cases.
+  // Desktop auto-login: when running inside the Tauri shell, the host injects
+  // a local-user JWT (window.__TESSLATE_DESKTOP_TOKEN__) and dispatches
+  // `tesslate-desktop-token-ready`. We cover both "token ready before React
+  // mounted" and "token arrives after React mounted" cases here.
+  //
+  // Falls back to the cloud login path after DESKTOP_TOKEN_TIMEOUT_MS so a
+  // dead/failing sidecar doesn't leave the user staring at a loader forever.
   useEffect(() => {
-    // Detect Tauri by the injected internals object (present in all Tauri v2 webviews).
-    const isTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
-    if (!isTauri) return;
+    if (!isTauriDesktop()) return;
 
+    // Always overwrite — a stale token from a previous sidecar instance
+    // (different JWT secret) would otherwise prevent the fresh local-auth
+    // token from ever taking effect.
     const applyToken = (token: string) => {
-      if (token && !localStorage.getItem('token')) {
-        localStorage.setItem('token', token);
-        checkAuth({ force: true });
-      }
+      if (!token) return;
+      localStorage.setItem('token', token);
+      checkAuth({ force: true });
     };
 
     // Case 1: token already injected before React mounted.
@@ -427,18 +453,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     // Case 2: token arrives after React mounts (host fetched it async).
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const handler = () => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
       const t = (window as unknown as Record<string, unknown>).__TESSLATE_DESKTOP_TOKEN__;
       if (typeof t === 'string') applyToken(t);
     };
     window.addEventListener('tesslate-desktop-token-ready', handler);
-    return () => window.removeEventListener('tesslate-desktop-token-ready', handler);
+
+    // Safety net: if the host never injects a token (sidecar crash, local-auth
+    // endpoint down, etc.), drop back to the normal checkAuth path so the cloud
+    // login form is reachable instead of an infinite loader.
+    timeoutHandle = setTimeout(() => {
+      timeoutHandle = null;
+      if (!localStorage.getItem('token') && mountedRef.current) {
+        console.warn('[Auth] Desktop token bootstrap timed out; falling back to cloud login.');
+        checkAuth({ force: true });
+      }
+    }, DESKTOP_TOKEN_TIMEOUT_MS);
+
+    return () => {
+      window.removeEventListener('tesslate-desktop-token-ready', handler);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Initial auth check on mount
+  // Initial auth check on mount.
+  //
+  // On Tauri we always defer to the host-injected local-user JWT — any token
+  // currently in localStorage may be stale (different sidecar instance, JWT
+  // secret rotation, leftover cloud session). Running checkAuth() here would
+  // 401 on the stale token and bounce the user to /login before the fresh
+  // token arrives. The desktop-token effect above drives the transition.
   useEffect(() => {
     mountedRef.current = true;
-    checkAuth();
+    if (!isTauriDesktop()) {
+      checkAuth();
+    }
 
     return () => {
       mountedRef.current = false;

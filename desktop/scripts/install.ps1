@@ -14,10 +14,12 @@
 $ErrorActionPreference = 'Stop'
 
 # ── configuration ──────────────────────────────────────────────────────────
-# TODO(release): replace the base URL with the real download host once
-# release assets are published. Until then this is a placeholder.
+# Download host. The orchestrator at your-domain.com serves the desktop
+# release surface (see orchestrator/app/routers/desktop_releases.py) and
+# 302-redirects to the actual binary on GitHub Releases. Override with
+# OPENSAIL_INSTALL_BASE_URL for self-hosted Studio deployments.
 $baseUrl = if ($env:OPENSAIL_INSTALL_BASE_URL) { $env:OPENSAIL_INSTALL_BASE_URL }
-           else { 'https://downloads.example.com/opensail' }
+           else { 'https://your-domain.com/desktop/releases' }
 $version = if ($env:OPENSAIL_VERSION) { $env:OPENSAIL_VERSION } else { '0.1.0' }
 
 # ── detect architecture ────────────────────────────────────────────────────

@@ -98,7 +98,16 @@ class Settings(BaseSettings):
     # Desktop: cloud companion endpoint. The desktop sidecar talks to this URL
     # via services.cloud_client.CloudClient for marketplace pulls, model proxy,
     # sync, etc. Bearer token is sourced from services.token_store.
-    tesslate_cloud_url: str = "https://opensail.tesslate.com"
+    tesslate_cloud_url: str = "https://your-domain.com"
+
+    # ── Public desktop-release surface (see routers/desktop_releases.py) ──
+    # The `/desktop/releases/{latest.json,<filename>}` routes proxy to the
+    # configured GitHub repo's releases. The Tauri updater + install
+    # scripts hard-code `https://<app_base_url>/desktop/releases/*` so the
+    # canonical URL is stable across CI/CDN changes.
+    desktop_releases_github_repo: str = "TesslateAI/OpenSail"
+    desktop_releases_github_token: str = ""
+    desktop_releases_tag_prefix: str = "desktop-v"
 
     # Desktop marketplace: when True and paired, /api/desktop/marketplace/items
     # merges cloud catalog entries with local installed items. Toggle off to
@@ -183,11 +192,11 @@ class Settings(BaseSettings):
     # Application domain (no protocol, just domain)
     # Used for subdomain routing and CORS wildcard pattern matching
     # Format: "subdomain.domain.com" (no protocol, no wildcards)
-    # Examples: localhost (local), studio-demo.tesslate.com (production)
+    # Examples: localhost (local), your-domain.com (production)
     app_domain: str = "localhost"
 
     # Application base URL (full URL with protocol)
-    # Format: "https://studio-demo.tesslate.com" or "http://localhost"
+    # Format: "https://your-domain.com" or "http://localhost"
     # Used for OAuth redirects and other absolute URL generation
     app_base_url: str = ""  # Will default to http://app_domain if not set
 

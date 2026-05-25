@@ -48,7 +48,13 @@ fn main() {
                 eprintln!("[host] tray install failed: {e}");
             }
 
-            window::register_main_window(handle);
+            // Programmatically create the main window with an initialization
+            // script that injects window._env_.API_URL so the bundled React
+            // app talks to the sidecar (random ephemeral port), not the
+            // cloud-build fallback of http://localhost:8000.
+            if let Err(e) = window::create_main_window(handle, &sidecar_handle.api_url()) {
+                eprintln!("[host] create main window failed: {e}");
+            }
 
             // Inject the local user's JWT into the WebView so the frontend
             // can auto-authenticate without a registration / login flow.

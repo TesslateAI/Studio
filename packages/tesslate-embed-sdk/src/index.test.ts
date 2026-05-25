@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EmbedClient, EmbedRemoteError } from "./index.js";
 import type { EmbedEnvelope } from "./types.js";
 
-const ORIGIN = "https://opensail.tesslate.com";
+const ORIGIN = "https://your-domain.com";
 
 describe("EmbedClient", () => {
   let parentWin: { postMessage: ReturnType<typeof vi.fn> };

@@ -279,7 +279,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             data_response.headers["X-OpenSail-Data-API-Version"] = DATA_API_VERSION
             return data_response
 
-        # Get app domain from settings (e.g., "studio-demo.tesslate.com")
+        # Get app domain from settings (e.g., "your-domain.com")
         app_domain = settings.app_domain
         # Escape dots for regex pattern matching
         escaped_domain = re.escape(app_domain)
@@ -291,6 +291,14 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             r"^http://localhost:\d+$",  # Local dev server (any port)
             r"^http://studio\.localhost$",  # Local main app
             r"^http://[\w-]+\.studio\.localhost$",  # Local user dev environments (subdomain)
+            # Tauri desktop WebView origins. The bundled React app loads from
+            # the framework's app:// scheme — `tauri://localhost` on Linux +
+            # macOS (WebKitGTK / WKWebView), `https://tauri.localhost` on
+            # Windows (WebView2) — and makes cross-origin requests to the
+            # 127.0.0.1 sidecar. These origins are reachable only from inside
+            # the Tauri shell, so credentials-bearing CORS is safe.
+            r"^tauri://localhost$",
+            r"^https://tauri\.localhost$",
         ]
 
         # Production patterns (generated from APP_DOMAIN)
@@ -1488,6 +1496,16 @@ from .routers import workspace_data as _workspace_data  # noqa: E402
 
 app.include_router(_workspace_data.mgmt_router)  # /api/workspace-data - data store mgmt
 app.include_router(_workspace_data.data_router)  # /api/data/v1 - public Data API (key auth)
+
+# --- Public desktop installer + Tauri auto-updater surface ------------------
+# Mounted at /desktop/releases/* (no /api prefix) so the Tauri updater
+# endpoint in tauri.conf.json and the install.{sh,ps1} scripts can hit the
+# canonical https://<app_base_url>/desktop/releases/latest.json URL.
+# Resolves binaries from GitHub Releases on demand — orchestrator never
+# streams the bytes itself.
+from .routers import desktop_releases as _desktop_releases  # noqa: E402
+
+app.include_router(_desktop_releases.router)
 
 # --- Tesslate Apps (Waves 1-3) ---------------------------------------------
 app.include_router(

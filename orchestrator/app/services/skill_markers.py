@@ -183,7 +183,7 @@ def _render_url_patterns() -> str:
         "`http://my-app-abc-frontend.localhost`.\n"
         "- **Kubernetes** — `https://<project-slug>-<container-name>."
         "<app-domain>` via NGINX Ingress. Example: "
-        "`https://my-app-abc-frontend.opensail.tesslate.com`.\n"
+        "`https://my-app-abc-frontend.your-domain.com`.\n"
         "- **Internal service DNS (K8s only)** — `http://dev-<container-dir>."
         "proj-<project-id>.svc.cluster.local:<port>` for pod-to-pod calls. "
         "Used by `project_control`'s `health_check` action.\n\n"
