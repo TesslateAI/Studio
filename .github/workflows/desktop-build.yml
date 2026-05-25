@@ -1,9 +1,13 @@
 name: Desktop Build
 
+# Manual-only. The push-on-tag trigger has been removed so this workflow
+# never auto-fires — desktop installer builds happen by hand today
+# (`./desktop/scripts/build-all.sh --release --signed`). The job machinery
+# below is kept intact so that when we're ready to wire a real CI build
+# pipeline back up, it's a one-line trigger change rather than a rewrite.
+#
+# Run manually via Actions → Desktop Build → Run workflow.
 on:
-  push:
-    tags:
-      - 'desktop-v*'
   workflow_dispatch:
     inputs:
       sign:

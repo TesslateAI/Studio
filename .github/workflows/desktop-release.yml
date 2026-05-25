@@ -1,173 +1,109 @@
-name: Desktop Release
+name: Desktop Release Notes
 
-# Builds the desktop installers for every platform and publishes them to a
-# GitHub Release. Runs automatically on a push to main, and can be started
-# manually from the Actions tab.
+# Tag-triggered, release-notes-only.
+#
+# When a `desktop-v*` tag is pushed (typically against `main`), this workflow
+# creates a GitHub Release on the Enterprise repo with auto-generated notes
+# (PRs merged since the previous matching tag), then mirrors that same body
+# to a release on the public `TesslateAI/OpenSail` mirror via PUBLIC_REPO_PAT.
+#
+# No binaries are built or attached today — the build pipeline is paused on
+# `desktop-build.yml` (manual-only). When a real build flow lands, that
+# workflow can be wired to upload assets to the release this one created.
+#
+# Manual trigger: Actions → Desktop Release Notes → Run workflow, supply a
+# tag name. The tag must already exist on the repo.
+
 on:
   push:
-    branches: [main]
+    tags:
+      - 'desktop-v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish release notes for (e.g. desktop-v0.1.0)'
+        required: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            label: macos-arm64
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            label: macos-x64
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: windows-x64
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            label: linux-x64
-
-    runs-on: ${{ matrix.platform }}
-    name: Build (${{ matrix.label }})
-    timeout-minutes: 60
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      # ── Linux system deps (Tauri WebKitGTK + AppImage tooling) ────────────
-      - name: Install Linux system deps
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            pkg-config
-
-      # ── Rust toolchain ────────────────────────────────────────────────────
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache Rust deps
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop/src-tauri
-
-      # ── Node / pnpm (frontend) ────────────────────────────────────────────
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install pnpm
-        run: npm install -g pnpm@11
-
-      - name: Install frontend deps
-        working-directory: app
-        run: pnpm install --frozen-lockfile
-
-      # ── Python / sidecar ──────────────────────────────────────────────────
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install sidecar build deps
-        working-directory: orchestrator
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e "../packages/tesslate-agent"
-          pip install -e .
-          pip install pyinstaller
-
-      # ── Migration smoke test (desktop runs on SQLite) ─────────────────────
-      - name: Smoke-test migrations on fresh SQLite
-        working-directory: orchestrator
-        run: alembic upgrade head
-        env:
-          DATABASE_URL: sqlite+aiosqlite:///./ci-smoke.db
-          SECRET_KEY: ci-smoke-key
-          DEPLOYMENT_MODE: desktop
-
-      # ── Freeze the orchestrator into the PyInstaller sidecar ──────────────
-      - name: Build sidecar
-        working-directory: desktop/sidecar
-        run: python build_sidecar.py
-
-      # ── Tauri CLI + app bundle ────────────────────────────────────────────
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version '^2.0' --locked
-
-      - name: Build Tauri app
-        working-directory: desktop/src-tauri
-        run: cargo tauri build --target ${{ matrix.target }}
-        env:
-          # Signing is a no-op when the cert secrets are absent — unsigned
-          # installers still build.
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_ID: ${{ secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '' }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERT || '' }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD || '' }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
-
-      # ── Collect installers ────────────────────────────────────────────────
-      - name: Upload installer artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: opensail-${{ matrix.label }}
-          path: |
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
-          if-no-files-found: warn
-          retention-days: 14
-
-  # ── Fan-in: publish every platform's installers to one GitHub Release ─────
-  release:
-    needs: build
+  release-notes:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Resolve desktop version
-        id: ver
-        run: echo "version=$(jq -r .version desktop/src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          fetch-depth: 0   # full history so generate-notes can diff vs the previous tag
 
-      - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: desktop-v${{ steps.ver.outputs.version }}
-          name: OpenSail Desktop v${{ steps.ver.outputs.version }}
-          body: >
-            Automated desktop build from `main`
-            (${{ github.sha }}). Installers for macOS, Windows, and Linux.
-          prerelease: true
-          make_latest: false
-          files: artifacts/**/*
-          fail_on_unmatched_files: true
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          if [ -z "$tag" ]; then
+            echo "Failed to resolve tag name." >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release on Enterprise (with auto-generated notes)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # `--generate-notes` walks PRs merged since the previous release of
+          # the same kind. Marked `--prerelease` since no binaries are
+          # attached — flip back to a "real" release once builds upload assets.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists on Enterprise; regenerating notes."
+            body="$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="$TAG" --jq .body)"
+            printf '%s\n' "$body" | gh release edit "$TAG" --prerelease --notes-file -
+          else
+            gh release create "$TAG" \
+              --title "OpenSail Desktop $TAG" \
+              --generate-notes \
+              --prerelease
+          fi
+
+      - name: Capture release body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          mkdir -p /tmp/release
+          gh release view "$TAG" --json body --jq .body > /tmp/release/body.md
+          if [ ! -s /tmp/release/body.md ]; then
+            echo "Release body is empty — generate-notes produced nothing." >&2
+            exit 1
+          fi
+          wc -c /tmp/release/body.md
+
+      - name: Mirror release to public TesslateAI/OpenSail
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_PAT }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # PUBLIC_REPO_PAT is the same token sync-to-public.yml uses; it has
+          # `contents: write` on the public repo. `gh release create` will
+          # create the tag on the public side if it doesn't already exist —
+          # the public mirror doesn't need its own tag push.
+          if gh release view "$TAG" --repo TesslateAI/OpenSail >/dev/null 2>&1; then
+            echo "Release $TAG already exists on public mirror; updating notes."
+            gh release edit "$TAG" \
+              --repo TesslateAI/OpenSail \
+              --prerelease \
+              --notes-file /tmp/release/body.md
+          else
+            gh release create "$TAG" \
+              --repo TesslateAI/OpenSail \
+              --title "OpenSail Desktop $TAG" \
+              --prerelease \
+              --notes-file /tmp/release/body.md
+          fi
