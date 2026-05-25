@@ -135,12 +135,21 @@ async def db_event_dispatcher(ctx: dict) -> dict:
     for stream in streams:
         await _ensure_group(redis, stream)
         try:
+            # NB: do NOT pass block=0 here. In the Redis protocol BLOCK 0
+            # means "block indefinitely" (the opposite of what naïve
+            # readers expect). Combined with the client's finite
+            # ``socket_timeout`` that produced one socket-read TimeoutError
+            # per stream per cron tick (~250 ERROR lines / 5 min in prod
+            # before this fix), all of which surfaced as
+            # ``redis.exceptions.TimeoutError: Timeout reading from redis:6379``
+            # in logger.exception. This is a cron-style drain — return
+            # whatever's already in the stream and let the next tick pick
+            # up new arrivals. No ``block`` arg → non-blocking read.
             entries = await redis.xreadgroup(
                 CONSUMER_GROUP,
                 CONSUMER_NAME,
                 {stream: ">"},
                 count=BATCH_PER_STREAM,
-                block=0,
             )
         except Exception:
             logger.exception("db_event_dispatcher: xreadgroup(%s) failed", stream)
