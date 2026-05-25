@@ -361,17 +361,29 @@ resource "helm_release" "external_dns" {
 
       sources = ["ingress", "service"]
 
-      # Watch ONLY the platform namespace. Per-project ingresses in proj-*
-      # namespaces are already covered by the wildcard CNAME
-      # (`*.<domain>` → NLB, declared in dns.tf) so we don't want
+      # Watch ONLY the platform namespace via --namespace flag. Per-project
+      # ingresses in proj-* namespaces are already covered by the wildcard
+      # CNAME (`*.<domain>` → NLB, declared in dns.tf) so we don't want
       # external-dns creating one specific CNAME per project — those
       # records silently override the wildcard, consume the Cloudflare
       # zone's record cap, and on 2026-05-24 wedged production wildcard
-      # cert renewal at the Free plan's 200-record cap. The orchestrator
-      # also stamps `external-dns.alpha.kubernetes.io/exclude: "true"`
-      # on each project ingress as defense-in-depth (see
-      # orchestrator/.../kubernetes/helpers.py:create_ingress_manifest).
-      namespace = "tesslate"
+      # cert renewal at the Free plan's 200-record cap.
+      #
+      # The orchestrator also stamps
+      # `external-dns.alpha.kubernetes.io/controller=tesslate-ignore`
+      # on every project ingress in helpers.py:create_ingress_manifest.
+      # That's the supported per-resource opt-out (anything other than
+      # the default value 'dns-controller' makes external-dns skip the
+      # resource) and serves as defense-in-depth if this --namespace
+      # flag is ever widened. Both layers are needed — only the
+      # namespace flag is a hard filter; the annotation is a soft one
+      # that external-dns honours but doesn't enforce.
+      #
+      # NB: must go through `extraArgs`. A top-level `namespace` key in
+      # this chart sets the *install* namespace of the operator, NOT
+      # the watch filter — putting it there silently does nothing,
+      # which is how we got bitten on 2026-05-24's terraform apply.
+      extraArgs = ["--namespace=tesslate"]
 
       txtOwnerId = "${var.project_name}-${var.environment}"
 

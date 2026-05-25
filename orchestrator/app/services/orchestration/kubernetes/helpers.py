@@ -588,16 +588,24 @@ def create_ingress_manifest(
                 "nginx.ingress.kubernetes.io/proxy-http-version": "1.1",
                 "nginx.ingress.kubernetes.io/proxy-read-timeout": "3600",
                 "nginx.ingress.kubernetes.io/proxy-send-timeout": "3600",
-                # Tell external-dns to ignore this Ingress. Project hostnames
-                # all live under the platform-wide wildcard CNAME
-                # (`*.<domain>` → NLB, declared in k8s/terraform/aws/dns.tf),
-                # so per-host CNAMEs are pure waste — they consume Cloudflare
-                # plan slots and silently override the wildcard. Without this
-                # annotation, external-dns creates one CNAME per project
-                # ingress and eventually trips zone record limits (which on
-                # 2026-05-24 wedged production wildcard-cert renewal at
-                # 200/200 records).
-                "external-dns.alpha.kubernetes.io/exclude": "true",
+                # Tell external-dns this resource is managed by something
+                # other than the default controller, which is the supported
+                # way to opt OUT of external-dns processing (per its docs).
+                # Project hostnames are routed by the platform-wide wildcard
+                # CNAME (`*.<domain>` → NLB, declared in
+                # k8s/terraform/aws/dns.tf), so per-host CNAMEs are pure
+                # waste — they consume Cloudflare plan slots and silently
+                # override the wildcard. Without an opt-out, external-dns
+                # creates one CNAME per project ingress and eventually
+                # trips zone record limits (which on 2026-05-24 wedged
+                # production wildcard-cert renewal at 200/200 records).
+                #
+                # The actual hard filter is the process-wide
+                # `--namespace=tesslate` flag set on the external-dns
+                # deployment in k8s/terraform/aws/helm.tf — this
+                # annotation is defense-in-depth in case the namespace
+                # filter is widened or someone runs a second external-dns.
+                "external-dns.alpha.kubernetes.io/controller": "tesslate-ignore",
             },
         ),
         spec=ingress_spec,
