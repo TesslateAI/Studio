@@ -22,7 +22,10 @@ fi
 echo "🔍 Checking for cert-manager..."
 if ! kubectl get namespace cert-manager > /dev/null 2>&1; then
     echo "⚠️  cert-manager not found. Installing cert-manager..."
-    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+    # v1.20.2: do NOT downgrade below v1.18. Cloudflare deprecated the
+    # per-record zone_id JSON field on 2024-11-30; cert-manager <=v1.17
+    # breaks DNS-01 cleanup as a result and renewals eventually wedge.
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
     echo "⏳ Waiting for cert-manager to be ready..."
     kubectl wait --for=condition=available --timeout=300s deployment/cert-manager -n cert-manager
     kubectl wait --for=condition=available --timeout=300s deployment/cert-manager-webhook -n cert-manager

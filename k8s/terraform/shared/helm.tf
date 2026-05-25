@@ -52,17 +52,24 @@ resource "helm_release" "nginx_ingress" {
 # -----------------------------------------------------------------------------
 # cert-manager (TLS certificates)
 # -----------------------------------------------------------------------------
+# IMPORTANT: Do NOT downgrade below v1.18.x. See k8s/terraform/aws/helm.tf
+# for the Cloudflare zone_id deprecation context (2024-11-30) that broke
+# DNS-01 cleanup in cert-manager <=v1.17.
+# -----------------------------------------------------------------------------
 resource "helm_release" "cert_manager" {
   name             = "cert-manager"
   repository       = "https://charts.jetstack.io"
   chart            = "cert-manager"
-  version          = "v1.14.0"
+  version          = "v1.20.2"
   namespace        = "cert-manager"
   create_namespace = true
 
   values = [
     yamlencode({
-      installCRDs = true
+      crds = {
+        enabled = true
+        keep    = true
+      }
 
       serviceAccount = {
         annotations = {
@@ -83,10 +90,46 @@ resource "helm_release" "cert_manager" {
 
       dns01RecursiveNameservers     = "1.1.1.1:53,8.8.8.8:53"
       dns01RecursiveNameserversOnly = true
+
+      networkPolicy = { enabled = false }
+      cainjector    = { networkPolicy = { enabled = false } }
+      webhook       = { networkPolicy = { enabled = false } }
     })
   ]
 
   depends_on = [module.eks]
+}
+
+# -----------------------------------------------------------------------------
+# kubernetes-reflector — auto-sync wildcard TLS into other namespaces.
+# Mirrors the AWS overlay; required so the orchestrator no longer has to
+# hand-copy the Secret into every project namespace and so renewals
+# propagate automatically.
+# -----------------------------------------------------------------------------
+resource "helm_release" "reflector" {
+  name             = "reflector"
+  repository       = "https://emberstack.github.io/helm-charts"
+  chart            = "reflector"
+  version          = "9.1.18"
+  namespace        = "kube-system"
+  create_namespace = false
+
+  values = [
+    yamlencode({
+      resources = {
+        requests = {
+          cpu    = "10m"
+          memory = "32Mi"
+        }
+        limits = {
+          cpu    = "100m"
+          memory = "128Mi"
+        }
+      }
+    })
+  ]
+
+  depends_on = [helm_release.cert_manager]
 }
 
 # -----------------------------------------------------------------------------

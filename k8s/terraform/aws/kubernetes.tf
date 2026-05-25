@@ -484,6 +484,19 @@ resource "kubectl_manifest" "wildcard_certificate" {
     }
     spec = {
       secretName = "tesslate-wildcard-tls"
+      # secretTemplate.annotations are copied onto the issued Secret on
+      # every renewal — picked up by emberstack/reflector (installed in
+      # helm.tf) to auto-sync the Secret into every proj-* namespace.
+      # Without this, the orchestrator's per-project hand-copy goes stale
+      # on each 90-day renewal.
+      secretTemplate = {
+        annotations = {
+          "reflector.v1.k8s.emberstack.com/reflection-allowed"            = "true"
+          "reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces" = "proj-.*"
+          "reflector.v1.k8s.emberstack.com/reflection-auto-enabled"       = "true"
+          "reflector.v1.k8s.emberstack.com/reflection-auto-namespaces"    = "proj-.*"
+        }
+      }
       issuerRef = {
         name = "letsencrypt-prod"
         kind = "ClusterIssuer"

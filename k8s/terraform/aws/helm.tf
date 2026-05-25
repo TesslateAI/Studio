@@ -85,19 +85,29 @@ resource "helm_release" "nginx_ingress" {
 # -----------------------------------------------------------------------------
 # cert-manager (for TLS certificates)
 # -----------------------------------------------------------------------------
+# IMPORTANT: Do NOT downgrade below v1.18.x. Cloudflare deprecated the
+# per-record `zone_id` JSON field on 2024-11-30, which broke DNS-01 cleanup
+# in cert-manager <=v1.17 — every renewal silently leaks an orphan TXT
+# record and eventually the cert expires when cleanup blocks the next
+# challenge from being presented. Fixed upstream by injecting the zone id
+# onto records after unmarshal (cert-manager v1.18+).
+# -----------------------------------------------------------------------------
 resource "helm_release" "cert_manager" {
   count = var.enable_cert_manager ? 1 : 0
 
   name             = "cert-manager"
   repository       = "https://charts.jetstack.io"
   chart            = "cert-manager"
-  version          = "v1.14.0"
+  version          = "v1.20.2"
   namespace        = "cert-manager"
   create_namespace = true
 
   values = [
     yamlencode({
-      installCRDs = true
+      crds = {
+        enabled = true
+        keep    = true  # don't delete CRDs (and their Certificates) on uninstall
+      }
 
       serviceAccount = {
         annotations = {
@@ -117,12 +127,55 @@ resource "helm_release" "cert_manager" {
       }
 
       # DNS-01 challenge configuration (for wildcard certs)
-      dns01RecursiveNameservers = "1.1.1.1:53,8.8.8.8:53"
+      dns01RecursiveNameservers     = "1.1.1.1:53,8.8.8.8:53"
       dns01RecursiveNameserversOnly = true
+
+      # NetworkPolicy gates are new in v1.18+ chart; opt out to keep
+      # existing behaviour (no policies in cert-manager ns).
+      networkPolicy            = { enabled = false }
+      cainjector               = { networkPolicy = { enabled = false } }
+      webhook                  = { networkPolicy = { enabled = false } }
     })
   ]
 
   depends_on = [module.eks]
+}
+
+# -----------------------------------------------------------------------------
+# kubernetes-reflector (auto-sync wildcard TLS into project namespaces)
+# -----------------------------------------------------------------------------
+# Replaces the orchestrator's per-project secret-copy with a live watch:
+# when cert-manager renews the wildcard, every annotated reflection updates
+# automatically. Without this, the 60 hand-copied per-namespace copies go
+# stale on renewal and every project subdomain serves an expired cert.
+# Annotation-driven (see kubernetes.tf:tesslate-wildcard-tls Certificate).
+# -----------------------------------------------------------------------------
+resource "helm_release" "reflector" {
+  count = var.enable_cert_manager ? 1 : 0
+
+  name             = "reflector"
+  repository       = "https://emberstack.github.io/helm-charts"
+  chart            = "reflector"
+  version          = "9.1.18"
+  namespace        = "kube-system"
+  create_namespace = false
+
+  values = [
+    yamlencode({
+      resources = {
+        requests = {
+          cpu    = "10m"
+          memory = "32Mi"
+        }
+        limits = {
+          cpu    = "100m"
+          memory = "128Mi"
+        }
+      }
+    })
+  ]
+
+  depends_on = [helm_release.cert_manager]
 }
 
 # -----------------------------------------------------------------------------

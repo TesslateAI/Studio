@@ -265,10 +265,19 @@ class KubernetesClient:
         self, target_namespace: str, source_namespace: str = None, secret_name: str = None
     ) -> bool:
         """
-        Copy wildcard TLS secret from source namespace to target namespace.
+        Bootstrap the wildcard TLS secret in a freshly-created project namespace.
 
-        This is required for HTTPS ingress in project namespaces - the wildcard
-        certificate needs to be available in each project namespace for TLS termination.
+        Long-term sync (including renewals) is handled by kubernetes-reflector,
+        which watches the source Secret (annotated via Certificate.spec.secretTemplate
+        in k8s/terraform/aws/kubernetes.tf) and pushes updates into every proj-*
+        namespace. We still do an explicit copy here as a bootstrap optimisation
+        so HTTPS works the instant the project's ingress comes up, without waiting
+        for reflector's watch reconcile (~seconds).
+
+        The copy is stamped with the reflector `reflects` annotation so reflector
+        adopts the secret immediately and keeps it in sync from then on. If
+        bootstrap and reflector both create the secret, reflector's idempotent
+        patch wins and the data converges to the source.
 
         Args:
             target_namespace: Namespace to copy the secret to
@@ -276,7 +285,7 @@ class KubernetesClient:
             secret_name: Name of the secret (defaults to k8s_wildcard_tls_secret)
 
         Returns:
-            True if copied successfully, False if secret doesn't exist in source
+            True if the secret is present in target_namespace (already or now), False if no source.
         """
         if source_namespace is None:
             source_namespace = self.settings.k8s_default_namespace
@@ -288,7 +297,7 @@ class KubernetesClient:
             logger.debug("[K8S] No wildcard TLS secret configured, skipping copy")
             return False
 
-        # Check if secret already exists in target namespace
+        # Check if secret already exists in target namespace (race with reflector)
         try:
             await asyncio.to_thread(
                 self.core_v1.read_namespaced_secret, name=secret_name, namespace=target_namespace
@@ -312,8 +321,12 @@ class KubernetesClient:
                 return False
             raise
 
-        # Create new secret in target namespace (copy data, new metadata)
-        # TLS secrets have type kubernetes.io/tls
+        # Create new secret in target namespace (copy data, new metadata).
+        # The `reflector.v1.k8s.emberstack.com/reflects` annotation hands the
+        # secret over to kubernetes-reflector so the live source's renewals
+        # propagate automatically. Without this annotation reflector would
+        # refuse to overwrite our bootstrap copy.
+        reflects_value = f"{source_namespace}/{secret_name}"
         new_secret = client.V1Secret(
             metadata=client.V1ObjectMeta(
                 name=secret_name,
@@ -323,15 +336,29 @@ class KubernetesClient:
                     "managed-by": "tesslate-backend",
                     "copied-from": source_namespace,
                 },
+                annotations={
+                    "reflector.v1.k8s.emberstack.com/reflects": reflects_value,
+                },
             ),
             type=source_secret.type,
             data=source_secret.data,
         )
 
-        await asyncio.to_thread(
-            self.core_v1.create_namespaced_secret, namespace=target_namespace, body=new_secret
-        )
-        logger.info(f"[K8S] ✅ Copied wildcard TLS secret to {target_namespace}")
+        try:
+            await asyncio.to_thread(
+                self.core_v1.create_namespaced_secret, namespace=target_namespace, body=new_secret
+            )
+            logger.info(f"[K8S] ✅ Copied wildcard TLS secret to {target_namespace}")
+        except ApiException as e:
+            # Race: reflector may have created it between our 404 and our create.
+            # 409 Conflict is success-equivalent — the secret is there.
+            if e.status == 409:
+                logger.debug(
+                    f"[K8S] TLS secret {secret_name} concurrently created in {target_namespace} "
+                    "(likely by kubernetes-reflector); treating as success"
+                )
+                return True
+            raise
         return True
 
     def get_project_namespace(self, project_id: str) -> str:
