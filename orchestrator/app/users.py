@@ -103,109 +103,25 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             logger.error(f"Failed to create LiteLLM key for user {user.username}: {e}")
             logger.warning(f"User {user.username} registered WITHOUT LiteLLM key")
 
-        # Create personal team (RBAC) — must happen before agent/theme assignment
-        # so that team_id is available for library scoping
-        await self._create_personal_team(user)
-
-        # Auto-add default agents + themes to new users.
+        # Create personal team (RBAC). The library/theme defaults are NOT
+        # provisioned at signup anymore — the system default agent is
+        # code-resident (see ``services.default_agent``) and surfaces in
+        # ``/api/marketplace/my-agents`` derivationally. Themes follow the
+        # same pattern via their existing ``is_default`` flag on the
+        # ``themes`` table. Per-user override rows are lazy-created the
+        # first time a user explicitly customizes (toggle / model select).
         #
-        # We insert via ``INSERT ... ON CONFLICT DO NOTHING`` in a single
-        # statement per table (one round-trip, atomic within the request
-        # txn). This avoids the FK-ShareLock deadlock cycle we previously
-        # hit under concurrent registrations: a loop of per-row ORM inserts
-        # holds row locks across multiple statements, giving two concurrent
-        # sessions a window to deadlock on shared parent rows (the global
-        # MarketplaceAgent / Theme catalog rows). A single statement
-        # acquires all its locks atomically, and ON CONFLICT DO NOTHING
-        # makes it idempotent, so retrying after a transient failure is
-        # always safe.
-        import uuid as _uuid
-
-        from sqlalchemy import select
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-        try:
-            from .models import MarketplaceAgent, UserPurchasedAgent
-
-            default_agent_slugs = ["tesslate-agent"]
-            agent_rows = (
-                await self.user_db.session.execute(
-                    select(MarketplaceAgent.id, MarketplaceAgent.name).where(
-                        MarketplaceAgent.slug.in_(default_agent_slugs)
-                    )
-                )
-            ).all()
-
-            if agent_rows:
-                values = [
-                    {
-                        "id": _uuid.uuid4(),
-                        "user_id": user.id,
-                        "team_id": user.default_team_id,
-                        "agent_id": row.id,
-                        "purchase_type": "free",
-                        "is_active": True,
-                    }
-                    for row in agent_rows
-                ]
-                stmt = pg_insert(UserPurchasedAgent).values(values)
-                stmt = stmt.on_conflict_do_nothing(
-                    index_elements=["user_id", "team_id", "agent_id"]
-                )
-                await self.user_db.session.execute(stmt)
-                await self.user_db.session.commit()
-                for row in agent_rows:
-                    logger.info(f"Auto-added {row.name} to user {user.username}")
-            missing = set(default_agent_slugs) - {
-                row.name
-                for row in agent_rows  # noqa: F821 — name used as slug when present
-            }
-            for slug in missing:
-                logger.warning(f"{slug} not found - user registered without this default agent")
-        except Exception as e:
-            logger.error(f"Failed to add default agents to user {user.username}: {e}")
-
-        try:
-            from .models import Theme, UserLibraryTheme
-
-            # Wave 1.5: Theme.id is now a GUID; the human-readable
-            # identifiers ("default-dark", "default-light") are stored as
-            # ``slug``. Look up by slug, then FK into the new GUID id.
-            default_theme_slugs = ["default-dark", "default-light"]
-            theme_rows = (
-                await self.user_db.session.execute(
-                    select(Theme.id, Theme.slug, Theme.name).where(
-                        Theme.slug.in_(default_theme_slugs)
-                    )
-                )
-            ).all()
-
-            if theme_rows:
-                values = [
-                    {
-                        "id": _uuid.uuid4(),
-                        "user_id": user.id,
-                        "theme_id": row.id,
-                        "purchase_type": "free",
-                        "is_active": True,
-                    }
-                    for row in theme_rows
-                ]
-                stmt = pg_insert(UserLibraryTheme).values(values)
-                stmt = stmt.on_conflict_do_nothing(
-                    index_elements=["user_id", "theme_id", "team_id"]
-                )
-                await self.user_db.session.execute(stmt)
-                await self.user_db.session.commit()
-                for row in theme_rows:
-                    logger.info(f"Auto-added theme {row.name} to user {user.username}")
-            missing = set(default_theme_slugs) - {row.slug for row in theme_rows}
-            for theme_slug in missing:
-                logger.warning(
-                    f"Theme {theme_slug} not found - user registered without this default theme"
-                )
-        except Exception as e:
-            logger.error(f"Failed to add default themes to user {user.username}: {e}")
+        # Removed (was broken in this signup path):
+        #   - ``pg_insert(UserPurchasedAgent).on_conflict_do_nothing(
+        #     index_elements=["user_id", "team_id", "agent_id"])``
+        #     The referenced unique constraint never existed (no alembic
+        #     migration adds it; model declares no UniqueConstraint).
+        #     Postgres raised ``InvalidColumnReference`` which the bare
+        #     ``except Exception`` swallowed, leaving the new user with
+        #     an empty library AND aborting the txn so the subsequent
+        #     theme-insert + auto-accept-invites blocks failed with
+        #     ``InFailedSQLTransaction``.
+        await self._create_personal_team(user)
 
         # Send Discord signup notification
         try:
