@@ -361,6 +361,18 @@ resource "helm_release" "external_dns" {
 
       sources = ["ingress", "service"]
 
+      # Watch ONLY the platform namespace. Per-project ingresses in proj-*
+      # namespaces are already covered by the wildcard CNAME
+      # (`*.<domain>` → NLB, declared in dns.tf) so we don't want
+      # external-dns creating one specific CNAME per project — those
+      # records silently override the wildcard, consume the Cloudflare
+      # zone's record cap, and on 2026-05-24 wedged production wildcard
+      # cert renewal at the Free plan's 200-record cap. The orchestrator
+      # also stamps `external-dns.alpha.kubernetes.io/exclude: "true"`
+      # on each project ingress as defense-in-depth (see
+      # orchestrator/.../kubernetes/helpers.py:create_ingress_manifest).
+      namespace = "tesslate"
+
       txtOwnerId = "${var.project_name}-${var.environment}"
 
       serviceAccount = {
