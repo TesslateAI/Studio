@@ -12,8 +12,10 @@ This migration adds:
 """
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
+
 # revision identifiers
 revision = "0021_agent_steps_sessions"
 down_revision = "0020_admin_panel_schema"

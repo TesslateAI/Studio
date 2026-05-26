@@ -370,9 +370,10 @@ async def restore_snapshot(
             async def _bounce_pods() -> None:
                 try:
                     from kubernetes import client as k8s_client
-                    from kubernetes import config as k8s_config
 
-                    k8s_config.load_incluster_config()
+                    from ..services.k8s_auth import load_in_cluster_or_kube
+
+                    load_in_cluster_or_kube()
                     v1 = k8s_client.CoreV1Api()
                     pods = await asyncio.to_thread(
                         v1.list_namespaced_pod,

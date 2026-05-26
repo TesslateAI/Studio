@@ -23,7 +23,6 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 _ASYNC_DB_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
@@ -69,20 +68,24 @@ async def _seed_federated_submission(db, *, source_id: uuid.UUID) -> dict:
     db.add(user)
     await db.flush()
 
-    src_stmt = pg_insert(models.MarketplaceSource).values(
-        {
-            "id": source_id,
-            "handle": f"hub-{source_id.hex[:6]}",
-            "display_name": "Test Hub",
-            "base_url": "https://hub.example.com",
-            "scope": "system",
-            "trust_level": "admin_trusted",
-            "is_active": True,
-            "pinned_hub_id": "hub-x",
-        }
-    ).on_conflict_do_update(
-        index_elements=[models.MarketplaceSource.id],
-        set_={"is_active": True},
+    src_stmt = (
+        pg_insert(models.MarketplaceSource)
+        .values(
+            {
+                "id": source_id,
+                "handle": f"hub-{source_id.hex[:6]}",
+                "display_name": "Test Hub",
+                "base_url": "https://hub.example.com",
+                "scope": "system",
+                "trust_level": "admin_trusted",
+                "is_active": True,
+                "pinned_hub_id": "hub-x",
+            }
+        )
+        .on_conflict_do_update(
+            index_elements=[models.MarketplaceSource.id],
+            set_={"is_active": True},
+        )
     )
     await db.execute(src_stmt)
 
@@ -140,13 +143,12 @@ def test_proxy_advance_routes_through_marketplace_and_mirrors(api_client_session
 
     # Build a superuser-authenticated session by promoting our user.
     async def _promote(db):
-        from app import models
         from sqlalchemy import update
 
+        from app import models
+
         await db.execute(
-            update(models.User)
-            .where(models.User.id == seeded["user_id"])
-            .values(is_superuser=True)
+            update(models.User).where(models.User.id == seeded["user_id"]).values(is_superuser=True)
         )
         await db.commit()
 
@@ -191,8 +193,9 @@ def test_proxy_advance_routes_through_marketplace_and_mirrors(api_client_session
     su_id = r.json()["id"]
 
     async def _make_super(db):
-        from app import models
         from sqlalchemy import update
+
+        from app import models
 
         await db.execute(
             update(models.User).where(models.User.id == su_id).values(is_superuser=True)
@@ -208,6 +211,7 @@ def test_proxy_advance_routes_through_marketplace_and_mirrors(api_client_session
     api_client_session.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
 
     import unittest.mock as mock
+
     with mock.patch.object(gov, "proxy_advance_submission", side_effect=_fake_proxy_advance):
         res = api_client_session.post(
             f"/api/app-submissions/{seeded['submission_id']}/advance",
@@ -241,8 +245,9 @@ def test_proxy_advance_returns_502_on_marketplace_5xx(api_client_session):
     su_id = r.json()["id"]
 
     async def _make_super(db):
-        from app import models
         from sqlalchemy import update
+
+        from app import models
 
         await db.execute(
             update(models.User).where(models.User.id == su_id).values(is_superuser=True)
@@ -261,6 +266,7 @@ def test_proxy_advance_returns_502_on_marketplace_5xx(api_client_session):
         raise MarketplaceServerError("hub down", status_code=503)
 
     import unittest.mock as mock
+
     with mock.patch.object(gov, "proxy_advance_submission", side_effect=_boom):
         res = api_client_session.post(
             f"/api/app-submissions/{seeded['submission_id']}/advance",
@@ -290,8 +296,9 @@ def test_proxy_advance_returns_503_when_admin_token_missing(api_client_session):
     su_id = r.json()["id"]
 
     async def _make_super(db):
-        from app import models
         from sqlalchemy import update
+
+        from app import models
 
         await db.execute(
             update(models.User).where(models.User.id == su_id).values(is_superuser=True)
@@ -310,6 +317,7 @@ def test_proxy_advance_returns_503_when_admin_token_missing(api_client_session):
         raise gov.AdminTokenMissingError("admin token unset")
 
     import unittest.mock as mock
+
     with mock.patch.object(gov, "proxy_advance_submission", side_effect=_missing_token):
         res = api_client_session.post(
             f"/api/app-submissions/{seeded['submission_id']}/advance",

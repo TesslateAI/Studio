@@ -39,7 +39,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration / session fixtures
 # ---------------------------------------------------------------------------
@@ -48,9 +47,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -68,9 +65,7 @@ def migrated_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setenv("DEPLOYMENT_MODE", "desktop")
     # Stable secret key so derive_signing_key on the verify side reproduces
     # the same per-pod key the test signs with.
-    monkeypatch.setenv(
-        "SECRET_KEY", "test-secret-key-for-connector-proxy-integration"
-    )
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-for-connector-proxy-integration")
 
     from app.config import get_settings
 
@@ -92,18 +87,14 @@ def session_maker(migrated_sqlite: str, monkeypatch: pytest.MonkeyPatch):
     _install_sqlite_now(engine)
     maker = async_sessionmaker(engine, expire_on_commit=False)
 
-    monkeypatch.setattr(
-        "app.database.AsyncSessionLocal", maker, raising=False
-    )
+    monkeypatch.setattr("app.database.AsyncSessionLocal", maker, raising=False)
 
     async def _override_get_db():
         async with maker() as session:
             yield session
 
     # Patch the FastAPI Depends(get_db) the connector_proxy router uses.
-    monkeypatch.setattr(
-        "app.database.get_db", _override_get_db, raising=False
-    )
+    monkeypatch.setattr("app.database.get_db", _override_get_db, raising=False)
 
     yield maker
     asyncio.run(engine.dispose())
@@ -150,7 +141,6 @@ async def _seed_app_install_with_slack_grant(
     insert minimal rows so the FK constraints are satisfied without
     pulling in the full app-publish flow.
     """
-    from sqlalchemy import insert as core_insert
 
     # Minimal MarketplaceApp + AppVersion to satisfy FKs on AppInstance.
     from app.models import (
@@ -316,16 +306,14 @@ async def test_proxy_call_succeeds_without_app_seeing_token(
     # 1. Seed everything.
     async with session_maker() as db:
         owner_id = await _seed_user(db)
-        instance_id, _oauth_id, _req_id = (
-            await _seed_app_install_with_slack_grant(db, owner_user_id=owner_id)
+        instance_id, _oauth_id, _req_id = await _seed_app_install_with_slack_grant(
+            db, owner_user_id=owner_id
         )
 
     # 2. Mint the per-pod token using the same derivation the verifier uses.
     invalidate_signing_key_cache()
     signing_key = derive_signing_key(instance_id)
-    token = generate_pod_token(
-        app_instance_id=instance_id, signing_key=signing_key
-    )
+    token = generate_pod_token(app_instance_id=instance_id, signing_key=signing_key)
 
     # 3. Mock httpx.AsyncClient so we can capture the outbound call.
     captured_calls: list[dict[str, Any]] = []
@@ -334,7 +322,7 @@ async def test_proxy_call_succeeds_without_app_seeing_token(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._kwargs = kwargs
 
-        async def __aenter__(self) -> "_MockClient":
+        async def __aenter__(self) -> _MockClient:
             return self
 
         async def __aexit__(self, *args: Any) -> None:
@@ -375,9 +363,7 @@ async def test_proxy_call_succeeds_without_app_seeing_token(
 
     import importlib
 
-    _router_mod = importlib.import_module(
-        "app.services.apps.connector_proxy.router"
-    )
+    _router_mod = importlib.import_module("app.services.apps.connector_proxy.router")
     monkeypatch.setattr(_router_mod.httpx, "AsyncClient", _MockClient)
 
     # 4. Build the test client and POST to the proxy.
@@ -411,14 +397,10 @@ async def test_proxy_call_succeeds_without_app_seeing_token(
     # The injected Authorization header MUST carry the decrypted bearer.
     assert call["headers"].get("Authorization") == "Bearer xoxb-fake"
     # The smuggled Authorization from the app pod MUST be gone.
-    assert "Bearer attacker-supplied" not in (
-        call["headers"].get("Authorization") or ""
-    )
+    assert "Bearer attacker-supplied" not in (call["headers"].get("Authorization") or "")
     # The OpenSail auth header MUST NOT have been forwarded upstream.
     assert APP_INSTANCE_HEADER not in call["headers"]
-    assert APP_INSTANCE_HEADER.lower() not in {
-        k.lower() for k in call["headers"]
-    }
+    assert APP_INSTANCE_HEADER.lower() not in {k.lower() for k in call["headers"]}
 
     # 6. Response back to the pod must NOT carry Authorization.
     assert "authorization" not in {k.lower() for k in resp.headers}
@@ -433,12 +415,16 @@ async def test_proxy_call_succeeds_without_app_seeing_token(
         from app.models_automations import ConnectorProxyCall
 
         rows = (
-            await db.execute(
-                select(ConnectorProxyCall).where(
-                    ConnectorProxyCall.app_instance_id == instance_id
+            (
+                await db.execute(
+                    select(ConnectorProxyCall).where(
+                        ConnectorProxyCall.app_instance_id == instance_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert len(rows) == 1, f"expected 1 audit row, got {len(rows)}"
     assert rows[0].status_code == 200
     assert rows[0].connector_id == "slack"

@@ -174,7 +174,7 @@ def validate_startup_command(command: str) -> tuple[bool, str | None]:
 
 def get_node_modules_fix_prefix() -> str:
     """Public API for K8s orchestrator."""
-    return _install_deps_if_missing_command()
+    return _materialize_dotenv_local_command() + _install_deps_if_missing_command()
 
 
 def _install_deps_if_missing_command() -> str:
@@ -194,6 +194,66 @@ def _install_deps_if_missing_command() -> str:
         "  else npm install; "
         "  fi; "
         "fi && "
+    )
+
+
+def _materialize_dotenv_local_command() -> str:
+    """Merge every public env var into ``.env.local`` at container start.
+
+    Why this exists: Next.js dev (Turbopack) and Vite both populate the
+    browser-side ``process.env`` polyfill from project-root .env* files
+    at bundler boot, NOT from the OS environment of the dev process. We
+    confirmed empirically on Next.js 16 + Turbopack that only
+    ``.env.local`` reliably reaches the client bundle — the
+    ``.env.development.local`` precedent is loaded for the server but
+    doesn't propagate into the client polyfill. So we have to own
+    ``.env.local``.
+
+    Design:
+
+    * **Merge, never clobber.** Read existing ``.env.local`` first; strip
+      every line whose key starts with one of our platform-managed
+      prefixes (``OPENSAIL_``, ``VITE_``, ``NEXT_PUBLIC_``); append the
+      fresh platform values from the pod environ. User-added lines
+      under any OTHER prefix (e.g. ``ANALYTICS_TOKEN``) are preserved
+      verbatim.
+
+    * **Convention is explicit.** A header comment marks the
+      platform-managed block so anyone editing the file sees that
+      ``OPENSAIL_*`` / ``VITE_*`` / ``NEXT_PUBLIC_*`` lines below it
+      are overwritten on container restart. To add a non-managed env
+      var, put it ABOVE the header (or under a different prefix).
+
+    * **Broad allowlist: any ``NEXT_PUBLIC_*`` / ``VITE_*`` / ``OPENSAIL_*``.**
+      Every connector that emits a client-readable env var (Stripe
+      ``NEXT_PUBLIC_STRIPE_PK``, Supabase ``VITE_SUPABASE_URL``, etc.)
+      flows through this materialiser — narrowing it to ``OPENSAIL_*``
+      silently breaks every other connector with the same root cause.
+
+    * **Skip when allowlist matches nothing.** Projects without any
+      managed env vars don't grow a phantom file.
+    """
+    # Shell pipeline:
+    #   1. Gather the platform-managed env into $env_lines.
+    #   2. If empty: nothing to do, exit early so we never touch the user's file.
+    #   3. Else: drop any prior platform-managed lines from existing .env.local
+    #      (keeping user-owned lines), then write the kept lines + the marker +
+    #      the fresh platform lines into .env.local.
+    # The marker grep pattern matches our owned prefixes ONLY at line start so
+    # a value that happens to contain those tokens isn't mistakenly stripped.
+    return (
+        '(env_lines=$(printenv | grep -E "^(OPENSAIL_|VITE_|NEXT_PUBLIC_)" || true) && '
+        'if [ -n "$env_lines" ]; then '
+        '  echo "[TESSLATE] Materializing .env.local for Next/Vite bundler" && '
+        '  existing=""; '
+        "  if [ -f .env.local ]; then "
+        '    existing=$(grep -vE "^(OPENSAIL_|VITE_|NEXT_PUBLIC_|# Tesslate-managed)" .env.local || true); '
+        "  fi; "
+        '  { [ -n "$existing" ] && printf "%s\\n" "$existing"; '
+        '    printf "%s\\n" "# Tesslate-managed (auto-overwritten on container start)"; '
+        '    printf "%s\\n" "$env_lines"; } > .env.local.new && '
+        "  mv .env.local.new .env.local; "
+        "fi) && "
     )
 
 
@@ -237,6 +297,7 @@ class AppConfig:
     # The K8s pod renderer merges these onto the platform defaults so a
     # heavy app can opt into more memory without forking the runtime.
     # Empty / None → platform defaults apply.
+    readiness_port: int | None = None
     resources: dict[str, str] | None = None
     env: dict[str, str] = field(default_factory=dict)
     exports: dict[str, str] = field(default_factory=dict)
@@ -265,6 +326,7 @@ class ConnectionConfig:
 
     from_node: str = ""
     to_node: str = ""
+    config: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -391,6 +453,7 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             image=app_data.get("image") or None,
             source_strategy=app_data.get("source_strategy") or None,
             state_mount_path=app_data.get("state_mount_path") or None,
+            readiness_port=app_data.get("readiness_port") or None,
             resources=resources,
             env=app_data.get("env", {}),
             exports=app_data.get("exports", {}),
@@ -419,6 +482,7 @@ def parse_tesslate_config(json_str: str) -> TesslateProjectConfig:
             ConnectionConfig(
                 from_node=conn_data.get("from", ""),
                 to_node=conn_data.get("to", ""),
+                config=conn_data.get("config") or {},
             )
         )
 

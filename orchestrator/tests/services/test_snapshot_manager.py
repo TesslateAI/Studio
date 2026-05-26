@@ -109,11 +109,11 @@ def snapshot_manager(mock_settings, monkeypatch):
     mock_core_v1 = Mock()
 
     with (
-        patch("app.services.snapshot_manager.config") as mock_config,
+        patch("app.services.k8s_auth.k8s_config.load_incluster_config") as _mock_incluster,
         patch("app.services.snapshot_manager.client") as mock_client,
         patch("app.services.snapshot_manager.get_settings", return_value=mock_settings),
     ):
-        mock_config.load_incluster_config = Mock()
+        _mock_incluster.return_value = None
         mock_client.CustomObjectsApi.return_value = mock_custom_api
         mock_client.CoreV1Api.return_value = mock_core_v1
 

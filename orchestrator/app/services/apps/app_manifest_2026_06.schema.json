@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tesslate.com/schemas/app-manifest/2026-06.schema.json",
+  "title": "Tesslate App Manifest",
+  "description": "v2.1 manifest schema for Tesslate Apps (container shape). Version tag: 2026-06. Additive over 2025-02: compute.containers[].readiness_port decouples K8s readiness probe + Service + Ingress port from PORT; compute.credentials[] declares user-supplied secrets the install modal collects and the orchestrator upserts as K8s Secrets in the platform namespace; state.mount_path makes the per-install volume mount point explicit (was implicit-default in 2025-02).",
+  "type": "object",
+  "required": ["manifest_schema_version", "app", "compatibility", "surfaces", "state", "billing", "listing"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_schema_version": {
+      "type": "string",
+      "const": "2026-06"
+    },
+    "app": {
+      "type": "object",
+      "required": ["id", "name", "slug", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)+$", "description": "Reverse-DNS unique id, e.g. com.example.intake-contract"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "minLength": 1, "maxLength": 80},
+        "creator_id": {"type": ["string", "null"], "format": "uuid"},
+        "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$", "description": "Semver"},
+        "description": {"type": "string", "maxLength": 4000},
+        "category": {"type": "string", "maxLength": 64},
+        "icon_ref": {"type": ["string", "null"], "description": "CAS hash or URL"},
+        "changelog": {"type": "string", "maxLength": 8000},
+        "forkable": {"enum": ["true", "restricted", "no"], "default": "restricted"},
+        "forked_from": {"type": ["string", "null"], "description": "app_id@semver of parent"}
+      }
+    },
+    "source_visibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {"enum": ["public", "installers", "private"], "default": "installers"},
+        "excluded_paths": {"type": "array", "items": {"type": "string"}, "default": [".env*", "secrets/**", ".git/**", ".tesslate/internal/**"]},
+        "manifest_always_public": {"type": "boolean", "default": true}
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "required": ["studio", "manifest_schema", "runtime_api"],
+      "additionalProperties": false,
+      "properties": {
+        "studio": {
+          "type": "object",
+          "required": ["min"],
+          "additionalProperties": false,
+          "properties": {
+            "min": {"type": "string"},
+            "max": {"type": "string"}
+          }
+        },
+        "manifest_schema": {"type": "string", "const": "2026-06"},
+        "runtime_api": {"type": "string", "description": "semver range, e.g. ^1.2"},
+        "required_features": {"type": "array", "items": {"type": "string"}, "default": []}
+      }
+    },
+    "surfaces": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["kind"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"enum": ["ui", "chat", "scheduled", "triggered", "mcp-tool"]},
+          "entrypoint": {"type": "string", "description": "Path within bundle (relative to primary container URL for ui/chat kinds)."},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "tool_schema": {"type": "object", "description": "Required when kind=mcp-tool; JSON Schema for MCP tool input"}
+        },
+        "if": {
+          "properties": {"kind": {"enum": ["ui", "chat"]}}
+        },
+        "then": {
+          "required": ["kind", "entrypoint"]
+        },
+        "else": {
+          "required": ["kind"]
+        }
+      }
+    },
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tier": {"type": "integer", "enum": [0, 1, 2], "default": 0},
+        "model": {"enum": ["always-on", "job-only"], "default": "always-on", "description": "Runtime shape: always-on runs Deployments; job-only runs only as scheduled K8s Jobs (headless)."},
+        "compute_model": {"enum": ["per-invocation", "per-installer", "shared-singleton"], "default": "per-invocation"},
+        "containers": {
+          "type": "array",
+          "if": {"minItems": 1},
+          "then": {
+            "contains": {
+              "type": "object",
+              "properties": {"primary": {"const": true}},
+              "required": ["primary"]
+            }
+          },
+          "items": {
+            "type": "object",
+            "required": ["name", "image"],
+            "additionalProperties": true,
+            "properties": {
+              "name": {"type": "string"},
+              "image": {"type": "string"},
+              "primary": {"type": "boolean", "default": false},
+              "ports": {"type": "array", "items": {"type": "integer"}},
+              "readiness_port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "K8s readiness probe + Service + Ingress port. Defaults to ports[0]. Use when an in-pod reverse proxy fronts the app on a different port than the dev server."},
+              "env": {"type": "object", "additionalProperties": {"type": "string"}},
+              "startup_command": {"type": "string"},
+              "resources": {"type": "object"}
+            }
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source_container", "target_container", "connector_type"],
+            "additionalProperties": false,
+            "properties": {
+              "source_container": {"type": "string"},
+              "target_container": {"type": "string"},
+              "connector_type": {
+                "enum": [
+                  "env_injection",
+                  "http_api",
+                  "database",
+                  "cache",
+                  "message_queue",
+                  "websocket",
+                  "depends_on"
+                ]
+              },
+              "config": {"type": "object", "additionalProperties": true, "default": {}}
+            }
+          },
+          "default": []
+        },
+        "credentials": {
+          "type": "array",
+          "default": [],
+          "description": "User-supplied secrets the install modal collects at install time. Each entry's secret_ref matches the ${secret:name/key} convention used in container env values; the orchestrator upserts an Opaque K8s Secret named <name> in the platform namespace, then secret_propagator copies it into the project namespace at start time. K8s mode only.",
+          "items": {
+            "type": "object",
+            "required": ["secret_ref"],
+            "additionalProperties": false,
+            "properties": {
+              "secret_ref": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,251}/[A-Za-z0-9_.-]+$", "description": "Reference in the form '<secret-name>/<key>' matching ${secret:<secret-name>/<key>} usage in env."},
+              "label": {"type": "string", "description": "Human-readable label shown in the install modal. Defaults to secret_ref when omitted."},
+              "description": {"type": "string", "description": "Helper text shown beneath the input (typically a sign-up URL)."},
+              "required": {"type": "boolean", "default": true, "description": "When true, the install button is disabled until the user provides a non-empty value."}
+            }
+          }
+        },
+        "hosted_agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "system_prompt_ref"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "model_pref": {"type": "string"},
+              "system_prompt_ref": {"type": "string", "description": "Path within bundle to prompt file"},
+              "tools_ref": {"type": "array", "items": {"type": "string"}},
+              "mcps_ref": {"type": "array", "items": {"type": "string"}},
+              "temperature": {"type": "number"},
+              "max_tokens": {"type": "integer"},
+              "thinking_effort": {"type": "string"},
+              "warm_pool_size": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": ["model"],
+      "additionalProperties": false,
+      "properties": {
+        "model": {"enum": ["stateless", "per-install-volume", "byo-database"]},
+        "volume_size": {"type": "string", "pattern": "^\\d+(Mi|Gi)$"},
+        "mount_path": {"type": "string", "pattern": "^/[A-Za-z0-9_./-]*$", "description": "Absolute path inside the container where the per-install volume is mounted. Required for state.model=per-install-volume when the manifest sets source_strategy=image and the image's WORKDIR is not /data."},
+        "byo_database": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema": {"type": "string"},
+            "connection_env": {"type": "string"},
+            "external_db_version": {"type": "string"}
+          }
+        }
+      }
+    },
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"enum": ["mcp", "api_key", "oauth", "webhook"]},
+          "scopes": {"type": "array", "items": {"type": "string"}},
+          "required": {"type": "boolean", "default": true},
+          "oauth": {"type": "boolean", "default": false},
+          "secret_key": {"type": "string"}
+        }
+      }
+    },
+    "schedules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "default_cron": {"type": "string"},
+          "entrypoint": {"type": "string"},
+          "execution": {"enum": ["job", "http-post"], "default": "job"},
+          "trigger_kind": {"enum": ["cron", "webhook"], "default": "cron"},
+          "editable": {"type": "boolean", "default": true},
+          "optional": {"type": "boolean", "default": true}
+        }
+      }
+    },
+    "migrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "from": {"type": "string"},
+          "to": {"type": "string"},
+          "auto_safe": {"type": "boolean", "default": false},
+          "up": {"type": "string"},
+          "down": {"type": "string"}
+        }
+      }
+    },
+    "billing": {
+      "type": "object",
+      "required": ["ai_compute", "general_compute", "platform_fee"],
+      "additionalProperties": false,
+      "properties": {
+        "ai_compute": {"$ref": "#/$defs/dimensionBilling"},
+        "general_compute": {"$ref": "#/$defs/dimensionBilling"},
+        "platform_fee": {
+          "type": "object",
+          "required": ["model"],
+          "additionalProperties": false,
+          "properties": {
+            "model": {"enum": ["free", "one_time", "subscription", "per_invocation"]},
+            "price_usd": {"type": "number", "minimum": 0},
+            "billing_period": {"type": ["string", "null"], "enum": ["monthly", "yearly", null]},
+            "trial_days": {"type": "integer", "minimum": 0, "default": 0}
+          }
+        },
+        "promotional_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fund_usd": {"type": "number", "minimum": 0, "default": 0},
+            "covers": {"type": "array", "items": {"enum": ["ai_compute", "general_compute", "platform_fee"]}},
+            "on_exhaust": {"enum": ["disable", "flip_to_installer", "degrade_to_free"], "default": "flip_to_installer"}
+          }
+        }
+      }
+    },
+    "listing": {
+      "type": "object",
+      "required": ["visibility"],
+      "additionalProperties": false,
+      "properties": {
+        "visibility": {
+          "oneOf": [
+            {"type": "string", "enum": ["public", "private"]},
+            {"type": "string", "pattern": "^team:[0-9a-f-]{36}$"}
+          ]
+        },
+        "update_policy_default": {"enum": ["manual", "patch-auto", "minor-auto", "pinned"], "default": "manual"},
+        "minimum_rollback_version": {"type": "string"}
+      }
+    },
+    "eval_scenarios": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["entrypoint", "input", "expected_behavior"],
+        "additionalProperties": false,
+        "properties": {
+          "entrypoint": {"type": "string"},
+          "input": {},
+          "expected_behavior": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dimensionBilling": {
+      "type": "object",
+      "required": ["payer"],
+      "additionalProperties": false,
+      "properties": {
+        "payer": {"enum": ["creator", "platform", "installer", "byok"]},
+        "markup_pct": {"type": "number", "minimum": 0, "default": 0},
+        "cap_usd_per_session": {"type": "number", "minimum": 0},
+        "cap_usd_per_month_per_install": {"type": "number", "minimum": 0},
+        "on_cap": {"enum": ["pause", "degrade", "notify-only"], "default": "pause"},
+        "free_tier": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "cpu_seconds_per_month": {"type": "integer", "minimum": 0},
+            "volume_gb": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    }
+  }
+}

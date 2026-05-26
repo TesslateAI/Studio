@@ -6,6 +6,7 @@ publishes through ``pubsub.publish_agent_event``. The critical security
 assertion is that secret *values* never appear in the tool's return value or
 in any event payload — only key names do.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +20,6 @@ from app.agent.tools.approval_manager import PendingUserInputManager
 from app.agent.tools.node_config.request_node_config import (
     request_node_config_executor,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -129,9 +129,7 @@ def patch_audit(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     return captured
 
 
-def _build_context(
-    db: Any, project_id: UUID, user_id: UUID, task_id: str = "task-1"
-) -> dict:
+def _build_context(db: Any, project_id: UUID, user_id: UUID, task_id: str = "task-1") -> dict:
     return {
         "db": db,
         "project_id": project_id,
@@ -259,9 +257,7 @@ async def test_create_supabase_persists_encrypted_secrets_and_returns_no_plainte
 
     # And in every published event
     for ev in pubsub_recorder.events:
-        _assert_no_plaintext_in(
-            ev, {"anon-secret-abcdefghij", "service-secret-0123456789"}
-        )
+        _assert_no_plaintext_in(ev, {"anon-secret-abcdefghij", "service-secret-0123456789"})
 
     # --- 6. Audit log written with node_config_updated + rotated_secrets
     assert len(patch_audit) == 1

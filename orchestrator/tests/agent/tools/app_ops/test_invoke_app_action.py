@@ -33,7 +33,6 @@ from app.agent.tools.app_ops.invoke_app_action import (
 )
 from app.agent.tools.registry import ToolCategory, ToolRegistry, get_tool_registry
 
-
 # ---------------------------------------------------------------------------
 # Registry / annotation tests
 # ---------------------------------------------------------------------------
@@ -226,9 +225,7 @@ async def test_executor_returns_structured_error_on_unexpected_exception():
 @pytest.mark.asyncio
 async def test_executor_rejects_missing_app_instance_id():
     db = AsyncMock()
-    result = await invoke_app_action_executor(
-        {"action_name": "noop"}, {"db": db}
-    )
+    result = await invoke_app_action_executor({"action_name": "noop"}, {"db": db})
     assert result["success"] is False
     assert result["ok"] is False
     assert "app_instance_id" in result["message"]
@@ -237,9 +234,7 @@ async def test_executor_rejects_missing_app_instance_id():
 @pytest.mark.asyncio
 async def test_executor_rejects_missing_action_name():
     db = AsyncMock()
-    result = await invoke_app_action_executor(
-        {"app_instance_id": str(uuid4())}, {"db": db}
-    )
+    result = await invoke_app_action_executor({"app_instance_id": str(uuid4())}, {"db": db})
     assert result["success"] is False
     assert result["ok"] is False
     assert "action_name" in result["message"]

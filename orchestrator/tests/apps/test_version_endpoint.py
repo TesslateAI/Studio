@@ -31,7 +31,7 @@ async def test_get_version_shape(client: AsyncClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert "build_sha" in body
-    assert body["schema_versions"]["manifest"] == ["2025-01"]
+    assert body["schema_versions"]["manifest"] == ["2025-01", "2025-02", "2026-05", "2026-06"]
     assert isinstance(body["features"], list)
     assert len(body["feature_set_hash"]) == 64
     assert body["runtime_api_supported"] == ["1.0"]

@@ -14,22 +14,13 @@ from __future__ import annotations
 
 from .base import AllowedEndpoint, AuthScheme, ProviderAdapter
 
-
 GMAIL_ALLOWED_ENDPOINTS: tuple[AllowedEndpoint, ...] = (
     # ---- Messages ----
     AllowedEndpoint(method="GET", path="gmail/v1/users/{userId}/messages"),
-    AllowedEndpoint(
-        method="GET", path="gmail/v1/users/{userId}/messages/{id}"
-    ),
-    AllowedEndpoint(
-        method="POST", path="gmail/v1/users/{userId}/messages/send"
-    ),
-    AllowedEndpoint(
-        method="POST", path="gmail/v1/users/{userId}/messages/{id}/modify"
-    ),
-    AllowedEndpoint(
-        method="POST", path="gmail/v1/users/{userId}/messages/{id}/trash"
-    ),
+    AllowedEndpoint(method="GET", path="gmail/v1/users/{userId}/messages/{id}"),
+    AllowedEndpoint(method="POST", path="gmail/v1/users/{userId}/messages/send"),
+    AllowedEndpoint(method="POST", path="gmail/v1/users/{userId}/messages/{id}/modify"),
+    AllowedEndpoint(method="POST", path="gmail/v1/users/{userId}/messages/{id}/trash"),
     # ---- Drafts ----
     AllowedEndpoint(method="GET", path="gmail/v1/users/{userId}/drafts"),
     AllowedEndpoint(method="POST", path="gmail/v1/users/{userId}/drafts"),
@@ -38,9 +29,7 @@ GMAIL_ALLOWED_ENDPOINTS: tuple[AllowedEndpoint, ...] = (
     AllowedEndpoint(method="POST", path="gmail/v1/users/{userId}/labels"),
     # ---- Threads ----
     AllowedEndpoint(method="GET", path="gmail/v1/users/{userId}/threads"),
-    AllowedEndpoint(
-        method="GET", path="gmail/v1/users/{userId}/threads/{id}"
-    ),
+    AllowedEndpoint(method="GET", path="gmail/v1/users/{userId}/threads/{id}"),
     # ---- Profile ----
     AllowedEndpoint(method="GET", path="gmail/v1/users/{userId}/profile"),
 )

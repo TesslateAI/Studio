@@ -47,11 +47,20 @@ helm install ingress-nginx ingress-nginx/ingress-nginx \
   --set controller.admissionWebhooks.enabled=false
 
 # Install cert-manager (optional for SSL)
+# Pin to v1.20.2 — do NOT downgrade below v1.18.x. Cloudflare deprecated
+# the per-record zone_id JSON field on 2024-11-30, which broke DNS-01
+# cleanup in cert-manager <=v1.17 (renewals leak orphan TXT records,
+# then eventually wedge the renewal pipeline and certs expire silently).
 echo "[6/6] Installing cert-manager..."
 kubectl create namespace cert-manager
 helm install cert-manager jetstack/cert-manager \
   --namespace cert-manager \
-  --set installCRDs=true
+  --version v1.20.2 \
+  --set crds.enabled=true \
+  --set crds.keep=true \
+  --set networkPolicy.enabled=false \
+  --set cainjector.networkPolicy.enabled=false \
+  --set webhook.networkPolicy.enabled=false
 
 # Wait for pods to be ready
 echo "Waiting for ingress-nginx to be ready..."

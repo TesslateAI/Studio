@@ -5,6 +5,11 @@
 # obviously dev. Also pins capabilities to what Wave 8 ships so a stale
 # DISABLED_CAPABILITIES env in another overlay doesn't accidentally
 # carry into local testing.
+#
+# IMPORTANT: initContainers order matters.
+# Kustomize strategic-merge builds the merged list in patch-list order,
+# with base-only items appended. Listing create-database FIRST here
+# guarantees it runs before alembic-migrate in the merged Deployment.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -15,6 +20,11 @@ spec:
   template:
     spec:
       initContainers:
+      # 1. create-database — postgres:16-alpine pulled from registry (IfNotPresent default).
+      #    Listed first to anchor order before alembic-migrate.
+      - name: create-database
+        image: postgres:16-alpine
+      # 2. alembic-migrate — local image, never pull from registry.
       - name: alembic-migrate
         imagePullPolicy: Never
       containers:

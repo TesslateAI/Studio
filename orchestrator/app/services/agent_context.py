@@ -7,10 +7,11 @@ worker tasks, and reconnect flows.
 
 import logging
 import os
+from dataclasses import dataclass
 from uuid import UUID
 
 import aiofiles
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -20,6 +21,7 @@ from ..models import (
     Message,
     Project,
 )
+from ..models_team import ProjectMembership
 from ..utils.resource_naming import get_project_path
 
 settings = get_settings()
@@ -364,6 +366,241 @@ async def _build_cross_platform_context(
     except Exception as e:
         logger.warning("[CROSS-PLATFORM] Failed to build context: %s", e)
         return None
+
+
+@dataclass(frozen=True)
+class MentionPayload:
+    """Per-turn mention slices that drive run-context enrichment.
+
+    Mirrors the ``mention_*`` payload fields without coupling to the
+    queue's ``AgentTaskPayload`` dataclass — callers slice their own
+    structured-mention list into these strings.
+    """
+
+    data_collection_refs: tuple[str, ...] = ()
+    project_ids: tuple[str, ...] = ()
+
+    @classmethod
+    def from_lists(
+        cls,
+        *,
+        data_collection_refs: list[str] | tuple[str, ...] | None,
+        project_ids: list[str] | tuple[str, ...] | None,
+    ) -> "MentionPayload":
+        return cls(
+            data_collection_refs=tuple(data_collection_refs or ()),
+            project_ids=tuple(project_ids or ()),
+        )
+
+    def is_empty(self) -> bool:
+        return not (self.data_collection_refs or self.project_ids)
+
+
+# Bounded sample sizes for context-injected text blocks. Kept here (not
+# in workspace_data.store) because they're prompt-shaping decisions, not
+# storage knobs — analyzing more records is cheap; spending more *tokens*
+# is what we're bounding.
+_OVERVIEW_SAMPLE = 3  # top-fields-per-collection sample for passive block
+_FOCUS_SAMPLE = 5  # per-collection sample for @data mention deep-dive
+_PROJECT_FANOUT_LIMIT = 10  # cap for @project:* / @project:workspace
+
+
+async def _build_data_overview(project: Project, db: AsyncSession) -> str | None:
+    """Passive workspace-data discovery block (auto-injected every run)."""
+    from . import workspace_data as wd
+
+    try:
+        summary = await wd.project_data_summary(db, project.id, sample_size=_OVERVIEW_SAMPLE)
+    except Exception as exc:  # noqa: BLE001 - non-blocking enrichment
+        logger.debug("[RUN-CONTEXT] data_overview skipped: %s", exc)
+        return None
+
+    collections = summary.get("collections") or []
+    if not collections:
+        return None
+
+    lines = [
+        "=== Workspace Data Store ===",
+        (
+            f"This project has {summary['collection_count']} collection(s) and "
+            f"{summary['total_records']} record(s) in its built-in data store. "
+            "Use the ``workspace_data`` tool to read/write/analyze (actions: "
+            "list_collections, query, summarize, schema, aggregate, insert, "
+            "update, delete)."
+        ),
+        "",
+    ]
+    for c in collections:
+        fields = ", ".join(c.get("top_fields") or []) or "(empty)"
+        lines.append(f"- {c['name']} — {c['total_records']} record(s); sample fields: {fields}")
+    return "\n".join(lines)
+
+
+async def _build_data_focus(
+    *,
+    db: AsyncSession,
+    user_id: UUID,
+    scope_project: Project | None,
+    mentions: MentionPayload,
+) -> str | None:
+    """Mention-driven deep-dive block: @data:<name> and @project:<id>."""
+    from . import workspace_data as wd
+
+    sections: list[str] = []
+
+    # --- @data: mentions (current project) ---------------------------------
+    if mentions.data_collection_refs and scope_project is not None:
+        # "*" widens to every collection in the project.
+        if any(r == "*" for r in mentions.data_collection_refs):
+            colls = await wd.list_collections(db, scope_project.id)
+            wanted = sorted({c.name for c in colls})
+        else:
+            wanted = sorted({r for r in mentions.data_collection_refs if r and r != "*"})
+        if wanted:
+            sections.append(f"=== Mentioned Collections (project '{scope_project.name}') ===")
+            for name in wanted:
+                try:
+                    coll = await wd.require_collection(db, scope_project.id, name)
+                    summary = await wd.summarize_collection(db, coll, sample_size=_FOCUS_SAMPLE)
+                    schema = await wd.infer_schema(db, coll, sample_size=wd.SCHEMA_SAMPLE)
+                except wd.WorkspaceDataError as exc:
+                    sections.append(f"- {name}: (unavailable — {exc})")
+                    continue
+                field_lines = [
+                    f"  - {fname}: {'|'.join(meta['types'])} "
+                    f"(present in {meta['present_in']}/{schema['sampled']})"
+                    for fname, meta in (schema.get("fields") or {}).items()
+                ]
+                sections.append(
+                    f"- {coll.name} — {summary['total_records']} record(s), "
+                    f"{len(summary['sample'])} sampled. Inferred fields:"
+                )
+                sections.extend(field_lines or ["  (no records yet)"])
+
+    # --- @project: mentions (cross-project) --------------------------------
+    if mentions.project_ids:
+        explicit_ids: list[str] = []
+        wildcard = False
+        for r in mentions.project_ids:
+            if r in ("*", "workspace"):
+                wildcard = True
+            elif r:
+                explicit_ids.append(r)
+
+        # Visible projects = owned OR has any ProjectMembership row. Use a
+        # subquery on id so the outer SELECT doesn't try to apply DISTINCT
+        # across Project's JSON columns (Postgres has no equality for
+        # ``json``, only ``jsonb``).
+        visible_ids_sq = (
+            select(Project.id)
+            .outerjoin(
+                ProjectMembership,
+                ProjectMembership.project_id == Project.id,
+            )
+            .where(
+                or_(
+                    Project.owner_id == user_id,
+                    ProjectMembership.user_id == user_id,
+                )
+            )
+        )
+        if not wildcard and explicit_ids:
+            visible_ids_sq = visible_ids_sq.where(Project.id.in_(explicit_ids))
+
+        visible_q = select(Project).where(Project.id.in_(visible_ids_sq.subquery().select()))
+        if wildcard:
+            visible_q = visible_q.limit(_PROJECT_FANOUT_LIMIT)
+
+        result = await db.execute(visible_q)
+        projects = list(result.scalars().all())
+
+        if projects:
+            sections.append("=== Mentioned Projects (data store overview) ===")
+            for proj in projects:
+                try:
+                    summary = await wd.project_data_summary(
+                        db, proj.id, sample_size=_OVERVIEW_SAMPLE
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("[RUN-CONTEXT] project %s skipped: %s", proj.id, exc)
+                    continue
+                colls = summary.get("collections") or []
+                if not colls:
+                    sections.append(f"- {proj.name}: (no data store collections yet)")
+                    continue
+                sections.append(
+                    f"- {proj.name} ({proj.id}): {summary['collection_count']} "
+                    f"collection(s), {summary['total_records']} record(s)"
+                )
+                for c in colls:
+                    fields = ", ".join(c.get("top_fields") or []) or "(empty)"
+                    sections.append(
+                        f"    · {c['name']} — {c['total_records']} record(s); fields: {fields}"
+                    )
+
+    if not sections:
+        return None
+    return "\n".join(sections)
+
+
+@dataclass(frozen=True)
+class RunContextEnrichment:
+    """Pre-formatted text blocks to merge into ``project_context``.
+
+    Every field is either a non-empty string (rendered by the agent's
+    system-prompt builder) or ``None`` (skipped). The ``apply`` helper
+    writes only the present blocks into ``project_context`` so callers
+    never have to ``if x is not None`` themselves.
+    """
+
+    data_overview: str | None = None
+    data_focus: str | None = None
+
+    def apply(self, project_context: dict) -> dict:
+        for name, value in (
+            ("data_overview", self.data_overview),
+            ("data_focus", self.data_focus),
+        ):
+            if value:
+                project_context[name] = value
+        return project_context
+
+
+async def enrich_project_context_for_run(
+    *,
+    db: AsyncSession,
+    project: Project | None,
+    user_id: UUID,
+    mentions: MentionPayload | None = None,
+) -> RunContextEnrichment:
+    """Single entry point for per-run project_context enrichment.
+
+    Returns the *changes* to merge into ``project_context``. The submodule
+    prompt builder concatenates each named block in deterministic order, so
+    callers never assemble prompt strings themselves.
+
+    This used to be three call sites duplicating identical wiring across
+    chat.py WS, chat.py SSE, and worker.py. Adding a new auto-injected
+    block now means: add a field on ``RunContextEnrichment``, add a builder
+    here, and add the key to the submodule's render list. No call-site
+    changes anywhere.
+    """
+    if project is None:
+        return RunContextEnrichment()
+
+    overview = await _build_data_overview(project, db)
+
+    focus: str | None = None
+    payload = mentions or MentionPayload()
+    if not payload.is_empty():
+        focus = await _build_data_focus(
+            db=db,
+            user_id=user_id,
+            scope_project=project,
+            mentions=payload,
+        )
+
+    return RunContextEnrichment(data_overview=overview, data_focus=focus)
 
 
 async def build_tier_snapshot(project: Project | None, db: AsyncSession) -> dict:

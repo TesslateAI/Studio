@@ -10,13 +10,16 @@ against the new workspace with zero further plumbing.
 """
 
 from .request_workspace import register_workspace_tool
+from .workspace_data import register_workspace_data_tool
 
 
 def register_all_workspace_tools(registry) -> None:
     register_workspace_tool(registry)
+    register_workspace_data_tool(registry)
 
 
 __all__ = [
     "register_all_workspace_tools",
+    "register_workspace_data_tool",
     "register_workspace_tool",
 ]

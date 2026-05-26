@@ -64,9 +64,7 @@ class InvalidSignature(Exception):
     """Raised on any verify failure (malformed, expired, signature mismatch)."""
 
 
-def _derive_signing_key(
-    *, app_instance_id: UUID, fallback_secret: str | bytes
-) -> bytes:
+def _derive_signing_key(*, app_instance_id: UUID, fallback_secret: str | bytes) -> bytes:
     """Return the 32-byte HMAC key for ``app_instance_id``.
 
     Production: this delegates to :func:`load_pod_signing_key`
@@ -82,9 +80,7 @@ def _derive_signing_key(
     else:
         fallback_bytes = fallback_secret
     if not fallback_bytes:
-        raise InvalidSignature(
-            "no signing material available — settings.secret_key is empty"
-        )
+        raise InvalidSignature("no signing material available — settings.secret_key is empty")
     return hmac.new(
         fallback_bytes,
         b"app-pod-key:" + str(app_instance_id).encode("utf-8"),
@@ -123,9 +119,7 @@ async def sign_user_header(
     )
     exp = int(time.time()) + max(1, ttl_seconds)
     payload = f"{user_id}:{app_instance_id}:{exp}"
-    sig = hmac.new(
-        signing_key, payload.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    sig = hmac.new(signing_key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}:{sig}"
 
 
@@ -151,9 +145,7 @@ async def verify_user_header(
 
     parts = header_value.split(":")
     if len(parts) != 4:
-        raise InvalidSignature(
-            f"expected 4 colon-separated fields, got {len(parts)}"
-        )
+        raise InvalidSignature(f"expected 4 colon-separated fields, got {len(parts)}")
     user_id_str, instance_str, exp_str, sig_hex = parts
 
     try:
@@ -164,17 +156,13 @@ async def verify_user_header(
     try:
         embedded_instance_id = UUID(instance_str)
     except (TypeError, ValueError) as exc:
-        raise InvalidSignature(
-            f"app_instance_id not a UUID: {exc}"
-        ) from exc
+        raise InvalidSignature(f"app_instance_id not a UUID: {exc}") from exc
 
     if embedded_instance_id != app_instance_id:
         # Cross-app replay defense — header signed for instance A must
         # never authenticate against instance B. The verify side knows
         # its expected instance id from the call-site context.
-        raise InvalidSignature(
-            "embedded app_instance_id does not match expected"
-        )
+        raise InvalidSignature("embedded app_instance_id does not match expected")
 
     try:
         exp = int(exp_str)
@@ -183,9 +171,7 @@ async def verify_user_header(
 
     now = now_seconds if now_seconds is not None else int(time.time())
     if exp + CLOCK_SKEW_TOLERANCE_SECONDS < now:
-        raise InvalidSignature(
-            f"header expired at {exp} (now={now})"
-        )
+        raise InvalidSignature(f"header expired at {exp} (now={now})")
 
     if secret_override is None:
         from ...config import get_settings
@@ -197,7 +183,7 @@ async def verify_user_header(
     )
     expected = hmac.new(
         signing_key,
-        f"{user_id}:{app_instance_id}:{exp}".encode("utf-8"),
+        f"{user_id}:{app_instance_id}:{exp}".encode(),
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(expected, sig_hex):

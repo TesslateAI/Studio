@@ -35,7 +35,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration fixtures (mirror test_approval_card_dm_owner.py)
 # ---------------------------------------------------------------------------
@@ -44,9 +43,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -369,9 +366,7 @@ async def test_slack_approval_card_uploads_artifacts_before_posting(
         call_log.append(("send_approval_card", {"args": args, "kwargs": kwargs}))
         return {"ok": True, "ts": "1700000000.000100", "channel": args[0]}
 
-    adapter = MagicMock(
-        spec_set=["channel_type", "upload_file", "send_approval_card"]
-    )
+    adapter = MagicMock(spec_set=["channel_type", "upload_file", "send_approval_card"])
     adapter.channel_type = "slack"
     adapter.upload_file = AsyncMock(side_effect=fake_upload_file)
     adapter.send_approval_card = AsyncMock(side_effect=fake_send_approval_card)
@@ -404,9 +399,7 @@ async def test_slack_approval_card_uploads_artifacts_before_posting(
     #    the card was posted.
     upload_calls = [c for c in call_log if c[0] == "upload_file"]
     card_calls = [c for c in call_log if c[0] == "send_approval_card"]
-    assert len(upload_calls) == 2, (
-        f"expected 2 upload_file calls, got {len(upload_calls)}"
-    )
+    assert len(upload_calls) == 2, f"expected 2 upload_file calls, got {len(upload_calls)}"
     assert len(card_calls) == 1
     # Ordering — every upload happens before the card post.
     last_upload_idx = max(i for i, c in enumerate(call_log) if c[0] == "upload_file")
@@ -437,16 +430,12 @@ async def test_slack_approval_card_uploads_artifacts_before_posting(
 
     async with session_maker() as db:
         req = await db.scalar(
-            select(AutomationApprovalRequest).where(
-                AutomationApprovalRequest.id == approval_id
-            )
+            select(AutomationApprovalRequest).where(AutomationApprovalRequest.id == approval_id)
         )
         delivered = list(req.delivered_to or [])
 
     assert delivered, "delivered_to should record the slack post"
-    assert delivered[0].get("artifacts"), (
-        "delivered_to row must include per-artifact upload audit"
-    )
+    assert delivered[0].get("artifacts"), "delivered_to row must include per-artifact upload audit"
     artifact_audit = delivered[0]["artifacts"]
     assert len(artifact_audit) == 2
     assert all(a.get("ok") for a in artifact_audit)
@@ -497,9 +486,7 @@ async def test_oversize_artifact_is_skipped_with_card_annotation(
         posted_summaries.append(args[4])
         return {"ok": True, "ts": "1700000000.000200", "channel": args[0]}
 
-    adapter = MagicMock(
-        spec_set=["channel_type", "upload_file", "send_approval_card"]
-    )
+    adapter = MagicMock(spec_set=["channel_type", "upload_file", "send_approval_card"])
     adapter.channel_type = "slack"
     adapter.upload_file = AsyncMock(side_effect=fake_upload_file)
     adapter.send_approval_card = AsyncMock(side_effect=fake_send_approval_card)
@@ -555,9 +542,7 @@ async def test_telegram_approval_card_uses_send_document(session_maker) -> None:
         approval_id = await _seed_approval_with_artifacts(
             db, run_id=run_id, artifact_ids=[artifact_id]
         )
-        cc_id = await _seed_channel_config(
-            db, owner_user_id=owner_id, channel_type="telegram"
-        )
+        cc_id = await _seed_channel_config(db, owner_user_id=owner_id, channel_type="telegram")
         dest_id = await _seed_destination(
             db,
             owner_user_id=owner_id,
@@ -629,12 +614,8 @@ async def test_envelope_artifact_refs_override_row_context(session_maker) -> Non
         art_envelope = await _seed_inline_artifact(
             db, run_id=run_id, name="from-envelope.txt", content=b"e"
         )
-        art_row = await _seed_inline_artifact(
-            db, run_id=run_id, name="from-row.txt", content=b"r"
-        )
-        approval_id = await _seed_approval_with_artifacts(
-            db, run_id=run_id, artifact_ids=[art_row]
-        )
+        art_row = await _seed_inline_artifact(db, run_id=run_id, name="from-row.txt", content=b"r")
+        approval_id = await _seed_approval_with_artifacts(db, run_id=run_id, artifact_ids=[art_row])
         cc_id = await _seed_channel_config(db, owner_user_id=owner_id)
         dest_id = await _seed_destination(
             db,
@@ -651,9 +632,7 @@ async def test_envelope_artifact_refs_override_row_context(session_maker) -> Non
         upload_calls.append(kwargs)
         return {"ok": True, "file_id": "F", "permalink": "p"}
 
-    adapter = MagicMock(
-        spec_set=["channel_type", "upload_file", "send_approval_card"]
-    )
+    adapter = MagicMock(spec_set=["channel_type", "upload_file", "send_approval_card"])
     adapter.channel_type = "slack"
     adapter.upload_file = AsyncMock(side_effect=fake_upload_file)
     adapter.send_approval_card = AsyncMock(

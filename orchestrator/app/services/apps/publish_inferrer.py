@@ -271,7 +271,7 @@ def _build_manifest(
             # checklist surfaces this with a fix action to add Postgres.
             "max_replicas": 1 if sqlite_detected else 1,
             "target_concurrency": 10,
-            "idle_timeout_seconds": 600,
+            "idle_timeout_seconds": 172800,
         },
     }
     if state_model in {"per_install_volume", "service_pvc", "shared_volume"}:
@@ -503,9 +503,7 @@ def _build_checklist(
     # 4. connector_exposure — every connector must have an explicit exposure
     # (proxy | env). The schema requires it, but we double-check here so the
     # creator sees a friendly checklist note rather than a 422.
-    bad_connectors = [
-        c.get("id", "<unnamed>") for c in connectors if not c.get("exposure")
-    ]
+    bad_connectors = [c.get("id", "<unnamed>") for c in connectors if not c.get("exposure")]
     if bad_connectors:
         items.append(
             ChecklistItem(
@@ -586,9 +584,7 @@ def _build_checklist(
 async def infer_draft(db: AsyncSession, *, project: Project) -> DraftResult:
     """Read the project's structure and produce a draft opensail.app.yaml + checklist."""
     # 1. Load Container + ContainerConnection + DeploymentCredential rows.
-    containers_q = await db.execute(
-        select(Container).where(Container.project_id == project.id)
-    )
+    containers_q = await db.execute(select(Container).where(Container.project_id == project.id))
     containers = list(containers_q.scalars().all())
 
     connections_q = await db.execute(
@@ -627,9 +623,7 @@ async def infer_draft(db: AsyncSession, *, project: Project) -> DraftResult:
     # 4. Determine state_model — sqlite forces per_install_volume; otherwise
     # if there are infra services with volumes, use service_pvc; default
     # stateless. Creators refine in the editor.
-    has_service_container = any(
-        (c.container_type or "").lower() == "service" for c in containers
-    )
+    has_service_container = any((c.container_type or "").lower() == "service" for c in containers)
     if sqlite_detected:
         state_model = "per_install_volume"
     elif has_service_container:
@@ -679,9 +673,7 @@ async def infer_draft(db: AsyncSession, *, project: Project) -> DraftResult:
 async def find_existing_app_for_project(
     db: AsyncSession, *, project: Project, user_id: UUID
 ) -> MarketplaceApp | None:
-    derived_slug = (
-        slugify(project.slug or project.name or "app", max_length=80) or "app"
-    )
+    derived_slug = slugify(project.slug or project.name or "app", max_length=80) or "app"
     row = (
         await db.execute(
             select(MarketplaceApp).where(

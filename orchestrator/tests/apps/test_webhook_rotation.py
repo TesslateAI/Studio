@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from datetime import UTC
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -29,7 +30,6 @@ from app.routers.app_triggers import (
     _normalize_sig,
     _timing_safe_eq,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -241,14 +241,14 @@ def test_installer_emits_list_shape_for_webhook_kind():
     that drops the new shape gets caught here, not in production.
     """
     import secrets as _secrets
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     trigger_config: dict = {"execution": "job", "entrypoint": None}
     trigger_config["webhook_secrets"] = [
         {
             "kid": "v1",
             "secret": _secrets.token_urlsafe(32),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "revoked_at": None,
         }
     ]

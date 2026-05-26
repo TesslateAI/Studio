@@ -79,11 +79,11 @@ class AgentTaskPayload:
     # Legacy callers (chat.py, channels, schedules, external_agent) leave
     # these unset; ``from_dict`` silently accepts dicts without these keys.
     automation_run_id: str | None = None  # AutomationRun UUID this invocation belongs to
-    automation_id: str | None = None      # AutomationDefinition UUID
-    contract: dict | None = None          # JSONB contract (allowed_tools, max_compute_tier, on_breach, ...)
-    trigger_kind: str | None = None       # e.g., "manual", "cron", "webhook", "app_event"
-    trigger_payload: dict | None = None   # the original event payload that fired the run
-    trigger_event_id: str | None = None   # AutomationEvent UUID
+    automation_id: str | None = None  # AutomationDefinition UUID
+    contract: dict | None = None  # JSONB contract (allowed_tools, max_compute_tier, on_breach, ...)
+    trigger_kind: str | None = None  # e.g., "manual", "cron", "webhook", "app_event"
+    trigger_payload: dict | None = None  # the original event payload that fired the run
+    trigger_event_id: str | None = None  # AutomationEvent UUID
 
     # Per-turn @-mentions from the chat input. None of these mutate the agent
     # record — they only affect THIS run. Empty defaults mean legacy callers
@@ -100,9 +100,29 @@ class AgentTaskPayload:
     """AppInstance.id values surfaced as a system-prompt context hint.
     The agent already has invoke_app_action; this just tells it which instance to use."""
 
+    mention_data_collection_refs: list[str] = field(default_factory=list)
+    """WorkspaceCollection names from @data: mentions in the current project.
+    "*" widens to every collection. Worker uses these to fold focused
+    summarize/schema text into the system prompt for THIS run."""
+
+    mention_project_ids: list[str] = field(default_factory=list)
+    """Project IDs from @project: mentions whose data store should surface
+    in this run's context. "*" / "workspace" means "all visible projects"
+    (capped server-side to keep prompts bounded)."""
+
     parent_task_id: str | None = None
     """Set by the call_agent tool when dispatching a sub-run. Lets the
     sub-chat row link back to the parent for the drill-in UI."""
+
+    # Workflow engine compute profile (Phase B, issue #471). Selects the
+    # runner that picks up this task. ``connector_only`` skips project /
+    # container provisioning and restricts the tool set to LLM,
+    # connectors, app actions, and send_message; ``ephemeral_workspace``
+    # provisions a throwaway PVC + container per run; ``persistent_workspace``
+    # uses the project's long-lived workspace (today's behavior).
+    # ``persistent_workspace`` is the default so legacy callers (chat,
+    # channels, schedules, external_agent) need no change.
+    compute_profile: str = "persistent_workspace"
 
     def to_dict(self) -> dict:
         """Serialize to dict for ARQ job dispatch."""

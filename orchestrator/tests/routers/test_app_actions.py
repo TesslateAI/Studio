@@ -20,14 +20,13 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, insert as core_insert
+from sqlalchemy import event
+from sqlalchemy import insert as core_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 # ---------------------------------------------------------------------------
 # SQLite migrate fixture (mirrors test_automations.py)
@@ -37,9 +36,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -109,6 +106,10 @@ async def _seed_user(db) -> uuid.UUID:
 async def _seed_marketplace_app(db, *, owner_id: uuid.UUID) -> uuid.UUID:
     from app.models import MarketplaceApp
 
+    # 0088_marketplace_sources made marketplace_apps.source_id NOT NULL.
+    # The "local" sentinel source is seeded by that migration with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     app_id = uuid.uuid4()
     suffix = uuid.uuid4().hex[:6]
     db.add(
@@ -120,6 +121,7 @@ async def _seed_marketplace_app(db, *, owner_id: uuid.UUID) -> uuid.UUID:
             creator_user_id=owner_id,
             category="utility",
             state="approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     await db.flush()
@@ -129,6 +131,7 @@ async def _seed_marketplace_app(db, *, owner_id: uuid.UUID) -> uuid.UUID:
 async def _seed_app_version(db, *, app_id: uuid.UUID) -> uuid.UUID:
     from app.models import AppVersion
 
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
     version_id = uuid.uuid4()
     db.add(
         AppVersion(
@@ -145,15 +148,14 @@ async def _seed_app_version(db, *, app_id: uuid.UUID) -> uuid.UUID:
                 "billing": {},
             },
             approval_state="stage2_approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     await db.flush()
     return version_id
 
 
-async def _seed_app_action(
-    db, *, app_version_id: uuid.UUID, name: str = "ping"
-) -> uuid.UUID:
+async def _seed_app_action(db, *, app_version_id: uuid.UUID, name: str = "ping") -> uuid.UUID:
     from app.models_automations import AppAction
 
     action_id = uuid.uuid4()
@@ -300,9 +302,7 @@ def test_invoke_returns_dispatcher_result(app_client, monkeypatch) -> None:
 
     monkeypatch.setattr(app_actions_router, "dispatch_app_action", _stub)
 
-    resp = client.post(
-        f"/api/apps/{instance_id}/actions/ping", json={"input": {"who": "world"}}
-    )
+    resp = client.post(f"/api/apps/{instance_id}/actions/ping", json={"input": {"who": "world"}})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["output"] == {"pong": True}
@@ -382,7 +382,5 @@ def test_invoke_handler_not_supported_returns_501(app_client, monkeypatch) -> No
 @pytest.mark.unit
 def test_invoke_404_for_missing_instance(app_client) -> None:
     client, _, _, _ = app_client
-    resp = client.post(
-        f"/api/apps/{uuid.uuid4()}/actions/ping", json={"input": {}}
-    )
+    resp = client.post(f"/api/apps/{uuid.uuid4()}/actions/ping", json={"input": {}})
     assert resp.status_code == 404

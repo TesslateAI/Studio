@@ -16,15 +16,13 @@ correctly.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-
 
 pytestmark = pytest.mark.unit
 
@@ -249,7 +247,11 @@ async def test_dcr_start_and_complete_end_to_end(monkeypatch):
     assert "resource=" in result.authorize_url
 
     # Derive state from flow state stored in redis
-    keys = [k for k in fake_redis.store if k.startswith("mcp:oauth:flow:") and not k.startswith("mcp:oauth:flow:id:")]
+    keys = [
+        k
+        for k in fake_redis.store
+        if k.startswith("mcp:oauth:flow:") and not k.startswith("mcp:oauth:flow:id:")
+    ]
     assert len(keys) == 1, keys
     state = keys[0].rsplit(":", 1)[-1]
 
@@ -261,7 +263,6 @@ async def test_dcr_start_and_complete_end_to_end(monkeypatch):
     )
 
     # Row asserts: UserMcpConfig + McpOAuthConnection added, state removed.
-    from app.models import McpOAuthConnection, UserMcpConfig
 
     added_types = {type(obj).__name__ for obj in db.added}
     assert "UserMcpConfig" in added_types

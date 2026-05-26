@@ -1,0 +1,109 @@
+name: Desktop Release Notes
+
+# Tag-triggered, release-notes-only.
+#
+# When a `desktop-v*` tag is pushed (typically against `main`), this workflow
+# creates a GitHub Release on the Enterprise repo with auto-generated notes
+# (PRs merged since the previous matching tag), then mirrors that same body
+# to a release on the public `TesslateAI/OpenSail` mirror via PUBLIC_REPO_PAT.
+#
+# No binaries are built or attached today — the build pipeline is paused on
+# `desktop-build.yml` (manual-only). When a real build flow lands, that
+# workflow can be wired to upload assets to the release this one created.
+#
+# Manual trigger: Actions → Desktop Release Notes → Run workflow, supply a
+# tag name. The tag must already exist on the repo.
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish release notes for (e.g. desktop-v0.1.0)'
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so generate-notes can diff vs the previous tag
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          if [ -z "$tag" ]; then
+            echo "Failed to resolve tag name." >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release on Enterprise (with auto-generated notes)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # `--generate-notes` walks PRs merged since the previous release of
+          # the same kind. Marked `--prerelease` since no binaries are
+          # attached — flip back to a "real" release once builds upload assets.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists on Enterprise; regenerating notes."
+            body="$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="$TAG" --jq .body)"
+            printf '%s\n' "$body" | gh release edit "$TAG" --prerelease --notes-file -
+          else
+            gh release create "$TAG" \
+              --title "OpenSail Desktop $TAG" \
+              --generate-notes \
+              --prerelease
+          fi
+
+      - name: Capture release body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          mkdir -p /tmp/release
+          gh release view "$TAG" --json body --jq .body > /tmp/release/body.md
+          if [ ! -s /tmp/release/body.md ]; then
+            echo "Release body is empty — generate-notes produced nothing." >&2
+            exit 1
+          fi
+          wc -c /tmp/release/body.md
+
+      - name: Mirror release to public TesslateAI/OpenSail
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_PAT }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # PUBLIC_REPO_PAT is the same token sync-to-public.yml uses; it has
+          # `contents: write` on the public repo. `gh release create` will
+          # create the tag on the public side if it doesn't already exist —
+          # the public mirror doesn't need its own tag push.
+          if gh release view "$TAG" --repo TesslateAI/OpenSail >/dev/null 2>&1; then
+            echo "Release $TAG already exists on public mirror; updating notes."
+            gh release edit "$TAG" \
+              --repo TesslateAI/OpenSail \
+              --prerelease \
+              --notes-file /tmp/release/body.md
+          else
+            gh release create "$TAG" \
+              --repo TesslateAI/OpenSail \
+              --title "OpenSail Desktop $TAG" \
+              --prerelease \
+              --notes-file /tmp/release/body.md
+          fi

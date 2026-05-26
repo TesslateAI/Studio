@@ -28,7 +28,6 @@ from alembic.config import Config
 from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Fixtures (mirror test_cron_producer.py)
 # ---------------------------------------------------------------------------
@@ -37,9 +36,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -234,9 +231,7 @@ async def test_stale_running_retries_below_cap(session_maker) -> None:
 
     pool = _FakeArqPool()
     async with session_maker() as db:
-        swept = await sweep_stale_running(
-            db, queue=pool, current_term=7, max_retries=3
-        )
+        swept = await sweep_stale_running(db, queue=pool, current_term=7, max_retries=3)
     assert swept == 1
 
     async with session_maker() as db:
@@ -275,9 +270,7 @@ async def test_stale_running_terminal_at_cap(session_maker) -> None:
 
     pool = _FakeArqPool()
     async with session_maker() as db:
-        swept = await sweep_stale_running(
-            db, queue=pool, current_term=2, max_retries=3
-        )
+        swept = await sweep_stale_running(db, queue=pool, current_term=2, max_retries=3)
     assert swept == 1
 
     async with session_maker() as db:

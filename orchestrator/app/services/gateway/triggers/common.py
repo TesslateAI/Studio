@@ -132,9 +132,7 @@ def parse_slash_command(text: str) -> ParsedCommand:
         tokens = tokens[1:]
         if tokens and tokens[0].lower() == "run":
             tokens = tokens[1:]
-    elif head in ("/automation_run", "automation_run"):
-        tokens = tokens[1:]
-    elif head == "run":
+    elif head in ("/automation_run", "automation_run") or head == "run":
         tokens = tokens[1:]
 
     if not tokens:
@@ -166,15 +164,11 @@ def parse_bot_mention(text: str) -> ParsedCommand:
     """
     raw = (text or "").strip()
     if not raw:
-        return ParsedCommand(
-            kind="unknown", name="", args=[], raw_text=raw, app_alias=None
-        )
+        return ParsedCommand(kind="unknown", name="", args=[], raw_text=raw, app_alias=None)
 
     tokens = raw.split()
     if not tokens:
-        return ParsedCommand(
-            kind="unknown", name="", args=[], raw_text=raw, app_alias=None
-        )
+        return ParsedCommand(kind="unknown", name="", args=[], raw_text=raw, app_alias=None)
 
     head = tokens[0]
     alias: str | None = None
@@ -185,20 +179,14 @@ def parse_bot_mention(text: str) -> ParsedCommand:
         alias = head[1:]
         tokens = tokens[1:]
     else:
-        return ParsedCommand(
-            kind="unknown", name="", args=[], raw_text=raw, app_alias=None
-        )
+        return ParsedCommand(kind="unknown", name="", args=[], raw_text=raw, app_alias=None)
 
     if not tokens:
-        return ParsedCommand(
-            kind="unknown", name="", args=[], raw_text=raw, app_alias=alias
-        )
+        return ParsedCommand(kind="unknown", name="", args=[], raw_text=raw, app_alias=alias)
 
     name = tokens[0]
     if not _looks_like_name(name):
-        return ParsedCommand(
-            kind="unknown", name="", args=[], raw_text=raw, app_alias=alias
-        )
+        return ParsedCommand(kind="unknown", name="", args=[], raw_text=raw, app_alias=alias)
 
     return ParsedCommand(
         kind="app_action",
@@ -314,9 +302,7 @@ async def resolve_app_action_by_name(
         )
     ).all()
     if not rows:
-        raise NoMatchingAppAction(
-            f"no active automation invokes app action {name!r}"
-        )
+        raise NoMatchingAppAction(f"no active automation invokes app action {name!r}")
 
     # Prefer the alias-matched automation if the caller passed one.
     if app_alias is not None:
@@ -415,8 +401,7 @@ async def ingest_and_enqueue_command(
     await db.commit()
 
     logger.info(
-        "[GATEWAY-TRIGGER] dispatched automation=%s event=%s platform=%s "
-        "invoking_user_id=%s",
+        "[GATEWAY-TRIGGER] dispatched automation=%s event=%s platform=%s invoking_user_id=%s",
         automation.id,
         event_id,
         platform,

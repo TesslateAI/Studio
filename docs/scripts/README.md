@@ -27,7 +27,7 @@
 | `scripts/notify.sh` | Send a Slack notification (extensible to other providers). Used by local cron jobs and other skills. See the `notify` skill for credential setup. |
 | `scripts/regenerate_user_keys.py` | Regenerate every user's LiteLLM key to drop per-key model allowlists. One-shot after widening team model access. |
 | `scripts/secrets_migrate_audit.py` | Audit Container rows for env vars that look like ambiguous or unmigrated secret references. |
-| `scripts/seed_all_apps.sh` | Build seed-app external images, roll the minikube backend, and seed every Tesslate App (7 apps). |
+| `scripts/seed_all_apps.sh` | Build the platform images, roll the minikube backend, provision shared secrets, and seed every Tesslate App. Heavy seed-app images (markitdown / deer-flow / mirofish, 5–10 GB combined) are skipped by default — pass `--preload-heavy` (or `BUILD_HEAVY=1`) to preload; otherwise containerd lazy-pulls them on first install. |
 | `scripts/test.sh` | Convenience wrapper for the pytest suite. |
 | `scripts/test_container_e2e.py` | End-to-end test: create project, start container, hit dev URL, tear down. |
 | `scripts/test_nextjs_e2e.py` | Next.js-specific lifecycle test: create, start, build, preview URL assertion. |

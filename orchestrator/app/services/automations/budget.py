@@ -50,6 +50,7 @@ Wave coordination
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
@@ -60,10 +61,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models_automations import AutomationDefinition
-from ..litellm_keys import LiteLLMDelegate, mint_with_secret as litellm_mint_with_secret
+from ..litellm_keys import LiteLLMDelegate
+from ..litellm_keys import mint_with_secret as litellm_mint_with_secret
 
 if TYPE_CHECKING:  # pragma: no cover
-    from ..apps.key_lifecycle import KeyTier as _KeyTier
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +79,15 @@ logger = logging.getLogger(__name__)
 class BudgetAllocation:
     """Returned by :func:`allocate_run_budget`.
 
-    Carries the LiteLLM key (id + secret value) and the budget envelope
-    we just reserved against. ``daily_remaining_usd`` is the post-debit
-    remaining; it's surfaced in run history for the user.
+    Carries the LiteLLM key (id + secret value) when one was minted, plus
+    the budget envelope we reserved against. ``daily_remaining_usd`` is
+    the post-debit remaining; it's surfaced in run history for the user.
+
+    ``litellm_key_id`` / ``litellm_key_value`` are ``None`` for action
+    types that don't drive a model loop (``app.invoke``,
+    ``gateway.send``) — daily budget is still debited so the daily cap
+    is honored across action types, but no per-run LiteLLM key is needed
+    because cost is bounded by the action handler itself.
 
     ``is_extension=True`` is set when the allocation came from a re-
     allocation after the user approved a budget-extension card. The
@@ -87,18 +95,17 @@ class BudgetAllocation:
     and stamp the audit trail.
     """
 
-    litellm_key_id: str
-    litellm_key_value: str  # actual sk-... string for HTTP injection
+    litellm_key_id: str | None
+    litellm_key_value: str | None  # actual sk-... string for HTTP injection
     max_usd_per_run: Decimal
     daily_remaining_usd: Decimal
     is_extension: bool = False
 
     def __repr__(self) -> str:  # pragma: no cover — defensive log-leak guard
-        masked = (
-            f"{self.litellm_key_value[:6]}…(len={len(self.litellm_key_value)})"
-            if self.litellm_key_value
-            else "<empty>"
-        )
+        if self.litellm_key_value:
+            masked = f"{self.litellm_key_value[:6]}…(len={len(self.litellm_key_value)})"
+        else:
+            masked = "<none>"
         return (
             f"BudgetAllocation(litellm_key_id={self.litellm_key_id!r}, "
             f"litellm_key_value={masked}, max_usd_per_run={self.max_usd_per_run}, "
@@ -128,9 +135,7 @@ class BudgetExhaustedError(BudgetError):
         self.run_id = run_id
         self.key_id = key_id
         self.spent_usd = spent_usd
-        super().__init__(
-            f"budget exhausted for run {run_id}: key {key_id} spent ${spent_usd}"
-        )
+        super().__init__(f"budget exhausted for run {run_id}: key {key_id} spent ${spent_usd}")
 
 
 class DailyBudgetExceeded(BudgetError):
@@ -291,9 +296,7 @@ def _seconds_until_end_of_day_utc() -> int:
     from datetime import UTC, datetime, timedelta
 
     now = datetime.now(tz=UTC)
-    tomorrow = (now + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return max(int((tomorrow - now).total_seconds()), 60)
 
 
@@ -394,8 +397,9 @@ async def allocate_run_budget(
     delegate: LiteLLMDelegate | None = None,
     redis_client: Any | None = None,
     is_extension: bool = False,
+    mint_litellm_key: bool = True,
 ) -> BudgetAllocation:
-    """Mint a single-use LiteLLM key + reserve daily budget for one run.
+    """Reserve daily budget for one run, optionally minting a LiteLLM key.
 
     Two reservations happen atomically from the caller's perspective:
 
@@ -404,12 +408,20 @@ async def allocate_run_budget(
         zero, raise :class:`DailyBudgetExceeded` *before* minting the
         LiteLLM key — no rollback needed for the cheap path.
     2.  Mint the per-run LiteLLM key with ``budget_usd =
-        contract.max_spend_per_run_usd``. If the mint fails after we've
-        debited the daily counter(s), refund and re-raise.
+        contract.max_spend_per_run_usd`` *iff* ``mint_litellm_key`` is
+        True (default). If the mint fails after we've debited the daily
+        counter(s), refund and re-raise.
+
+    ``mint_litellm_key=False`` is the path for action types that do not
+    drive a model loop (``app.invoke``, ``gateway.send``). Daily budget
+    is still reserved so the daily cap remains enforceable across action
+    types, but no per-run LiteLLM key is minted — cost is bounded by
+    the action handler itself, not by the proxy.
 
     Returns a :class:`BudgetAllocation` carrying the key id + secret
     value (the caller is responsible for plumbing the secret into the
-    agent's HTTP injection — we don't store it).
+    agent's HTTP injection — we don't store it). Key fields are
+    ``None`` when ``mint_litellm_key=False``.
 
     Raises:
         DailyBudgetExceeded: any chain member would go negative.
@@ -421,19 +433,10 @@ async def allocate_run_budget(
     """
     max_per_run = contract.get("max_spend_per_run_usd")
     if max_per_run is None:
-        raise ValueError(
-            "contract.max_spend_per_run_usd is required for budget allocation"
-        )
+        raise ValueError("contract.max_spend_per_run_usd is required for budget allocation")
     max_per_run = Decimal(str(max_per_run))
     if max_per_run <= 0:
-        raise ValueError(
-            f"contract.max_spend_per_run_usd must be positive, got {max_per_run}"
-        )
-
-    # Daily cap is optional — None means "no daily limit". The plan calls
-    # this out as the explicit user opt-out: leave the field unset.
-    max_per_day_raw = contract.get("max_spend_per_day_usd")
-    max_per_day = Decimal(str(max_per_day_raw)) if max_per_day_raw is not None else None
+        raise ValueError(f"contract.max_spend_per_run_usd must be positive, got {max_per_run}")
 
     if redis_client is None:
         from ..cache_service import get_redis_client
@@ -476,9 +479,7 @@ async def allocate_run_budget(
         try:
             own_remaining: Decimal | None = None
             for idx, chain_member in enumerate(chain):
-                remaining = await _atomic_reserve_daily(
-                    redis_client, chain_member, max_per_run
-                )
+                remaining = await _atomic_reserve_daily(redis_client, chain_member, max_per_run)
                 debited.append(chain_member)
                 if idx == 0:
                     own_remaining = remaining
@@ -489,6 +490,22 @@ async def allocate_run_budget(
             raise
     else:
         own_remaining = None
+
+    daily_remaining = (
+        own_remaining if own_remaining is not None else Decimal("Infinity")
+    )
+
+    if not mint_litellm_key:
+        # app.invoke / gateway.send path: daily counter is debited, but no
+        # per-run LiteLLM key is minted because the action doesn't drive a
+        # model loop. The action handler enforces its own cost ceiling.
+        return BudgetAllocation(
+            litellm_key_id=None,
+            litellm_key_value=None,
+            max_usd_per_run=max_per_run,
+            daily_remaining_usd=daily_remaining,
+            is_extension=is_extension,
+        )
 
     # Daily cap reservations succeeded (or no cap). Mint the LiteLLM key.
     # The mint call itself already updates the LiteLLMKeyLedger row; we
@@ -537,7 +554,7 @@ async def allocate_run_budget(
         litellm_key_id=ledger_row.key_id,
         litellm_key_value=api_key_full,
         max_usd_per_run=max_per_run,
-        daily_remaining_usd=own_remaining if own_remaining is not None else Decimal("Infinity"),
+        daily_remaining_usd=daily_remaining,
         is_extension=is_extension,
     )
 
@@ -581,6 +598,13 @@ async def deallocate_run_budget(
             chain.append(parent_automation_id)
         for member in chain:
             await _refund_daily(redis_client, member, refund_amount)
+
+    # Allocations made for non-model action types (``app.invoke``,
+    # ``gateway.send``) carry no LiteLLM key — skip the revoke side of
+    # the deallocation. Refund of unused daily budget already happened
+    # above and is the same regardless of action type.
+    if allocation.litellm_key_id is None:
+        return
 
     if delegate is None:
         delegate = _default_delegate()
@@ -661,17 +685,13 @@ async def request_budget_extension(
 
         try:
             return await asyncio.wait_for(_await_message(), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
     finally:
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover
             await pubsub.unsubscribe(channel)
-        except Exception:  # pragma: no cover
-            pass
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover
             await pubsub.close()
-        except Exception:  # pragma: no cover
-            pass
 
 
 async def publish_extension_resolution(
@@ -706,10 +726,8 @@ async def publish_extension_resolution(
     finally:
         # Drop the lock regardless of publish success so the next
         # extension request for this run can proceed.
-        try:
+        with contextlib.suppress(Exception):  # pragma: no cover
             await redis_client.delete(lock_key)
-        except Exception:  # pragma: no cover
-            pass
 
 
 __all__ = [

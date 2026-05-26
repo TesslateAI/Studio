@@ -48,8 +48,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -61,7 +62,10 @@ from .intents import LeaseLost
 logger = logging.getLogger(__name__)
 
 
-_TICK_INTERVAL_SECONDS = 60
+# Kept in sync with controller_main._LEADER_TICK_INTERVAL_SECONDS. The
+# 15s cadence keeps wall-clock cron drift inside ±30s; longer intervals
+# put a `*/5 * * * *` schedule outside that tolerance on its first fire.
+_TICK_INTERVAL_SECONDS = 15
 _MAX_BATCH = 100
 
 
@@ -84,9 +88,7 @@ async def run_loop(
 
     while not shutdown_event.is_set():
         try:
-            await asyncio.wait_for(
-                shutdown_event.wait(), timeout=interval_seconds
-            )
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
             return
         except TimeoutError:
             pass
@@ -117,6 +119,7 @@ async def tick(
         now = datetime.now(UTC)
 
     # Lazy import — avoids module-load surface in tests.
+    from ...models_auth import User
     from ...models_automations import (
         AutomationDefinition,
         AutomationEvent,
@@ -136,37 +139,33 @@ async def tick(
         if use_for_update:
             row = (
                 await db.execute(
-                    text(
-                        "SELECT term FROM controller_leases "
-                        "WHERE name = 'controller' FOR UPDATE"
-                    )
+                    text("SELECT term FROM controller_leases WHERE name = 'controller' FOR UPDATE")
                 )
             ).first()
         else:
             row = (
                 await db.execute(
-                    text(
-                        "SELECT term FROM controller_leases "
-                        "WHERE name = 'controller'"
-                    )
+                    text("SELECT term FROM controller_leases WHERE name = 'controller'")
                 )
             ).first()
 
         if row is None:
             raise LeaseLost("controller lease row missing")
         if int(row[0] or 0) != current_term:
-            raise LeaseLost(
-                f"lease term mismatch (db={row[0]} ours={current_term})"
-            )
+            raise LeaseLost(f"lease term mismatch (db={row[0]} ours={current_term})")
 
         # --------------------------------------------------------------
         # Claim due triggers.
         # --------------------------------------------------------------
         stmt = (
-            select(AutomationTrigger, AutomationDefinition)
+            select(AutomationTrigger, AutomationDefinition, User)
             .join(
                 AutomationDefinition,
                 AutomationDefinition.id == AutomationTrigger.automation_id,
+            )
+            .join(
+                User,
+                User.id == AutomationDefinition.owner_user_id,
             )
             .where(AutomationTrigger.kind == "cron")
             .where(AutomationTrigger.is_active.is_(True))
@@ -189,7 +188,7 @@ async def tick(
             await db.commit()
             return 0
 
-        for trigger, automation in rows:
+        for trigger, automation, owner in rows:
             cfg = trigger.config or {}
             cron_expr = cfg.get("cron_expression") or cfg.get("expression")
             if not cron_expr:
@@ -227,6 +226,62 @@ async def tick(
                     exc,
                 )
                 trigger.is_active = False
+                continue
+
+            # Self-heal: if a row arrived here with a NULL next_run_at
+            # (legacy, pre-on-insert-compute, or a writer that bypassed
+            # the router), compute the next slot and skip firing this
+            # tick. Otherwise the OR-NULL claim clause in the SELECT above
+            # would misread the NULL as "due now" and ship a spurious
+            # event ahead of the cron boundary.
+            if trigger.next_run_at is None:
+                trigger.next_run_at = new_next
+                continue
+
+            # Owner suspended / deleted: a user the platform has decided to
+            # stop serving must not accrue compute or spend through cron
+            # automations they owned at the time of suspension. Advance
+            # next_run_at so the schedule does not flood-fire on unsuspend,
+            # and persist a terminal AutomationEvent (failed_at set, no ARQ
+            # enqueue) for the audit trail. sweep_on_acquire and
+            # process_trigger_events_batch both filter on failed_at IS NULL
+            # so this synthetic event is never picked up for execution.
+            owner_blocked_reason = None
+            if getattr(owner, "is_deleted", False):
+                owner_blocked_reason = "owner_deleted"
+            elif getattr(owner, "is_suspended", False):
+                owner_blocked_reason = "owner_suspended"
+            if owner_blocked_reason is not None:
+                trigger.next_run_at = new_next
+                trigger.last_run_at = now
+                event_id = uuid4()
+                tick_iso = now.replace(microsecond=0).isoformat()
+                db.add(
+                    AutomationEvent(
+                        id=event_id,
+                        automation_id=automation.id,
+                        trigger_id=trigger.id,
+                        trigger_kind="cron",
+                        payload={
+                            "fired_at": now.isoformat(),
+                            "cron_expression": cron_expr,
+                            "timezone": tz_name,
+                            "kind": "cron",
+                            "skipped_reason": owner_blocked_reason,
+                        },
+                        idempotency_key=f"cron:{trigger.id}:{tick_iso}",
+                        received_at=now,
+                        dispatched_at=now,
+                        failed_at=now,
+                        last_error=owner_blocked_reason,
+                    )
+                )
+                logger.info(
+                    "[CRON-PROD] trigger %s skipped fire: %s (owner=%s)",
+                    trigger.id,
+                    owner_blocked_reason,
+                    owner.id,
+                )
                 continue
 
             trigger.next_run_at = new_next
@@ -283,9 +338,7 @@ async def tick(
     return fired
 
 
-async def _enqueue_dispatch(
-    arq_pool: Any | None, automation_id: UUID, event_id: UUID
-) -> None:
+async def _enqueue_dispatch(arq_pool: Any | None, automation_id: UUID, event_id: UUID) -> None:
     """Enqueue ``dispatch_automation_task`` (ARQ in cloud, local in desktop).
 
     Uses ``_job_id=str(event_id)`` so a duplicate enqueue against the same

@@ -5,13 +5,23 @@
 # minikube profile `tesslate` running.
 #
 # Usage:
-#   scripts/seed_all_apps.sh [--skip-build] [--skip-rollout] [--skip-seed]
+#   scripts/seed_all_apps.sh [--skip-build] [--skip-rollout] [--skip-seed] [--preload-heavy]
+#
+# Default behaviour: rebuilds the platform images (frontend, backend) but
+# skips the heavy seed-app images (markitdown, deer-flow, mirofish) — those
+# are pulled lazily by containerd on first install via IfNotPresent. Pass
+# --preload-heavy (or BUILD_HEAVY=1) to preload them up-front. The heavy
+# preload can blow up Docker Desktop's vhdx on WSL2; only opt in if you have
+# headroom and need offline installs.
 #
 # Environment:
 #   LLAMA_API_KEY    if set, the llama-api-credentials secret is created/updated
 #                    from this value. If unset, the script prints the command
 #                    and moves on (seeding still works for apps that don't
 #                    need the key).
+#   ZEP_API_KEY      if set, the zep-credentials secret is created/updated
+#                    (used by mirofish).
+#   BUILD_HEAVY      same as --preload-heavy.
 
 set -euo pipefail
 
@@ -22,12 +32,14 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SKIP_BUILD=${SKIP_BUILD:-0}
 SKIP_ROLLOUT=${SKIP_ROLLOUT:-0}
 SKIP_SEED=${SKIP_SEED:-0}
+BUILD_HEAVY=${BUILD_HEAVY:-0}
 
 for arg in "$@"; do
   case "$arg" in
-    --skip-build)   SKIP_BUILD=1 ;;
-    --skip-rollout) SKIP_ROLLOUT=1 ;;
-    --skip-seed)    SKIP_SEED=1 ;;
+    --skip-build)    SKIP_BUILD=1 ;;
+    --skip-rollout)  SKIP_ROLLOUT=1 ;;
+    --skip-seed)     SKIP_SEED=1 ;;
+    --preload-heavy) BUILD_HEAVY=1 ;;
     -h|--help)
       grep -E '^#( |$)' "$0" | sed 's/^# //; s/^#$//'
       exit 0
@@ -57,22 +69,30 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
   say "rebuild tesslate-frontend:latest (picks up new AppWorkspacePage)"
   docker build -t tesslate-frontend:latest -f "$REPO_ROOT/app/Dockerfile.prod" "$REPO_ROOT/app/"
 
+  # Backend Dockerfile copies k8s/base/compute-pool from outside orchestrator/,
+  # so the build context must be the repo root (matches scripts/minikube.sh).
   say "rebuild tesslate-backend:latest (picks up config.py + new seed_apps.py)"
-  docker build -t tesslate-backend:latest -f "$REPO_ROOT/orchestrator/Dockerfile" "$REPO_ROOT/orchestrator/"
+  docker build -t tesslate-backend:latest -f "$REPO_ROOT/orchestrator/Dockerfile" "$REPO_ROOT"
 
-  say "build tesslate-markitdown:latest"
-  docker build -t tesslate-markitdown:latest "$REPO_ROOT/seeds/apps/markitdown/"
+  if [[ "$BUILD_HEAVY" == 1 ]]; then
+    say "build tesslate-markitdown:latest"
+    docker build -t tesslate-markitdown:latest "$REPO_ROOT/seeds/apps/markitdown/"
 
-  if [[ -d "$REPO_ROOT/seeds/apps/deer-flow" ]]; then
-    say "build tesslate-deerflow:latest (heavy, ~5-10 min)"
-    docker build -t tesslate-deerflow:latest "$REPO_ROOT/seeds/apps/deer-flow/" || \
-      warn "deer-flow build failed — app will be published but install will fail until fixed"
+    if [[ -d "$REPO_ROOT/seeds/apps/deer-flow" ]]; then
+      say "build tesslate-deerflow:latest (heavy, ~5-10 min)"
+      docker build -t tesslate-deerflow:latest "$REPO_ROOT/seeds/apps/deer-flow/" || \
+        warn "deer-flow build failed — app will be published but install will fail until fixed"
+    fi
+
+    # MiroFish: pull the upstream image and load it into minikube's node cache.
+    say "load ghcr.io/666ghj/mirofish:latest into minikube"
+    docker pull ghcr.io/666ghj/mirofish:latest || warn "mirofish pull failed"
+    # Already in minikube's daemon since we eval'd docker-env; nothing else to do.
+  else
+    say "skipping heavy seed-app preload (markitdown/deer-flow/mirofish)"
+    say "  containerd will pull these on first install (IfNotPresent)"
+    say "  pass --preload-heavy to preload them up-front"
   fi
-
-  # MiroFish: pull the upstream image and load it into minikube's node cache.
-  say "load ghcr.io/666ghj/mirofish:latest into minikube"
-  docker pull ghcr.io/666ghj/mirofish:latest || warn "mirofish pull failed"
-  # Already in minikube's daemon since we eval'd docker-env; nothing else to do.
 
   say "current minikube images (filtered)"
   docker images | grep -E 'tesslate-|mirofish' || true
@@ -95,6 +115,24 @@ else
     warn "apps that need Llama (crm-demo, nightly-digest, deer-flow, mirofish) will fail to start"
     warn "to fix later:"
     warn "  kubectl --context=$CTX -n $NS create secret generic llama-api-credentials \\"
+    warn "    --from-literal=api_key='<your-key>'"
+  fi
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# 2b. Ensure the zep-credentials secret exists (used by mirofish).
+# ────────────────────────────────────────────────────────────────────────────
+if [[ -n "${ZEP_API_KEY:-}" ]]; then
+  say "upsert zep-credentials secret in $NS"
+  kubectl --context="$CTX" -n "$NS" create secret generic zep-credentials \
+    --from-literal=api_key="$ZEP_API_KEY" \
+    --dry-run=client -o yaml | kubectl --context="$CTX" -n "$NS" apply -f -
+else
+  if ! kubectl --context="$CTX" -n "$NS" get secret zep-credentials >/dev/null 2>&1; then
+    warn "zep-credentials not present in $NS namespace and ZEP_API_KEY not set"
+    warn "mirofish will fail to start without a Zep API key"
+    warn "get a free key at https://app.getzep.com/ then:"
+    warn "  kubectl --context=$CTX -n $NS create secret generic zep-credentials \\"
     warn "    --from-literal=api_key='<your-key>'"
   fi
 fi

@@ -158,8 +158,7 @@ def compute_cap(arq_pool_size: int) -> int:
         else:
             if cap < 1:
                 logger.warning(
-                    "approval_pressure: AUTOMATION_APPROVAL_PRESSURE_CAP=%d < 1; "
-                    "clamping to 1",
+                    "approval_pressure: AUTOMATION_APPROVAL_PRESSURE_CAP=%d < 1; clamping to 1",
                     cap,
                 )
                 return 1
@@ -237,8 +236,7 @@ async def try_acquire_pressure_slot(
         # blocking the user when Redis is flaky — the Phase 4 controller
         # sweep will reap any stuck runs.
         logger.exception(
-            "approval_pressure.try_acquire: redis.eval failed; "
-            "proceeding without slot accounting"
+            "approval_pressure.try_acquire: redis.eval failed; proceeding without slot accounting"
         )
         return PressureToken(
             pool_key=POOL_KEY,
@@ -252,23 +250,19 @@ async def try_acquire_pressure_slot(
         value = int(result)
     except (TypeError, ValueError):
         logger.warning(
-            "approval_pressure.try_acquire: unexpected eval result %r; "
-            "treating as cap-breach",
+            "approval_pressure.try_acquire: unexpected eval result %r; treating as cap-breach",
             result,
         )
         return None
 
     if value < 0:
         logger.info(
-            "approval_pressure.try_acquire: cap breached (cap=%d) — caller "
-            "should defer",
+            "approval_pressure.try_acquire: cap breached (cap=%d) — caller should defer",
             cap,
         )
         return None
 
-    logger.debug(
-        "approval_pressure.try_acquire: acquired slot %d/%d", value, cap
-    )
+    logger.debug("approval_pressure.try_acquire: acquired slot %d/%d", value, cap)
     return PressureToken(
         pool_key=POOL_KEY,
         acquired_at=datetime.now(tz=UTC),
@@ -299,9 +293,7 @@ async def release_pressure_slot(
 
     redis = redis_client if redis_client is not None else await _get_redis()
     if redis is None:
-        logger.debug(
-            "approval_pressure.release: redis unavailable; nothing to DECR"
-        )
+        logger.debug("approval_pressure.release: redis unavailable; nothing to DECR")
         return
 
     try:
@@ -319,22 +311,18 @@ async def release_pressure_slot(
     try:
         if int(new_value) < 0:
             logger.warning(
-                "approval_pressure.release: pool counter went negative (%s); "
-                "resetting to 0",
+                "approval_pressure.release: pool counter went negative (%s); resetting to 0",
                 new_value,
             )
             try:
                 await redis.set(token.pool_key, 0)
             except Exception:  # pragma: no cover - defensive nested
                 logger.exception(
-                    "approval_pressure.release: failed to reset negative "
-                    "counter for %s",
+                    "approval_pressure.release: failed to reset negative counter for %s",
                     token.pool_key,
                 )
     except (TypeError, ValueError):
-        logger.debug(
-            "approval_pressure.release: non-numeric DECR result %r", new_value
-        )
+        logger.debug("approval_pressure.release: non-numeric DECR result %r", new_value)
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +358,7 @@ def compute_jittered_backoff(attempt: int) -> timedelta:
 
 async def schedule_deferred_retry(
     *,
-    pool: "ArqRedis | Any",
+    pool: ArqRedis | Any,
     automation_id: UUID,
     event_id: UUID,
     worker_id: str,

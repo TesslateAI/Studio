@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from . import Lease, LeaseToken, LeaseUnavailableError
 
@@ -53,29 +53,22 @@ class K8sLease(Lease):
 
     def __init__(self, namespace: str | None = None) -> None:
         try:
-            from kubernetes import client, config
+            from kubernetes import client
         except ImportError as exc:
-            raise LeaseUnavailableError(
-                "kubernetes python client not installed"
-            ) from exc
+            raise LeaseUnavailableError("kubernetes python client not installed") from exc
 
         try:
-            config.load_incluster_config()
-        except Exception:
-            try:
-                config.load_kube_config()
-            except Exception as exc:
-                raise LeaseUnavailableError(
-                    f"no kube config available: {exc}"
-                ) from exc
+            from ...k8s_auth import load_in_cluster_or_kube
+
+            load_in_cluster_or_kube()
+        except Exception as exc:
+            raise LeaseUnavailableError(f"no kube config available: {exc}") from exc
 
         self._coord_api = client.CoordinationV1Api()
         self._models = client
         import os
 
-        self._namespace = namespace or os.environ.get(
-            "KUBERNETES_NAMESPACE", "tesslate"
-        )
+        self._namespace = namespace or os.environ.get("KUBERNETES_NAMESPACE", "tesslate")
 
     # ------------------------------------------------------------------
     # Internal helpers — wrap the sync K8s SDK calls in to_thread.
@@ -95,16 +88,14 @@ class K8sLease(Lease):
                 return None
             raise
 
-    async def _create(
-        self, name: str, holder: str, ttl_seconds: int, transitions: int
-    ) -> Any:
+    async def _create(self, name: str, holder: str, ttl_seconds: int, transitions: int) -> Any:
         body = self._models.V1Lease(
             metadata=self._models.V1ObjectMeta(name=name, namespace=self._namespace),
             spec=self._models.V1LeaseSpec(
                 holder_identity=holder,
                 lease_duration_seconds=ttl_seconds,
-                acquire_time=datetime.now(timezone.utc),
-                renew_time=datetime.now(timezone.utc),
+                acquire_time=datetime.now(UTC),
+                renew_time=datetime.now(UTC),
                 lease_transitions=transitions,
             ),
         )
@@ -138,9 +129,7 @@ class K8sLease(Lease):
     # Public API.
     # ------------------------------------------------------------------
 
-    async def acquire(
-        self, name: str, holder_id: str, ttl_seconds: int
-    ) -> Optional[LeaseToken]:
+    async def acquire(self, name: str, holder_id: str, ttl_seconds: int) -> LeaseToken | None:
         try:
             existing = await self._read(name)
         except Exception:
@@ -162,18 +151,14 @@ class K8sLease(Lease):
                 logger.exception("K8sLease.acquire: create failed name=%s", name)
                 return None
             term = int(getattr(created.spec, "lease_transitions", 1) or 1)
-            return LeaseToken(
-                name=name, holder=holder_id, term=term, expires_at=new_expiry
-            )
+            return LeaseToken(name=name, holder=holder_id, term=term, expires_at=new_expiry)
 
         # Decide if existing lease is up for grabs.
         spec = existing.spec
         cur_holder = getattr(spec, "holder_identity", None)
         cur_renew = _ensure_aware(getattr(spec, "renew_time", None))
         cur_ttl = int(getattr(spec, "lease_duration_seconds", 0) or 0)
-        expires_at = (
-            (cur_renew + timedelta(seconds=cur_ttl)) if cur_renew else None
-        )
+        expires_at = (cur_renew + timedelta(seconds=cur_ttl)) if cur_renew else None
         cur_transitions = int(getattr(spec, "lease_transitions", 0) or 0)
 
         expired = expires_at is None or expires_at < now
@@ -186,16 +171,14 @@ class K8sLease(Lease):
         new_transitions = cur_transitions + 1
         spec.holder_identity = holder_id
         spec.lease_duration_seconds = ttl_seconds
-        spec.acquire_time = datetime.now(timezone.utc)
-        spec.renew_time = datetime.now(timezone.utc)
+        spec.acquire_time = datetime.now(UTC)
+        spec.renew_time = datetime.now(UTC)
         spec.lease_transitions = new_transitions
 
         try:
             await self._replace(name, existing)
         except Exception:
-            logger.exception(
-                "K8sLease.acquire: replace failed name=%s (likely conflict)", name
-            )
+            logger.exception("K8sLease.acquire: replace failed name=%s (likely conflict)", name)
             return None
 
         return LeaseToken(
@@ -222,7 +205,7 @@ class K8sLease(Lease):
         if cur_holder != token.holder or cur_transitions != token.term:
             return False
 
-        spec.renew_time = datetime.now(timezone.utc)
+        spec.renew_time = datetime.now(UTC)
 
         try:
             await self._replace(token.name, existing)
@@ -255,9 +238,7 @@ class K8sLease(Lease):
             try:
                 await self._replace(token.name, existing)
             except Exception:
-                logger.exception(
-                    "K8sLease.release: replace failed name=%s", token.name
-                )
+                logger.exception("K8sLease.release: replace failed name=%s", token.name)
 
 
 __all__ = ["K8sLease"]

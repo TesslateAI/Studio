@@ -18,17 +18,15 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from ....services.automations.scopes import MARKETPLACE_AUTHOR
 from ....models import AgentMcpAssignment, MarketplaceAgent, UserMcpConfig
+from ....services.automations.scopes import MARKETPLACE_AUTHOR
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
 
 
-async def assign_mcp_executor(
-    params: dict[str, Any], context: dict[str, Any]
-) -> dict[str, Any]:
+async def assign_mcp_executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     agent_id_raw = params.get("agent_id")
     mcp_config_id_raw = params.get("mcp_config_id")
     if not agent_id_raw or not mcp_config_id_raw:
@@ -65,9 +63,7 @@ async def assign_mcp_executor(
 
     mcp_cfg = (
         await db.execute(
-            select(UserMcpConfig.id, UserMcpConfig.user_id).where(
-                UserMcpConfig.id == mcp_config_id
-            )
+            select(UserMcpConfig.id, UserMcpConfig.user_id).where(UserMcpConfig.id == mcp_config_id)
         )
     ).first()
     if mcp_cfg is None:

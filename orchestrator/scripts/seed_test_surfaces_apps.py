@@ -27,7 +27,6 @@ from app.models import MarketplaceApp
 from app.services.apps.publisher import DuplicateVersionError, publish_version
 from app.services.fileops_client import FileOpsClient
 from app.services.hub_client import HubClient
-
 from scripts._seed_helpers import resolve_seeder_user
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
@@ -158,7 +157,9 @@ async def _seed_one(slug: str, assets_dir: Path) -> int:
         await db.commit()
         logger.info(
             "[%s] published app=%s version=%s bundle=%s submission=%s",
-            slug, result.app_id, result.version,
+            slug,
+            result.app_id,
+            result.version,
             result.bundle_hash[:12] if isinstance(result.bundle_hash, str) else result.bundle_hash,
             result.submission_id,
         )

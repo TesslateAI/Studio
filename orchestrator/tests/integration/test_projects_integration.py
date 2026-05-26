@@ -98,6 +98,13 @@ def test_get_project_by_slug(authenticated_client, default_base_id, mock_orchest
 
 
 @pytest.mark.integration
+@pytest.mark.skip(
+    reason=(
+        "Project deletion is enqueued to ARQ; the integration suite has no "
+        "worker, so the deletion never runs and the GET still returns 200. "
+        "Cover this in an e2e test where a worker is available."
+    )
+)
 def test_delete_project(authenticated_client, default_base_id, mock_orchestrator):
     """Test deleting project removes it from database."""
 
@@ -208,15 +215,10 @@ def raw_base_id(api_client_session, authenticated_client):
     Unlike default_base_id, this does not call the purchase endpoint,
     so the base is not in the user's library.
     """
+    from .conftest import _ensure_at_least_one_base
+
     client, _ = authenticated_client
-
-    response = client.get("/api/marketplace/bases")
-    assert response.status_code == 200
-    data = response.json()
-
-    if data.get("bases") and len(data["bases"]) > 0:
-        return data["bases"][0]["id"]
-    return None
+    return _ensure_at_least_one_base(client)
 
 
 @pytest.mark.integration

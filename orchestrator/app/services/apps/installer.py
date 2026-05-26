@@ -61,6 +61,7 @@ __all__ = [
     "create_per_pod_signing_key",
     "delete_per_pod_signing_key",
     "install_app",
+    "mark_attempt_committed",
     "propagate_user_secrets_post_install",
 ]
 
@@ -84,7 +85,16 @@ class AlreadyInstalledError(InstallError):
 
 
 class IncompatibleAppError(InstallError):
-    """AppVersion is not installable in this deployment right now."""
+    """AppVersion is not installable in this deployment right now.
+
+    ``errors`` carries structured field-level detail when the underlying
+    failure is a manifest schema/typed validation (populated by the
+    projection layer's ``ManifestInvalid``). Empty list for other causes.
+    """
+
+    def __init__(self, message: str, errors: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(message)
+        self.errors: list[dict[str, Any]] = errors or []
 
 
 class ConsentRejectedError(InstallError):
@@ -142,12 +152,18 @@ class InstallResult:
     for both ``per_invocation`` and ``shared_singleton`` reuse paths
     where no fresh Hub volume was minted. ``node_name`` is None when the
     install path didn't touch Volume Hub at all.
+
+    ``attempt_id`` is the saga ledger row created by ``_record_install_attempt``.
+    Callers must flip it to ``committed`` AFTER their own ``db.commit()`` via
+    ``mark_attempt_committed`` — calling it before commit causes a FK violation
+    because the independent session cannot see the not-yet-committed AppInstance.
     """
 
     app_instance_id: UUID
     project_id: UUID | None
     volume_id: str | None
     node_name: str | None
+    attempt_id: UUID | None = None
 
 
 ProjectFactory = Callable[..., Awaitable[Project]]
@@ -274,7 +290,7 @@ def _extract_runtime_contract(manifest_json: dict[str, Any]) -> _RuntimeContract
         min_replicas=min_r,
         max_replicas=max_r,
         desired_replicas=desired_r,
-        idle_timeout_seconds=int(scaling.get("idle_timeout_seconds", 600)),
+        idle_timeout_seconds=int(scaling.get("idle_timeout_seconds", 172800)),
         concurrency_target=int(
             scaling.get("target_concurrency", scaling.get("concurrency_target", 10))
         ),
@@ -324,27 +340,20 @@ def _validate_runtime_contract(contract: _RuntimeContract) -> None:
     # raw IntegrityError. The DB is still the ultimate authority.
     if contract.max_replicas < contract.min_replicas:
         raise ManifestInvalid(
-            f"max_replicas={contract.max_replicas} < "
-            f"min_replicas={contract.min_replicas}"
+            f"max_replicas={contract.max_replicas} < min_replicas={contract.min_replicas}"
         )
-    if not (
-        contract.min_replicas
-        <= contract.desired_replicas
-        <= contract.max_replicas
-    ):
+    if not (contract.min_replicas <= contract.desired_replicas <= contract.max_replicas):
         raise ManifestInvalid(
             f"desired_replicas={contract.desired_replicas} must be in "
             f"[{contract.min_replicas}, {contract.max_replicas}]"
         )
     if contract.state_model == "per_install_volume" and contract.max_replicas > 1:
         raise ManifestInvalid(
-            "state_model='per_install_volume' forces max_replicas=1 "
-            f"(got {contract.max_replicas})"
+            f"state_model='per_install_volume' forces max_replicas=1 (got {contract.max_replicas})"
         )
     if contract.state_model == "service_pvc" and contract.max_replicas > 1:
         raise ManifestInvalid(
-            "state_model='service_pvc' forces max_replicas=1 "
-            f"(got {contract.max_replicas})"
+            f"state_model='service_pvc' forces max_replicas=1 (got {contract.max_replicas})"
         )
 
 
@@ -379,12 +388,14 @@ async def _find_shared_singleton_deployment(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-_VALID_TRIGGER_KINDS: frozenset[str] = frozenset(
-    {"cron", "webhook", "app_invocation", "manual"}
-)
-_VALID_ACTION_TYPES: frozenset[str] = frozenset(
-    {"agent.run", "app.invoke", "gateway.send"}
-)
+# Mirror of ``schemas_automations.AutomationTriggerIn._validate_kind``. Kept in
+# lockstep so a manifest with an ``app_invocation`` trigger template lands as a
+# clean install-time skip instead of a downstream silently-dead trigger row.
+# The DB CHECK constraint stays permissive for forward compatibility — see the
+# docstring on ``AutomationTriggerIn`` for the producer-not-wired rationale.
+# Tracking: TesslateAI/OpenSail-Enterprise#408.
+_VALID_TRIGGER_KINDS: frozenset[str] = frozenset({"cron", "webhook", "manual"})
+_VALID_ACTION_TYPES: frozenset[str] = frozenset({"agent.run", "app.invoke", "gateway.send"})
 
 
 async def _materialize_install_automations(
@@ -446,8 +457,7 @@ async def _materialize_install_automations(
         trigger_kind = str(trigger_cfg.pop("kind", "") or "")
         if trigger_kind not in _VALID_TRIGGER_KINDS:
             logger.warning(
-                "install_app: skipping automation template %r "
-                "(trigger.kind=%r not in %s)",
+                "install_app: skipping automation template %r (trigger.kind=%r not in %s)",
                 tpl.name,
                 trigger_kind,
                 sorted(_VALID_TRIGGER_KINDS),
@@ -459,15 +469,10 @@ async def _materialize_install_automations(
         # AutomationDefinition stores the runtime field as action_type.
         # Accept both so a manifest authored against the schema (kind) lands
         # cleanly without forcing creators to know the internal column name.
-        action_type = str(
-            action_cfg.pop("action_type", None)
-            or action_cfg.pop("kind", None)
-            or ""
-        )
+        action_type = str(action_cfg.pop("action_type", None) or action_cfg.pop("kind", None) or "")
         if action_type not in _VALID_ACTION_TYPES:
             logger.warning(
-                "install_app: skipping automation template %r "
-                "(action.action_type=%r not in %s)",
+                "install_app: skipping automation template %r (action.action_type=%r not in %s)",
                 tpl.name,
                 action_type,
                 sorted(_VALID_ACTION_TYPES),
@@ -678,9 +683,7 @@ async def install_app(
 
         source_row = (
             await db.execute(
-                select(MarketplaceSource).where(
-                    MarketplaceSource.id == app_row.source_id
-                )
+                select(MarketplaceSource).where(MarketplaceSource.id == app_row.source_id)
             )
         ).scalar_one_or_none()
         if source_row is not None:
@@ -787,8 +790,13 @@ async def install_app(
     try:
         await _projection.regenerate_projection(db, app_version_id=av.id)
     except _projection.ProjectionError as e:
+        # Surface manifest schema/typed validation errors verbatim so the
+        # API caller (and the UI) gets field-level detail instead of just
+        # "manifest failed schema validation". Other ProjectionError
+        # subclasses don't carry an errors list; the empty default is fine.
         raise IncompatibleAppError(
-            f"AppVersion {app_version_id} projection failed: {e}"
+            f"AppVersion {app_version_id} projection failed: {e}",
+            errors=list(getattr(e, "errors", []) or []),
         ) from e
 
     # 5) Resolve runtime deployment + provision the underlying project/volume.
@@ -992,12 +1000,8 @@ async def install_app(
     # so the SDK has a stable env contract; non-K8s callers reach the
     # orchestrator at the same Service name today.
     runtime_env_overlay: dict[str, str] = {}
-    if (
-        runtime_contract.tenancy_model == "per_install"
-        or (
-            runtime_contract.tenancy_model == "shared_singleton"
-            and materialize_compute
-        )
+    if runtime_contract.tenancy_model == "per_install" or (
+        runtime_contract.tenancy_model == "shared_singleton" and materialize_compute
     ):
         from ...config import get_settings as _get_runtime_settings
 
@@ -1013,24 +1017,20 @@ async def install_app(
         )
 
         try:
-            containers_by_name, primary_container = (
-                await materialize_compute_from_volume(
-                    db,
-                    project=project,
-                    installer_user_id=installer_user_id,
-                    volume_id=volume_id,
-                    cache_node=node_name,
-                    runtime_env_overlay=runtime_env_overlay,
-                )
+            containers_by_name, primary_container = await materialize_compute_from_volume(
+                db,
+                project=project,
+                installer_user_id=installer_user_id,
+                volume_id=volume_id,
+                cache_node=node_name,
+                runtime_env_overlay=runtime_env_overlay,
             )
         except BundleConfigMissing as exc:
             raise IncompatibleAppError(str(exc)) from exc
         except ValueError as exc:
             # parse_tesslate_config raises ValueError for invalid JSON or
             # unsafe startup commands — both are install-blocking.
-            raise IncompatibleAppError(
-                f"bundle .tesslate/config.json invalid: {exc}"
-            ) from exc
+            raise IncompatibleAppError(f"bundle .tesslate/config.json invalid: {exc}") from exc
 
     # 8) Insert AppInstance + McpConsentRecord rows.
     #
@@ -1070,8 +1070,7 @@ async def install_app(
         # distinguish.
         await db.rollback()
         raise AlreadyInstalledError(
-            f"user {installer_user_id} already has app {app_row.id} installed "
-            "(concurrent install)"
+            f"user {installer_user_id} already has app {app_row.id} installed (concurrent install)"
         ) from e
 
     # 8.5) Wire ``OPENSAIL_APPINSTANCE_TOKEN`` onto the primary container as
@@ -1133,8 +1132,9 @@ async def install_app(
     # 5's Install Modal) is responsible for walking the user through the
     # recursive install. Optional deps are silently skipped — the runtime
     # surfaces them as AliasNotFound at call time.
-    if (manifest_json.get("manifest_schema_version") == "2026-05"
-            and manifest_json.get("dependencies")):
+    if manifest_json.get("manifest_schema_version") == "2026-05" and manifest_json.get(
+        "dependencies"
+    ):
         from .app_manifest import AppManifest2026_05
         from .composition import (
             MissingDependencyError,
@@ -1147,9 +1147,7 @@ async def install_app(
         except Exception as exc:  # noqa: BLE001 — manifest already passed publish
             # If the manifest doesn't even parse here, the projection layer
             # already raised earlier — defense in depth.
-            raise IncompatibleAppError(
-                f"manifest parse failed during link wiring: {exc}"
-            ) from exc
+            raise IncompatibleAppError(f"manifest parse failed during link wiring: {exc}") from exc
 
         if parsed_manifest.dependencies:
             child_installs_by_app_id = await resolve_dependency_installs(
@@ -1185,23 +1183,16 @@ async def install_app(
         runtime_deployment.id,
     )
 
-    # Saga ledger: flip the attempt row to committed in a second independent
-    # session. ``attempt_id`` is None for per_invocation installs (no Hub
-    # call) and for shared_singleton reuse (the first installer already
-    # marked the attempt). If this call fails the reaper still converges
-    # — it joins on volume_id / app_instance_id and skips rows that
-    # already have a live AppInstance.
-    if attempt_id is not None:
-        await _mark_attempt_committed(
-            attempt_id=attempt_id,
-            app_instance_id=instance.id,
-        )
-
+    # Return attempt_id so the caller can flip it to 'committed' AFTER their
+    # own db.commit(). Doing it here (before the caller commits) causes a FK
+    # violation: the independent session in mark_attempt_committed cannot see
+    # the AppInstance row until the caller's transaction is committed.
     return InstallResult(
         app_instance_id=instance.id,
         project_id=(project.id if project is not None else None),
         volume_id=volume_id,
         node_name=node_name,
+        attempt_id=attempt_id,
     )
 
 
@@ -1248,12 +1239,15 @@ async def _record_install_attempt(
     return attempt_id
 
 
-async def _mark_attempt_committed(
+async def mark_attempt_committed(
     *,
     attempt_id: UUID,
     app_instance_id: UUID,
 ) -> None:
     """Flip AppInstallAttempt to state='committed' in an independent session.
+
+    Must be called AFTER the caller's db.commit() so the AppInstance row is
+    visible to the FK check in this independent session.
 
     Best-effort: failure here is non-fatal. The reaper's convergence rule
     (skip attempt whose volume_id matches a live AppInstance.volume_id) still
@@ -1394,19 +1388,15 @@ async def create_per_pod_signing_key(
             app_instance_id=app_instance_id,
             fallback_secret=settings.secret_key,
         )
-        token = generate_pod_token(
-            app_instance_id=app_instance_id, signing_key=signing_key
-        )
+        token = generate_pod_token(app_instance_id=app_instance_id, signing_key=signing_key)
         return {"OPENSAIL_APPINSTANCE_TOKEN": token}
 
-    namespace = target_namespace or getattr(
-        settings, "kubernetes_namespace", "tesslate"
-    ) or "tesslate"
+    namespace = (
+        target_namespace or getattr(settings, "kubernetes_namespace", "tesslate") or "tesslate"
+    )
     secret_name = k8s_secret_name(app_instance_id)
     signing_key = generate_pod_signing_key()
-    token = generate_pod_token(
-        app_instance_id=app_instance_id, signing_key=signing_key
-    )
+    token = generate_pod_token(app_instance_id=app_instance_id, signing_key=signing_key)
 
     body = k8s_client.V1Secret(
         metadata=k8s_client.V1ObjectMeta(
@@ -1433,9 +1423,7 @@ async def create_per_pod_signing_key(
         except ApiException as exc:
             if exc.status != 409:
                 raise
-            core_v1.patch_namespaced_secret(
-                name=secret_name, namespace=namespace, body=body
-            )
+            core_v1.patch_namespaced_secret(name=secret_name, namespace=namespace, body=body)
         # Drop any stale cached key so the proxy reads the fresh value
         # on the next call.
         invalidate_signing_key_cache(app_instance_id)
@@ -1486,9 +1474,9 @@ async def delete_per_pod_signing_key(
     if not getattr(settings, "is_kubernetes_mode", False):
         return
 
-    namespace = target_namespace or getattr(
-        settings, "kubernetes_namespace", "tesslate"
-    ) or "tesslate"
+    namespace = (
+        target_namespace or getattr(settings, "kubernetes_namespace", "tesslate") or "tesslate"
+    )
     try:
         core_v1 = k8s_client.CoreV1Api()
         core_v1.delete_namespaced_secret(

@@ -13,9 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import app.models  # noqa: F401
-
-from app.permissions import Permission, ROLE_PERMISSIONS, SCOPE_LABELS
-
+from app.permissions import ROLE_PERMISSIONS, SCOPE_LABELS, Permission
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -70,9 +68,11 @@ class TestScopeEnforcementIntegration:
 
         mock_db = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership), \
-             patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+            patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             result = await dep(user=user, db=mock_db)
             assert result.id == user.id
@@ -109,9 +109,11 @@ class TestScopeEnforcementIntegration:
 
         mock_db = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership), \
-             patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+            patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+        ):
             dep = require_api_scope(Permission.CHAT_VIEW)
             result = await dep(user=user, db=mock_db)
             assert result.id == user.id
@@ -148,9 +150,11 @@ class TestScopeEnforcementIntegration:
         mock_db = AsyncMock()
 
         for perm in [Permission.CHAT_SEND, Permission.CHAT_VIEW, Permission.FILE_WRITE]:
-            with patch("app.auth_external.get_external_api_user", return_value=user), \
-                 patch("app.auth_external.get_team_membership", return_value=membership), \
-                 patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+            with (
+                patch("app.auth_external.get_external_api_user", return_value=user),
+                patch("app.auth_external.get_team_membership", return_value=membership),
+                patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+            ):
                 dep = require_api_scope(perm)
                 result = await dep(user=user, db=mock_db)
                 assert result.id == user.id
@@ -219,8 +223,10 @@ class TestScopeCeilingAtRuntime:
 
         mock_db = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+        ):
             dep = require_api_scope(Permission.FILE_WRITE)
             with pytest.raises(HTTPException) as exc:
                 await dep(user=user, db=mock_db)
@@ -240,9 +246,11 @@ class TestScopeCeilingAtRuntime:
 
         mock_db = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership), \
-             patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+            patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+        ):
             dep = require_api_scope(Permission.AUDIT_VIEW)
             result = await dep(user=user, db=mock_db)
             assert result.id == user.id
@@ -267,9 +275,11 @@ class TestAuditLogIntegration:
         mock_db = AsyncMock()
         mock_log = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership), \
-             patch("app.services.audit_service.log_event", mock_log):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+            patch("app.services.audit_service.log_event", mock_log),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             await dep(user=user, db=mock_db)
 
@@ -296,8 +306,10 @@ class TestAuditLogIntegration:
         mock_db = AsyncMock()
         mock_log = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.services.audit_service.log_event", mock_log):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.services.audit_service.log_event", mock_log),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             with pytest.raises(HTTPException):
                 await dep(user=user, db=mock_db)
@@ -317,8 +329,10 @@ class TestAuditLogIntegration:
         mock_db = AsyncMock()
         mock_log = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.services.audit_service.log_event", mock_log):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.services.audit_service.log_event", mock_log),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             await dep(user=user, db=mock_db)
 
@@ -387,9 +401,11 @@ class TestMultipleScopeCombinations:
         mock_db = AsyncMock()
 
         # Should pass for file.read
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership), \
-             patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+            patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+        ):
             dep = require_api_scope(Permission.FILE_READ)
             result = await dep(user=user, db=mock_db)
             assert result.id == user.id
@@ -407,8 +423,13 @@ class TestMultipleScopeCombinations:
         from app.auth_external import require_api_scope
 
         agent_scopes = [
-            "chat.send", "chat.view", "file.read", "file.write",
-            "container.view", "container.start_stop", "terminal.access",
+            "chat.send",
+            "chat.view",
+            "file.read",
+            "file.write",
+            "container.view",
+            "container.start_stop",
+            "terminal.access",
         ]
         user = _make_user()
         key = _make_api_key(user.id, scopes=agent_scopes)
@@ -419,9 +440,11 @@ class TestMultipleScopeCombinations:
 
         for perm_value in agent_scopes:
             perm = Permission(perm_value)
-            with patch("app.auth_external.get_external_api_user", return_value=user), \
-                 patch("app.auth_external.get_team_membership", return_value=membership), \
-                 patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+            with (
+                patch("app.auth_external.get_external_api_user", return_value=user),
+                patch("app.auth_external.get_team_membership", return_value=membership),
+                patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+            ):
                 dep = require_api_scope(perm)
                 result = await dep(user=user, db=mock_db)
                 assert result.id == user.id

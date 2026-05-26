@@ -25,6 +25,8 @@ import {
   Plug as McpIcon,
   AppWindow as AppIcon,
   File as FileIcon,
+  Database as DataIcon,
+  FolderOpen as ProjectIcon,
   WarningCircle,
 } from '@phosphor-icons/react';
 
@@ -52,6 +54,8 @@ const KIND_LABEL: Record<MentionPickerKind, string> = {
   agent: 'Agents',
   app: 'Apps',
   mcp: 'Connectors',
+  data: 'Data Collections',
+  project: 'Projects',
   file: 'Files',
 };
 
@@ -68,6 +72,8 @@ const KIND_ICON: Record<
   agent: AgentIcon,
   app: AppIcon,
   mcp: McpIcon,
+  data: DataIcon,
+  project: ProjectIcon,
   file: FileIcon,
 };
 
@@ -89,6 +95,16 @@ const KIND_TOKENS: Record<MentionPickerKind, { dot: string; chip: string; iconTe
     chip: 'bg-[var(--accent)]/10 text-[var(--accent)] border-[var(--accent)]/20',
     iconText: 'text-[var(--accent)]',
   },
+  data: {
+    dot: 'bg-[var(--status-success)]',
+    chip: 'bg-[var(--status-success)]/10 text-[var(--status-success)] border-[var(--status-success)]/20',
+    iconText: 'text-[var(--status-success)]',
+  },
+  project: {
+    dot: 'bg-[var(--status-warning)]',
+    chip: 'bg-[var(--status-warning)]/10 text-[var(--status-warning)] border-[var(--status-warning)]/20',
+    iconText: 'text-[var(--status-warning)]',
+  },
   file: {
     dot: 'bg-[var(--status-info)]',
     chip: 'bg-[var(--status-info)]/10 text-[var(--status-info)] border-[var(--status-info)]/20',
@@ -102,6 +118,8 @@ export interface MentionPickerProps {
   agents: MentionItem[];
   mcps: MentionItem[];
   apps: MentionItem[];
+  data: MentionItem[];
+  projects: MentionItem[];
   files: MentionPickerFile[];
   loading?: boolean;
   /**
@@ -131,6 +149,8 @@ export function MentionPicker({
   agents,
   mcps,
   apps,
+  data,
+  projects,
   files,
   loading,
   onSelectMention,
@@ -152,16 +172,22 @@ export function MentionPicker({
     const filteredAgents = agents.filter((a) => matches(a.name) || matches(a.slug));
     const filteredApps = apps.filter((a) => matches(a.name) || matches(a.slug));
     const filteredMcps = mcps.filter((m) => matches(m.name) || matches(m.slug));
+    const filteredData = data.filter((d) => matches(d.name) || matches(d.slug));
+    const filteredProjects = projects.filter((p) => matches(p.name) || matches(p.slug));
     const filteredFiles = files.filter((f) => matches(f.display) || matches(f.path));
 
     const rows: FlatRow[] = [];
-    for (const a of filteredAgents) rows.push({ section: 'agent', row: { ...a, rowKind: 'mention' } });
+    for (const a of filteredAgents)
+      rows.push({ section: 'agent', row: { ...a, rowKind: 'mention' } });
     for (const a of filteredApps) rows.push({ section: 'app', row: { ...a, rowKind: 'mention' } });
     for (const m of filteredMcps) rows.push({ section: 'mcp', row: { ...m, rowKind: 'mention' } });
+    for (const d of filteredData) rows.push({ section: 'data', row: { ...d, rowKind: 'mention' } });
+    for (const p of filteredProjects)
+      rows.push({ section: 'project', row: { ...p, rowKind: 'mention' } });
     for (const f of filteredFiles)
       rows.push({ section: 'file', row: { ...f, rowKind: 'file', enabled: true } });
     return rows;
-  }, [agents, apps, mcps, files, query]);
+  }, [agents, apps, mcps, data, projects, files, query]);
 
   // Reset active index when the row set changes so we never end up on a
   // stale row (e.g. user typed deeper, the previously active row vanished).
@@ -243,6 +269,8 @@ export function MentionPicker({
     { kind: 'agent', rows: flatRows.filter((r) => r.section === 'agent') },
     { kind: 'app', rows: flatRows.filter((r) => r.section === 'app') },
     { kind: 'mcp', rows: flatRows.filter((r) => r.section === 'mcp') },
+    { kind: 'data', rows: flatRows.filter((r) => r.section === 'data') },
+    { kind: 'project', rows: flatRows.filter((r) => r.section === 'project') },
     { kind: 'file', rows: flatRows.filter((r) => r.section === 'file') },
   ];
 
@@ -274,7 +302,9 @@ export function MentionPicker({
           className="flex items-center justify-between px-3 py-2 border-b text-[11px] uppercase tracking-wide text-[var(--text-muted)]"
           style={{ borderColor: 'var(--border)' }}
         >
-          <span>{query ? `Matching “${query}”` : 'Type to search · ↑↓ to navigate · ↵ to insert'}</span>
+          <span>
+            {query ? `Matching “${query}”` : 'Type to search · ↑↓ to navigate · ↵ to insert'}
+          </span>
           {loading ? <span>loading…</span> : null}
         </div>
 
@@ -308,7 +338,9 @@ export function MentionPicker({
                           onMouseEnter={() => setActiveIndex(rowIndex(flat))}
                           onClick={() => commit(flat)}
                           className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 ${
-                            isActive ? 'bg-[var(--surface-hover)]' : 'hover:bg-[var(--surface-hover)]'
+                            isActive
+                              ? 'bg-[var(--surface-hover)]'
+                              : 'hover:bg-[var(--surface-hover)]'
                           }`}
                         >
                           <Icon size={14} weight="regular" className={tokens.iconText} />
@@ -331,14 +363,17 @@ export function MentionPicker({
                         } ${item.enabled ? '' : 'opacity-50'}`}
                       >
                         {item.icon_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
                           <img
                             src={item.icon_url}
                             alt=""
                             className="h-4 w-4 rounded-sm flex-shrink-0"
                           />
                         ) : (
-                          <Icon size={14} weight="regular" className={`${tokens.iconText} flex-shrink-0`} />
+                          <Icon
+                            size={14}
+                            weight="regular"
+                            className={`${tokens.iconText} flex-shrink-0`}
+                          />
                         )}
                         <span className="text-[var(--text)] truncate flex-1">{item.name}</span>
                         {item.slug ? (

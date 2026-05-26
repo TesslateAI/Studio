@@ -319,9 +319,7 @@ async def _provision_postgres_db(
             )
 
         try:
-            await conn.execute(
-                f'CREATE DATABASE "{db_name}" OWNER "{db_user}"'
-            )
+            await conn.execute(f'CREATE DATABASE "{db_name}" OWNER "{db_user}"')
         except asyncpg.exceptions.DuplicateDatabaseError:
             # Surface the duplicate clearly so callers can choose to retry
             # with a fresh nonce. With token_hex(4) collisions are vanishingly
@@ -335,24 +333,17 @@ async def _provision_postgres_db(
             )
 
         # GRANT is idempotent.
-        await conn.execute(
-            f'GRANT ALL PRIVILEGES ON DATABASE "{db_name}" TO "{db_user}"'
-        )
+        await conn.execute(f'GRANT ALL PRIVILEGES ON DATABASE "{db_name}" TO "{db_user}"')
     finally:
         if conn is not None:
             try:
                 await conn.close()
             except Exception:  # noqa: BLE001
-                logger.debug(
-                    "managed_resources: pg admin conn close failed", exc_info=True
-                )
+                logger.debug("managed_resources: pg admin conn close failed", exc_info=True)
 
-    connection_url = (
-        f"postgresql://{db_user}:{db_password}@{host}:{port}/{db_name}"
-    )
+    connection_url = f"postgresql://{db_user}:{db_password}@{host}:{port}/{db_name}"
     logger.info(
-        "managed_resources.add_postgres: provisioned db=%s user=%s host=%s "
-        "for project=%s slug=%s",
+        "managed_resources.add_postgres: provisioned db=%s user=%s host=%s for project=%s slug=%s",
         db_name,
         db_user,
         host,
@@ -458,9 +449,7 @@ async def _provision_object_storage_bucket(
         # region requires it. Mirror what the AWS docs say verbatim.
         create_kwargs: dict[str, Any] = {"Bucket": bucket}
         if region and region != "us-east-1":
-            create_kwargs["CreateBucketConfiguration"] = {
-                "LocationConstraint": region
-            }
+            create_kwargs["CreateBucketConfiguration"] = {"LocationConstraint": region}
         try:
             s3.create_bucket(**create_kwargs)
         except ClientError as exc:
@@ -554,17 +543,12 @@ async def _provision_kv_namespace(
             try:
                 await client.close()
             except Exception:  # noqa: BLE001
-                logger.debug(
-                    "managed_resources: redis client close failed", exc_info=True
-                )
+                logger.debug("managed_resources: redis client close failed", exc_info=True)
         except Exception:  # noqa: BLE001
-            logger.debug(
-                "managed_resources: redis client close failed", exc_info=True
-            )
+            logger.debug("managed_resources: redis client close failed", exc_info=True)
 
     logger.info(
-        "managed_resources.add_kv: verified Redis pool reachable for "
-        "project=%s slug=%s prefix=%s",
+        "managed_resources.add_kv: verified Redis pool reachable for project=%s slug=%s prefix=%s",
         project.id,
         project.slug,
         prefix,
@@ -600,21 +584,17 @@ def _resolve_core_v1_api():  # pragma: no cover — exercised by integration tes
         from kubernetes import client as k8s_client
         from kubernetes import config as k8s_config
 
+        from ..k8s_auth import load_in_cluster_or_kube
+
         try:
-            k8s_config.load_incluster_config()
+            load_in_cluster_or_kube()
         except k8s_config.ConfigException:
-            try:
-                k8s_config.load_kube_config()
-            except k8s_config.ConfigException:
-                logger.info(
-                    "managed_resources: no kube config found; skipping Secret write"
-                )
-                return None
+            logger.info("managed_resources: no kube config found; skipping Secret write")
+            return None
         return k8s_client.CoreV1Api()
     except ImportError:
         logger.info(
-            "managed_resources: kubernetes python client not installed; "
-            "skipping Secret write"
+            "managed_resources: kubernetes python client not installed; skipping Secret write"
         )
         return None
 
@@ -743,15 +723,7 @@ def _build_postgres_manifest_patch(secret_name: str) -> dict[str, Any]:
             "state_model": STATE_MODEL_EXTERNAL,
             "scaling": {"max_replicas": DEFAULT_SCALABLE_MAX_REPLICAS},
         },
-        "compute": {
-            "containers": [
-                {
-                    "env": {
-                        "DATABASE_URL": "${secret:" + secret_name + "/url}"
-                    }
-                }
-            ]
-        },
+        "compute": {"containers": [{"env": {"DATABASE_URL": "${secret:" + secret_name + "/url}"}}]},
     }
 
 
@@ -851,9 +823,7 @@ def _apply_manifest_patch_to_disk(
             yaml.safe_dump(merged, f, sort_keys=False)
         return str(manifest_path)
     except Exception as exc:  # noqa: BLE001 — best-effort write
-        logger.warning(
-            "managed_resources: failed to patch %s: %r", manifest_path, exc
-        )
+        logger.warning("managed_resources: failed to patch %s: %r", manifest_path, exc)
         return None
 
 
@@ -884,8 +854,7 @@ def _detect_primary_language(project_root: Path) -> str:
     if (project_root / "package.json").exists():
         return "ts"
     if any(
-        (project_root / name).exists()
-        for name in ("pyproject.toml", "requirements.txt", "Pipfile")
+        (project_root / name).exists() for name in ("pyproject.toml", "requirements.txt", "Pipfile")
     ):
         return "py"
     return "py"
@@ -952,7 +921,7 @@ print("Migration complete.")
 '''
 
 
-_MIGRATION_TS_TEMPLATE = '''/**
+_MIGRATION_TS_TEMPLATE = """/**
  * One-time SQLite → Postgres migration helper.
  *
  * Generated by OpenSail managed_resources.add_postgres. Run ONCE before
@@ -1010,7 +979,7 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-'''
+"""
 
 
 def _write_migration_helper(project_root: Path) -> str | None:
@@ -1026,9 +995,7 @@ def _write_migration_helper(project_root: Path) -> str | None:
     try:
         scripts_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        logger.warning(
-            "managed_resources: cannot create %s: %r", scripts_dir, exc
-        )
+        logger.warning("managed_resources: cannot create %s: %r", scripts_dir, exc)
         return None
 
     language = _detect_primary_language(project_root)
@@ -1046,9 +1013,7 @@ def _write_migration_helper(project_root: Path) -> str | None:
         os.chmod(target, 0o644)
         return str(target)
     except OSError as exc:
-        logger.warning(
-            "managed_resources: failed to write %s: %r", target, exc
-        )
+        logger.warning("managed_resources: failed to write %s: %r", target, exc)
         return None
 
 
@@ -1089,8 +1054,8 @@ async def add_postgres(
     namespace = _build_secret_namespace(project)
 
     # 1. Provision (REAL — or stub when ALLOW_STUB is on).
-    db_name, db_user, db_password, connection_url, is_stub = (
-        await _provision_postgres_db(project=project)
+    db_name, db_user, db_password, connection_url, is_stub = await _provision_postgres_db(
+        project=project
     )
 
     # 2. Write the K8s Secret. Real, but optional — desktop/docker callers
@@ -1148,9 +1113,7 @@ async def add_postgres(
             "for the Publish Drawer to merge."
         )
     if migration_path is None:
-        notes.append(
-            "Migration helper not written (project root missing or unwritable)."
-        )
+        notes.append("Migration helper not written (project root missing or unwritable).")
 
     return ManagedDbResult(
         secret_name=secret_name,
@@ -1188,9 +1151,14 @@ async def add_object_storage(
     secret_name = managed_object_storage_secret_name(project.id)
     namespace = _build_secret_namespace(project)
 
-    endpoint, region, bucket, access_key_id, secret_access_key, is_stub = (
-        await _provision_object_storage_bucket(project=project)
-    )
+    (
+        endpoint,
+        region,
+        bucket,
+        access_key_id,
+        secret_access_key,
+        is_stub,
+    ) = await _provision_object_storage_bucket(project=project)
 
     if core_v1 is None:
         core_v1 = _resolve_core_v1_api()
@@ -1213,8 +1181,7 @@ async def add_object_storage(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "managed_resources.add_object_storage: Secret write failed "
-            "(project=%s): %r",
+            "managed_resources.add_object_storage: Secret write failed (project=%s): %r",
             project.id,
             exc,
         )

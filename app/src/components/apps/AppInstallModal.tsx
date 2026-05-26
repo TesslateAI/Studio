@@ -61,6 +61,13 @@ interface ConnectorDecl {
   required: boolean;
 }
 
+interface CredentialDecl {
+  secret_ref: string;
+  label: string;
+  description: string;
+  required: boolean;
+}
+
 const RUNTIME_MODES: AppManifestTenancyModel[] = [
   'per_install',
   'shared_singleton',
@@ -113,6 +120,27 @@ function parseConnectors(manifest: Record<string, unknown> | null): ConnectorDec
       scopes: Array.isArray(c.scopes) ? (c.scopes as string[]) : [],
       exposure,
       required: typeof c.required === 'boolean' ? c.required : true,
+    });
+  }
+  return out;
+}
+
+function parseCredentials(manifest: Record<string, unknown> | null): CredentialDecl[] {
+  if (!manifest) return [];
+  const compute = manifest.compute as Record<string, unknown> | undefined;
+  if (!compute) return [];
+  const credentials = compute.credentials;
+  if (!Array.isArray(credentials)) return [];
+  const out: CredentialDecl[] = [];
+  for (const raw of credentials) {
+    if (!raw || typeof raw !== 'object') continue;
+    const c = raw as Record<string, unknown>;
+    if (typeof c.secret_ref !== 'string') continue;
+    out.push({
+      secret_ref: c.secret_ref as string,
+      label: typeof c.label === 'string' ? (c.label as string) : c.secret_ref as string,
+      description: typeof c.description === 'string' ? (c.description as string) : '',
+      required: typeof c.required === 'boolean' ? (c.required as boolean) : true,
     });
   }
   return out;
@@ -231,7 +259,16 @@ export function AppInstallModal({
   const [connectorAccepted, setConnectorAccepted] = useState<Record<string, boolean>>(
     {}
   );
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  // Inline failure detail for install errors. Toast alone is too easy to
+  // miss — when a 422 comes back the user needs to see the server's
+  // message (and optionally the field-level error list from
+  // ProjectionError.errors) without opening devtools.
+  const [submitError, setSubmitError] = useState<{
+    message: string;
+    errors?: Array<{ path?: unknown[]; message?: string }>;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,6 +300,10 @@ export function AppInstallModal({
   );
   const connectorDecls = useMemo(
     () => parseConnectors(version?.manifest_json ?? null),
+    [version]
+  );
+  const credentialDecls = useMemo(
+    () => parseCredentials(version?.manifest_json ?? null),
     [version]
   );
   const dependencies = useMemo(
@@ -362,12 +403,19 @@ export function AppInstallModal({
       .every((d) => depState[d.alias]?.status === 'installed');
   }, [dependencies, depState]);
 
+  const allRequiredCredentialsFilled = useMemo(() => {
+    return credentialDecls
+      .filter((c) => c.required)
+      .every((c) => (credentialValues[c.secret_ref] ?? '').trim().length > 0);
+  }, [credentialDecls, credentialValues]);
+
   const canInstall = useMemo(() => {
     if (loading || submitting) return false;
     if (!compat?.compatible) return false;
     if (!teamId) return false;
     if (!allConnectorsAccepted) return false;
     if (!allRequiredDepsSatisfied) return false;
+    if (!allRequiredCredentialsFilled) return false;
     return true;
   }, [
     loading,
@@ -376,6 +424,7 @@ export function AppInstallModal({
     teamId,
     allConnectorsAccepted,
     allRequiredDepsSatisfied,
+    allRequiredCredentialsFilled,
   ]);
 
   const confirm = async () => {
@@ -384,12 +433,20 @@ export function AppInstallModal({
       return;
     }
     setSubmitting(true);
+    setSubmitError(null);
     try {
       const walletMix: Record<string, unknown> = { accepted: true };
       for (const key of ['ai_compute', 'general_compute', 'platform_fee'] as const) {
         const entry = billingDims.find((d) => d.dimension === key);
         if (entry) walletMix[key] = entry;
       }
+      // Collect user-provided credentials — only send non-empty values.
+      const userCreds: Record<string, string> = {};
+      for (const cred of credentialDecls) {
+        const val = (credentialValues[cred.secret_ref] ?? '').trim();
+        if (val) userCreds[cred.secret_ref] = val;
+      }
+
       const result = await installApp({
         app_version_id: appVersionId,
         team_id: teamId,
@@ -403,11 +460,39 @@ export function AppInstallModal({
           accepted: connectorAccepted[d.id] === true,
         })),
         update_policy: updatePolicy,
+        ...(Object.keys(userCreds).length > 0 && { user_credentials: userCreds }),
       });
       onDone(result.app_instance_id);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Install failed';
-      toast.error(msg);
+      // FastAPI 422s ride on `err.response.data.detail` (string for
+      // simple errors, `{message, errors[]}` for manifest validation
+      // failures — see ProjectionError.ManifestInvalid). Surface the
+      // server's text inline AND in the toast so the user sees the
+      // actual failure reason rather than "Request failed with status
+      // code 422".
+      const axiosLike = err as {
+        response?: {
+          data?: {
+            detail?:
+              | string
+              | { message?: string; errors?: Array<{ path?: unknown[]; message?: string }> };
+          };
+        };
+        message?: string;
+      };
+      const detail = axiosLike?.response?.data?.detail;
+      let message: string;
+      let errors: Array<{ path?: unknown[]; message?: string }> | undefined;
+      if (typeof detail === 'string') {
+        message = detail;
+      } else if (detail && typeof detail === 'object') {
+        message = detail.message ?? 'Install failed';
+        errors = detail.errors;
+      } else {
+        message = axiosLike?.message ?? 'Install failed';
+      }
+      setSubmitError({ message, errors });
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }
@@ -505,6 +590,66 @@ export function AppInstallModal({
                   </div>
                 )}
               </div>
+
+              {/* Credentials — always visible when present. */}
+              {credentialDecls.length > 0 && (
+                <CollapsibleSection
+                  label="Credentials"
+                  count={credentialDecls.length}
+                  defaultExpanded={true}
+                >
+                  <div className="flex flex-col gap-3">
+                    <p className="text-[var(--text-subtle)]">
+                      This app requires credentials to run. Enter them below.
+                    </p>
+                    {credentialDecls.map((cred) => (
+                      <label
+                        key={cred.secret_ref}
+                        className="flex flex-col gap-1"
+                        data-testid={`credential-${cred.secret_ref}`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="text-[var(--text)] font-medium">
+                            {cred.label}
+                          </span>
+                          {cred.required && (
+                            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/30 text-red-400">
+                              Required
+                            </span>
+                          )}
+                        </span>
+                        {cred.description && (
+                          <span className="text-[11px] text-[var(--text-subtle)] leading-snug">
+                            {cred.description}
+                          </span>
+                        )}
+                        <input
+                          type="password"
+                          className="h-8 px-2 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-small)] text-sm text-[var(--text)] font-mono"
+                          placeholder={cred.label}
+                          value={credentialValues[cred.secret_ref] ?? ''}
+                          onChange={(e) =>
+                            setCredentialValues((prev) => ({
+                              ...prev,
+                              [cred.secret_ref]: e.target.value,
+                            }))
+                          }
+                          data-testid={`credential-input-${cred.secret_ref}`}
+                        />
+                      </label>
+                    ))}
+                    {!allRequiredCredentialsFilled && (
+                      <p
+                        role="alert"
+                        className="text-[11px] text-amber-300 leading-snug"
+                        data-testid="credentials-blocking-banner"
+                      >
+                        All required credentials must be filled before installing.
+                      </p>
+                    )}
+                  </div>
+                </CollapsibleSection>
+              )}
 
               {/* Runtime mode (advanced). */}
               <CollapsibleSection
@@ -798,6 +943,38 @@ export function AppInstallModal({
           )}
         </div>
 
+        {submitError && (
+          <div
+            className="mx-4 mb-2 mt-1 rounded border border-red-500/40 bg-red-500/10 p-3 text-[11px] text-red-300"
+            role="alert"
+            data-testid="install-error"
+          >
+            <div className="font-semibold text-red-200">Install failed</div>
+            <div className="mt-1 whitespace-pre-wrap break-words">
+              {submitError.message}
+            </div>
+            {submitError.errors && submitError.errors.length > 0 && (
+              <ul className="mt-2 list-disc pl-4 space-y-0.5">
+                {submitError.errors.slice(0, 8).map((err, i) => (
+                  <li key={i}>
+                    <span className="font-mono text-red-200">
+                      {Array.isArray(err.path) && err.path.length > 0
+                        ? err.path.join('.')
+                        : '<root>'}
+                    </span>
+                    {' — '}
+                    {err.message ?? 'validation error'}
+                  </li>
+                ))}
+                {submitError.errors.length > 8 && (
+                  <li className="text-red-400/70">
+                    + {submitError.errors.length - 8} more
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-2 p-4 border-t border-[var(--border)]">
           <button className="btn" onClick={onClose} disabled={submitting}>
             Cancel

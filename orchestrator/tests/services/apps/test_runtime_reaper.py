@@ -48,7 +48,6 @@ from app.models_automations import (
 )
 from app.services.apps.runtime_reaper import ReapResult, reap_idle_runtimes
 
-
 # ---------------------------------------------------------------------------
 # Fake K8s client — records every call so tests can assert exactly what
 # the reaper drove on the cluster.
@@ -56,19 +55,17 @@ from app.services.apps.runtime_reaper import ReapResult, reap_idle_runtimes
 
 
 class _FakeAppsV1:
-    def __init__(self, parent: "FakeK8sClient") -> None:
+    def __init__(self, parent: FakeK8sClient) -> None:
         self._parent = parent
 
     def patch_namespaced_deployment_scale(
         self, *, name: str, namespace: str, body: dict[str, Any]
     ) -> None:
-        self._parent.scale_calls.append(
-            {"name": name, "namespace": namespace, "body": body}
-        )
+        self._parent.scale_calls.append({"name": name, "namespace": namespace, "body": body})
 
 
 class _FakeCoreV1:
-    def __init__(self, parent: "FakeK8sClient") -> None:
+    def __init__(self, parent: FakeK8sClient) -> None:
         self._parent = parent
 
     def list_namespaced_pod(self, *, namespace: str, label_selector: str) -> Any:

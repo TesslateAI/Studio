@@ -713,6 +713,8 @@ async def get_marketplace_agents(
     - Authenticated: Shows purchase status (is_purchased) for each item
     - Unauthenticated: Shows catalog without purchase status
     """
+    from ..services.default_agent import SYSTEM_DEFAULT_AGENT_ID
+
     source_id_filter = await _resolve_source_filter(db, source)
 
     # Base query - show official agents AND published community agents (exclude skills/subagents)
@@ -728,6 +730,13 @@ async def get_marketplace_agents(
             ),
             (MarketplaceAgent.forked_by_user_id.is_(None))
             | (MarketplaceAgent.is_published.is_(True)),
+            # System default pseudo-row (services.default_agent) is platform
+            # infrastructure backing the code-resident default — it satisfies
+            # FKs from user_purchased_agents / messages / etc., but it must
+            # never appear in the marketplace catalog browse. Users see the
+            # system default exclusively via /my-agents, which injects it
+            # from code with the proper presentation dict.
+            MarketplaceAgent.id != SYSTEM_DEFAULT_AGENT_ID,
         )
     )
 
@@ -2128,7 +2137,27 @@ async def get_user_agents(
 ):
     """
     Get all agents in the user's library.
+
+    Response composition:
+      1. The **system default agent** is ALWAYS prepended (pinned to the top).
+         Its identity + config come from ``services.default_agent`` (code),
+         not from this DB row's catalog columns. The per-user override row
+         in ``user_purchased_agents`` (if any) supplies ``is_enabled`` and
+         ``selected_model``; otherwise the defaults from
+         ``get_system_default_listing_dict()`` apply.
+      2. Everything else in the user's ``user_purchased_agents`` library
+         (real catalog purchases, forks, helper agents from the boot
+         seeder) follows, ordered by ``purchase_date`` desc.
+
+    The system default's per-user override row is filtered out of the
+    main JOIN so it doesn't double-render — it's handled by the dedicated
+    branch below.
     """
+    from ..services.default_agent import (
+        SYSTEM_DEFAULT_AGENT_ID,
+        get_system_default_listing_dict,
+    )
+
     # Resolve active team for ownership scoping
     team_id = current_user.default_team_id
     ownership_filter = (
@@ -2137,7 +2166,10 @@ async def get_user_agents(
         else UserPurchasedAgent.user_id == current_user.id
     )
 
-    # Query user's purchased agents (all agents in library, regardless of enabled/disabled status)
+    # Query user's purchased agents (all agents in library, regardless of enabled/disabled status).
+    # Exclude the system default sentinel — it gets dedicated handling
+    # below so the listing dict comes from code, not from the DB row's
+    # (intentionally minimal) catalog columns.
     result = await db.execute(
         select(MarketplaceAgent, UserPurchasedAgent)
         .join(UserPurchasedAgent, UserPurchasedAgent.agent_id == MarketplaceAgent.id)
@@ -2147,12 +2179,31 @@ async def get_user_agents(
                 ["skill", "subagent", "mcp_server", "deployment_target"]
             ),
             MarketplaceAgent.is_system.isnot(True),
+            MarketplaceAgent.id != SYSTEM_DEFAULT_AGENT_ID,
         )
         .options(selectinload(MarketplaceAgent.forked_by_user))
         .order_by(UserPurchasedAgent.purchase_date.desc())
     )
 
     agents_data = result.fetchall()
+
+    # Fetch the per-user override row for the system default (if any).
+    # Lazy-created by toggle/select-model when the user customizes; absent
+    # for every fresh user.
+    sys_default_override_row = (
+        (
+            await db.execute(
+                select(UserPurchasedAgent)
+                .where(
+                    ownership_filter,
+                    UserPurchasedAgent.agent_id == SYSTEM_DEFAULT_AGENT_ID,
+                )
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
 
     source_rows = await _bulk_load_sources(
         db, {a.source_id for a, _ in agents_data if a.source_id is not None}
@@ -2208,6 +2259,24 @@ async def get_user_agents(
             }
         )
 
+    # Prepend the system default agent. Always present in every user's
+    # library; its config comes from code (services.default_agent), the
+    # override row (if any) supplies is_enabled and selected_model.
+    sys_default_dict = get_system_default_listing_dict(
+        is_enabled=(
+            sys_default_override_row.is_active if sys_default_override_row is not None else True
+        ),
+        selected_model=(
+            sys_default_override_row.selected_model
+            if sys_default_override_row is not None
+            else None
+        ),
+        purchase_date=(
+            sys_default_override_row.purchase_date if sys_default_override_row is not None else None
+        ),
+    )
+    response.insert(0, sys_default_dict)
+
     return {"agents": response}
 
 
@@ -2220,7 +2289,15 @@ async def toggle_agent(
 ):
     """
     Toggle an agent enabled/disabled in user's library.
+
+    For the **system default agent** (sentinel ID from
+    ``services.default_agent``), the per-user override row is lazy-created
+    on first toggle — the user has no DB row for the default until they
+    explicitly customize it. After lazy-create, subsequent toggles update
+    the same row.
     """
+    from ..services.default_agent import SYSTEM_DEFAULT_AGENT_ID, is_system_default
+
     # Find ALL purchase rows for this (user, agent) pair — a user can have
     # one row per team they belong to, and the toggle should affect every
     # team-scoped copy uniformly. Returning the first and ignoring siblings
@@ -2233,6 +2310,24 @@ async def toggle_agent(
     purchases = result.scalars().all()
 
     if not purchases:
+        # System default: lazy-create the override row. Every other agent
+        # genuinely requires a prior install — return 404 for those.
+        if is_system_default(agent_id):
+            new_row = UserPurchasedAgent(
+                user_id=current_user.id,
+                team_id=current_user.default_team_id,
+                agent_id=SYSTEM_DEFAULT_AGENT_ID,
+                purchase_type="system_default",
+                is_active=enabled,
+            )
+            db.add(new_row)
+            await db.commit()
+            return {
+                "message": f"Agent {'enabled' if enabled else 'disabled'} successfully",
+                "agent_id": agent_id,
+                "enabled": enabled,
+                "success": True,
+            }
         raise HTTPException(status_code=404, detail="Agent not in your library")
 
     for purchase in purchases:
@@ -2607,6 +2702,27 @@ async def select_agent_model(
     purchase = result.scalar_one_or_none()
 
     if not purchase:
+        # System default: lazy-create the override row carrying the model
+        # selection. For every other agent, no row = no install = 404.
+        from ..services.default_agent import SYSTEM_DEFAULT_AGENT_ID, is_system_default
+
+        if is_system_default(agent_id):
+            new_row = UserPurchasedAgent(
+                user_id=current_user.id,
+                team_id=current_user.default_team_id,
+                agent_id=SYSTEM_DEFAULT_AGENT_ID,
+                purchase_type="system_default",
+                is_active=True,
+                selected_model=model,
+            )
+            db.add(new_row)
+            await db.commit()
+            return {
+                "message": "Model selection updated successfully",
+                "agent_id": agent_id,
+                "selected_model": model,
+                "success": True,
+            }
         raise HTTPException(status_code=404, detail="Agent not in your library")
 
     # Update selected model

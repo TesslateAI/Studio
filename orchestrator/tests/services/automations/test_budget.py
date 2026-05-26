@@ -17,6 +17,7 @@ calls and returns deterministic key ids.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import uuid
 from collections import defaultdict
@@ -31,7 +32,6 @@ from alembic.config import Config
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration fixture (same shape as test_dispatcher.py).
 # ---------------------------------------------------------------------------
@@ -40,9 +40,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -88,7 +86,7 @@ def session_maker(migrated_sqlite: str):
 
 
 class _FakePubSub:
-    def __init__(self, owner: "_FakeRedis") -> None:
+    def __init__(self, owner: _FakeRedis) -> None:
         self._owner = owner
         self._channel: str | None = None
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -114,9 +112,7 @@ class _FakePubSub:
             yield msg
 
     async def deliver(self, payload: str) -> None:
-        await self._queue.put(
-            {"type": "message", "channel": self._channel, "data": payload}
-        )
+        await self._queue.put({"type": "message", "channel": self._channel, "data": payload})
 
 
 class _FakeRedis:
@@ -434,7 +430,7 @@ def test_deallocate_refunds_unused_and_revokes_key(session_maker) -> None:
 
     allocation = asyncio.run(go())
     # Refund of 0.40 (0.50 cap - 0.10 actual). Daily now 0.90.
-    from app.services.automations.budget import _MICRO_PER_USD, _R_DAILY_KEY  # type: ignore
+    from app.services.automations.budget import _MICRO_PER_USD  # type: ignore
 
     # Find the automation's daily key in the fake redis.
     daily_keys = [k for k in redis._kv if k.startswith("tesslate:budget:daily:")]
@@ -470,9 +466,7 @@ def test_request_budget_extension_deduplicates_concurrent_callers(
         # resolution publish after a short delay so the awaiter wakes.
         async def _publish_later():
             await asyncio.sleep(0.05)
-            await publish_extension_resolution(
-                run_id=run_id, approved=True, redis_client=redis
-            )
+            await publish_extension_resolution(run_id=run_id, approved=True, redis_client=redis)
 
         publish_task = asyncio.create_task(_publish_later())
         second = await request_budget_extension(
@@ -615,7 +609,7 @@ def test_parent_overflow_refunds_child_debit(session_maker) -> None:
             await db.commit()
 
         async with session_maker() as db:
-            try:
+            with contextlib.suppress(DailyBudgetExceeded):  # expected
                 await allocate_run_budget(
                     db,
                     run_id=uuid.uuid4(),
@@ -629,8 +623,6 @@ def test_parent_overflow_refunds_child_debit(session_maker) -> None:
                     redis_client=redis,
                     delegate=delegate,
                 )
-            except DailyBudgetExceeded:
-                pass  # expected
         return parent_id, child_id
 
     parent_id, child_id = asyncio.run(go())
@@ -658,9 +650,7 @@ def test_no_daily_cap_returns_infinite_remaining(session_maker) -> None:
     async def go():
         async with session_maker() as db:
             user_id = await _seed_user(db)
-            automation_id = await _seed_automation(
-                db, owner_user_id=user_id, max_per_day=None
-            )
+            automation_id = await _seed_automation(db, owner_user_id=user_id, max_per_day=None)
             await db.commit()
 
         async with session_maker() as db:

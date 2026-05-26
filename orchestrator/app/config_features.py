@@ -26,12 +26,14 @@ import os
 from functools import lru_cache
 from typing import Literal
 
-SchemaVersion = Literal["2025-01", "2025-02", "2026-05"]
+SchemaVersion = Literal["2025-01", "2025-02", "2026-05", "2026-06"]
 
-# 2026-05 is the canonical post-Phase-1 manifest. Older versions stay
-# accepted so old AppVersion rows don't suddenly fail compatibility
-# (we don't republish historical bundles).
-MANIFEST_SCHEMA_SUPPORTED: list[SchemaVersion] = ["2025-01", "2025-02", "2026-05"]
+# 2026-05 is the action-shape manifest (App Runtime Contract).
+# 2026-06 is the container-shape manifest (additive over 2025-02 with
+# compute.credentials[], compute.containers[].readiness_port,
+# state.mount_path). Older versions stay accepted so old AppVersion rows
+# don't suddenly fail compatibility (we don't republish historical bundles).
+MANIFEST_SCHEMA_SUPPORTED: list[SchemaVersion] = ["2025-01", "2025-02", "2026-05", "2026-06"]
 RUNTIME_API_SUPPORTED: list[str] = ["1.0"]
 
 

@@ -18,10 +18,10 @@ a real database. K8s + httpx are mocked.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import httpx
@@ -34,7 +34,6 @@ from app.services.apps.action_dispatcher import (
     ActionHandlerNotSupported,
     dispatch_app_action,
 )
-
 
 # ---------------------------------------------------------------------------
 # Scripted AsyncSession — duplicated from tests/apps/test_action_dispatcher
@@ -96,16 +95,18 @@ class FakeDb:
 
 
 def _mk_instance(*, project_id=None, runtime_deployment_id=None) -> MagicMock:
-    inst = MagicMock(spec_set=[
-        "id",
-        "app_id",
-        "app_version_id",
-        "installer_user_id",
-        "project_id",
-        "primary_container_id",
-        "wallet_mix",
-        "runtime_deployment_id",
-    ])
+    inst = MagicMock(
+        spec_set=[
+            "id",
+            "app_id",
+            "app_version_id",
+            "installer_user_id",
+            "project_id",
+            "primary_container_id",
+            "wallet_mix",
+            "runtime_deployment_id",
+        ]
+    )
     inst.id = uuid4()
     inst.app_id = uuid4()
     inst.app_version_id = uuid4()
@@ -143,9 +144,7 @@ def _mk_action(
 def _mk_version(*, tenancy: str | None = None) -> MagicMock:
     version = MagicMock()
     version.id = uuid4()
-    version.manifest_json = (
-        {"runtime": {"tenancy_model": tenancy}} if tenancy else {}
-    )
+    version.manifest_json = {"runtime": {"tenancy_model": tenancy}} if tenancy else {}
     return version
 
 
@@ -238,9 +237,7 @@ async def test_shared_singleton_signs_user_header_and_routes_to_shared_url(
     * Surfaces the JSON response as the typed output.
     """
     instance = _mk_instance()
-    action = _mk_action(
-        handler={"kind": "http_post", "container": "api", "path": "/handle"}
-    )
+    action = _mk_action(handler={"kind": "http_post", "container": "api", "path": "/handle"})
     version = _mk_version(tenancy="shared_singleton")
     shared_project = _mk_project(slug="shared-app")
     container = _mk_container(name="api", directory="api")
@@ -253,10 +250,10 @@ async def test_shared_singleton_signs_user_header_and_routes_to_shared_url(
 
     db = FakeDb(
         results=[
-            _Result(scalar=instance),    # _load_app_instance
-            _Result(scalar=action),      # _load_app_action
+            _Result(scalar=instance),  # _load_app_instance
+            _Result(scalar=action),  # _load_app_action
             _Result(scalar=deployment),  # _load_shared_singleton_deployment
-            _Result(scalar=container),   # container lookup by name
+            _Result(scalar=container),  # container lookup by name
         ],
         objects={
             (action_dispatcher.AppVersion, instance.app_version_id): version,
@@ -335,9 +332,7 @@ async def test_shared_singleton_attribution_uses_installer_user_id(
     ``installer_user_id=instance.installer_user_id`` to billing.
     """
     instance = _mk_instance()
-    action = _mk_action(
-        handler={"kind": "http_post", "container": "api", "path": "/x"}
-    )
+    action = _mk_action(handler={"kind": "http_post", "container": "api", "path": "/x"})
     version = _mk_version(tenancy="shared_singleton")
     shared_project = _mk_project()
     container = _mk_container()
@@ -434,9 +429,7 @@ async def test_per_invocation_runs_k8s_job_with_input_env_var(monkeypatch) -> No
             self.core_v1.list_namespaced_pod = MagicMock(
                 return_value=MagicMock(items=[MagicMock(metadata=MagicMock(name="pod-1"))])
             )
-            self.core_v1.read_namespaced_pod_log = MagicMock(
-                return_value='{"answer": 42}'
-            )
+            self.core_v1.read_namespaced_pod_log = MagicMock(return_value='{"answer": 42}')
 
         async def create_job(self, namespace, job):
             submitted["namespace"] = namespace
@@ -479,9 +472,7 @@ async def test_per_invocation_rejected_in_docker_mode(monkeypatch) -> None:
     sees the typed error instead of a silent fallback.
     """
     instance = _mk_instance()
-    action = _mk_action(
-        handler={"kind": "k8s_job", "image": "x", "command": "echo hi"}
-    )
+    action = _mk_action(handler={"kind": "k8s_job", "image": "x", "command": "echo hi"})
     version = _mk_version(tenancy="per_invocation")
 
     db = FakeDb(
@@ -511,9 +502,7 @@ async def test_per_invocation_failed_job_raises_dispatch_failed(monkeypatch) -> 
     the tail of the Pod log in the error body for debugging.
     """
     instance = _mk_instance()
-    action = _mk_action(
-        handler={"kind": "k8s_job", "image": "x", "command": "false"}
-    )
+    action = _mk_action(handler={"kind": "k8s_job", "image": "x", "command": "false"})
     version = _mk_version(tenancy="per_invocation")
 
     db = FakeDb(
@@ -532,9 +521,7 @@ async def test_per_invocation_failed_job_raises_dispatch_failed(monkeypatch) -> 
             self.core_v1.list_namespaced_pod = MagicMock(
                 return_value=MagicMock(items=[MagicMock(metadata=MagicMock(name="p"))])
             )
-            self.core_v1.read_namespaced_pod_log = MagicMock(
-                return_value="ERROR: bad input"
-            )
+            self.core_v1.read_namespaced_pod_log = MagicMock(return_value="ERROR: bad input")
 
         async def create_job(self, namespace, job):
             return job

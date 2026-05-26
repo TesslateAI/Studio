@@ -37,16 +37,18 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..models import (
     AgentMcpAssignment,
     AgentSkillAssignment,
@@ -66,6 +68,8 @@ from ..models import (
 # Try to import AppInstance — it lives in models_automations.py, not models.py.
 from ..models_automations import AppInstance
 from .credential_manager import safe_decrypt_token
+from .hub_client import HubClient
+from .marketplace_bundle_materializer import BundleMaterializeError, materialize_bundle_into_hub
 from .marketplace_client import (
     LOCAL_URL_PREFIX,
     NOT_MODIFIED,
@@ -127,7 +131,10 @@ _UPSERT_PREFETCH_PARALLELISM: Final[int] = 8
 # manifest hit on every 5-minute sync tick — capabilities/policies change on
 # the order of hours/days, not minutes.
 _MANIFEST_REFRESH_INTERVAL_S: Final[float] = 3600.0  # 1h
-_manifest_refresh_at: dict[UUID, float] = {}
+
+# Fallback manifest schema version for federated AppVersion rows where the
+# upstream omits both manifest_schema_version and compatibility.manifest_schema.
+_DEFAULT_MANIFEST_SCHEMA_VERSION: Final[str] = "2025-02"
 
 
 def _utcnow() -> datetime:
@@ -145,9 +152,54 @@ def _stable_manifest_hash(manifest: dict[str, Any]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-# Type alias for the factories the worker accepts (testable injection).
-SessionFactory = Callable[[], Awaitable[AsyncSession]]
+# Top-level keys that federated marketplaces (including our own seed
+# publisher) may surface for scoring purposes, but which the orchestrator's
+# manifest schemas (2025-01 / 2025-02 / 2026-05 / 2026-06) reject because
+# every schema declares ``additionalProperties: false`` at the root. The
+# canonical homes are nested:
+#   * forkable           → ``app.forkable``
+#   * required_features  → ``compatibility.required_features``
+# ``source_visibility`` is special: the 2025-01 / 2025-02 / 2026-06 schemas
+# declare a top-level ``source_visibility`` of type ``object``. The scoring
+# overlay writes it as the string ``"public"``. We strip only the string
+# form so a properly-shaped object survives.
+_SCORING_OVERLAY_ROOT_KEYS: Final[tuple[str, ...]] = (
+    "forkable",
+    "required_features",
+)
+
+
+def _sanitize_manifest_for_persistence(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Strip top-level scoring-overlay keys before persisting ``manifest_json``.
+
+    Federated marketplace publishers may decorate the manifest with
+    top-level keys (``forkable``, ``required_features``, scalar
+    ``source_visibility``) so the marketplace's score function can read
+    them cheaply. The orchestrator's manifest validator rejects those
+    extras at install time, so leaving them in ``app_versions.manifest_json``
+    makes the version uninstallable. We sanitize at the sync boundary —
+    the orchestrator's local copy of the manifest is for its own
+    consumption (install + projection), not a cryptographic mirror of
+    what the marketplace stores. Bundle integrity is enforced by
+    ``bundle_hash`` against the Volume Hub CAS; ``manifest_hash`` is
+    re-derived from this sanitized copy.
+
+    Idempotent: a manifest that's already clean is returned as a
+    shallow-copied dict so callers can mutate freely without aliasing.
+    """
+    cleaned = dict(manifest)
+    for key in _SCORING_OVERLAY_ROOT_KEYS:
+        cleaned.pop(key, None)
+    sv = cleaned.get("source_visibility")
+    if isinstance(sv, str):
+        cleaned.pop("source_visibility", None)
+    return cleaned
+
+
+# Type aliases for the factories the worker accepts (testable injection).
+SessionFactory = Callable[[], AsyncSession]
 ClientFactory = Callable[[MarketplaceSource, str | None], MarketplaceClient]
+HubClientFactory = Callable[[str], HubClient]
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +218,11 @@ def default_client_factory(
     )
 
 
+def default_hub_client_factory(address: str) -> HubClient:
+    """Construct a :class:`HubClient` from a Volume Hub gRPC address."""
+    return HubClient(address)
+
+
 # ---------------------------------------------------------------------------
 # Worker
 # ---------------------------------------------------------------------------
@@ -182,9 +239,16 @@ class MarketplaceSyncWorker:
         self,
         db_session_factory: Callable[[], AsyncSession],
         marketplace_client_factory: ClientFactory = default_client_factory,
+        hub_client_factory: HubClientFactory | None = None,
     ) -> None:
         self._db_session_factory = db_session_factory
         self._client_factory = marketplace_client_factory
+        self._hub_client_factory: HubClientFactory = (
+            hub_client_factory or default_hub_client_factory
+        )
+        # Per-instance cache: avoids sharing monotonic timestamps across worker
+        # instances (e.g. test isolation) and avoids the process-global dict.
+        self._manifest_refresh_at: dict[UUID, float] = {}
 
     # ------------------------------------------------------------------
     # Top-level entry points
@@ -303,7 +367,7 @@ class MarketplaceSyncWorker:
                 )
                 if not yanks_only and must_refresh_manifest:
                     await self._refresh_manifest(session, source, client)
-                    _manifest_refresh_at[source.id] = time.monotonic()
+                    self._manifest_refresh_at[source.id] = time.monotonic()
 
                 # Step 2 — changes feed (or yanks-only feed).
                 next_etag = await self._drain_changes(
@@ -334,7 +398,15 @@ class MarketplaceSyncWorker:
                     )[:1000]
                 else:
                     error_text = str(exc)[:1000]
-                logger.warning("marketplace_sync: source %s failed: %s", handle, error_text)
+                # Transport failures (DNS, connect, timeout) are routine when
+                # offline or before initial pairing — log at INFO so the
+                # desktop tray doesn't surface them as scary warnings.
+                # Semantic failures (auth, malformed, hub-id drift) stay at
+                # WARNING because the user needs to act on them.
+                cause = getattr(exc, "__cause__", None)
+                is_transport = isinstance(cause, (httpx.TransportError, httpx.TimeoutException))
+                log_at = logger.info if is_transport and not is_hub_id_drift else logger.warning
+                log_at("marketplace_sync: source %s failed: %s", handle, error_text)
                 # Roll back any partial changes from this batch.
                 await session.rollback()
                 # Re-fetch source for a clean update tx.
@@ -372,7 +444,7 @@ class MarketplaceSyncWorker:
         )
 
     def _manifest_refresh_due(self, source_id: UUID) -> bool:
-        last = _manifest_refresh_at.get(source_id)
+        last = self._manifest_refresh_at.get(source_id)
         return last is None or (time.monotonic() - last) >= _MANIFEST_REFRESH_INTERVAL_S
 
     async def _refresh_manifest(
@@ -744,6 +816,49 @@ class MarketplaceSyncWorker:
             return legacy
         return None
 
+    # ------------------------------------------------------------------
+    # Pricing + provenance field helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_pricing(
+        item: JsonObject,
+        trust_level: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Extract raw pricing from item and derive the effective (trust-gated) pricing.
+
+        Returns ``(pricing_raw, effective)`` where ``effective`` is the dict
+        returned by :meth:`_derive_effective_pricing`.
+        """
+        pricing: dict[str, Any] = (
+            item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
+        )
+        is_trusted = trust_level in _TRUSTED_PRICING_LEVELS
+        effective = MarketplaceSyncWorker._derive_effective_pricing(pricing, is_trusted)
+        return pricing, effective
+
+    @staticmethod
+    def _build_source_provenance_fields(
+        source: MarketplaceSource,
+        item: JsonObject,
+        slug: str,
+        etag: Any,
+        pricing: dict[str, Any],
+        effective: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the source-provenance sub-dict common to every catalog row upsert."""
+        return {
+            "source_id": source.id,
+            "source_etag": str(etag) if etag is not None else None,
+            "source_remote_id": str(item.get("id") or item.get("remote_id") or slug),
+            "source_pricing_type_original": pricing.get("pricing_type") if pricing else None,
+            "source_pricing_payload_original": pricing or None,
+            "source_pricing_ignored": effective["stripped"],
+            "source_pricing_stripped_at": _utcnow() if effective["stripped"] else None,
+            "deleted_upstream": False,
+            "deleted_upstream_at": None,
+        }
+
     async def _upsert_marketplace_agent(
         self,
         session: AsyncSession,
@@ -755,18 +870,10 @@ class MarketplaceSyncWorker:
     ) -> None:
         existing = await self._existing_row(session, MarketplaceAgent, source, slug)
 
-        # Pricing handling: trusted sources get the original; untrusted/private
-        # are stripped to free with provenance preserved.
-        pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
-        is_trusted = source.trust_level in _TRUSTED_PRICING_LEVELS
-        effective = self._derive_effective_pricing(pricing, is_trusted)
-
+        pricing, effective = self._resolve_pricing(item, source.trust_level)
         manifest = self._extract_version_manifest(item)
-        item_type = "agent"
-        if kind == "skill":
-            item_type = "skill"
-        elif kind == "mcp_server":
-            item_type = "mcp_server"
+        # kind is already validated as agent | skill | mcp_server by _upsert_row.
+        item_type = kind
 
         common_fields: dict[str, Any] = {
             "name": item.get("name") or slug,
@@ -790,15 +897,7 @@ class MarketplaceSyncWorker:
             "pricing_type": effective["pricing_type"],
             "price": effective["price_cents"],
             "stripe_price_id": effective["stripe_price_id"],
-            "source_id": source.id,
-            "source_etag": str(etag) if etag is not None else None,
-            "source_remote_id": str(item.get("id") or item.get("remote_id") or slug),
-            "source_pricing_type_original": pricing.get("pricing_type") if pricing else None,
-            "source_pricing_payload_original": pricing or None,
-            "source_pricing_ignored": effective["stripped"],
-            "source_pricing_stripped_at": _utcnow() if effective["stripped"] else None,
-            "deleted_upstream": False,
-            "deleted_upstream_at": None,
+            **self._build_source_provenance_fields(source, item, slug, etag, pricing, effective),
         }
 
         # Skill body (item_type='skill') ships in extra_metadata or manifest.
@@ -845,9 +944,7 @@ class MarketplaceSyncWorker:
         etag: Any,
     ) -> None:
         existing = await self._existing_row(session, MarketplaceBase, source, slug)
-        pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
-        is_trusted = source.trust_level in _TRUSTED_PRICING_LEVELS
-        effective = self._derive_effective_pricing(pricing, is_trusted)
+        pricing, effective = self._resolve_pricing(item, source.trust_level)
 
         fields: dict[str, Any] = {
             "name": item.get("name") or slug,
@@ -869,15 +966,7 @@ class MarketplaceSyncWorker:
             "pricing_type": effective["pricing_type"],
             "price": effective["price_cents"],
             "stripe_price_id": effective["stripe_price_id"],
-            "source_id": source.id,
-            "source_etag": str(etag) if etag is not None else None,
-            "source_remote_id": str(item.get("id") or item.get("remote_id") or slug),
-            "source_pricing_type_original": pricing.get("pricing_type") if pricing else None,
-            "source_pricing_payload_original": pricing or None,
-            "source_pricing_ignored": effective["stripped"],
-            "source_pricing_stripped_at": _utcnow() if effective["stripped"] else None,
-            "deleted_upstream": False,
-            "deleted_upstream_at": None,
+            **self._build_source_provenance_fields(source, item, slug, etag, pricing, effective),
         }
         if existing is None:
             session.add(MarketplaceBase(**fields))
@@ -895,9 +984,7 @@ class MarketplaceSyncWorker:
         etag: Any,
     ) -> None:
         existing = await self._existing_row(session, MarketplaceApp, source, slug)
-        pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
-        is_trusted = source.trust_level in _TRUSTED_PRICING_LEVELS
-        effective = self._derive_effective_pricing(pricing, is_trusted)
+        pricing, effective = self._resolve_pricing(item, source.trust_level)
 
         fields: dict[str, Any] = {
             "slug": slug,
@@ -905,15 +992,7 @@ class MarketplaceSyncWorker:
             "description": item.get("description"),
             "category": item.get("category"),
             "icon_ref": item.get("icon"),
-            "source_id": source.id,
-            "source_etag": str(etag) if etag is not None else None,
-            "source_remote_id": str(item.get("id") or item.get("remote_id") or slug),
-            "source_pricing_type_original": pricing.get("pricing_type") if pricing else None,
-            "source_pricing_payload_original": pricing or None,
-            "source_pricing_ignored": effective["stripped"],
-            "source_pricing_stripped_at": _utcnow() if effective["stripped"] else None,
-            "deleted_upstream": False,
-            "deleted_upstream_at": None,
+            **self._build_source_provenance_fields(source, item, slug, etag, pricing, effective),
         }
         if existing is None:
             # Apps require visibility/state defaults — set them explicitly.
@@ -926,6 +1005,9 @@ class MarketplaceSyncWorker:
         else:
             for k, v in fields.items():
                 setattr(existing, k, v)
+            # Restore state when a previously-deprecated app re-appears on the hub.
+            if existing.state == "deprecated":
+                existing.state = "approved"
             app_row = existing
 
         # Mirror AppVersion rows so the install dialog has a target. The
@@ -1066,19 +1148,10 @@ class MarketplaceSyncWorker:
                     bundle_url = envelope.get("url")
                     if isinstance(bundle_url, str) and bundle_url:
                         # Materialise into Hub-CAS so install_app finds
-                        # the bundle. The hub_client is constructed lazily
-                        # to avoid wiring it through every sync entry-
-                        # point — we only need it on the first publish of
-                        # each (slug, version) pair.
-                        from ..config import get_settings
-                        from .hub_client import HubClient
-                        from .marketplace_bundle_materializer import (
-                            BundleMaterializeError,
-                            materialize_bundle_into_hub,
-                        )
-
+                        # the bundle. Created once per (slug, version) pair;
+                        # closed in the finally below.
                         settings = get_settings()
-                        hub_client = HubClient(settings.volume_hub_address)
+                        hub_client = self._hub_client_factory(settings.volume_hub_address)
                         try:
                             bundle_hash = await materialize_bundle_into_hub(
                                 bundle_url=bundle_url,
@@ -1099,16 +1172,26 @@ class MarketplaceSyncWorker:
                         finally:
                             await hub_client.close()
 
-            manifest_hash = _stable_manifest_hash(manifest)
+            # Read required_features BEFORE sanitizing so we still capture
+            # the value from upstream's scoring overlay if that's the only
+            # place it appears. Fall back to compatibility.required_features
+            # (the canonical home declared by 2025-01 / 2025-02 / 2026-06).
             required_features = manifest.get("required_features")
             if not isinstance(required_features, list):
-                required_features = []
+                compat = manifest.get("compatibility")
+                nested = compat.get("required_features") if isinstance(compat, dict) else None
+                required_features = nested if isinstance(nested, list) else []
+
+            # Strip scoring-overlay roots before persisting + hashing so
+            # ``manifest_json`` validates against the orchestrator's schema
+            # at install time. See ``_sanitize_manifest_for_persistence``.
+            manifest = _sanitize_manifest_for_persistence(manifest)
+            manifest_hash = _stable_manifest_hash(manifest)
             schema_version = (
                 manifest.get("manifest_schema_version")
-                or manifest.get("compatibility", {}).get("manifest_schema")
-                if isinstance(manifest.get("compatibility"), dict)
-                else None
-            ) or "2025-02"
+                or (manifest.get("compatibility") or {}).get("manifest_schema")
+                or _DEFAULT_MANIFEST_SCHEMA_VERSION
+            )
 
             if existing_av is None:
                 session.add(
@@ -1151,9 +1234,7 @@ class MarketplaceSyncWorker:
         etag: Any,
     ) -> None:
         existing = await self._existing_row(session, Theme, source, slug)
-        pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
-        is_trusted = source.trust_level in _TRUSTED_PRICING_LEVELS
-        effective = self._derive_effective_pricing(pricing, is_trusted)
+        pricing, effective = self._resolve_pricing(item, source.trust_level)
         manifest = self._extract_version_manifest(item)
         theme_json = (
             (manifest.get("theme_json") if isinstance(manifest, dict) else None)
@@ -1188,15 +1269,7 @@ class MarketplaceSyncWorker:
             "pricing_type": effective["pricing_type"],
             "price": effective["price_cents"],
             "stripe_price_id": effective["stripe_price_id"],
-            "source_id": source.id,
-            "source_etag": str(etag) if etag is not None else None,
-            "source_remote_id": str(item.get("id") or item.get("remote_id") or slug),
-            "source_pricing_type_original": pricing.get("pricing_type") if pricing else None,
-            "source_pricing_payload_original": pricing or None,
-            "source_pricing_ignored": effective["stripped"],
-            "source_pricing_stripped_at": _utcnow() if effective["stripped"] else None,
-            "deleted_upstream": False,
-            "deleted_upstream_at": None,
+            **self._build_source_provenance_fields(source, item, slug, etag, pricing, effective),
         }
         # Default mode if upstream truly omitted it.
         if not fields["mode"]:
@@ -1216,9 +1289,7 @@ class MarketplaceSyncWorker:
         etag: Any,
     ) -> None:
         existing = await self._existing_row(session, WorkflowTemplate, source, slug)
-        pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
-        is_trusted = source.trust_level in _TRUSTED_PRICING_LEVELS
-        effective = self._derive_effective_pricing(pricing, is_trusted)
+        pricing, effective = self._resolve_pricing(item, source.trust_level)
         manifest = self._extract_version_manifest(item)
         template_definition = (
             (manifest or {}).get("template_definition") if isinstance(manifest, dict) else None
@@ -1247,15 +1318,7 @@ class MarketplaceSyncWorker:
             "pricing_type": effective["pricing_type"],
             "price": effective["price_cents"],
             "stripe_price_id": effective["stripe_price_id"],
-            "source_id": source.id,
-            "source_etag": str(etag) if etag is not None else None,
-            "source_remote_id": str(item.get("id") or item.get("remote_id") or slug),
-            "source_pricing_type_original": pricing.get("pricing_type") if pricing else None,
-            "source_pricing_payload_original": pricing or None,
-            "source_pricing_ignored": effective["stripped"],
-            "source_pricing_stripped_at": _utcnow() if effective["stripped"] else None,
-            "deleted_upstream": False,
-            "deleted_upstream_at": None,
+            **self._build_source_provenance_fields(source, item, slug, etag, pricing, effective),
         }
         if existing is None:
             session.add(WorkflowTemplate(**fields))
@@ -1354,9 +1417,10 @@ class MarketplaceSyncWorker:
             v = res.scalars().first()
             if v is None:
                 return False
-            v.yanked_upstream_at = _utcnow()
+            now = _utcnow()
+            v.yanked_upstream_at = now
             v.approval_state = "yanked"
-            v.yanked_at = _utcnow()
+            v.yanked_at = now
             v.yanked_reason = (
                 payload.get("reason") if isinstance(payload, dict) else None
             ) or "upstream yank"
@@ -1679,10 +1743,12 @@ def register_desktop_periodic(loop: asyncio.AbstractEventLoop) -> asyncio.Event:
 
 __all__ = [
     "ClientFactory",
+    "HubClientFactory",
     "MarketplaceSyncWorker",
     "SessionFactory",
     "SyncResult",
     "default_client_factory",
+    "default_hub_client_factory",
     "marketplace_sync_periodic_cron",
     "marketplace_yanks_fast_cron",
     "register_desktop_periodic",

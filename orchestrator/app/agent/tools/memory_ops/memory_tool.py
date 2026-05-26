@@ -24,7 +24,7 @@ Concurrency
 -----------
 All disk I/O is routed through ``asyncio.to_thread`` so that the event
 loop is never blocked on filesystem operations. Writes take an exclusive
-``fcntl.flock`` on the target file; reads take a shared lock. Writes are
+an advisory lock on the target file; reads take a shared lock. Writes are
 additionally atomic: content is first written to a sibling tempfile and
 then renamed into place with ``os.replace`` so that a crash mid-write can
 never leave the memory file in a partially written state.
@@ -34,14 +34,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fcntl
 import logging
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
+from ....utils.file_lock import lock_exclusive, lock_shared, unlock
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 
@@ -193,20 +194,27 @@ def _normalize_body(body: str) -> str:
 
 
 class _LockedFile:
-    """Context manager holding an fcntl lock on an open file object."""
+    """Context manager holding an advisory lock on an open file object."""
 
-    def __init__(self, path: Path, mode: str, lock_op: int):
+    def __init__(self, path: Path, mode: str, shared: bool):
         self._path = path
         self._mode = mode
-        self._lock_op = lock_op
+        self._shared = shared
         self._fh = None
 
     def __enter__(self):
-        # "x" (exclusive create) is not a real concept here — callers use
-        # "r", "r+", "w" or "a".
-        self._fh = open(self._path, self._mode, encoding="utf-8")
+        # Windows' msvcrt.locking needs a write-capable descriptor, so a
+        # read open ("r") is widened to "r+"; callers only request a shared
+        # lock after confirming the file exists, so "r+" is always valid.
+        open_mode = self._mode
+        if sys.platform == "win32" and open_mode == "r":
+            open_mode = "r+"
+        self._fh = open(self._path, open_mode, encoding="utf-8")
         try:
-            fcntl.flock(self._fh.fileno(), self._lock_op)
+            if self._shared:
+                lock_shared(self._fh.fileno())
+            else:
+                lock_exclusive(self._fh.fileno())
         except OSError:
             self._fh.close()
             self._fh = None
@@ -218,7 +226,7 @@ class _LockedFile:
             return False
         try:
             with contextlib.suppress(OSError):
-                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+                unlock(self._fh.fileno())
         finally:
             self._fh.close()
             self._fh = None
@@ -236,9 +244,7 @@ async def _with_file_lock(path: Path, mode: str):
     All blocking operations are dispatched to a worker thread so that the
     asyncio event loop remains responsive even under heavy contention.
     """
-    lock_op = fcntl.LOCK_SH if mode == "r" else fcntl.LOCK_EX
-
-    locked = _LockedFile(path, mode, lock_op)
+    locked = _LockedFile(path, mode, shared=(mode == "r"))
 
     fh = await asyncio.to_thread(locked.__enter__)
     try:
@@ -419,7 +425,7 @@ async def _with_file_lock_for_write(path: Path):
         parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            lock_exclusive(fd)
         except OSError:
             os.close(fd)
             raise
@@ -433,7 +439,7 @@ async def _with_file_lock_for_write(path: Path):
 
     def _release(fd: int) -> None:
         with contextlib.suppress(OSError):
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            unlock(fd)
         with contextlib.suppress(OSError):
             os.close(fd)
 

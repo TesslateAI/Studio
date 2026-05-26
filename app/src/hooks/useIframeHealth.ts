@@ -170,7 +170,9 @@ export function useIframeHealth(opts: UseIframeHealthOptions): IframeHealthState
             ? prev
             : { ...prev, phase, error }
         );
-        if (phase !== 'healthy' && !cancelledRef.current) {
+        // phase is narrowed to 'error' | 'installing' here. Keep retrying
+        // while installing; stop once we've flipped to error.
+        if (phase === 'installing' && !cancelledRef.current) {
           timerRef.current = setTimeout(poll, intervalMs);
         }
       }

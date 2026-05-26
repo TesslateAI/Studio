@@ -738,7 +738,7 @@ s3_region: str = "us-east-1"
 k8s_s3_credentials_secret: str = "s3-credentials"
 
 # Hibernation settings
-k8s_hibernation_idle_minutes: int = 30
+k8s_hibernation_idle_minutes: int = 2880
 ```
 
 ### Minikube Overrides (backend-patch.yaml)

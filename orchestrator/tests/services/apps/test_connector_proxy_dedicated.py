@@ -52,7 +52,6 @@ from app.services.apps.connector_proxy.auth import (
 )
 from app.services.apps.env_resolver import resolve_env_for_pod
 
-
 # ---------------------------------------------------------------------------
 # Helpers — borrow the seed shape from test_connector_proxy.py.  We keep an
 # inline copy rather than importing across test modules so the dedicated
@@ -84,9 +83,7 @@ async def db_engine():
 
 @pytest_asyncio.fixture
 async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
-    maker = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with maker() as session:
         yield session
 
@@ -101,9 +98,7 @@ def dedicated_client(db_engine) -> Generator[TestClient, None, None]:
     """
     from app.services.apps.connector_proxy.main import create_app
 
-    maker = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
 
     async def _get_test_db():
         async with maker() as session:
@@ -206,9 +201,7 @@ async def _seed_oauth_install(
     db.add(user_mcp)
     await db.flush()
 
-    encrypted_tokens = encrypt_credentials(
-        {"access_token": access_token, "token_type": "Bearer"}
-    )
+    encrypted_tokens = encrypt_credentials({"access_token": access_token, "token_type": "Bearer"})
     encrypted_client_info = encrypt_credentials({"client_id": "test-client"})
     oauth = McpOAuthConnection(
         id=uuid.uuid4(),
@@ -251,12 +244,9 @@ def test_create_app_returns_fastapi_with_router_and_health() -> None:
     # Health probe target — kubelet hits this every few seconds.
     assert "/health" in routes
     # Proxy router carries its own ``/api/v1/connector-proxy`` prefix.
-    proxy_routes = [
-        r for r in standalone.routes if "/connector-proxy/" in str(r.path)
-    ]
+    proxy_routes = [r for r in standalone.routes if "/connector-proxy/" in str(r.path)]
     assert proxy_routes, (
-        "create_app() must mount the connector_proxy router; got routes="
-        f"{sorted(routes)}"
+        f"create_app() must mount the connector_proxy router; got routes={sorted(routes)}"
     )
 
 
@@ -283,9 +273,7 @@ def test_health_endpoint_returns_mode() -> None:
 def test_main_module_exposes_main_callable() -> None:
     """``python -m app.services.apps.connector_proxy`` must have a main()."""
     mod = importlib.import_module("app.services.apps.connector_proxy.__main__")
-    assert hasattr(mod, "main"), (
-        "__main__ must expose a main() callable for the K8s entrypoint"
-    )
+    assert hasattr(mod, "main"), "__main__ must expose a main() callable for the K8s entrypoint"
     # Don't actually run it — that would block on uvicorn.run().
 
 
@@ -307,11 +295,7 @@ def _orchestrator_proxy_routes() -> set[str]:
     get_settings.cache_clear()
 
     main_mod = importlib.import_module("app.main")
-    return {
-        str(r.path)
-        for r in main_mod.app.routes
-        if "/connector-proxy/" in str(r.path)
-    }
+    return {str(r.path) for r in main_mod.app.routes if "/connector-proxy/" in str(r.path)}
 
 
 def test_embedded_mode_mounts_router_on_orchestrator(
@@ -322,7 +306,7 @@ def test_embedded_mode_mounts_router_on_orchestrator(
     routes = _orchestrator_proxy_routes()
     assert routes, (
         "embedded mode must mount the proxy router on the orchestrator; "
-        f"got no /connector-proxy/ routes among orchestrator routes"
+        "got no /connector-proxy/ routes among orchestrator routes"
     )
 
 
@@ -342,8 +326,7 @@ def test_dedicated_mode_skips_router_on_orchestrator(
         monkeypatch.setenv("CONNECTOR_PROXY_MODE", "embedded")
         _orchestrator_proxy_routes()  # rebuild with embedded
     assert not routes, (
-        "dedicated mode must NOT mount the proxy router on the "
-        f"orchestrator; got {sorted(routes)}"
+        f"dedicated mode must NOT mount the proxy router on the orchestrator; got {sorted(routes)}"
     )
 
 
@@ -384,9 +367,7 @@ async def test_dedicated_app_accepts_signed_appinstance_header(
     the smuggled Authorization on the way out.
     """
     token = "xoxb-fake-test-token-dedicated"
-    instance_id, _ = await _seed_oauth_install(
-        db_session, access_token=token
-    )
+    instance_id, _ = await _seed_oauth_install(db_session, access_token=token)
 
     captured: dict[str, object] = {}
 
@@ -396,9 +377,7 @@ async def test_dedicated_app_accepts_signed_appinstance_header(
         return httpx.Response(200, json={"ok": True, "ts": "5.0"})
 
     with respx.mock(assert_all_called=True) as router:
-        router.post("https://slack.com/api/chat.postMessage").mock(
-            side_effect=_record
-        )
+        router.post("https://slack.com/api/chat.postMessage").mock(side_effect=_record)
         resp = dedicated_client.post(
             "/api/v1/connector-proxy/connectors/slack/chat.postMessage",
             headers={
@@ -419,7 +398,8 @@ async def test_dedicated_app_accepts_signed_appinstance_header(
     assert "rogue-app-token" not in captured["headers"].get("authorization", "")
     # OpenSail header was stripped from the upstream call.
     assert "x-opensail-appinstance" not in {
-        k.lower() for k in captured["headers"]  # type: ignore[union-attr]
+        k.lower()
+        for k in captured["headers"]  # type: ignore[union-attr]
     }
 
 
@@ -427,9 +407,7 @@ def test_dedicated_app_rejects_missing_header(
     dedicated_client: TestClient,
 ) -> None:
     """Same auth contract as the embedded path: 401 on missing header."""
-    resp = dedicated_client.post(
-        "/api/v1/connector-proxy/connectors/slack/chat.postMessage"
-    )
+    resp = dedicated_client.post("/api/v1/connector-proxy/connectors/slack/chat.postMessage")
     assert resp.status_code == 401
     assert APP_INSTANCE_HEADER in resp.json()["detail"]
 
@@ -448,10 +426,7 @@ def test_pod_env_includes_runtime_url_in_dedicated_mode(
     monkeypatch.setenv("CONNECTOR_PROXY_MODE", "dedicated")
     get_settings.cache_clear()
     settings = get_settings()
-    assert (
-        settings.connector_proxy_runtime_url
-        == "http://opensail-runtime:8400"
-    )
+    assert settings.connector_proxy_runtime_url == "http://opensail-runtime:8400"
 
     # Mirror what the installer puts on the Container row (see
     # services/apps/installer.py::install_app — runtime_env_overlay).

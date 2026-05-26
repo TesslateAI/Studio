@@ -7,10 +7,11 @@ export const dynamic = 'force-dynamic';
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: { q?: string; status?: string };
+  searchParams?: Promise<{ q?: string; status?: string }>;
 }) {
-  const q = searchParams?.q ?? '';
-  const status = searchParams?.status ?? '';
+  const params = await searchParams;
+  const q = params?.q ?? '';
+  const status = params?.status ?? '';
 
   const where: any = {};
   if (status && ['lead', 'customer', 'lost'].includes(status)) where.status = status;

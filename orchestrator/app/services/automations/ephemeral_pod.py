@@ -337,12 +337,10 @@ def render_pod(
 def _default_core_v1() -> Any:
     """Lazily build a CoreV1Api client. Mirrors compute_manager's pattern."""
     from kubernetes import client as k8s_client
-    from kubernetes import config as k8s_config
 
-    try:
-        k8s_config.load_incluster_config()
-    except k8s_config.ConfigException:
-        k8s_config.load_kube_config()
+    from ..k8s_auth import load_in_cluster_or_kube
+
+    load_in_cluster_or_kube()
     return k8s_client.CoreV1Api()
 
 
@@ -358,13 +356,10 @@ async def _create_pod(core_v1: Any, namespace: str, body: dict[str, Any]) -> str
     the caller observes any name-generation done server-side (e.g., if
     we ever switch to ``generateName``).
     """
-    created = await asyncio.to_thread(
-        core_v1.create_namespaced_pod, namespace=namespace, body=body
-    )
-    name = (
-        getattr(getattr(created, "metadata", None), "name", None)
-        or body.get("metadata", {}).get("name", "")
-    )
+    created = await asyncio.to_thread(core_v1.create_namespaced_pod, namespace=namespace, body=body)
+    name = getattr(getattr(created, "metadata", None), "name", None) or body.get(
+        "metadata", {}
+    ).get("name", "")
     return str(name)
 
 
@@ -441,9 +436,7 @@ async def _harvest_tracker_log(
             tail_lines=tail_lines,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "ephemeral_pod: tracker log read failed name=%s err=%r", name, exc
-        )
+        logger.warning("ephemeral_pod: tracker log read failed name=%s err=%r", name, exc)
         return []
     warnings: list[TrackerWarning] = []
     for line in (raw or "").splitlines():
@@ -599,12 +592,8 @@ async def run_in_ephemeral_pod(
 
     # Harvest the sidecar log even on timeout — partial logs are still
     # useful for the run-history detail view.
-    warnings = await _harvest_tracker_log(
-        core_v1, name=pod_name, namespace=ns
-    )
-    artifact_id = await _persist_tracker_artifact(
-        db, run_id=run_id, warnings=warnings
-    )
+    warnings = await _harvest_tracker_log(core_v1, name=pod_name, namespace=ns)
+    artifact_id = await _persist_tracker_artifact(db, run_id=run_id, warnings=warnings)
 
     return EphemeralPodResult(
         pod_name=pod_name,

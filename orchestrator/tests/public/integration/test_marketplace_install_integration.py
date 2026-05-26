@@ -1,4 +1,5 @@
 """Integration tests for /api/v1/marketplace/install endpoints."""
+
 from __future__ import annotations
 
 import os
@@ -93,7 +94,7 @@ def _agent(**overrides):
     # fixtures cover the pre-federation backfill path (no source attached) so
     # the guard short-circuits to "allow" — keep that behavior unless a test
     # explicitly opts-in to a source.
-    a.source_id = overrides.get("source_id", None)
+    a.source_id = overrides.get("source_id")
     return a
 
 

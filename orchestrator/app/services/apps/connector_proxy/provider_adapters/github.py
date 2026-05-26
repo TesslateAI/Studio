@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from .base import AllowedEndpoint, AuthScheme, ProviderAdapter
 
-
 GITHUB_ALLOWED_ENDPOINTS: tuple[AllowedEndpoint, ...] = (
     # ---- User / orgs ----
     AllowedEndpoint(method="GET", path="user"),
@@ -35,23 +34,15 @@ GITHUB_ALLOWED_ENDPOINTS: tuple[AllowedEndpoint, ...] = (
     AllowedEndpoint(method="POST", path="repos/{owner}/{repo}/issues"),
     AllowedEndpoint(method="GET", path="repos/{owner}/{repo}/issues/{number}"),
     AllowedEndpoint(method="PATCH", path="repos/{owner}/{repo}/issues/{number}"),
-    AllowedEndpoint(
-        method="POST", path="repos/{owner}/{repo}/issues/{number}/comments"
-    ),
-    AllowedEndpoint(
-        method="GET", path="repos/{owner}/{repo}/issues/{number}/comments"
-    ),
+    AllowedEndpoint(method="POST", path="repos/{owner}/{repo}/issues/{number}/comments"),
+    AllowedEndpoint(method="GET", path="repos/{owner}/{repo}/issues/{number}/comments"),
     AllowedEndpoint(method="GET", path="search/issues"),
     # ---- Pull requests ----
     AllowedEndpoint(method="GET", path="repos/{owner}/{repo}/pulls"),
     AllowedEndpoint(method="GET", path="repos/{owner}/{repo}/pulls/{number}"),
     AllowedEndpoint(method="POST", path="repos/{owner}/{repo}/pulls"),
-    AllowedEndpoint(
-        method="POST", path="repos/{owner}/{repo}/pulls/{number}/reviews"
-    ),
-    AllowedEndpoint(
-        method="POST", path="repos/{owner}/{repo}/pulls/{number}/comments"
-    ),
+    AllowedEndpoint(method="POST", path="repos/{owner}/{repo}/pulls/{number}/reviews"),
+    AllowedEndpoint(method="POST", path="repos/{owner}/{repo}/pulls/{number}/comments"),
 )
 
 

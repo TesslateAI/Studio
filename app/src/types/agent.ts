@@ -37,9 +37,10 @@ export interface AgentStep {
 /**
  * Categories surfaced by the @-mention picker. Maps directly to the backend
  * field-split: `agent` -> mention_agent_ids, `mcp` -> mention_mcp_config_ids,
- * `app` -> mention_app_instance_ids.
+ * `app` -> mention_app_instance_ids, `data` -> mention_data_collection_refs,
+ * `project` -> mention_project_ids.
  */
-export type ChatMentionKind = 'agent' | 'mcp' | 'app';
+export type ChatMentionKind = 'agent' | 'mcp' | 'app' | 'data' | 'project';
 
 /**
  * One @-mention emitted by the picker. The `display` token (e.g. `@coworker`)
@@ -47,9 +48,11 @@ export type ChatMentionKind = 'agent' | 'mcp' | 'app';
  * the structured `ref_id` for run semantics and never re-parses `message`.
  *
  *   ref_id is:
- *     - kind=agent -> MarketplaceAgent.id
- *     - kind=mcp   -> UserMcpConfig.id
- *     - kind=app   -> AppInstance.id
+ *     - kind=agent   -> MarketplaceAgent.id
+ *     - kind=mcp     -> UserMcpConfig.id
+ *     - kind=app     -> AppInstance.id
+ *     - kind=data    -> WorkspaceCollection name (or "*" for every collection)
+ *     - kind=project -> Project.id (or "*" / "workspace" for every visible project)
  */
 export interface ChatMention {
   kind: ChatMentionKind;

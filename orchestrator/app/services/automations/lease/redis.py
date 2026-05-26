@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 
 from . import Lease, LeaseToken, LeaseUnavailableError
 
@@ -84,9 +83,7 @@ class RedisLease(Lease):
         self._client = client
         return client
 
-    async def acquire(
-        self, name: str, holder_id: str, ttl_seconds: int
-    ) -> Optional[LeaseToken]:
+    async def acquire(self, name: str, holder_id: str, ttl_seconds: int) -> LeaseToken | None:
         client = await self._get_client()
         key = _key(name)
 

@@ -13,7 +13,6 @@ Integration tests rely on the shared `db_session` fixture used elsewhere in
 
 from __future__ import annotations
 
-import os
 import uuid
 from copy import deepcopy
 from typing import Any
@@ -23,7 +22,6 @@ import pytest
 
 from app import config_features, models
 from app.services.apps import compatibility, installer, publisher
-
 
 # ---------------------------------------------------------------------------
 # Fake Hub client — async, deterministic.
@@ -47,9 +45,7 @@ class FakeHubClient:
     async def publish_bundle(
         self, *, volume_id: str, app_id: str, version: str, timeout: float = 600.0
     ) -> str:
-        self.publish_calls.append(
-            {"volume_id": volume_id, "app_id": app_id, "version": version}
-        )
+        self.publish_calls.append({"volume_id": volume_id, "app_id": app_id, "version": version})
         return self._bundle_hash
 
     async def create_volume_from_bundle(
@@ -116,9 +112,7 @@ def test_compatibility_check_missing_feature(monkeypatch):
 
 
 def test_compatibility_check_unsupported_schema(monkeypatch):
-    monkeypatch.setattr(
-        config_features, "current_feature_set", lambda: ["cas_bundle"]
-    )
+    monkeypatch.setattr(config_features, "current_feature_set", lambda: ["cas_bundle"])
     report = compatibility.check(
         required_features=[],
         manifest_schema="2999-99",
@@ -284,11 +278,7 @@ async def test_install_app_happy_path(db_session, test_user, test_team):
     inst = db_session.get(models.AppInstance, result.app_instance_id)
     assert inst is not None and inst.state == "installed"
     assert inst.wallet_mix == consent
-    records = (
-        db_session.query(models.McpConsentRecord)
-        .filter_by(app_instance_id=inst.id)
-        .all()
-    )
+    records = db_session.query(models.McpConsentRecord).filter_by(app_instance_id=inst.id).all()
     assert {r.mcp_server_id for r in records} == {"github", "slack"}
 
 
@@ -326,9 +316,7 @@ async def test_install_one_project_one_app_enforced(db_session, test_user, test_
 async def test_install_unapproved_rejected_without_flag(
     db_session, test_user, test_team, monkeypatch
 ):
-    _, av = _seed_approved_version(
-        db_session, test_user.id, approval_state="pending_stage1"
-    )
+    _, av = _seed_approved_version(db_session, test_user.id, approval_state="pending_stage1")
     hub = FakeHubClient()
     consent = {
         "ai_compute": {"payer": "installer"},
@@ -406,9 +394,7 @@ def _seed_version_with_compute(
 
 
 @pytest.mark.integration
-async def test_install_materializes_connections_from_manifest(
-    db_session, test_user, test_team
-):
+async def test_install_materializes_connections_from_manifest(db_session, test_user, test_team):
     """Connections in manifest.compute use schema field names
     `source_container` / `target_container`. The installer must read those
     exact keys (no legacy `source` / `source_name` fallback) and create
@@ -449,17 +435,13 @@ async def test_install_materializes_connections_from_manifest(
     )
 
     container_rows = (
-        db_session.query(models.Container)
-        .filter_by(project_id=result.project_id)
-        .all()
+        db_session.query(models.Container).filter_by(project_id=result.project_id).all()
     )
     by_name = {c.name: c for c in container_rows}
     assert set(by_name.keys()) == {"web", "api"}
 
     conn_rows = (
-        db_session.query(models.ContainerConnection)
-        .filter_by(project_id=result.project_id)
-        .all()
+        db_session.query(models.ContainerConnection).filter_by(project_id=result.project_id).all()
     )
     assert len(conn_rows) == 1
     cn = conn_rows[0]
@@ -481,9 +463,7 @@ async def test_install_rejects_connection_missing_source_container(
         {"name": "api", "image": "python:3.11"},
     ]
     # Legacy field name `source` should NOT be honored.
-    connections = [
-        {"source": "web", "target_container": "api", "connector_type": "http_api"}
-    ]
+    connections = [{"source": "web", "target_container": "api", "connector_type": "http_api"}]
     _, av = _seed_version_with_compute(
         db_session,
         test_user.id,

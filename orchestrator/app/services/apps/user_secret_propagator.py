@@ -46,7 +46,7 @@ from kubernetes.client.rest import ApiException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...models import McpOAuthConnection, UserMcpConfig
+from ...models import UserMcpConfig
 from ...models_automations import (
     AppConnectorGrant,
     AppConnectorRequirement,
@@ -156,8 +156,7 @@ async def _resolve_grant_credentials(
             return {}, "skipped_decrypt_failed"
         # Coerce values to strings — Secret string_data must be str.
         flat = {
-            _sanitize_key(str(k)): "" if v is None else str(v)
-            for k, v in (decrypted or {}).items()
+            _sanitize_key(str(k)): "" if v is None else str(v) for k, v in (decrypted or {}).items()
         }
         return flat, "upserted"
 

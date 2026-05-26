@@ -12,8 +12,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.database import get_db
-from app.routers.desktop.sessions import _git_diff_for_project
 from app.routers import desktop
+from app.routers.desktop.sessions import _git_diff_for_project
 from app.users import current_active_user
 
 

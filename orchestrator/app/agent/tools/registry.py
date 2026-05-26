@@ -342,80 +342,11 @@ class ToolRegistry:
         # ``approval_required`` flag and registers a card; ``hard_stop``
         # and ``extend_once`` semantics land in a follow-up wave.
         # ============================================================================
-        contract = context.get("contract")
-        if contract:
-            from .contract_gate import ContractGate
-
-            run_context = {
-                "automation_run_id": context.get("automation_run_id"),
-                "automation_id": context.get("automation_id"),
-                "current_spend_usd": context.get("current_spend_usd"),
-            }
-            gate = ContractGate(contract, run_context)
-            decision = await gate.check(
-                tool_name=tool_name,
-                tool_call_params=parameters,
-                tool=tool,
-            )
-            if not decision.allowed:
-                # Increment ``automation_runs.contract_breaches`` regardless
-                # of the on_breach resolution. Best-effort: never crash the
-                # tool path on a counter write.
-                automation_run_id = context.get("automation_run_id")
-                if automation_run_id is not None:
-                    try:
-                        await _increment_contract_breaches(automation_run_id)
-                    except Exception:  # pragma: no cover — defensive
-                        logger.debug(
-                            "[ContractGate] failed to increment contract_breaches for run %s",
-                            automation_run_id,
-                            exc_info=True,
-                        )
-
-                on_breach = (contract.get("on_breach") or "pause_for_approval").lower()
-                logger.warning(
-                    "[ContractGate] denied tool=%s breach=%s on_breach=%s reason=%s",
-                    tool_name,
-                    decision.breach_kind,
-                    on_breach,
-                    decision.reason,
-                )
-
-                if on_breach == "pause_for_approval":
-                    # Hand off to the existing PendingUserInputManager —
-                    # the dispatcher's approval-card path picks this up just
-                    # like the edit-mode "ask" branch below. Phase 2D layers
-                    # the non-blocking HITL pattern on the same envelope.
-                    return {
-                        "approval_required": True,
-                        "tool": tool_name,
-                        "parameters": parameters,
-                        "session_id": context.get("chat_id", "default"),
-                        "contract_breach": {
-                            "kind": decision.breach_kind,
-                            "reason": decision.reason,
-                            "estimate_usd": str(decision.estimate_usd),
-                            "automation_run_id": automation_run_id,
-                            "automation_id": context.get("automation_id"),
-                        },
-                    }
-
-                # ``hard_stop`` / ``extend_once`` are wired in Phase 2 Wave-1B.
-                # For now, return a plain failure with the breach metadata so
-                # the run terminates cleanly with a recorded reason.
-                return {
-                    "success": False,
-                    "tool": tool_name,
-                    "error": (
-                        f"ContractGate denied tool '{tool_name}' "
-                        f"({decision.breach_kind}): {decision.reason}"
-                    ),
-                    "contract_breach": {
-                        "kind": decision.breach_kind,
-                        "reason": decision.reason,
-                        "on_breach": on_breach,
-                    },
-                }
+        gate_result = await check_contract_gate(
+            tool_name=tool_name, parameters=parameters, context=context, tool=tool
+        )
+        if gate_result is not None:
+            return gate_result
 
         # ============================================================================
         # Edit Mode Control - Applies to ALL agents
@@ -497,6 +428,98 @@ class ToolRegistry:
                 f"[TOOL-EXEC] Tool {tool_name} execution FAILED with exception: {e}", exc_info=True
             )
             return {"success": False, "tool": tool_name, "error": str(e)}
+
+
+async def check_contract_gate(
+    *,
+    tool_name: str,
+    parameters: dict[str, Any],
+    context: dict[str, Any],
+    tool: Tool,
+) -> dict[str, Any] | None:
+    """Run the automation ContractGate against a single tool dispatch.
+
+    Returns ``None`` when the call may proceed (no contract in context, or
+    the contract permits this call). Returns a tool-result-shaped envelope
+    when the gate denies the call — same shape as the in-tree registry
+    historically returned, so the agent loop / dispatcher don't need to
+    branch on call site.
+
+    Lives at module level so the worker's submodule-registry pre-execute
+    hook can invoke it without re-implementing the breach-counter and
+    on_breach branching. The orchestrator's in-tree ``ToolRegistry.execute``
+    delegates here too — single source of truth.
+    """
+    contract = context.get("contract")
+    if not contract:
+        return None
+
+    from .contract_gate import ContractGate
+
+    run_context = {
+        "automation_run_id": context.get("automation_run_id"),
+        "automation_id": context.get("automation_id"),
+        "current_spend_usd": context.get("current_spend_usd"),
+    }
+    gate = ContractGate(contract, run_context)
+    decision = await gate.check(
+        tool_name=tool_name,
+        tool_call_params=parameters,
+        tool=tool,
+    )
+    if decision.allowed:
+        return None
+
+    automation_run_id = context.get("automation_run_id")
+    if automation_run_id is not None:
+        try:
+            await _increment_contract_breaches(automation_run_id)
+        except Exception:  # pragma: no cover — defensive
+            logger.debug(
+                "[ContractGate] failed to increment contract_breaches for run %s",
+                automation_run_id,
+                exc_info=True,
+            )
+
+    on_breach = (contract.get("on_breach") or "pause_for_approval").lower()
+    logger.warning(
+        "[ContractGate] denied tool=%s breach=%s on_breach=%s reason=%s",
+        tool_name,
+        decision.breach_kind,
+        on_breach,
+        decision.reason,
+    )
+
+    if on_breach == "pause_for_approval":
+        return {
+            "approval_required": True,
+            "tool": tool_name,
+            "parameters": parameters,
+            "session_id": context.get("chat_id", "default"),
+            "contract_breach": {
+                "kind": decision.breach_kind,
+                "reason": decision.reason,
+                "estimate_usd": str(decision.estimate_usd),
+                "automation_run_id": automation_run_id,
+                "automation_id": context.get("automation_id"),
+            },
+        }
+
+    # ``hard_stop`` / ``extend_once`` — plain failure with breach metadata
+    # so the run terminates cleanly with a recorded reason.
+    return {
+        "success": False,
+        "tool": tool_name,
+        "error": (
+            f"ContractGate denied tool '{tool_name}' "
+            f"({decision.breach_kind}): {decision.reason}"
+        ),
+        "contract_breach": {
+            "kind": decision.breach_kind,
+            "reason": decision.reason,
+            "on_breach": on_breach,
+        },
+    }
 
 
 async def _increment_contract_breaches(automation_run_id: Any) -> None:
@@ -604,6 +627,13 @@ def _register_all_tools(registry: ToolRegistry):
     from .marketplace_ops import register_all_marketplace_ops_tools
 
     register_all_marketplace_ops_tools(registry)
+
+    # Workflow ops (G2+ self-evolving workflow track): agent drafts
+    # WorkflowProposals and reads run history to diagnose. G3 adds
+    # test_run_workflow; G6 adds learning lookup/record.
+    from .workflow_ops import register_all_workflow_ops_tools
+
+    register_all_workflow_ops_tools(registry)
 
     logger.info(f"Registered {len(registry._tools)} tools total")
 

@@ -1,6 +1,25 @@
 import type { AutomationTriggerIn, AutomationTriggerKind } from '../../../types/automations';
 import { ScheduleBuilder } from './ScheduleBuilder';
 
+function detectBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+function initialConfigForKind(kind: AutomationTriggerKind): Record<string, unknown> {
+  // Pre-populating timezone here (instead of in ScheduleBuilder's mount
+  // effect) avoids the closure race where a preset click could fire
+  // before the mount effect resolved, leaving the saved expression empty
+  // and the timezone unwritten.
+  if (kind === 'cron') {
+    return { expression: '', timezone: detectBrowserTimezone() };
+  }
+  return {};
+}
+
 interface Props {
   value: AutomationTriggerIn;
   onChange: (next: AutomationTriggerIn) => void;
@@ -8,6 +27,12 @@ interface Props {
   webhookUrl?: string | null;
 }
 
+// `app_invocation` is intentionally absent — the kind is reserved in the DB
+// CHECK constraint but has no producer wired in the orchestrator yet (see
+// `schemas_automations.AutomationTriggerIn._validate_kind`). The API rejects
+// the kind on create/update, so we hide it from the picker rather than offer
+// a choice that returns a 422. Re-add when the producer lands.
+// Tracking: TesslateAI/OpenSail-Enterprise#408.
 const KIND_OPTIONS: Array<{ value: AutomationTriggerKind; label: string; help: string }> = [
   {
     value: 'cron',
@@ -23,11 +48,6 @@ const KIND_OPTIONS: Array<{ value: AutomationTriggerKind; label: string; help: s
     value: 'manual',
     label: 'Only when I run it',
     help: 'Run only when you click "Run now" on this automation.',
-  },
-  {
-    value: 'app_invocation',
-    label: 'When an installed app calls it',
-    help: 'Run when one of your installed apps emits a matching event.',
   },
 ];
 
@@ -45,7 +65,10 @@ export function TriggerEditor({ value, onChange, webhookUrl }: Props) {
         </span>
         <select
           value={value.kind}
-          onChange={(e) => onChange({ kind: e.target.value as AutomationTriggerKind, config: {} })}
+          onChange={(e) => {
+            const nextKind = e.target.value as AutomationTriggerKind;
+            onChange({ kind: nextKind, config: initialConfigForKind(nextKind) });
+          }}
           className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
         >
           {KIND_OPTIONS.map((opt) => (
@@ -94,12 +117,6 @@ export function TriggerEditor({ value, onChange, webhookUrl }: Props) {
       {value.kind === 'manual' && (
         <p className="text-[11px] text-[var(--text-muted)]">
           This automation will only run when you click "Run now" on its detail page.
-        </p>
-      )}
-
-      {value.kind === 'app_invocation' && (
-        <p className="text-[11px] text-[var(--text-muted)]">
-          This automation will run whenever one of your installed apps emits a matching event.
         </p>
       )}
     </div>

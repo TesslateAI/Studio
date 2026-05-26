@@ -142,7 +142,7 @@ export function ScheduleBuilder({ expression, timezone, onChange }: Props) {
         <span className="block text-xs font-medium text-[var(--text)] mb-1">Timezone</span>
         <select
           value={timezone || (browserTz ?? 'UTC')}
-          onChange={(e) => setTimezone(e.target.value === 'UTC' ? '' : e.target.value)}
+          onChange={(e) => setTimezone(e.target.value)}
           className="w-full px-2 py-1.5 bg-[var(--bg)] border border-[var(--border)] text-[var(--text)] rounded-[var(--radius-small)] text-xs focus:outline-none focus:border-[var(--border-hover)]"
         >
           {tzOptions.map((tz) => (

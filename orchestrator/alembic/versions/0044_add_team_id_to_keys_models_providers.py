@@ -7,8 +7,9 @@ Revises: 0043_chat_team_id
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
 
 revision: str = "0044_keys_models_team"
 down_revision: str | Sequence[str] | None = "0043_chat_team_id"
@@ -22,7 +23,9 @@ def upgrade() -> None:
     for table in _TABLES:
         op.add_column(table, sa.Column("team_id", GUID(), nullable=True))
         with op.batch_alter_table(table) as batch_op:
-            batch_op.create_foreign_key(f"fk_{table}_team_id", "teams", ["team_id"], ["id"], ondelete="SET NULL")
+            batch_op.create_foreign_key(
+                f"fk_{table}_team_id", "teams", ["team_id"], ["id"], ondelete="SET NULL"
+            )
         op.create_index(f"ix_{table}_team_id", table, ["team_id"])
 
     is_postgres = op.get_bind().dialect.name == "postgresql"

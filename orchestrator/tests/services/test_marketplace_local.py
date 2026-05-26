@@ -47,9 +47,7 @@ def test_scan_kind_returns_empty_for_missing_dir(opensail_home: Path) -> None:
 def test_scan_kind_finds_versionless_item(opensail_home: Path) -> None:
     item_dir = opensail_home / "agents" / "coder"
     item_dir.mkdir(parents=True)
-    (item_dir / "manifest.json").write_text(
-        json.dumps({"name": "Coder", "version": "1.2.3"})
-    )
+    (item_dir / "manifest.json").write_text(json.dumps({"name": "Coder", "version": "1.2.3"}))
 
     records = scan_kind("agent")
     assert len(records) == 1
@@ -129,7 +127,9 @@ def test_get_bundle_envelope_versionless(opensail_home: Path) -> None:
     assert env.size_bytes > 0
 
 
-def test_get_bundle_envelope_dir_sha_matches_materialised(opensail_home: Path, tmp_path: Path) -> None:
+def test_get_bundle_envelope_dir_sha_matches_materialised(
+    opensail_home: Path, tmp_path: Path
+) -> None:
     item = opensail_home / "agents" / "alpha"
     item.mkdir(parents=True)
     (item / "manifest.json").write_text('{"name":"Alpha","version":"1.0.0"}')
@@ -234,6 +234,7 @@ async def test_sync_local_emits_upsert_events(opensail_home, monkeypatch) -> Non
     last_sync_error on success.
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from app.models import Base, MarketplaceSource
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)

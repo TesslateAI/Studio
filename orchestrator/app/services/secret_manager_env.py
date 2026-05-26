@@ -305,6 +305,20 @@ async def build_env_overrides(
 
     overrides: dict[UUID, dict[str, str]] = {c.id: container_env(c) for c in containers}
 
+    # Workspace-data env-var injection — DELEGATES to the single resolver
+    # that the deploy injector also uses. Graph-aware: each base container
+    # gets either (a) the wired source's env, optionally renamed by
+    # env_mapping, or (b) the blanket fallback if collections exist.
+    # Service containers skipped (postgres/redis/etc don't consume the SDK).
+    try:
+        await _apply_workspace_data_overrides(db, project_id, containers, overrides)
+    except Exception:
+        logger.debug(
+            "[secret_manager_env] workspace-data injection skipped for project %s",
+            project_id,
+            exc_info=True,
+        )
+
     result = await db.execute(
         select(ContainerConnection).where(
             ContainerConnection.project_id == project_id,
@@ -336,6 +350,19 @@ async def build_env_overrides(
                 env=container_env(source),
                 port=effective_port,
             )
+        elif conn.config and conn.config.get("env_mapping"):
+            # Manifest-declared explicit env mapping takes priority over the
+            # service catalog. Values may contain ${secret:name/key} and
+            # ${NAMESPACE} templates — resolve_env_for_pod expands secrets via
+            # K8s env chaining; compute_manager substitutes ${NAMESPACE} with
+            # the real namespace before the pod spec is built.
+            resolved = dict(conn.config["env_mapping"])
+        elif _is_workspace_data_source(source):
+            # workspace-data env is computed centrally by
+            # _apply_workspace_data_overrides above (it walked every
+            # workspace-data connection in one pass). Skip here — the env
+            # is already merged into overrides[target_container_id].
+            resolved = None
         else:
             service_def = get_service(source.service_slug) if source.service_slug else None
             creds = None
@@ -349,3 +376,63 @@ async def build_env_overrides(
             overrides[target_id].update(resolved)
 
     return overrides
+
+
+async def _apply_workspace_data_overrides(
+    db: "AsyncSession",
+    project_id: UUID,
+    containers: list,
+    overrides: dict[UUID, dict[str, str]],
+) -> None:
+    """Inject workspace-data env into every base container via the unified resolver.
+
+    One DB pass + one resolver call per base container. Graph-aware: a
+    workspace-data service node wired to specific containers populates
+    only those; unwired base containers fall back to the blanket default.
+
+    Skips:
+      * service containers (postgres/redis/etc don't consume the SDK)
+      * containers that already have ``OPENSAIL_*`` env (user / explicit
+        graph override wins — we never clobber)
+    """
+    from ..models import Project
+    from .workspace_data_env import compute_env_for_containers
+
+    base_containers = [
+        c for c in containers
+        if getattr(c, "container_type", None) == "base"
+    ]
+    if not base_containers:
+        return
+
+    project = await db.get(Project, project_id)
+    if project is None:
+        return
+
+    per_container = await compute_env_for_containers(
+        db, project,
+        [c.id for c in base_containers],
+        user_id=project.owner_id,
+        default_key_strategy="autoinject",
+    )
+    if not per_container:
+        return
+
+    for c in base_containers:
+        env = per_container.get(c.id)
+        if not env:
+            continue
+        existing = overrides.setdefault(c.id, {})
+        if any(k.startswith("OPENSAIL_") or "_OPENSAIL_" in k for k in existing):
+            # User or explicit graph override already populated — don't clobber.
+            continue
+        for k, v in env.items():
+            existing.setdefault(k, v)
+
+
+def _is_workspace_data_source(source) -> bool:
+    """Identify the workspace-data service node in the architecture graph."""
+    from .workspace_data_env import is_workspace_data_service
+
+    slug = getattr(source, "service_slug", None) or getattr(source, "name", None)
+    return is_workspace_data_service(slug)

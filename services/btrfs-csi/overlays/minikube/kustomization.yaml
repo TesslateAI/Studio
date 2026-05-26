@@ -42,16 +42,16 @@ patches:
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: "Never"
 
-  # Image precache: swap devserver for pause (devserver loaded separately)
+  # Image precache: drop the devserver init container on minikube.
+  # The devserver image is loaded via `minikube image load`, not pulled from a registry,
+  # so there is nothing to pre-cache. Previous patch swapped the image to pause:3.10
+  # but left command: ["true"] in place — pause has no shell or coreutils, so the
+  # init container CrashLoopBackOff'd indefinitely (590 restarts / 10h observed).
   - target:
       group: apps
       version: v1
       kind: DaemonSet
       name: tesslate-image-precache
     patch: |-
-      - op: replace
-        path: /spec/template/spec/initContainers/0/image
-        value: "registry.k8s.io/pause:3.10"
-      - op: add
-        path: /spec/template/spec/initContainers/0/imagePullPolicy
-        value: "IfNotPresent"
+      - op: remove
+        path: /spec/template/spec/initContainers/0

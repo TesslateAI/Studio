@@ -28,7 +28,6 @@ input_id, automation_id, tool_name, summary, actions)`` returning
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -103,32 +102,24 @@ class GatewayClientProtocol(Protocol):
 
 async def _load_approval_context(
     db: AsyncSession, approval_request_id: UUID
-) -> tuple[
-    AutomationApprovalRequest, AutomationRun, AutomationDefinition
-] | None:
+) -> tuple[AutomationApprovalRequest, AutomationRun, AutomationDefinition] | None:
     """Load the approval request + parent run + definition in one shot.
 
     Returns ``None`` if the request was deleted between when the caller
     grabbed the id and when we tried to load it.
     """
     request = await db.scalar(
-        select(AutomationApprovalRequest).where(
-            AutomationApprovalRequest.id == approval_request_id
-        )
+        select(AutomationApprovalRequest).where(AutomationApprovalRequest.id == approval_request_id)
     )
     if request is None:
         return None
 
-    run = await db.scalar(
-        select(AutomationRun).where(AutomationRun.id == request.run_id)
-    )
+    run = await db.scalar(select(AutomationRun).where(AutomationRun.id == request.run_id))
     if run is None:
         return None
 
     definition = await db.scalar(
-        select(AutomationDefinition).where(
-            AutomationDefinition.id == run.automation_id
-        )
+        select(AutomationDefinition).where(AutomationDefinition.id == run.automation_id)
     )
     if definition is None:
         return None
@@ -177,18 +168,8 @@ def _approval_summary(
     older rows still render correctly.
     """
     ctx = request.context or {}
-    tool_name = (
-        ctx.get("tool_name")
-        or ctx.get("tool")
-        or ctx.get("kind")
-        or "unknown_tool"
-    )
-    summary = (
-        ctx.get("summary")
-        or ctx.get("message")
-        or ctx.get("reason_detail")
-        or ""
-    )
+    tool_name = ctx.get("tool_name") or ctx.get("tool") or ctx.get("kind") or "unknown_tool"
+    summary = ctx.get("summary") or ctx.get("message") or ctx.get("reason_detail") or ""
     options = list(request.options or []) or [
         "allow_once",
         "allow_for_run",
@@ -221,9 +202,7 @@ async def send_with_fallback(
         return DeliveryResult(
             kind="failed",
             surface="approval_request_missing",
-            attempts=[
-                {"step": "load", "ok": False, "reason": "approval_request_missing"}
-            ],
+            attempts=[{"step": "load", "ok": False, "reason": "approval_request_missing"}],
         )
 
     request, run, definition = loaded
@@ -235,9 +214,7 @@ async def send_with_fallback(
     attempts: list[dict[str, Any]] = []
 
     # ---- Step 1: Slack DM -------------------------------------------------
-    slack_identity = await _find_platform_identity(
-        db, user_id=owner_user_id, platform="slack"
-    )
+    slack_identity = await _find_platform_identity(db, user_id=owner_user_id, platform="slack")
     if slack_identity is not None and gateway_client is not None:
         try:
             ok = await gateway_client.send_approval_card_to_dm(
@@ -250,9 +227,7 @@ async def send_with_fallback(
                 actions=options,
             )
         except Exception as exc:
-            logger.warning(
-                "[DELIVERY] slack DM raised: %s", exc, exc_info=True
-            )
+            logger.warning("[DELIVERY] slack DM raised: %s", exc, exc_info=True)
             ok = False
         attempts.append(
             {
@@ -280,9 +255,7 @@ async def send_with_fallback(
                 "step": "slack_dm",
                 "ok": False,
                 "reason": (
-                    "no_platform_identity"
-                    if slack_identity is None
-                    else "no_gateway_client"
+                    "no_platform_identity" if slack_identity is None else "no_gateway_client"
                 ),
             }
         )
@@ -303,9 +276,7 @@ async def send_with_fallback(
                 actions=options,
             )
         except Exception as exc:
-            logger.warning(
-                "[DELIVERY] telegram DM raised: %s", exc, exc_info=True
-            )
+            logger.warning("[DELIVERY] telegram DM raised: %s", exc, exc_info=True)
             ok = False
         attempts.append(
             {
@@ -333,9 +304,7 @@ async def send_with_fallback(
                 "step": "telegram_dm",
                 "ok": False,
                 "reason": (
-                    "no_platform_identity"
-                    if telegram_identity is None
-                    else "no_gateway_client"
+                    "no_platform_identity" if telegram_identity is None else "no_gateway_client"
                 ),
             }
         )
@@ -362,13 +331,9 @@ async def send_with_fallback(
             ok = False
         attempts.append({"step": "email", "ok": ok, "to": owner_email})
         if ok:
-            await _record_delivery(
-                db, request=request, kind="email", surface=owner_email
-            )
+            await _record_delivery(db, request=request, kind="email", surface=owner_email)
             await db.commit()
-            return DeliveryResult(
-                kind="email", surface=owner_email, attempts=attempts
-            )
+            return DeliveryResult(kind="email", surface=owner_email, attempts=attempts)
     else:
         attempts.append({"step": "email", "ok": False, "reason": "no_email"})
 
@@ -387,9 +352,7 @@ async def send_with_fallback(
         automation_id_str,
     )
     attempts.append({"step": "web_only", "ok": True})
-    await _record_delivery(
-        db, request=request, kind="web_only", surface=None
-    )
+    await _record_delivery(db, request=request, kind="web_only", surface=None)
     await db.commit()
 
     # If we reached here at all, we recorded a web_only delivery — that's
@@ -397,14 +360,10 @@ async def send_with_fallback(
     # delivery channel could be reached". Web is always reachable, so
     # the "failed" terminal is only triggered when the request itself
     # disappeared above (handled at the top of the function).
-    return DeliveryResult(
-        kind="web_only", surface=None, attempts=attempts
-    )
+    return DeliveryResult(kind="web_only", surface=None, attempts=attempts)
 
 
-async def mark_no_delivery_channel(
-    db: AsyncSession, run_id: UUID
-) -> None:
+async def mark_no_delivery_channel(db: AsyncSession, run_id: UUID) -> None:
     """Helper for the controller: stamp ``paused_reason`` on a run that
     truly cannot be delivered (every step in the chain raised, including
     the web fallback). Today only ``send_with_fallback``'s internal

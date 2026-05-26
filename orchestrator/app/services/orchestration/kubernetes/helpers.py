@@ -532,7 +532,7 @@ def create_ingress_manifest(
         container_directory: Container directory name
         project_slug: Project slug (e.g., "my-app-abc123")
         port: Port the dev server listens on
-        domain: Base domain (e.g., "localhost" or "opensail.tesslate.com")
+        domain: Base domain (e.g., "localhost" or "your-domain.com")
         ingress_class: Ingress class name
         tls_secret: Optional TLS secret name for HTTPS
 
@@ -588,6 +588,24 @@ def create_ingress_manifest(
                 "nginx.ingress.kubernetes.io/proxy-http-version": "1.1",
                 "nginx.ingress.kubernetes.io/proxy-read-timeout": "3600",
                 "nginx.ingress.kubernetes.io/proxy-send-timeout": "3600",
+                # Tell external-dns this resource is managed by something
+                # other than the default controller, which is the supported
+                # way to opt OUT of external-dns processing (per its docs).
+                # Project hostnames are routed by the platform-wide wildcard
+                # CNAME (`*.<domain>` → NLB, declared in
+                # k8s/terraform/aws/dns.tf), so per-host CNAMEs are pure
+                # waste — they consume Cloudflare plan slots and silently
+                # override the wildcard. Without an opt-out, external-dns
+                # creates one CNAME per project ingress and eventually
+                # trips zone record limits (which on 2026-05-24 wedged
+                # production wildcard-cert renewal at 200/200 records).
+                #
+                # The actual hard filter is the process-wide
+                # `--namespace=tesslate` flag set on the external-dns
+                # deployment in k8s/terraform/aws/helm.tf — this
+                # annotation is defense-in-depth in case the namespace
+                # filter is widened or someone runs a second external-dns.
+                "external-dns.alpha.kubernetes.io/controller": "tesslate-ignore",
             },
         ),
         spec=ingress_spec,
@@ -1378,6 +1396,7 @@ def create_v2_dev_deployment(
     source_strategy: str | None = None,
     state_mount_path: str | None = None,
     resources: dict[str, str] | None = None,
+    readiness_port: int | None = None,
 ) -> client.V1Deployment:
     """
     Create a v2 dev container deployment using CSI-backed PVC volumes.
@@ -1437,14 +1456,15 @@ def create_v2_dev_deployment(
     # Working directory inside container
     effective_dir = working_directory or container_directory
     if use_image_source:
-        # Image is the source of truth. Don't ``cd /app`` (would mask
-        # the image's WORKDIR with an empty mount). Use the manifest-
-        # declared subdirectory only if explicitly non-default; otherwise
-        # let the image's WORKDIR take over.
-        if effective_dir in (".", "", container_directory):
-            working_dir_prefix = ""
+        # Image strategy: by default the image's own WORKDIR is authoritative
+        # (postgres, mirofish, markitdown, etc. would break if we cd'd into
+        # /app/<dir>). When the manifest *explicitly* sets working_directory
+        # we cd into that path RELATIVE to the image WORKDIR (no /app prefix)
+        # so multi-service image layouts can pick a baked-in subdirectory.
+        if working_directory and working_directory not in (".", ""):
+            working_dir_prefix = f"cd {working_directory} && "
         else:
-            working_dir_prefix = f"cd {effective_dir} && "
+            working_dir_prefix = ""
     else:
         working_dir = "/app" if effective_dir in (".", "") else f"/app/{effective_dir}"
         working_dir_prefix = f"mkdir -p {working_dir} && cd {working_dir} && "
@@ -1519,6 +1539,12 @@ def create_v2_dev_deployment(
         # ``resources`` shape was filtered upstream by the federated
         # converter, so we trust the keys here.
         resources=_merge_resource_overrides(resources),
+        # Image-based apps run as whatever user the image defines (often
+        # root). Bundle-based apps are user code — lock to uid 1000.
+        security_context=client.V1SecurityContext(
+            allow_privilege_escalation=False,
+            **({"run_as_non_root": True, "run_as_user": 1000} if not use_image_source else {}),
+        ),
         startup_probe=client.V1Probe(
             _exec=client.V1ExecAction(command=[tsinit_path, "health", "/tmp/tsinit.sock"]),
             initial_delay_seconds=2,
@@ -1527,7 +1553,7 @@ def create_v2_dev_deployment(
             failure_threshold=30,
         ),
         readiness_probe=client.V1Probe(
-            http_get=client.V1HTTPGetAction(path="/", port=port),
+            http_get=client.V1HTTPGetAction(path="/", port=readiness_port or port),
             initial_delay_seconds=5,
             period_seconds=5,
             timeout_seconds=3,
@@ -1556,9 +1582,6 @@ def create_v2_dev_deployment(
             "cp /usr/local/bin/tsinit /opt/bin/tsinit && chmod 0755 /opt/bin/tsinit",
         ],
         volume_mounts=[client.V1VolumeMount(name="tsinit-bin", mount_path="/opt/bin")],
-        # Init runs as the same uid as the main container. tsinit is owned
-        # by root in devserver but world-readable / world-executable, so the
-        # cp below works without root.
         security_context=client.V1SecurityContext(
             run_as_non_root=True, run_as_user=1000, allow_privilege_escalation=False
         ),
@@ -1586,8 +1609,12 @@ def create_v2_dev_deployment(
                 empty_dir=client.V1EmptyDirVolumeSource(medium="Memory", size_limit="16Mi"),
             ),
         ],
+        # Bundle apps: lock the entire pod to uid 1000.
+        # Image apps: let the image's baked-in user run (often root);
+        # only set fsGroup so the PVC state volume is group-writable.
         security_context=client.V1PodSecurityContext(
-            run_as_non_root=True, run_as_user=1000, fs_group=1000
+            **({"run_as_non_root": True, "run_as_user": 1000} if not use_image_source else {}),
+            fs_group=1000,
         ),
     )
 

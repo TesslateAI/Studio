@@ -18,9 +18,9 @@ from typing import Any
 
 from sqlalchemy import select
 
+from ....models import MarketplaceAgent, UserPurchasedAgent
 from ....services.automations.scopes import MARKETPLACE_AUTHOR
 from ....services.marketplace_constants import LOCAL_SOURCE_ID
-from ....models import MarketplaceAgent, UserPurchasedAgent
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 
@@ -47,9 +47,7 @@ async def _allocate_slug(db, name: str) -> str:
     for _ in range(8):
         candidate = f"{base}-{secrets.token_hex(2)}"
         existing = (
-            await db.execute(
-                select(MarketplaceAgent.id).where(MarketplaceAgent.slug == candidate)
-            )
+            await db.execute(select(MarketplaceAgent.id).where(MarketplaceAgent.slug == candidate))
         ).first()
         if existing is None:
             return candidate
@@ -58,9 +56,7 @@ async def _allocate_slug(db, name: str) -> str:
     return f"{base}-{secrets.token_hex(6)}"
 
 
-async def create_agent_executor(
-    params: dict[str, Any], context: dict[str, Any]
-) -> dict[str, Any]:
+async def create_agent_executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Create a draft MarketplaceAgent row owned by the current user.
 
     Inserts the row with ``is_published=False`` regardless of input.
@@ -72,9 +68,7 @@ async def create_agent_executor(
     description = params.get("description")
     system_prompt = params.get("system_prompt")
     if not name or not description or not system_prompt:
-        return error_output(
-            message="name, description, and system_prompt are required"
-        )
+        return error_output(message="name, description, and system_prompt are required")
 
     db = context.get("db")
     user_id = context.get("user_id")
@@ -86,15 +80,11 @@ async def create_agent_executor(
     # verify here so a misconfigured registry can't bypass the gate.
     allowed_scopes = set(context.get("allowed_scopes") or [])
     if MARKETPLACE_AUTHOR not in allowed_scopes:
-        return error_output(
-            message=f"missing required scope: {MARKETPLACE_AUTHOR}"
-        )
+        return error_output(message=f"missing required scope: {MARKETPLACE_AUTHOR}")
 
     item_type = params.get("item_type", "agent")
     if item_type not in _VALID_ITEM_TYPES:
-        return error_output(
-            message=f"item_type must be one of {sorted(_VALID_ITEM_TYPES)}"
-        )
+        return error_output(message=f"item_type must be one of {sorted(_VALID_ITEM_TYPES)}")
 
     model = params.get("model")
     tool_allowlist = params.get("tool_allowlist") or []

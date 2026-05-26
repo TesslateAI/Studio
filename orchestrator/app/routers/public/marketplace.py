@@ -49,9 +49,7 @@ SortParam = Literal["featured", "popular", "newest", "rating"]
 # public API even when explicitly requested — the orchestrator's
 # authenticated UI is the only surface that lets users browse those.
 _PUBLIC_DEFAULT_SOURCE_HANDLE = "tesslate-official"
-_PUBLIC_ALLOWED_TRUST_LEVELS: frozenset[str] = frozenset(
-    {"official", "admin_trusted"}
-)
+_PUBLIC_ALLOWED_TRUST_LEVELS: frozenset[str] = frozenset({"official", "admin_trusted"})
 
 
 async def _resolve_public_source_filter(
@@ -76,9 +74,7 @@ async def _resolve_public_source_filter(
     """
     handle = source_handle or _PUBLIC_DEFAULT_SOURCE_HANDLE
     src = (
-        await db.execute(
-            select(MarketplaceSource).where(MarketplaceSource.handle == handle)
-        )
+        await db.execute(select(MarketplaceSource).where(MarketplaceSource.handle == handle))
     ).scalar_one_or_none()
     if src is None:
         if source_handle is None:
@@ -153,9 +149,9 @@ def _agent_to_dict(
             display_name_val = str(source.display_name) if source.display_name is not None else ""
             if display_name_val:
                 creator_name = display_name_val
-        creator_type = "official" if (
-            source is None or str(source.trust_level) == "official"
-        ) else "community"
+        creator_type = (
+            "official" if (source is None or str(source.trust_level) == "official") else "community"
+        )
     if not creator_name:
         # Hard fallback: the source registry hadn't been seeded yet at
         # call time. We still want a non-empty name in the response.
@@ -276,9 +272,7 @@ def _theme_to_dict(theme: Theme, *, include_detail: bool = False) -> dict:
                 "long_description": theme.long_description,
                 "theme_json": theme.theme_json,
                 "source_type": theme.source_type,
-                "parent_theme_id": str(theme.parent_theme_id)
-                if theme.parent_theme_id
-                else None,
+                "parent_theme_id": str(theme.parent_theme_id) if theme.parent_theme_id else None,
             }
         )
     return data
@@ -332,9 +326,7 @@ async def _list_marketplace_agents(
     rows = (await db.execute(stmt)).scalars().all()
 
     add_cache_headers(response, f"{total}:{page}:{limit}")
-    return paginated_response(
-        [to_dict(a, source=source_row) for a in rows], total, page, limit
-    )
+    return paginated_response([to_dict(a, source=source_row) for a in rows], total, page, limit)
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +388,11 @@ async def get_agent(
     ]
     if source_id is not None:
         filters.append(MarketplaceAgent.source_id == source_id)
-    stmt = select(MarketplaceAgent).where(*filters)
+    stmt = (
+        select(MarketplaceAgent)
+        .where(*filters)
+        .options(selectinload(MarketplaceAgent.created_by_user))
+    )
     agent = (await db.execute(stmt)).scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -543,7 +539,11 @@ async def get_skill(
     ]
     if source_id is not None:
         filters.append(MarketplaceAgent.source_id == source_id)
-    stmt = select(MarketplaceAgent).where(*filters)
+    stmt = (
+        select(MarketplaceAgent)
+        .where(*filters)
+        .options(selectinload(MarketplaceAgent.created_by_user))
+    )
     skill = (await db.execute(stmt)).scalar_one_or_none()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -708,7 +708,11 @@ async def get_mcp_server(
     ]
     if source_id is not None:
         filters.append(MarketplaceAgent.source_id == source_id)
-    stmt = select(MarketplaceAgent).where(*filters)
+    stmt = (
+        select(MarketplaceAgent)
+        .where(*filters)
+        .options(selectinload(MarketplaceAgent.created_by_user))
+    )
     server = (await db.execute(stmt)).scalar_one_or_none()
     if not server:
         raise HTTPException(status_code=404, detail="MCP server not found")

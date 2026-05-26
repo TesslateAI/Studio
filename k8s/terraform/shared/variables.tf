@@ -128,3 +128,23 @@ variable "headscale_base_domain" {
   type        = string
   default     = "vpn.tesslate.com"
 }
+
+# -----------------------------------------------------------------------------
+# Desktop Updater Signing
+# -----------------------------------------------------------------------------
+# Minisign private key used to sign Tauri desktop updater bundles.
+# Generated once via `cargo tauri signer generate --ci --password ""`; the
+# matching public key lives in desktop/src-tauri/tauri.conf.json. Stored here
+# (and synced to AWS Secrets Manager via scripts/terraform/secrets.sh) so the
+# key is recoverable if anyone's laptop dies — losing it means every shipped
+# desktop client stops accepting updates until a new keypair + transition
+# release.
+#
+# desktop/scripts/build-all.sh --signed pulls this value back out of Secrets
+# Manager and exports it as TAURI_SIGNING_PRIVATE_KEY for cargo tauri build.
+variable "tauri_signing_private_key" {
+  description = "Minisign private key (base64) for signing Tauri desktop updater bundles. Empty disables signing."
+  type        = string
+  sensitive   = true
+  default     = ""
+}

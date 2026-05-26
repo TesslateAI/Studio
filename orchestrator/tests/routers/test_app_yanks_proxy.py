@@ -21,7 +21,6 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 _ASYNC_DB_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
@@ -58,20 +57,24 @@ async def _seed_federated_app(db, *, source_id: uuid.UUID) -> dict:
     db.add(user)
     await db.flush()
 
-    src_stmt = pg_insert(models.MarketplaceSource).values(
-        {
-            "id": source_id,
-            "handle": f"hub-y-{source_id.hex[:6]}",
-            "display_name": "Yank Test Hub",
-            "base_url": "https://hub.example.com",
-            "scope": "system",
-            "trust_level": "admin_trusted",
-            "is_active": True,
-            "pinned_hub_id": "hub-yyy",
-        }
-    ).on_conflict_do_update(
-        index_elements=[models.MarketplaceSource.id],
-        set_={"is_active": True},
+    src_stmt = (
+        pg_insert(models.MarketplaceSource)
+        .values(
+            {
+                "id": source_id,
+                "handle": f"hub-y-{source_id.hex[:6]}",
+                "display_name": "Yank Test Hub",
+                "base_url": "https://hub.example.com",
+                "scope": "system",
+                "trust_level": "admin_trusted",
+                "is_active": True,
+                "pinned_hub_id": "hub-yyy",
+            }
+        )
+        .on_conflict_do_update(
+            index_elements=[models.MarketplaceSource.id],
+            set_={"is_active": True},
+        )
     )
     await db.execute(src_stmt)
 
@@ -138,6 +141,7 @@ def test_create_yank_inserts_local_row_and_forwards(api_client_session):
         }
 
     import unittest.mock as mock
+
     with mock.patch.object(gov, "proxy_create_yank", side_effect=_fake_proxy):
         res = api_client_session.post(
             "/api/app-yanks/",
@@ -225,6 +229,7 @@ def test_create_yank_local_only_when_no_source(api_client_session):
         return {}
 
     import unittest.mock as mock
+
     with mock.patch.object(gov, "proxy_create_yank", side_effect=_watch):
         res = api_client_session.post(
             "/api/app-yanks/",
@@ -290,11 +295,14 @@ def test_runtime_gate_still_refuses_yanked_after_sync(api_client_session):
     seeded = _run_db(_seed_yanked)
 
     async def _check(db):
-        from app import models
         from sqlalchemy import select
 
+        from app import models
+
         av = (
-            await db.execute(select(models.AppVersion).where(models.AppVersion.id == seeded["av_id"]))
+            await db.execute(
+                select(models.AppVersion).where(models.AppVersion.id == seeded["av_id"])
+            )
         ).scalar_one()
         # Wave-7 runtime gate uses the same `_UNRUNNABLE_VERSION_STATES` set.
         assert av.approval_state in runtime._UNRUNNABLE_VERSION_STATES

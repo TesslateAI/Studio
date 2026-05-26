@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -57,7 +57,86 @@ __all__ = [
     "ContractGateDecision",
     "ContractBreachException",
     "BreachKind",
+    "TOOL_GROUP_ALIASES",
+    "expand_tool_aliases",
 ]
+
+
+# Maps user-facing permission group names (the shorthand the UI checkbox
+# surface emits — see ``LimitsForm.tsx``) to the canonical tool names the
+# registry knows about. Defining the map here, next to the gate that uses
+# it, keeps the contract semantics reviewable in one place. Group names
+# are stable; tool sets can grow as new tools are registered.
+#
+# Contracts may mix group names and canonical names freely; the gate
+# expands the union before the allow-list check. A ``None`` allow-list
+# still means "inherit project defaults" (no enforcement).
+TOOL_GROUP_ALIASES: dict[str, frozenset[str]] = {
+    "read": frozenset(
+        {
+            "read_file",
+            "read_many_files",
+            "view_image",
+            "glob",
+            "grep",
+            "list_dir",
+            "git_log",
+            "git_status",
+            "git_diff",
+            "git_blame",
+            "metadata",
+            "get_project_info",
+        }
+    ),
+    "write": frozenset({"write_file", "delete_file", "file_undo"}),
+    "edit": frozenset({"patch_file", "multi_edit", "apply_patch"}),
+    "bash": frozenset(
+        {
+            "bash_exec",
+            "shell_exec",
+            "shell_open",
+            "shell_close",
+            "write_stdin",
+            "list_background_processes",
+            "read_background_output",
+            "python_repl",
+        }
+    ),
+    "web": frozenset({"web_fetch", "web_search"}),
+    "skill": frozenset({"load_skill"}),
+    "container": frozenset(
+        {
+            "container_status",
+            "container_start",
+            "container_stop",
+            "container_restart",
+            "container_logs",
+            "container_health",
+        }
+    ),
+    "kanban": frozenset(
+        {"kanban_create", "kanban_move", "kanban_update", "kanban_comment"}
+    ),
+    "send_message": frozenset({"send_message"}),
+    "app": frozenset({"invoke_app_action"}),
+}
+
+
+def expand_tool_aliases(allowed_tools: list[str]) -> set[str]:
+    """Expand user-facing group names into the canonical tool-name set.
+
+    Entries that are not group names pass through unchanged (so callers can
+    mix canonical names like ``read_file`` and group names like ``read`` in
+    the same allow-list).
+    """
+    expanded: set[str] = set()
+    for entry in allowed_tools:
+        group = TOOL_GROUP_ALIASES.get(entry)
+        if group is None:
+            expanded.add(entry)
+        else:
+            expanded.update(group)
+    return expanded
 
 
 # Decision-only sentinel strings — kept narrow so callers can branch with a
@@ -68,6 +147,31 @@ class BreachKind:
     SKILL_DISALLOWED = "skill_disallowed"
     TIER_TOO_HIGH = "tier_too_high"
     BUDGET_EXCEEDED = "budget_exceeded"
+    WORKSPACE_REQUIRED = "workspace_required"
+
+
+# Phase B (issue #471): tools allowed in the ``connector_only`` compute
+# profile. This profile runs the agent on a shared, warm pool with no
+# project / PVC / container, so anything that touches a filesystem,
+# shell, container, or kanban must be refused. MCP-bridged tools
+# (``mcp__*``) and ``call_agent`` go through their own contract gates
+# and are checked elsewhere; the registered ones in this list are the
+# bare minimum the connector_only path needs.
+_CONNECTOR_ONLY_ALLOWED_TOOLS: frozenset[str] = frozenset(
+    {
+        "send_message",
+        "invoke_app_action",
+        "web_fetch",
+        "web_search",
+        "load_skill",
+        "schedule_create",
+        "schedule_update",
+        "schedule_delete",
+        "schedule_list",
+        "schedule_pause",
+        "schedule_resume",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -104,8 +208,7 @@ class ContractBreachException(Exception):
         self.decision = decision
         self.tool_name = tool_name
         super().__init__(
-            f"ContractGate denied tool '{tool_name}': "
-            f"{decision.breach_kind} — {decision.reason}"
+            f"ContractGate denied tool '{tool_name}': {decision.breach_kind} — {decision.reason}"
         )
 
 
@@ -134,6 +237,10 @@ class ContractGate:
         self.run_context = run_context or {}
         self._automation_run_id = self.run_context.get("automation_run_id")
         self._automation_id = self.run_context.get("automation_id")
+        # Phase B: empty / unset means the legacy persistent-workspace path.
+        self._compute_profile: str = (
+            self.run_context.get("compute_profile") or "persistent_workspace"
+        )
 
     # ------------------------------------------------------------------
     # Public surface
@@ -144,7 +251,7 @@ class ContractGate:
         *,
         tool_name: str,
         tool_call_params: dict[str, Any],
-        tool: "Tool",
+        tool: Tool,
     ) -> ContractGateDecision:
         """Evaluate the contract against a single tool call.
 
@@ -152,14 +259,23 @@ class ContractGate:
         The first failing check short-circuits — we want the most specific
         reason in the approval card, not the most expensive one.
         """
-        # 1. Allow-list check (tool, MCP, skill).
+        # 1. Compute-profile check (Phase B). connector_only refuses any
+        # tool that needs a workspace (filesystem, shell, container,
+        # kanban, project-scoped wrappers). Runs first so the user sees
+        # the workspace-required reason rather than a tool-allow-list
+        # miss when both would fire on the same call.
+        denial = self._check_compute_profile(tool_name=tool_name)
+        if denial is not None:
+            return denial
+
+        # 2. Allow-list check (tool, MCP, skill).
         denial = self._check_allow_lists(
             tool_name=tool_name, tool_call_params=tool_call_params, tool=tool
         )
         if denial is not None:
             return denial
 
-        # 2. Compute-tier check.
+        # 3. Compute-tier check.
         denial = self._check_compute_tier(tool_name=tool_name, tool=tool)
         if denial is not None:
             return denial
@@ -184,7 +300,7 @@ class ContractGate:
         *,
         tool_name: str,
         tool_call_params: dict[str, Any],
-        tool: "Tool",
+        tool: Tool,
     ) -> ContractGateDecision | None:
         """Allow-list checks for tool, MCP server, and skill bundle.
 
@@ -234,12 +350,20 @@ class ContractGate:
             return None
 
         allowed_tools = self.contract.get("allowed_tools")
-        if allowed_tools is not None and tool_name not in allowed_tools:
-            return ContractGateDecision(
-                allowed=False,
-                reason=f"tool '{tool_name}' not in contract.allowed_tools",
-                breach_kind=BreachKind.TOOL_DISALLOWED,
-            )
+        if allowed_tools is not None:
+            # Expand user-facing group names (``read``, ``write``, ``bash``)
+            # to the canonical registry tool names (``read_file``,
+            # ``write_file``, ``bash_exec``, ...). Without this the UI's
+            # checkbox surface — which writes shorthand into the contract —
+            # would deny every tool call. Canonical names pass through
+            # unchanged so raw-JSON authors can keep using either form.
+            expanded = expand_tool_aliases(allowed_tools)
+            if tool_name not in expanded:
+                return ContractGateDecision(
+                    allowed=False,
+                    reason=f"tool '{tool_name}' not in contract.allowed_tools",
+                    breach_kind=BreachKind.TOOL_DISALLOWED,
+                )
 
         # MCP allow-list (for tools whose params name an MCP server).
         # ``mcp_name`` / ``server`` are the conventional param keys —
@@ -274,9 +398,44 @@ class ContractGate:
 
         return None
 
-    def _check_compute_tier(
-        self, *, tool_name: str, tool: "Tool"
-    ) -> ContractGateDecision | None:
+    def _check_compute_profile(self, *, tool_name: str) -> ContractGateDecision | None:
+        """Phase B (#471): refuse workspace-bound tools in the connector-only
+        profile.
+
+        ``connector_only`` runs the agent on a shared, warm pool with no
+        project / PVC / container. MCP-bridged tools (``mcp__*``) and
+        the Phase A-allowed connector / app / messaging tools pass; any
+        tool that would touch a filesystem, shell, kanban, or container
+        gets refused with a clear ``WORKSPACE_REQUIRED`` reason.
+
+        The check is a pure no-op for the other two profiles
+        (``persistent_workspace`` is today's behavior;
+        ``ephemeral_workspace`` falls back to it in Phase B).
+        """
+        if self._compute_profile != "connector_only":
+            return None
+
+        # MCP-bridged tools have a separate gating path
+        # (``allowed_mcps``). They never need a workspace by themselves;
+        # the remote MCP server is responsible for its own scoping.
+        if tool_name.startswith("mcp__"):
+            return None
+
+        if tool_name in _CONNECTOR_ONLY_ALLOWED_TOOLS:
+            return None
+
+        return ContractGateDecision(
+            allowed=False,
+            reason=(
+                f"tool '{tool_name}' requires a project workspace; the "
+                "automation's compute_profile is 'connector_only' which "
+                "has no PVC / container. Switch the workflow to "
+                "'persistent_workspace' or remove this tool from the step."
+            ),
+            breach_kind=BreachKind.WORKSPACE_REQUIRED,
+        )
+
+    def _check_compute_tier(self, *, tool_name: str, tool: Tool) -> ContractGateDecision | None:
         """Reject tools that demand a higher compute tier than the contract allows.
 
         Most tools default to Tier 0 (control-plane only). Tools that need a
@@ -312,7 +471,7 @@ class ContractGate:
         *,
         tool_name: str,
         tool_call_params: dict[str, Any],
-        tool: "Tool",
+        tool: Tool,
     ) -> ContractGateDecision | None:
         """Estimate the spend for this call and compare against remaining budget.
 
@@ -330,7 +489,12 @@ class ContractGate:
 
         try:
             max_per_run_d = Decimal(str(max_per_run))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, InvalidOperation):
+            # ``decimal.InvalidOperation`` is an ``ArithmeticError``, not a
+            # subclass of ValueError, so it must be named explicitly.
+            # Without this the bad-value path raises through to the agent's
+            # blanket ``except Exception`` and surfaces as the Python class
+            # repr ``[<class 'decimal.ConversionSyntax'>]`` in tool results.
             logger.warning(
                 "[ContractGate] non-numeric max_spend_per_run_usd=%r; skipping estimate",
                 max_per_run,
@@ -341,7 +505,7 @@ class ContractGate:
         if not isinstance(current, Decimal):
             try:
                 current = Decimal(str(current))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, InvalidOperation):
                 current = Decimal(0)
 
         remaining = max_per_run_d - current

@@ -38,7 +38,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration / session fixtures (mirrors tests/services/automations/test_dispatcher.py)
 # ---------------------------------------------------------------------------
@@ -47,9 +46,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -104,20 +101,66 @@ class _StubQueue:
 
 
 class _StubRedis:
+    """In-memory Redis stand-in for the dispatcher's outbound calls.
+
+    Covers the surfaces the dispatcher touches in this flow:
+    ``xadd`` (gateway delivery), and the budget-allocator's ``set`` /
+    ``get`` / ``exists`` / ``incrby`` / ``eval`` ops. ``eval`` here only
+    needs to honor the daily-budget reserve script: return ``-2`` when
+    the daily counter key is absent (no cap configured), else DECRBY
+    with a non-negative floor, returning ``-1`` on floor breach.
+    """
+
     def __init__(self) -> None:
         self.xadds: list[tuple[str, dict[str, str]]] = []
+        self._kv: dict[str, int] = {}
 
     async def xadd(self, stream: str, fields: dict[str, str], **_: Any) -> str:
         self.xadds.append((stream, dict(fields)))
         return "1-0"
 
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        *,
+        nx: bool = False,
+        ex: int | None = None,
+        **_: Any,
+    ) -> bool:
+        if nx and key in self._kv:
+            return False
+        self._kv[key] = int(value)
+        return True
+
+    async def get(self, key: str) -> int | None:
+        return self._kv.get(key)
+
+    async def exists(self, key: str) -> int:
+        return 1 if key in self._kv else 0
+
+    async def incrby(self, key: str, amount: int) -> int:
+        new = self._kv.get(key, 0) + int(amount)
+        self._kv[key] = new
+        return new
+
+    async def eval(self, _script: str, _num_keys: int, *args: Any) -> int:
+        # Mirrors _LUA_RESERVE_DAILY: KEYS[1]=counter, ARGV[1]=decrement.
+        key = args[0]
+        decrement = int(args[1])
+        cur = self._kv.get(key)
+        if cur is None:
+            return -2
+        if cur - decrement < 0:
+            return -1
+        self._kv[key] = cur - decrement
+        return self._kv[key]
+
 
 @pytest.fixture
 def stub_queue(monkeypatch: pytest.MonkeyPatch) -> _StubQueue:
     queue = _StubQueue()
-    monkeypatch.setattr(
-        "app.services.task_queue.get_task_queue", lambda: queue, raising=True
-    )
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue, raising=True)
     return queue
 
 
@@ -128,9 +171,7 @@ def stub_redis(monkeypatch: pytest.MonkeyPatch) -> _StubRedis:
     async def _get():
         return redis
 
-    monkeypatch.setattr(
-        "app.services.cache_service.get_redis_client", _get, raising=True
-    )
+    monkeypatch.setattr("app.services.cache_service.get_redis_client", _get, raising=True)
     return redis
 
 
@@ -235,6 +276,10 @@ async def _seed_app_action_for_owner(
     from app.models import AppVersion, MarketplaceApp
     from app.models_automations import AppAction, AppInstance
 
+    # 0088_marketplace_sources made marketplace_apps/app_versions.source_id
+    # NOT NULL. The "local" sentinel source is seeded by 0088 with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     suffix = uuid.uuid4().hex[:6]
     app_id = uuid.uuid4()
     db.add(
@@ -247,6 +292,7 @@ async def _seed_app_action_for_owner(
             category="productivity",
             state="published",
             creator_user_id=owner_user_id,
+            source_id=LOCAL_SOURCE_ID,
         )
     )
 
@@ -262,6 +308,7 @@ async def _seed_app_action_for_owner(
             feature_set_hash=f"sha256:fs-{suffix}",
             bundle_hash=f"cas://e2e-{suffix}",
             approval_state="approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
 
@@ -309,9 +356,7 @@ async def _seed_event_for(db, *, automation_id: uuid.UUID) -> uuid.UUID:
 async def _load_run(db, run_id: uuid.UUID):
     from app.models_automations import AutomationRun
 
-    return (
-        await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
-    ).scalar_one()
+    return (await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))).scalar_one()
 
 
 # ---------------------------------------------------------------------------
@@ -353,15 +398,11 @@ async def test_demo_recurring_report_end_to_end(
             "spend_usd": {"model_usd": 0.04, "tool_usd": 0.01},
         }
     )
-    monkeypatch.setitem(
-        sys.modules, "app.services.apps.action_dispatcher", fake_module
-    )
+    monkeypatch.setitem(sys.modules, "app.services.apps.action_dispatcher", fake_module)
 
     import app.services.apps as apps_pkg
 
-    monkeypatch.setattr(
-        apps_pkg, "action_dispatcher", fake_module, raising=False
-    )
+    monkeypatch.setattr(apps_pkg, "action_dispatcher", fake_module, raising=False)
 
     # ---- Step 1: owner + app + version + action + install + automation ---
     async with session_maker() as db:
@@ -369,9 +410,7 @@ async def test_demo_recurring_report_end_to_end(
         # The dispatcher resolves automation_actions.app_action_id ->
         # AppAction -> AppInstance(installer_user_id=owner) before
         # forwarding to dispatch_app_action, so the FK chain must exist.
-        app_action_id, _ = await _seed_app_action_for_owner(
-            db, owner_user_id=owner_id
-        )
+        app_action_id, _ = await _seed_app_action_for_owner(db, owner_user_id=owner_id)
         automation_id = await _seed_recurring_automation(
             db, owner_user_id=owner_id, app_action_id=app_action_id
         )
@@ -413,9 +452,7 @@ async def test_demo_recurring_report_end_to_end(
         from app.models_automations import AutomationEvent
 
         evt = (
-            await db.execute(
-                select(AutomationEvent).where(AutomationEvent.id == event_id)
-            )
+            await db.execute(select(AutomationEvent).where(AutomationEvent.id == event_id))
         ).scalar_one()
     # The dispatcher writes processed_at on the success path. (dispatched_at
     # is the cron producer's responsibility.) Either way at least one of
@@ -440,19 +477,27 @@ async def test_demo_recurring_report_end_to_end(
         )
 
         subjects = (
-            await db.execute(
-                select(InvocationSubject).where(
-                    InvocationSubject.automation_run_id == result.run_id
+            (
+                await db.execute(
+                    select(InvocationSubject).where(
+                        InvocationSubject.automation_run_id == result.run_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         artifacts = (
-            await db.execute(
-                select(AutomationRunArtifact).where(
-                    AutomationRunArtifact.run_id == result.run_id
+            (
+                await db.execute(
+                    select(AutomationRunArtifact).where(
+                        AutomationRunArtifact.run_id == result.run_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     if subjects:
         assert subjects[0].payer_policy == "installer", (
@@ -470,8 +515,14 @@ async def test_demo_recurring_report_end_to_end(
     # dispatcher only XADDs for gateway.send actions today; once the
     # action_dispatcher learns to fan out to delivery targets the count
     # will be >= 1.
-    if stub_redis.xadds:
-        stream, fields = stub_redis.xadds[0]
+    # Filter to gateway-shaped events (kind in {message, delivery}); the
+    # marketplace_sync catalog also XADDs to the same stub redis with
+    # `op`/`table` fields, which we don't care about here.
+    gateway_xadds = [
+        (s, f) for s, f in stub_redis.xadds if f.get("kind") in {"message", "delivery"}
+    ]
+    if gateway_xadds:
+        stream, fields = gateway_xadds[0]
         assert stream
         assert fields.get("kind") in {"message", "delivery"}
 

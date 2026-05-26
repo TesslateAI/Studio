@@ -85,19 +85,29 @@ resource "helm_release" "nginx_ingress" {
 # -----------------------------------------------------------------------------
 # cert-manager (for TLS certificates)
 # -----------------------------------------------------------------------------
+# IMPORTANT: Do NOT downgrade below v1.18.x. Cloudflare deprecated the
+# per-record `zone_id` JSON field on 2024-11-30, which broke DNS-01 cleanup
+# in cert-manager <=v1.17 — every renewal silently leaks an orphan TXT
+# record and eventually the cert expires when cleanup blocks the next
+# challenge from being presented. Fixed upstream by injecting the zone id
+# onto records after unmarshal (cert-manager v1.18+).
+# -----------------------------------------------------------------------------
 resource "helm_release" "cert_manager" {
   count = var.enable_cert_manager ? 1 : 0
 
   name             = "cert-manager"
   repository       = "https://charts.jetstack.io"
   chart            = "cert-manager"
-  version          = "v1.14.0"
+  version          = "v1.20.2"
   namespace        = "cert-manager"
   create_namespace = true
 
   values = [
     yamlencode({
-      installCRDs = true
+      crds = {
+        enabled = true
+        keep    = true  # don't delete CRDs (and their Certificates) on uninstall
+      }
 
       serviceAccount = {
         annotations = {
@@ -117,12 +127,55 @@ resource "helm_release" "cert_manager" {
       }
 
       # DNS-01 challenge configuration (for wildcard certs)
-      dns01RecursiveNameservers = "1.1.1.1:53,8.8.8.8:53"
+      dns01RecursiveNameservers     = "1.1.1.1:53,8.8.8.8:53"
       dns01RecursiveNameserversOnly = true
+
+      # NetworkPolicy gates are new in v1.18+ chart; opt out to keep
+      # existing behaviour (no policies in cert-manager ns).
+      networkPolicy            = { enabled = false }
+      cainjector               = { networkPolicy = { enabled = false } }
+      webhook                  = { networkPolicy = { enabled = false } }
     })
   ]
 
   depends_on = [module.eks]
+}
+
+# -----------------------------------------------------------------------------
+# kubernetes-reflector (auto-sync wildcard TLS into project namespaces)
+# -----------------------------------------------------------------------------
+# Replaces the orchestrator's per-project secret-copy with a live watch:
+# when cert-manager renews the wildcard, every annotated reflection updates
+# automatically. Without this, the 60 hand-copied per-namespace copies go
+# stale on renewal and every project subdomain serves an expired cert.
+# Annotation-driven (see kubernetes.tf:tesslate-wildcard-tls Certificate).
+# -----------------------------------------------------------------------------
+resource "helm_release" "reflector" {
+  count = var.enable_cert_manager ? 1 : 0
+
+  name             = "reflector"
+  repository       = "https://emberstack.github.io/helm-charts"
+  chart            = "reflector"
+  version          = "9.1.18"
+  namespace        = "kube-system"
+  create_namespace = false
+
+  values = [
+    yamlencode({
+      resources = {
+        requests = {
+          cpu    = "10m"
+          memory = "32Mi"
+        }
+        limits = {
+          cpu    = "100m"
+          memory = "128Mi"
+        }
+      }
+    })
+  ]
+
+  depends_on = [helm_release.cert_manager]
 }
 
 # -----------------------------------------------------------------------------
@@ -307,6 +360,30 @@ resource "helm_release" "external_dns" {
       policy = "sync"  # sync will delete records when ingress is deleted
 
       sources = ["ingress", "service"]
+
+      # Watch ONLY the platform namespace via --namespace flag. Per-project
+      # ingresses in proj-* namespaces are already covered by the wildcard
+      # CNAME (`*.<domain>` → NLB, declared in dns.tf) so we don't want
+      # external-dns creating one specific CNAME per project — those
+      # records silently override the wildcard, consume the Cloudflare
+      # zone's record cap, and on 2026-05-24 wedged production wildcard
+      # cert renewal at the Free plan's 200-record cap.
+      #
+      # The orchestrator also stamps
+      # `external-dns.alpha.kubernetes.io/controller=tesslate-ignore`
+      # on every project ingress in helpers.py:create_ingress_manifest.
+      # That's the supported per-resource opt-out (anything other than
+      # the default value 'dns-controller' makes external-dns skip the
+      # resource) and serves as defense-in-depth if this --namespace
+      # flag is ever widened. Both layers are needed — only the
+      # namespace flag is a hard filter; the annotation is a soft one
+      # that external-dns honours but doesn't enforce.
+      #
+      # NB: must go through `extraArgs`. A top-level `namespace` key in
+      # this chart sets the *install* namespace of the operator, NOT
+      # the watch filter — putting it there silently does nothing,
+      # which is how we got bitten on 2026-05-24's terraform apply.
+      extraArgs = ["--namespace=tesslate"]
 
       txtOwnerId = "${var.project_name}-${var.environment}"
 

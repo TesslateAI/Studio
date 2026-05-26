@@ -6,7 +6,7 @@
 // Canonical manifest schema: docs/specs/app-manifest-2025-01.md
 
 export interface AppSdkOptions {
-  /** Base URL of the Studio deployment, e.g. https://opensail.tesslate.com (no trailing slash required). */
+  /** Base URL of the Studio deployment, e.g. https://your-domain.com (no trailing slash required). */
   baseUrl: string;
   /** External API key. Must begin with `tsk_`. */
   apiKey: string;

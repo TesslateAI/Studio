@@ -24,6 +24,7 @@ import type {
 } from '../types/tesslateConfig';
 import type {
   ContainerConfigResponse,
+  FieldSchema,
   NodeConfigMode,
   ProjectConfigResponse,
   RevealSecretResponse,
@@ -1086,7 +1087,7 @@ export const chatApi = {
   },
   sendApprovalResponse: async (
     approvalId: string,
-    response: 'allow_once' | 'allow_all' | 'stop'
+    response: 'allow_once' | 'allow_all' | 'stop' | 'publish_and_activate' | 'save_draft' | 'cancel'
   ): Promise<void> => {
     await api.post('/api/chat/agent/approval', {
       approval_id: approvalId,
@@ -1297,7 +1298,7 @@ export interface SidebarTreeResponse {
 // category, never an exception, so the picker stays responsive
 // even if (e.g.) the MCP service is briefly unreachable.
 
-export type MentionItemKind = 'agent' | 'mcp' | 'app';
+export type MentionItemKind = 'agent' | 'mcp' | 'app' | 'data' | 'project';
 
 export interface MentionItem {
   kind: MentionItemKind;
@@ -1319,6 +1320,8 @@ export interface MentionSearchResponse {
   agents: MentionItem[];
   mcps: MentionItem[];
   apps: MentionItem[];
+  data: MentionItem[];
+  projects: MentionItem[];
 }
 
 export const mentionApi = {
@@ -1328,7 +1331,7 @@ export const mentionApi = {
    * we don't push the search query to the server because the lists
    * are small and a single fetch primes all three sections at once.
    */
-  search: async (): Promise<MentionSearchResponse> => {
+  search: async (opts: { projectSlug?: string } = {}): Promise<MentionSearchResponse> => {
     const safeGet = async <T>(url: string, params?: Record<string, unknown>) => {
       try {
         const r = await api.get(url, { params });
@@ -1363,15 +1366,25 @@ export const mentionApi = {
       state?: string | null;
     };
 
-    const [agentsRaw, mcpsRaw, appsRaw] = await Promise.all([
+    // Per-section row shapes declared near the consumers below.
+    type RawColl = { id: string; name: string; record_count?: number | null };
+    type RawProject = { id: string; slug?: string | null; name?: string | null };
+
+    // Single Promise.all dispatches every section's fetch in parallel —
+    // moving the data + projects requests off the critical path that the
+    // first three were already on. Sections that don't apply (data when
+    // there's no project scope) resolve to null and become empty arrays.
+    const [agentsRaw, mcpsRaw, appsRaw, collsRaw, projectsRaw] = await Promise.all([
       // /my-agents wraps in {agents:[...]} on cloud and returns a flat
       // list on some routes — accept both shapes so a single normaliser
       // works against any backend variant the user lands on.
       safeGet<{ agents?: RawAgent[] } | RawAgent[]>('/api/marketplace/my-agents'),
       safeGet<RawMcp[]>('/api/mcp/installed'),
-      safeGet<{ items?: RawApp[] } | RawApp[]>('/api/app-installs/mine', {
-        limit: 200,
-      }),
+      safeGet<{ items?: RawApp[] } | RawApp[]>('/api/app-installs/mine', { limit: 200 }),
+      opts.projectSlug
+        ? safeGet<RawColl[]>(`/api/workspace-data/projects/${opts.projectSlug}/collections`)
+        : Promise.resolve(null),
+      safeGet<RawProject[]>('/api/projects/'),
     ]);
 
     const agentsList: RawAgent[] = Array.isArray(agentsRaw)
@@ -1424,7 +1437,35 @@ export const mentionApi = {
           a.state && a.state !== 'installed' && a.state !== 'running' ? a.state : undefined,
       }));
 
-    return { agents, mcps, apps };
+    // --- data: collections in the current project ------------------------
+    // The picker only needs name + record_count to render. ``collsRaw`` is
+    // null when there's no project scope OR when the fetch failed; both
+    // collapse to an empty section.
+    const data: MentionItem[] = (collsRaw ?? []).map((c) => ({
+      kind: 'data' as const,
+      ref_id: c.name,
+      slug: c.name,
+      name: c.name,
+      enabled: true,
+      state_label:
+        c.record_count != null
+          ? `${c.record_count} record${c.record_count === 1 ? '' : 's'}`
+          : undefined,
+    }));
+
+    // --- project: every project the user can see -------------------------
+    // ``ref_id`` is the Project.id; ``slug`` drives the display @-token.
+    // Not team-scoped — the agent should be able to load data from any
+    // project the user has access to.
+    const projects: MentionItem[] = (projectsRaw ?? []).map((p) => ({
+      kind: 'project' as const,
+      ref_id: p.id,
+      slug: p.slug ?? p.id,
+      name: p.name ?? p.slug ?? 'Project',
+      enabled: true,
+    }));
+
+    return { agents, mcps, apps, data, projects };
   },
 };
 
@@ -1493,7 +1534,7 @@ export const nodeConfigApi = {
        * matches FieldSchema (key, label, type, required?, is_secret?, ...).
        * The backend merges these into the resolved schema so the value lands
        * in the right bucket (text → environment_vars, secret → encrypted). */
-      overrides?: Array<Record<string, unknown>>;
+      overrides?: FieldSchema[];
       preset?: string;
       mode?: NodeConfigMode;
     }
@@ -2320,11 +2361,7 @@ export const marketplaceApi = {
     return response.data;
   },
 
-  installSkillOnAgent: async (
-    skillId: string,
-    agentId: string,
-    opts?: { confirmed?: boolean }
-  ) => {
+  installSkillOnAgent: async (skillId: string, agentId: string, opts?: { confirmed?: boolean }) => {
     const queryParams = new URLSearchParams();
     if (opts?.confirmed) queryParams.append('confirmed', 'true');
     const query = queryParams.toString();
@@ -2355,11 +2392,11 @@ export const marketplaceApi = {
 
 /** Trust classification for a federated source row. */
 export type MarketplaceSourceTrustLevel =
-  | 'official'       // tesslate-official seed; never user-editable
-  | 'admin_trusted'  // promoted by superuser via /promote
-  | 'local'          // local:// system source (filesystem-backed)
-  | 'private'        // user/team source with bearer token
-  | 'untrusted';     // user/team source with no token (installs blocked)
+  | 'official' // tesslate-official seed; never user-editable
+  | 'admin_trusted' // promoted by superuser via /promote
+  | 'local' // local:// system source (filesystem-backed)
+  | 'private' // user/team source with bearer token
+  | 'untrusted'; // user/team source with no token (installs blocked)
 
 /** Visibility scope for a marketplace source. */
 export type MarketplaceSourceScope = 'system' | 'user' | 'team';
@@ -2451,16 +2488,16 @@ export const marketplaceSourcesApi = {
    * for the requester's active memberships. Inactive non-system rows are
    * hidden by default.
    */
-  list: async (
-    options?: { include_inactive?: boolean; signal?: AbortSignal }
-  ): Promise<MarketplaceSourceResponse[]> => {
+  list: async (options?: {
+    include_inactive?: boolean;
+    signal?: AbortSignal;
+  }): Promise<MarketplaceSourceResponse[]> => {
     const params = new URLSearchParams();
     if (options?.include_inactive) params.append('include_inactive', 'true');
     const query = params.toString();
-    const response = await api.get(
-      `/api/marketplace/sources${query ? `?${query}` : ''}`,
-      { signal: options?.signal }
-    );
+    const response = await api.get(`/api/marketplace/sources${query ? `?${query}` : ''}`, {
+      signal: options?.signal,
+    });
     return response.data;
   },
 
@@ -2488,9 +2525,7 @@ export const marketplaceSourcesApi = {
     const params = new URLSearchParams();
     if (options?.hard) params.append('hard', 'true');
     const query = params.toString();
-    await api.delete(
-      `/api/marketplace/sources/${sourceId}${query ? `?${query}` : ''}`
-    );
+    await api.delete(`/api/marketplace/sources/${sourceId}${query ? `?${query}` : ''}`);
   },
 
   /**
@@ -4520,6 +4555,7 @@ export interface InstallRequest {
   wallet_mix_consent?: Record<string, unknown>;
   mcp_consents?: Record<string, unknown>[];
   update_policy?: UpdatePolicy;
+  user_credentials?: Record<string, string>;
 }
 
 export interface InstallResult {
@@ -5292,17 +5328,14 @@ export const automationsApi = {
 
   /**
    * Read-only listing of progressively-persisted agent steps for a run
-   * whose action_type is ``agent.run``. Phase 5 stub: returns ``[]`` if the
-   * server-side endpoint hasn't shipped yet rather than throwing — the UI
-   * renders "No steps recorded" in that case.
+   * whose action_type is ``agent.run``. Errors propagate to the caller —
+   * silently returning ``[]`` here was masking real failures (404 from a
+   * routing typo, 500 from a JSON-path mismatch) and showing the user
+   * "No steps recorded" for runs that actually had steps (TC-04 Bug #23).
    */
   async listRunSteps(id: string, runId: string): Promise<RunStep[]> {
-    try {
-      const response = await api.get(`/api/automations/${id}/runs/${runId}/steps`);
-      return Array.isArray(response.data) ? response.data : [];
-    } catch {
-      return [];
-    }
+    const response = await api.get(`/api/automations/${id}/runs/${runId}/steps`);
+    return Array.isArray(response.data) ? response.data : [];
   },
 
   /**
@@ -5362,6 +5395,68 @@ export const automationsApi = {
       );
       return response.data;
     },
+  },
+
+  // -------------------------------------------------------------------
+  // G1 — WorkflowVersion
+  // -------------------------------------------------------------------
+  async listVersions(automationId: string) {
+    const response = await api.get(`/api/automations/${automationId}/versions`);
+    const data = response.data;
+    return Array.isArray(data) ? data : [];
+  },
+
+  // -------------------------------------------------------------------
+  // G2 — WorkflowProposal
+  // -------------------------------------------------------------------
+  async listProposals(automationId: string, status?: string) {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    const response = await api.get(`/api/automations/${automationId}/proposals${qs}`);
+    const data = response.data;
+    return Array.isArray(data) ? data : [];
+  },
+
+  async getProposal(automationId: string, proposalId: string) {
+    const response = await api.get(`/api/automations/${automationId}/proposals/${proposalId}`);
+    return response.data;
+  },
+
+  async createProposal(
+    automationId: string,
+    payload: {
+      to_payload: Record<string, unknown>;
+      rationale: string;
+      risk_class?: 'low' | 'medium' | 'high';
+      from_version_id?: string | null;
+    }
+  ) {
+    const response = await api.post(`/api/automations/${automationId}/proposals`, payload);
+    return response.data;
+  },
+
+  async decideProposal(
+    automationId: string,
+    proposalId: string,
+    payload: { decision: 'approve' | 'reject'; comment?: string }
+  ) {
+    const response = await api.post(
+      `/api/automations/${automationId}/proposals/${proposalId}/decide`,
+      payload
+    );
+    return response.data;
+  },
+
+  // -------------------------------------------------------------------
+  // G5 — Doctor (per-workflow self-healing agent)
+  // -------------------------------------------------------------------
+  async enableDoctor(automationId: string) {
+    const response = await api.post(`/api/automations/${automationId}/doctor/enable`);
+    return response.data;
+  },
+
+  async disableDoctor(automationId: string) {
+    const response = await api.post(`/api/automations/${automationId}/doctor/disable`);
+    return response.data;
   },
 };
 
@@ -5547,6 +5642,208 @@ export const adminSpendApi = {
   ): Promise<SpendRollupResponse> {
     const response = await api.get('/api/admin/spend/rollup', { params });
     return response.data;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Desktop sidecar (Tauri shell only)
+// ---------------------------------------------------------------------------
+
+export interface DesktopAuthStatus {
+  paired: boolean;
+  cloud_url: string;
+  default_cloud_url: string;
+}
+
+/**
+ * Desktop-only endpoints exposed by the local sidecar under `/api/desktop`.
+ * These 404 in cloud web deployments — callers must gate on the Tauri shell.
+ */
+export const desktopApi = {
+  async getAuthStatus(): Promise<DesktopAuthStatus> {
+    const response = await api.get('/api/desktop/auth/status');
+    return response.data;
+  },
+  async signOut(): Promise<void> {
+    await api.delete('/api/desktop/auth/token');
+  },
+  async setCloudUrl(url: string): Promise<{ cloud_url: string }> {
+    const response = await api.put('/api/desktop/cloud-url', { url });
+    return response.data;
+  },
+  async clearCloudUrl(): Promise<{ cloud_url: string }> {
+    const response = await api.delete('/api/desktop/cloud-url');
+    return response.data;
+  },
+  async getFirstRun(): Promise<{ completed: boolean }> {
+    const response = await api.get('/api/desktop/first-run');
+    return response.data;
+  },
+  async completeFirstRun(): Promise<{ completed: boolean }> {
+    const response = await api.post('/api/desktop/first-run');
+    return response.data;
+  },
+};
+
+export interface PairCompleteResponse {
+  device_id: string;
+  api_key_id: string;
+  token: string;
+  scopes: string[];
+  expires_at: string | null;
+}
+
+/**
+ * Cloud-side desktop pairing. Called from the `/desktop/pair` page that the
+ * desktop app opens in the system browser; the caller must hold a cloud
+ * session. Mints a `tsk_` device key returned exactly once.
+ */
+export const desktopPairApi = {
+  async complete(body: {
+    device_name: string;
+    device_platform?: string;
+    app_version?: string;
+  }): Promise<PairCompleteResponse> {
+    const response = await api.post('/api/desktop/pair/complete', body);
+    return response.data;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Workspace Data Store — built-in per-project KV/document database.
+// ---------------------------------------------------------------------------
+export interface WorkspaceCollection {
+  id: string;
+  project_id: string;
+  name: string;
+  public_insert: boolean;
+  public_read: boolean;
+  public_update: boolean;
+  public_delete: boolean;
+  /**
+   * Optional JSON Schema (Draft 2020-12) every record's ``data`` must
+   * conform to. ``null`` = no schema (any well-formed object accepted,
+   * structural guards only). Set/cleared via ``updateCollection``.
+   */
+  schema: Record<string, unknown> | null;
+  record_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WorkspaceRecord {
+  id: string;
+  collection_id: string;
+  data: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WorkspaceRecordPage {
+  records: WorkspaceRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface WorkspaceDataKey {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: string;
+  key_prefix: string;
+  is_active: boolean;
+  last_used_at: string | null;
+  created_at: string | null;
+  key?: string | null;
+}
+
+export interface WorkspaceDataUsage {
+  collection_count: number;
+  record_count: number;
+  max_collections: number;
+  max_records: number;
+  max_record_bytes: number;
+}
+
+type CollectionFlags = Pick<
+  WorkspaceCollection,
+  'public_insert' | 'public_read' | 'public_update' | 'public_delete'
+>;
+
+export const workspaceDataApi = {
+  async listCollections(projectSlug: string): Promise<WorkspaceCollection[]> {
+    const r = await api.get(`/api/workspace-data/projects/${projectSlug}/collections`);
+    return r.data;
+  },
+  async createCollection(
+    projectSlug: string,
+    body: {
+      name: string;
+      schema?: Record<string, unknown> | null;
+    } & Partial<CollectionFlags>
+  ): Promise<WorkspaceCollection> {
+    const r = await api.post(`/api/workspace-data/projects/${projectSlug}/collections`, body);
+    return r.data;
+  },
+  async updateCollection(
+    projectSlug: string,
+    collectionId: string,
+    body: Partial<CollectionFlags> & {
+      /**
+       * Tri-state by JSON serialisation convention:
+       *   * field omitted (``undefined``) → server leaves the schema as-is
+       *   * ``null`` → server clears the schema (reverts to "any object")
+       *   * object → server validates as JSON Schema and replaces
+       * The PATCH endpoint uses a sentinel default on the Pydantic side to
+       * preserve this distinction; we mirror it through the wire.
+       */
+      schema?: Record<string, unknown> | null;
+    }
+  ): Promise<WorkspaceCollection> {
+    const r = await api.patch(
+      `/api/workspace-data/projects/${projectSlug}/collections/${collectionId}`,
+      body
+    );
+    return r.data;
+  },
+  async deleteCollection(projectSlug: string, collectionId: string): Promise<void> {
+    await api.delete(`/api/workspace-data/projects/${projectSlug}/collections/${collectionId}`);
+  },
+  async listRecords(
+    projectSlug: string,
+    collectionId: string,
+    limit = 50,
+    offset = 0
+  ): Promise<WorkspaceRecordPage> {
+    const r = await api.get(
+      `/api/workspace-data/projects/${projectSlug}/collections/${collectionId}/records`,
+      { params: { limit, offset } }
+    );
+    return r.data;
+  },
+  async deleteRecord(projectSlug: string, collectionId: string, recordId: string): Promise<void> {
+    await api.delete(
+      `/api/workspace-data/projects/${projectSlug}/collections/${collectionId}/records/${recordId}`
+    );
+  },
+  async listKeys(projectSlug: string): Promise<WorkspaceDataKey[]> {
+    const r = await api.get(`/api/workspace-data/projects/${projectSlug}/keys`);
+    return r.data;
+  },
+  async createKey(
+    projectSlug: string,
+    body: { name: string; kind: string }
+  ): Promise<WorkspaceDataKey> {
+    const r = await api.post(`/api/workspace-data/projects/${projectSlug}/keys`, body);
+    return r.data;
+  },
+  async revokeKey(projectSlug: string, keyId: string): Promise<void> {
+    await api.delete(`/api/workspace-data/projects/${projectSlug}/keys/${keyId}`);
+  },
+  async getUsage(projectSlug: string): Promise<WorkspaceDataUsage> {
+    const r = await api.get(`/api/workspace-data/projects/${projectSlug}/usage`);
+    return r.data;
   },
 };
 

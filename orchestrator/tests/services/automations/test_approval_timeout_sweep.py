@@ -26,7 +26,6 @@ from alembic.config import Config
 from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Fixtures (mirror test_cron_producer.py / test_heartbeat_sweep.py)
 # ---------------------------------------------------------------------------
@@ -35,9 +34,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -191,9 +188,7 @@ async def test_no_eligible_rows_returns_zero(session_maker) -> None:
 
     user_id = await _seed_user(session_maker)
     # Future expiry → not eligible.
-    await _seed_run_and_request(
-        session_maker, owner_id=user_id, expires_in_seconds=3600
-    )
+    await _seed_run_and_request(session_maker, owner_id=user_id, expires_in_seconds=3600)
     await _seed_lease(session_maker, term=1)
 
     async with session_maker() as db:
@@ -243,9 +238,7 @@ async def test_expired_request_flips_and_fails_parent(session_maker) -> None:
     async with session_maker() as db:
         request = (
             await db.execute(
-                select(AutomationApprovalRequest).where(
-                    AutomationApprovalRequest.id == request_id
-                )
+                select(AutomationApprovalRequest).where(AutomationApprovalRequest.id == request_id)
             )
         ).scalar_one()
         run = (
@@ -287,9 +280,7 @@ async def test_lease_lost_aborts_sweep(session_maker) -> None:
     async with session_maker() as db:
         request = (
             await db.execute(
-                select(AutomationApprovalRequest).where(
-                    AutomationApprovalRequest.id == request_id
-                )
+                select(AutomationApprovalRequest).where(AutomationApprovalRequest.id == request_id)
             )
         ).scalar_one()
         run = (

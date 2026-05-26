@@ -50,7 +50,6 @@ from app.services.apps.user_secret_propagator import (
 )
 from app.services.channels.registry import encrypt_credentials
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

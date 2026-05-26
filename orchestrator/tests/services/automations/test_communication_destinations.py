@@ -35,7 +35,6 @@ from alembic.config import Config
 from sqlalchemy import event, insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Fixtures (mirror tests/services/automations/test_dispatcher.py)
 # ---------------------------------------------------------------------------
@@ -44,9 +43,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -81,6 +78,7 @@ def migrated_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 def session_maker(migrated_sqlite: str):
     engine = create_async_engine(migrated_sqlite, future=True)
     _install_sqlite_now(engine)
+
     # SQLite needs FK enforcement turned on per-connection so the FK from
     # automation_delivery_targets → communication_destinations actually
     # CASCADEs in tests.
@@ -122,9 +120,7 @@ async def _seed_user(db) -> uuid.UUID:
     return user_id
 
 
-async def _seed_channel_config(
-    db, *, user_id: uuid.UUID, name: str = "test-slack"
-) -> uuid.UUID:
+async def _seed_channel_config(db, *, user_id: uuid.UUID, name: str = "test-slack") -> uuid.UUID:
     from app.models import ChannelConfig
 
     config_id = uuid.uuid4()
@@ -210,9 +206,7 @@ def test_create_persists_row(session_maker) -> None:
             # Re-load to confirm persistence
             loaded = (
                 await db.execute(
-                    select(CommunicationDestination).where(
-                        CommunicationDestination.id == row.id
-                    )
+                    select(CommunicationDestination).where(CommunicationDestination.id == row.id)
                 )
             ).scalar_one()
             assert loaded.kind == "slack_channel"
@@ -370,9 +364,7 @@ def test_update_rejects_bad_formatting_policy(session_maker) -> None:
             )
             await db.commit()
             with pytest.raises(svc.InvalidFormattingPolicy):
-                await svc.update_destination(
-                    db, destination=row, formatting_policy="screaming"
-                )
+                await svc.update_destination(db, destination=row, formatting_policy="screaming")
 
     asyncio.run(go())
 
@@ -391,9 +383,7 @@ def test_list_for_user_includes_owner_only_when_no_team(session_maker) -> None:
             user_id = await _seed_user(db)
             other_id = await _seed_user(db)
             cc_id = await _seed_channel_config(db, user_id=user_id)
-            other_cc_id = await _seed_channel_config(
-                db, user_id=other_id, name="other-slack"
-            )
+            other_cc_id = await _seed_channel_config(db, user_id=other_id, name="other-slack")
 
             mine = await svc.create_destination(
                 db,
@@ -453,9 +443,7 @@ def test_list_for_user_filter_by_channel_config(session_maker) -> None:
             )
             await db.commit()
 
-            rows = await svc.list_for_user(
-                db, user_id=user_id, team_ids=(), channel_config_id=cc_a
-            )
+            rows = await svc.list_for_user(db, user_id=user_id, team_ids=(), channel_config_id=cc_a)
             assert len(rows) == 2
             assert {r.channel_config_id for r in rows} == {cc_a}
 
@@ -484,18 +472,10 @@ def test_destination_in_use_counts_only_active_automations(session_maker) -> Non
             )
             active_a = await _seed_automation(db, owner_user_id=user_id)
             active_b = await _seed_automation(db, owner_user_id=user_id)
-            paused = await _seed_automation(
-                db, owner_user_id=user_id, is_active=False
-            )
-            await _seed_delivery_target(
-                db, automation_id=active_a, destination_id=dest.id
-            )
-            await _seed_delivery_target(
-                db, automation_id=active_b, destination_id=dest.id
-            )
-            await _seed_delivery_target(
-                db, automation_id=paused, destination_id=dest.id
-            )
+            paused = await _seed_automation(db, owner_user_id=user_id, is_active=False)
+            await _seed_delivery_target(db, automation_id=active_a, destination_id=dest.id)
+            await _seed_delivery_target(db, automation_id=active_b, destination_id=dest.id)
+            await _seed_delivery_target(db, automation_id=paused, destination_id=dest.id)
             await db.commit()
 
             count = await svc.destination_in_use(db, dest.id)
@@ -524,9 +504,7 @@ def test_delete_refuses_when_in_use_then_force_deletes(session_maker) -> None:
                 name="incidents",
             )
             autom_id = await _seed_automation(db, owner_user_id=user_id)
-            await _seed_delivery_target(
-                db, automation_id=autom_id, destination_id=dest.id
-            )
+            await _seed_delivery_target(db, automation_id=autom_id, destination_id=dest.id)
             await db.commit()
 
             # Refuses without force.
@@ -541,9 +519,7 @@ def test_delete_refuses_when_in_use_then_force_deletes(session_maker) -> None:
 
             still_there = (
                 await db.execute(
-                    select(CommunicationDestination).where(
-                        CommunicationDestination.id == dest.id
-                    )
+                    select(CommunicationDestination).where(CommunicationDestination.id == dest.id)
                 )
             ).scalar_one_or_none()
             assert still_there is None
@@ -551,12 +527,16 @@ def test_delete_refuses_when_in_use_then_force_deletes(session_maker) -> None:
             # Cascade verification: the edge row pointing at the deleted
             # destination should be gone too.
             edges = (
-                await db.execute(
-                    select(AutomationDeliveryTarget).where(
-                        AutomationDeliveryTarget.destination_id == dest.id
+                (
+                    await db.execute(
+                        select(AutomationDeliveryTarget).where(
+                            AutomationDeliveryTarget.destination_id == dest.id
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             assert edges == []
 
     asyncio.run(go())

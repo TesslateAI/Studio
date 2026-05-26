@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,7 @@ async def run_loop(
 
     while not shutdown_event.is_set():
         try:
-            await asyncio.wait_for(
-                shutdown_event.wait(), timeout=interval_seconds
-            )
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval_seconds)
             return
         except TimeoutError:
             pass

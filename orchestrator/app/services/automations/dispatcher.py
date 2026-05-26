@@ -54,10 +54,10 @@ from __future__ import annotations
 import logging
 import socket
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
-from enum import Enum
+from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -81,7 +81,6 @@ from . import approval_pressure, trigger_events
 from .checkpoint import (
     ResumeStrategy,
     RunCheckpoint,
-    hydrate_checkpoint,
     serialize_checkpoint,
 )
 
@@ -93,7 +92,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class DispatchStatus(str, Enum):
+class DispatchStatus(StrEnum):
     """Terminal classification of a single ``dispatch_automation`` call.
 
     Distinct from :class:`AutomationRun.status` -- this describes what the
@@ -163,18 +162,46 @@ _REQUIRED_CONTRACT_KEYS = (
 
 _VALID_ON_BREACH = ("pause_for_approval", "hard_stop", "extend_once")
 
+# Highest compute tier the runtime knows how to route. ``dispatcher.py``
+# branches on tier == 1 (ephemeral pod) today; tier 2 wakes via
+# ``services/automations/wake.py``. Anything above is unwired — accepting
+# a higher value would silently fall through to Tier-0 routing, hiding the
+# misconfiguration. Bump this when a new tier ships in the wake/dispatch
+# tables.
+MAX_KNOWN_COMPUTE_TIER = 2
 
-def _validate_contract(contract: Any) -> None:
+
+def _coerce_contract_decimal(value: Any, *, key: str) -> Decimal | None:
+    """Coerce a contract spend cap to ``Decimal``, raising on garbage.
+
+    Centralizes the Decimal coercion so both ``validate_contract`` and the
+    pydantic schema reconcilers fail with the same error message on
+    non-numeric input. ``None`` passes through unchanged (means "unset").
+    """
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ContractInvalid(
+            f"contract.{key} must be a numeric value"
+        ) from exc
+
+
+def validate_contract(contract: Any) -> None:
     """Raise :class:`ContractInvalid` if the contract JSONB is malformed.
+
+    Public name (``validate_contract``) so the Pydantic schema can call
+    it directly at write time instead of deferring to dispatch — that way
+    POST/PATCH return 422 with field-level errors rather than persisting
+    a broken row that fails next run (TC-04 Bug #28).
 
     Phase 1 only enforces structural validity. Phase 2's ContractGate
     layers semantics (allow-list checks, tier mapping, spend estimation)
     on top of the same dict.
     """
     if not isinstance(contract, dict):
-        raise ContractInvalid(
-            f"contract must be a JSON object, got {type(contract).__name__}"
-        )
+        raise ContractInvalid(f"contract must be a JSON object, got {type(contract).__name__}")
 
     missing = [k for k in _REQUIRED_CONTRACT_KEYS if k not in contract]
     if missing:
@@ -183,21 +210,64 @@ def _validate_contract(contract: Any) -> None:
     allowed_tools = contract.get("allowed_tools")
     # ``None`` means "inherit project defaults"; a list is the explicit form.
     if allowed_tools is not None and not isinstance(allowed_tools, list):
-        raise ContractInvalid(
-            "contract.allowed_tools must be null or a list of tool names"
-        )
+        raise ContractInvalid("contract.allowed_tools must be null or a list of tool names")
+    if isinstance(allowed_tools, list) and not all(isinstance(t, str) for t in allowed_tools):
+        raise ContractInvalid("contract.allowed_tools entries must all be strings")
 
     tier = contract.get("max_compute_tier")
-    if not isinstance(tier, int) or tier < 0:
+    # ``bool`` is a subclass of ``int`` in Python; reject it explicitly so
+    # ``True`` doesn't slip through as ``tier=1``.
+    if isinstance(tier, bool) or not isinstance(tier, int) or tier < 0:
+        raise ContractInvalid("contract.max_compute_tier must be a non-negative integer")
+    if tier > MAX_KNOWN_COMPUTE_TIER:
         raise ContractInvalid(
-            "contract.max_compute_tier must be a non-negative integer"
+            f"contract.max_compute_tier={tier} exceeds the highest wired tier "
+            f"({MAX_KNOWN_COMPUTE_TIER}). Higher values are silently routed to "
+            f"Tier-0 by the dispatcher."
         )
 
     on_breach = contract.get("on_breach", "pause_for_approval")
     if on_breach not in _VALID_ON_BREACH:
+        raise ContractInvalid(f"contract.on_breach={on_breach!r} not in {_VALID_ON_BREACH!r}")
+
+    max_iter = contract.get("max_iterations")
+    if max_iter is not None and (
+        isinstance(max_iter, bool) or not isinstance(max_iter, int) or max_iter <= 0
+    ):
         raise ContractInvalid(
-            f"contract.on_breach={on_breach!r} not in {_VALID_ON_BREACH!r}"
+            "contract.max_iterations, when set, must be a positive integer"
         )
+
+    per_run_d = _coerce_contract_decimal(
+        contract.get("max_spend_per_run_usd"),
+        key="max_spend_per_run_usd",
+    )
+    per_day_d = _coerce_contract_decimal(
+        contract.get("max_spend_per_day_usd"),
+        key="max_spend_per_day_usd",
+    )
+    if per_run_d is not None and per_run_d <= 0:
+        raise ContractInvalid(
+            "contract.max_spend_per_run_usd must be strictly positive; "
+            "omit the field to disable the cap."
+        )
+    if per_day_d is not None and per_day_d <= 0:
+        raise ContractInvalid(
+            "contract.max_spend_per_day_usd must be strictly positive; "
+            "omit the field to disable the cap."
+        )
+    if per_run_d is not None and per_day_d is not None and per_run_d > per_day_d:
+        raise ContractInvalid(
+            f"contract.max_spend_per_run_usd (${per_run_d}) cannot exceed "
+            f"contract.max_spend_per_day_usd (${per_day_d}); raise the "
+            f"daily cap or lower the per-run cap."
+        )
+
+
+# Backwards-compatible alias so existing dispatch-time callers keep working
+# while we migrate them to the public name. New code should call
+# ``validate_contract`` directly.
+_validate_contract = validate_contract
 
 
 # ---------------------------------------------------------------------------
@@ -255,15 +325,11 @@ async def _upsert_run(
         stmt = (
             sqlite_insert(AutomationRun)
             .values(**base_values)
-            .on_conflict_do_nothing(
-                index_elements=["automation_id", "event_id"]
-            )
+            .on_conflict_do_nothing(index_elements=["automation_id", "event_id"])
             .returning(AutomationRun.id)
         )
     else:
-        raise NotImplementedError(
-            f"_upsert_run: unsupported dialect {dialect_name!r}"
-        )
+        raise NotImplementedError(f"_upsert_run: unsupported dialect {dialect_name!r}")
 
     result = await db.execute(stmt)
     inserted_id = result.scalar_one_or_none()
@@ -273,9 +339,7 @@ async def _upsert_run(
         # the same transaction.
         await db.flush()
         run = (
-            await db.execute(
-                select(AutomationRun).where(AutomationRun.id == inserted_id)
-            )
+            await db.execute(select(AutomationRun).where(AutomationRun.id == inserted_id))
         ).scalar_one()
         return run, True
 
@@ -312,9 +376,7 @@ async def update_run_heartbeat(
     if worker_id is not None:
         values["worker_id"] = worker_id
 
-    await db.execute(
-        update(AutomationRun).where(AutomationRun.id == run_id).values(**values)
-    )
+    await db.execute(update(AutomationRun).where(AutomationRun.id == run_id).values(**values))
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +427,7 @@ async def _dispatch_agent_run(
     # ``message`` wins last so a webhook trigger can still inject a runtime
     # prompt when the action template has none.
     message_text = (
-        config.get("prompt", "")
-        or config.get("message", "")
-        or event_payload.get("message", "")
+        config.get("prompt", "") or config.get("message", "") or event_payload.get("message", "")
     )
 
     # Tier-0 automations don't ship with a chat_id (no UI conversation
@@ -481,9 +541,7 @@ async def _dispatch_agent_run_tier1(
     )
 
     extra_env: dict[str, str] = {}
-    if budget_allocation is not None and getattr(
-        budget_allocation, "litellm_key_value", None
-    ):
+    if budget_allocation is not None and getattr(budget_allocation, "litellm_key_value", None):
         # Stamp the per-run LiteLLM key on the agent container so the
         # in-pod runtime can issue model calls without a separate
         # secret-fetch step. The key has a budget cap and a TTL so
@@ -542,9 +600,7 @@ async def _dispatch_app_action(
         # as "action_dispatcher unavailable: …" — same UX as the Wave 2B
         # stub path, so the failure mode reads identically whether the
         # module is missing or the import itself blew up.
-        raise NotImplementedError(
-            f"services.apps.action_dispatcher unavailable: {exc}"
-        ) from exc
+        raise NotImplementedError(f"services.apps.action_dispatcher unavailable: {exc}") from exc
 
     config = action.config or {}
     app_action_id = action.app_action_id
@@ -557,9 +613,7 @@ async def _dispatch_app_action(
         await db.execute(select(AppAction).where(AppAction.id == app_action_id))
     ).scalar_one_or_none()
     if app_action_row is None:
-        raise ContractInvalid(
-            f"automation_actions.app_action_id={app_action_id} does not exist"
-        )
+        raise ContractInvalid(f"automation_actions.app_action_id={app_action_id} does not exist")
 
     override_instance_id = config.get("app_instance_id")
     if override_instance_id is not None:
@@ -594,9 +648,7 @@ async def _dispatch_app_action(
 
     subject_row = (
         await db.execute(
-            select(InvocationSubject).where(
-                InvocationSubject.automation_run_id == run.id
-            )
+            select(InvocationSubject).where(InvocationSubject.automation_run_id == run.id)
         )
     ).scalar_one_or_none()
     invocation_subject_id = subject_row.id if subject_row is not None else None
@@ -609,13 +661,22 @@ async def _dispatch_app_action(
         run_id=run.id,
         invocation_subject_id=invocation_subject_id,
     )
-    if hasattr(result, "model_dump"):
-        return result.model_dump()  # type: ignore[no-any-return]
-    if hasattr(result, "dict"):
-        return result.dict()  # type: ignore[no-any-return]
-    if isinstance(result, dict):
-        return result
-    return {"action_type": "app.invoke", "result": str(result)}
+    # Normalize result into a JSON-friendly envelope so raw_output stays
+    # parseable downstream (audit export, cost dashboards, UI rendering).
+    # ``ActionDispatchResult`` is a plain ``@dataclass`` — preferred path.
+    if is_dataclass(result) and not isinstance(result, type):
+        body: dict[str, Any] = asdict(result)
+    elif hasattr(result, "model_dump"):
+        body = result.model_dump()  # type: ignore[no-any-return]
+    elif hasattr(result, "dict"):
+        body = result.dict()  # type: ignore[no-any-return]
+    elif isinstance(result, dict):
+        body = dict(result)
+    else:
+        # Last-resort: a non-dataclass, non-mapping result. Wrap the
+        # string form so callers can still distinguish the action_type.
+        body = {"raw": str(result)}
+    return {"action_type": "app.invoke", "result": body, "app_version_id": str(app_action_row.app_version_id), "action_name": app_action_row.name}
 
 
 async def _dispatch_gateway_send(
@@ -865,9 +926,7 @@ async def dispatch_automation(
             await db.commit()
             # Re-load so downstream sees the bumped retry_count.
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run.id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run.id))
             ).scalar_one()
             # Fall through into Phase B with status='queued' again.
         else:
@@ -886,9 +945,7 @@ async def dispatch_automation(
     # ---- Phase B: contract preflight -----------------------------------
     automation = (
         await db.execute(
-            select(AutomationDefinition).where(
-                AutomationDefinition.id == automation_id
-            )
+            select(AutomationDefinition).where(AutomationDefinition.id == automation_id)
         )
     ).scalar_one_or_none()
 
@@ -896,13 +953,31 @@ async def dispatch_automation(
         return await _mark_failed_preflight(
             db,
             run=run,
-            reason=(
-                "automation not found"
-                if automation is None
-                else "automation is_active=False"
-            ),
+            reason=("automation not found" if automation is None else "automation is_active=False"),
             paused_status=DispatchStatus.PAUSED,
         )
+
+    # G1 (#469): stamp the run with the head WorkflowVersion. Lazy-
+    # create generation 1 for definitions that pre-date G1 so every
+    # dispatch from here on is version-bound. The bootstrap snapshot
+    # is read-only — the live rows are still the editing surface
+    # until a router (or proposal) writes a new version.
+    if getattr(run, "workflow_version_id", None) is None:
+        from ..workflows.versions import ensure_head_version
+
+        try:
+            version = await ensure_head_version(db, definition=automation)
+            run.workflow_version_id = version.id
+            await db.commit()
+        except Exception as exc:
+            # Bootstrap is best-effort. If it fails the engine falls
+            # back to live rows; we log but don't abort the dispatch.
+            logger.warning(
+                "dispatcher.workflow_version_bootstrap_failed automation=%s run=%s err=%r",
+                automation_id,
+                run.id,
+                exc,
+            )
 
     try:
         _validate_contract(automation.contract)
@@ -957,9 +1032,7 @@ async def dispatch_automation(
         from .lazy_workspace import ensure_user_automation_workspace
 
         try:
-            workspace_project = await ensure_user_automation_workspace(
-                automation.owner_user_id, db
-            )
+            workspace_project = await ensure_user_automation_workspace(automation.owner_user_id, db)
             automation.workspace_project_id = workspace_project.id
             await db.commit()
         except LookupError as exc:
@@ -970,13 +1043,11 @@ async def dispatch_automation(
                 paused_status=DispatchStatus.FAILED,
             )
         except Exception as exc:
-            logger.exception(
-                "dispatcher.lazy_workspace_failed automation=%s", automation_id
-            )
+            logger.exception("dispatcher.lazy_workspace_failed automation=%s", automation_id)
             return await _mark_failed_preflight(
                 db,
                 run=run,
-                reason=f"lazy workspace creation crashed: {exc!r}",
+                reason=f"lazy workspace creation crashed: {exc}",
                 paused_status=DispatchStatus.FAILED,
             )
 
@@ -1016,40 +1087,41 @@ async def dispatch_automation(
             paused_status=DispatchStatus.FAILED,
         )
 
-    if len(actions) > 1:
-        # Phase 1 only supports a single action (ordinal=0). The DAG form
-        # ships in v2; until then we fail loudly rather than silently
-        # executing only the first row.
-        return await _mark_failed_preflight(
-            db,
-            run=run,
-            reason=(
-                f"phase 1 supports a single action; got {len(actions)} "
-                "(DAG form lands in v2)"
-            ),
-            paused_status=DispatchStatus.FAILED,
-        )
+    # Multi-step automations (more than one action) delegate to the
+    # workflow engine. Single-action stays on the legacy path so existing
+    # production workloads run unchanged. The engine still uses the same
+    # contract preflight, budget allocation, status transitions, and
+    # delivery / finalize at the tail of this function — it only owns
+    # the per-step walk and per-step persistence.
+    is_multi_step = len(actions) > 1
 
+    # The legacy single-action path uses ``action`` directly; for
+    # multi-step we keep it as a representative (the first action) so
+    # the budget allocation logic below stays correct without branching.
     action = actions[0]
 
     # ---- Phase B.5: budget allocation (Phase 2) ------------------------
-    # Mint a single-use LiteLLM key with budget=contract.max_spend_per_run_usd
-    # and atomically reserve daily budget against the automation + every
-    # parent in its chain. If the daily counter would go negative we fail
-    # preflight with a clear reason; the dispatcher's caller (router or
-    # ApprovalManager) is responsible for surfacing the "extend daily
-    # budget?" card.
+    # Atomically reserve daily budget against the automation + every
+    # parent in its chain. For ``agent.run`` we also mint a single-use
+    # LiteLLM key with ``budget_usd = contract.max_spend_per_run_usd`` so
+    # the proxy halts the model loop on overrun. For ``app.invoke`` /
+    # ``gateway.send`` we skip the key mint — those actions don't drive
+    # a model loop and cost is bounded by the handler itself — but we
+    # still debit the daily counter so the daily cap is enforced
+    # uniformly across action types.
     #
-    # Skipped when (a) ``contract.max_spend_per_run_usd`` is unset (e.g.,
-    # Tier 0 control-plane runs), or (b) the action does not drive a
-    # model loop (``app.invoke``/``gateway.send`` — those don't consume
-    # the per-run LiteLLM key). For ``agent.run`` we always allocate;
-    # the daily-budget refund on no-spend keeps the cap honest.
+    # If the daily counter would go negative we fail preflight with a
+    # clear reason; the dispatcher's caller (router or ApprovalManager)
+    # is responsible for surfacing the "extend daily budget?" card.
+    #
+    # Skipped entirely when ``contract.max_spend_per_run_usd`` is unset
+    # (e.g., Tier 0 control-plane runs configured with no caps).
     budget_allocation = None
-    if (
-        action.action_type == "agent.run"
+    needs_run_budget = (
+        any(a.action_type == "agent.run" for a in actions)
         and automation.contract.get("max_spend_per_run_usd") is not None
-    ):
+    )
+    if needs_run_budget:
         from . import budget as budget_mod
 
         try:
@@ -1059,16 +1131,25 @@ async def dispatch_automation(
                 automation_id=automation_id,
                 contract=automation.contract,
                 parent_automation_id=automation.parent_automation_id,
+                mint_litellm_key=(action.action_type == "agent.run"),
             )
             await db.commit()
         except budget_mod.DailyBudgetExceeded as exc:
+            reason = (
+                f"daily budget exceeded for automation {exc.automation_id}: "
+                f"requested ${exc.requested_usd}, remaining ${exc.remaining_usd}"
+            )
+            await _audit_budget_rejection(
+                db,
+                automation=automation,
+                run=run,
+                reason=reason,
+                breach_kind="daily_budget_exceeded",
+            )
             return await _mark_failed_preflight(
                 db,
                 run=run,
-                reason=(
-                    f"daily budget exceeded for automation {exc.automation_id}: "
-                    f"requested ${exc.requested_usd}, remaining ${exc.remaining_usd}"
-                ),
+                reason=reason,
                 paused_status=DispatchStatus.PAUSED,
             )
         except budget_mod.CycleDetected as exc:
@@ -1094,7 +1175,7 @@ async def dispatch_automation(
             return await _mark_failed_preflight(
                 db,
                 run=run,
-                reason=f"budget allocation failed: {exc!r}",
+                reason=f"budget allocation failed: {exc}",
                 paused_status=DispatchStatus.FAILED,
             )
 
@@ -1113,14 +1194,25 @@ async def dispatch_automation(
     await db.commit()
 
     # Re-fetch so we hand a fresh row to the executor branches.
-    run = (
-        await db.execute(select(AutomationRun).where(AutomationRun.id == run.id))
-    ).scalar_one()
+    run = (await db.execute(select(AutomationRun).where(AutomationRun.id == run.id))).scalar_one()
 
     event_payload = await _load_event_payload(db, event_id)
 
     try:
-        if action.action_type == "agent.run":
+        if is_multi_step:
+            # Lazy import: the engine is independent of the dispatcher
+            # but the dispatcher is the only caller for multi-step. Lazy
+            # keeps the module-import graph one-way.
+            from ..workflows.engine import execute_workflow
+
+            action_result = await execute_workflow(
+                db,
+                run=run,
+                automation=automation,
+                event_payload=event_payload,
+                budget_allocation=budget_allocation,
+            )
+        elif action.action_type == "agent.run":
             # Tier-1 ephemeral pod path (Phase 4). Tier-0 stays on the
             # in-process worker enqueue; Tier-2+ goes through wake.py.
             # Dispatcher branches on ``automation.max_compute_tier`` (the
@@ -1170,9 +1262,7 @@ async def dispatch_automation(
                 event_payload=event_payload,
             )
         else:
-            raise ActionDispatchFailed(
-                f"unknown action_type {action.action_type!r}"
-            )
+            raise ActionDispatchFailed(f"unknown action_type {action.action_type!r}")
     except ContractBreachException as exc:
         # Non-blocking HITL: write an approval row + checkpoint, transition
         # status to 'waiting_approval', commit, and return cleanly. The
@@ -1229,7 +1319,7 @@ async def dispatch_automation(
             event_id,
             run.id,
         )
-        return await _finalize_failure(db, run=run, reason=repr(exc)[:1000])
+        return await _finalize_failure(db, run=run, reason=str(exc)[:1000])
 
     # ---- Phase D: delivery + finalization ------------------------------
     try:
@@ -1248,7 +1338,7 @@ async def dispatch_automation(
         return await _finalize_failure(
             db,
             run=run,
-            reason=f"delivery failed: {exc!r}",
+            reason=f"delivery failed: {exc}",
         )
 
     # Branch on whether the action handler ran synchronously (real
@@ -1263,10 +1353,7 @@ async def dispatch_automation(
     # was being clobbered here. ``app.invoke`` and ``gateway.send``
     # complete in-process and return real results — those paths still
     # finalize here.
-    is_async_handoff = (
-        isinstance(action_result, dict)
-        and action_result.get("enqueued") is True
-    )
+    is_async_handoff = isinstance(action_result, dict) and action_result.get("enqueued") is True
 
     now = datetime.now(tz=UTC)
     if is_async_handoff:
@@ -1361,21 +1448,17 @@ def _build_action_state(
 
     if action_type == "agent.run":
         non_serializable = _detect_non_serializable_tools(breach)
-        message_history = config.get("message_history") or event_payload.get(
-            "message_history"
-        ) or []
+        message_history = (
+            config.get("message_history") or event_payload.get("message_history") or []
+        )
         return {
             "message": config.get("message") or event_payload.get("message", ""),
             "message_history": list(message_history),
-            "tool_result_trail": list(
-                config.get("tool_result_trail") or []
-            ),
+            "tool_result_trail": list(config.get("tool_result_trail") or []),
             "current_step": int(config.get("current_step", 0) or 0),
             "in_flight_non_serializable_tools": non_serializable,
             "breach_tool_name": breach.tool_name,
-            "breach_tool_params": _safe_json(
-                getattr(breach, "tool_call_params", {}) or {}
-            ),
+            "breach_tool_params": _safe_json(getattr(breach, "tool_call_params", {}) or {}),
             "agent_id": config.get("agent_id"),
             "model_name": config.get("model_name"),
             "view_context": config.get("view_context"),
@@ -1384,9 +1467,7 @@ def _build_action_state(
     if action_type == "app.invoke":
         return {
             "input": _safe_json(config.get("input", event_payload)),
-            "app_action_id": (
-                str(action.app_action_id) if action.app_action_id else None
-            ),
+            "app_action_id": (str(action.app_action_id) if action.app_action_id else None),
             "partial_output": _safe_json(config.get("partial_output")),
         }
 
@@ -1488,15 +1569,11 @@ async def _checkpoint_and_pause(
     if checkpoint.resume_strategy == ResumeStrategy.RESTART_FROM_CHECKPOINT:
         # When we can't replay the in-flight tool, the only honest
         # resolutions are cancel or restart from the last completed step.
-        options = list(_RESTART_ONLY_OPTIONS) + [
-            o for o in options if o.startswith("deny")
-        ]
+        options = list(_RESTART_ONLY_OPTIONS) + [o for o in options if o.startswith("deny")]
 
     approval_context: dict[str, Any] = {
         "tool_name": getattr(breach, "tool_name", None),
-        "tool_call_params": _safe_json(
-            getattr(breach, "tool_call_params", {}) or {}
-        ),
+        "tool_call_params": _safe_json(getattr(breach, "tool_call_params", {}) or {}),
         "summary": breach_reason,
         "breach_kind": breach_kind,
         "current_spend_usd": str(run.spend_usd or Decimal(0)),
@@ -1520,11 +1597,7 @@ async def _checkpoint_and_pause(
     )
     db.add(request)
 
-    pause_label = (
-        f"{breach_kind}: {breach_reason}"
-        if breach_kind != breach_reason
-        else breach_kind
-    )
+    pause_label = f"{breach_kind}: {breach_reason}" if breach_kind != breach_reason else breach_kind
 
     await db.execute(
         update(AutomationRun)
@@ -1539,8 +1612,7 @@ async def _checkpoint_and_pause(
     await db.commit()
 
     logger.info(
-        "[dispatcher] paused for approval automation=%s run=%s tool=%s "
-        "strategy=%s",
+        "[dispatcher] paused for approval automation=%s run=%s tool=%s strategy=%s",
         automation.id,
         run.id,
         getattr(breach, "tool_name", None),
@@ -1579,14 +1651,10 @@ async def resume_run(
     to flush any session-bound rows it added.
     """
     run = (
-        await db.execute(
-            select(AutomationRun).where(AutomationRun.id == checkpoint.run_id)
-        )
+        await db.execute(select(AutomationRun).where(AutomationRun.id == checkpoint.run_id))
     ).scalar_one_or_none()
     if run is None:
-        raise DispatcherError(
-            f"resume_run: AutomationRun {checkpoint.run_id} not found"
-        )
+        raise DispatcherError(f"resume_run: AutomationRun {checkpoint.run_id} not found")
 
     if run.status not in {"waiting_approval", "queued", "paused"}:
         # Defensive: an admin or sweep may have already terminalized the run.
@@ -1599,9 +1667,7 @@ async def resume_run(
 
     automation = (
         await db.execute(
-            select(AutomationDefinition).where(
-                AutomationDefinition.id == checkpoint.automation_id
-            )
+            select(AutomationDefinition).where(AutomationDefinition.id == checkpoint.automation_id)
         )
     ).scalar_one_or_none()
     if automation is None:
@@ -1610,16 +1676,18 @@ async def resume_run(
         )
 
     action = (
-        await db.execute(
-            select(AutomationAction)
-            .where(AutomationAction.automation_id == checkpoint.automation_id)
-            .order_by(AutomationAction.ordinal.asc())
+        (
+            await db.execute(
+                select(AutomationAction)
+                .where(AutomationAction.automation_id == checkpoint.automation_id)
+                .order_by(AutomationAction.ordinal.asc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if action is None:
-        return await _finalize_failure(
-            db, run=run, reason="automation has no actions on resume"
-        )
+        return await _finalize_failure(db, run=run, reason="automation has no actions on resume")
 
     now = datetime.now(tz=UTC)
     await db.execute(
@@ -1630,9 +1698,7 @@ async def resume_run(
     await db.commit()
 
     # Re-fetch so we hand a fresh row to the executor branches.
-    run = (
-        await db.execute(select(AutomationRun).where(AutomationRun.id == run.id))
-    ).scalar_one()
+    run = (await db.execute(select(AutomationRun).where(AutomationRun.id == run.id))).scalar_one()
 
     strategy = checkpoint.resume_strategy
     state = checkpoint.action_state or {}
@@ -1688,7 +1754,7 @@ async def resume_run(
             checkpoint.automation_id,
             run.id,
         )
-        return await _finalize_failure(db, run=run, reason=repr(exc)[:1000])
+        return await _finalize_failure(db, run=run, reason=str(exc)[:1000])
 
     # For redispatch app.invoke / gateway.send paths the action completes
     # synchronously here; finalize as success. Agent flows kick a worker
@@ -1700,11 +1766,9 @@ async def resume_run(
                 db, run=run, automation=automation, action_result=action_result
             )
         except Exception as exc:
-            logger.exception(
-                "[dispatcher] resume delivery failed run=%s", run.id
-            )
+            logger.exception("[dispatcher] resume delivery failed run=%s", run.id)
             return await _finalize_failure(
-                db, run=run, reason=f"delivery failed on resume: {exc!r}"
+                db, run=run, reason=f"delivery failed on resume: {exc}"
             )
 
         ended_at = datetime.now(tz=UTC)
@@ -1770,9 +1834,7 @@ async def _resume_redispatch(
             event_payload=state.get("event_payload") or {},
         )
 
-    raise DispatcherError(
-        f"_resume_redispatch: unsupported action_type={action.action_type!r}"
-    )
+    raise DispatcherError(f"_resume_redispatch: unsupported action_type={action.action_type!r}")
 
 
 async def _resume_agent_continue(
@@ -1799,11 +1861,7 @@ async def _resume_agent_continue(
         "user_id": str(automation.owner_user_id),
         "chat_id": config.get("chat_id", ""),
         "message": state.get("message") or config.get("message", ""),
-        "project_id": (
-            str(automation.target_project_id)
-            if automation.target_project_id
-            else ""
-        ),
+        "project_id": (str(automation.target_project_id) if automation.target_project_id else ""),
         "agent_id": state.get("agent_id") or config.get("agent_id"),
         "model_name": state.get("model_name") or config.get("model_name", ""),
         "view_context": state.get("view_context") or config.get("view_context"),
@@ -1858,11 +1916,7 @@ async def _resume_agent_restart(
         "user_id": str(automation.owner_user_id),
         "chat_id": config.get("chat_id", ""),
         "message": state.get("message") or config.get("message", ""),
-        "project_id": (
-            str(automation.target_project_id)
-            if automation.target_project_id
-            else ""
-        ),
+        "project_id": (str(automation.target_project_id) if automation.target_project_id else ""),
         "agent_id": state.get("agent_id") or config.get("agent_id"),
         "model_name": state.get("model_name") or config.get("model_name", ""),
         "view_context": state.get("view_context") or config.get("view_context"),
@@ -1960,8 +2014,7 @@ async def _handle_checkpoint_pressure_fallback(
                 )
             except Exception:
                 logger.exception(
-                    "dispatcher.pressure_fallback: schedule_deferred_retry "
-                    "raised for run=%s",
+                    "dispatcher.pressure_fallback: schedule_deferred_retry raised for run=%s",
                     run.id,
                 )
 
@@ -2003,9 +2056,7 @@ async def _handle_checkpoint_pressure_fallback(
         return await _finalize_failure(
             db,
             run=run,
-            reason=(
-                f"checkpoint_unavailable: {checkpoint_error!r}"[:1000]
-            ),
+            reason=(f"checkpoint_unavailable: {checkpoint_error!r}"[:1000]),
         )
     finally:
         try:
@@ -2034,6 +2085,41 @@ async def _resolve_arq_pool(task_queue: Any) -> Any | None:
     return await get_pool()
 
 
+async def _audit_budget_rejection(
+    db: AsyncSession,
+    *,
+    automation: AutomationDefinition,
+    run: AutomationRun,
+    reason: str,
+    breach_kind: str,
+) -> None:
+    """Best-effort AuditLog row for a budget-driven preflight rejection.
+
+    Skipped silently when the automation has no ``team_id`` (personal
+    automation outside any team scope) because ``audit_logs.team_id`` is
+    NOT NULL. ``services.audit_service.log_event`` swallows write
+    failures, so this never blocks the run-transition path.
+    """
+    if automation.team_id is None:
+        return
+    from ..audit_service import log_event
+
+    await log_event(
+        db,
+        team_id=automation.team_id,
+        user_id=automation.owner_user_id,
+        action="automation_run.budget_rejected",
+        resource_type="automation_run",
+        resource_id=run.id,
+        details={
+            "automation_id": str(automation.id),
+            "automation_name": automation.name,
+            "breach_kind": breach_kind,
+            "reason": reason,
+        },
+    )
+
+
 async def _mark_failed_preflight(
     db: AsyncSession,
     *,
@@ -2054,6 +2140,22 @@ async def _mark_failed_preflight(
         )
     )
     await db.commit()
+
+    # Doctor should see preflight failures too — they're a real signal
+    # (e.g. workspace can't be provisioned, budget breach).
+    try:
+        from ..workflows.event_log import emit_run_finished
+
+        await emit_run_finished(
+            db,
+            run_id=run.id,
+            automation_id=run.automation_id,
+            status="failed_preflight",
+            reason=reason,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.debug("emit_run_finished failed on _mark_failed_preflight", exc_info=True)
+
     return DispatchResult(
         status=paused_status,
         run_id=run.id,
@@ -2081,6 +2183,23 @@ async def _finalize_failure(
         )
     )
     await db.commit()
+
+    # G5 (#469): emit run.finished + fan out workflow_event subscribers
+    # so per-workflow doctors fire on terminal failures, not just on
+    # mid-run per-step errors.
+    try:
+        from ..workflows.event_log import emit_run_finished
+
+        await emit_run_finished(
+            db,
+            run_id=run.id,
+            automation_id=run.automation_id,
+            status="failed",
+            reason=reason,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.debug("emit_run_finished failed on _finalize_failure", exc_info=True)
+
     return DispatchResult(
         status=DispatchStatus.FAILED,
         run_id=run.id,
@@ -2099,9 +2218,7 @@ async def _load_event_payload(db: AsyncSession, event_id: UUID) -> dict[str, Any
     from ...models_automations import AutomationEvent
 
     event = (
-        await db.execute(
-            select(AutomationEvent).where(AutomationEvent.id == event_id)
-        )
+        await db.execute(select(AutomationEvent).where(AutomationEvent.id == event_id))
     ).scalar_one_or_none()
     if event is None:
         logger.warning(

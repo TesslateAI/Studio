@@ -42,7 +42,6 @@ from app.services.apps.managed_resources import (
     managed_object_storage_secret_name,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -65,9 +64,7 @@ async def db_engine():
 
 @pytest_asyncio.fixture
 async def db(db_engine) -> AsyncGenerator[AsyncSession, None]:
-    maker = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with maker() as session:
         yield session
 
@@ -167,9 +164,7 @@ def _seed_manifest_yaml(project_root: Path) -> Path:
 
 
 @pytest.mark.asyncio
-async def test_add_postgres_raises_when_unconfigured(
-    db, seeded_project, monkeypatch, core_v1
-):
+async def test_add_postgres_raises_when_unconfigured(db, seeded_project, monkeypatch, core_v1):
     monkeypatch.delenv("MANAGED_POSTGRES_ADMIN_URL", raising=False)
     monkeypatch.delenv("MANAGED_POSTGRES_ALLOW_STUB", raising=False)
     project, _root = seeded_project
@@ -206,9 +201,7 @@ async def test_add_object_storage_raises_when_unconfigured(
 
 
 @pytest.mark.asyncio
-async def test_add_kv_raises_when_unconfigured(
-    db, seeded_project, monkeypatch, core_v1
-):
+async def test_add_kv_raises_when_unconfigured(db, seeded_project, monkeypatch, core_v1):
     monkeypatch.delenv("MANAGED_REDIS_URL", raising=False)
     monkeypatch.delenv("MANAGED_REDIS_ALLOW_STUB", raising=False)
     project, _root = seeded_project
@@ -227,9 +220,7 @@ async def test_add_kv_raises_when_unconfigured(
 
 
 @pytest.mark.asyncio
-async def test_add_postgres_allow_stub_returns_sentinel(
-    db, seeded_project, monkeypatch, core_v1
-):
+async def test_add_postgres_allow_stub_returns_sentinel(db, seeded_project, monkeypatch, core_v1):
     monkeypatch.delenv("MANAGED_POSTGRES_ADMIN_URL", raising=False)
     monkeypatch.setenv("MANAGED_POSTGRES_ALLOW_STUB", "1")
     project, project_root = seeded_project
@@ -273,9 +264,7 @@ async def test_add_object_storage_allow_stub_returns_sentinel(
     user = await db.get(User, project.owner_id)
     assert user is not None
 
-    result = await add_object_storage(
-        db, project=project, user=user, core_v1=core_v1
-    )
+    result = await add_object_storage(db, project=project, user=user, core_v1=core_v1)
 
     assert result.is_stub_provisioner is True
     assert result.bucket.startswith("opensail-app-")
@@ -300,9 +289,7 @@ async def test_add_object_storage_allow_stub_returns_sentinel(
 
 
 @pytest.mark.asyncio
-async def test_add_kv_allow_stub_returns_sentinel(
-    db, seeded_project, monkeypatch, core_v1
-):
+async def test_add_kv_allow_stub_returns_sentinel(db, seeded_project, monkeypatch, core_v1):
     monkeypatch.delenv("MANAGED_REDIS_URL", raising=False)
     monkeypatch.setenv("MANAGED_REDIS_ALLOW_STUB", "1")
     project, project_root = seeded_project
@@ -346,9 +333,7 @@ class _FakeAsyncpgConn:
 
 
 @pytest.mark.asyncio
-async def test_add_postgres_real_provisioner_issues_ddl(
-    db, seeded_project, monkeypatch, core_v1
-):
+async def test_add_postgres_real_provisioner_issues_ddl(db, seeded_project, monkeypatch, core_v1):
     """Real path: connect to admin DSN, CREATE USER + CREATE DATABASE + GRANT."""
     monkeypatch.setenv(
         "MANAGED_POSTGRES_ADMIN_URL",
@@ -431,9 +416,7 @@ async def test_add_object_storage_real_provisioner_creates_bucket(
 
     monkeypatch.setattr(boto3, "client", _fake_client)
 
-    result = await add_object_storage(
-        db, project=project, user=user, core_v1=core_v1
-    )
+    result = await add_object_storage(db, project=project, user=user, core_v1=core_v1)
 
     assert result.is_stub_provisioner is False
     assert result.endpoint == "https://s3.example.com"
@@ -443,9 +426,7 @@ async def test_add_object_storage_real_provisioner_creates_bucket(
     # constraint (anything other than us-east-1 must include LocationConstraint).
     assert len(create_calls) == 1
     assert create_calls[0]["Bucket"] == result.bucket
-    assert create_calls[0]["CreateBucketConfiguration"] == {
-        "LocationConstraint": "eu-west-2"
-    }
+    assert create_calls[0]["CreateBucketConfiguration"] == {"LocationConstraint": "eu-west-2"}
     # Boto session received the configured admin credentials.
     assert client_kwargs[0]["aws_access_key_id"] == "AKIAFAKEKEY"
     assert client_kwargs[0]["aws_secret_access_key"] == "fakesecret"
@@ -457,14 +438,10 @@ async def test_add_object_storage_real_provisioner_creates_bucket(
 
 
 @pytest.mark.asyncio
-async def test_add_kv_real_provisioner_runs_info(
-    db, seeded_project, monkeypatch, core_v1
-):
+async def test_add_kv_real_provisioner_runs_info(db, seeded_project, monkeypatch, core_v1):
     """Real path: redis.asyncio.from_url(...).info() is called to verify
     reachability; the configured URL flows through to the result."""
-    monkeypatch.setenv(
-        "MANAGED_REDIS_URL", "redis://kv-pool.example.com:6380/0"
-    )
+    monkeypatch.setenv("MANAGED_REDIS_URL", "redis://kv-pool.example.com:6380/0")
     monkeypatch.delenv("MANAGED_REDIS_ALLOW_STUB", raising=False)
     project, project_root = seeded_project
     _seed_manifest_yaml(project_root)

@@ -6,8 +6,10 @@ Create Date: 2026-03-12
 """
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
+
 revision = "0024_add_skills_system"
 down_revision = "0023_container_start_cmd"
 branch_labels = None

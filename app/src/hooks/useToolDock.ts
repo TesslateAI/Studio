@@ -14,6 +14,7 @@ export type ToolType =
   | 'config'
   | 'volume'
   | 'notes'
+  | 'data'
   | 'settings';
 
 export const TOOL_TYPES: ToolType[] = [
@@ -29,6 +30,7 @@ export const TOOL_TYPES: ToolType[] = [
   'config',
   'volume',
   'notes',
+  'data',
   'settings',
 ];
 

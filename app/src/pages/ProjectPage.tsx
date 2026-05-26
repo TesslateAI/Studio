@@ -20,10 +20,12 @@ import {
   BookOpen,
   Gear,
   SlidersHorizontal,
+  Database,
 } from '@phosphor-icons/react';
 import { Tooltip } from '../components/ui/Tooltip';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { ChatContainer } from '../components/chat/ChatContainer';
+import type { ChatMention } from '../types/agent';
 import { ContainerLoadingOverlay } from '../components/ContainerLoadingOverlay';
 import { TimelinePanel } from '../components/panels/TimelinePanel';
 import { NoComputePlaceholder } from '../components/NoComputePlaceholder';
@@ -41,16 +43,14 @@ import {
   RepositoryPanel,
   NodeConfigPanel,
   ConfigPanel,
+  DataPanel,
 } from '../components/panels';
 import {
   NodeConfigPendingProvider,
   useNodeConfigPending,
 } from '../contexts/NodeConfigPendingContext';
 import { AgentRunsProvider } from '../contexts/AgentRunsProvider';
-import {
-  useBuilderShell,
-  useRegisterBuilderSection,
-} from '../contexts/BuilderShellContext';
+import { useBuilderShell, useRegisterBuilderSection } from '../contexts/BuilderShellContext';
 import { nodeConfigEvents } from '../utils/nodeConfigEvents';
 import { nodeConfigApi } from '../lib/api';
 import { DeploymentModal } from '../components/modals/DeploymentModal';
@@ -94,6 +94,7 @@ const TOOL_LABELS: Record<ToolType, string> = {
   repository: 'Repository',
   'node-config': 'Configure',
   config: 'Config',
+  data: 'Data',
   volume: 'Snapshots',
   notes: 'Notes',
   settings: 'Settings',
@@ -317,6 +318,7 @@ function ProjectPageInner() {
   } | null>(null);
   const [deployHubRefreshNonce, setDeployHubRefreshNonce] = useState(0);
   const [prefillChatMessage, setPrefillChatMessage] = useState<string | null>(null);
+  const [prefillChatMentions, setPrefillChatMentions] = useState<ChatMention[] | null>(null);
 
   // Preview port picker
   const [previewableContainers, setPreviewableContainers] = useState<PreviewableContainer[]>([]);
@@ -485,8 +487,13 @@ function ProjectPageInner() {
     [slug]
   );
 
-  const handleAskAgent = useCallback((message: string) => {
+  /** Callers MAY pass structured mentions alongside the prefill text so
+   *  the backend doesn't need to re-parse @-tokens. DataPanel uses this
+   *  for "Ask agent" on a Data row → the agent sees a real @data: mention
+   *  rather than just a slug in plain prose. */
+  const handleAskAgent = useCallback((message: string, mentions?: ChatMention[]) => {
     setPrefillChatMessage(message);
+    setPrefillChatMentions(mentions && mentions.length ? mentions : null);
   }, []);
 
   // Selection-aware chat: DesignView dispatches `tesslate:design-ask-ai`
@@ -1544,6 +1551,7 @@ function ProjectPageInner() {
     },
     { id: 'repository', icon: <GithubLogo size={14} weight="bold" />, hotkey: '⌘8' },
     { id: 'config', icon: <SlidersHorizontal size={14} weight="bold" />, hotkey: '⌘⇧K' },
+    { id: 'data', icon: <Database size={14} weight="bold" />, hotkey: '' },
     { id: 'volume', icon: <Clock size={14} weight="bold" />, hotkey: '' },
     { id: 'notes', icon: <BookOpen size={14} weight="bold" />, hotkey: '⌘⇧N' },
     {
@@ -1620,8 +1628,9 @@ function ProjectPageInner() {
   // row we navigate here with `state: { sessionId }`. ChatContainer seeds
   // its currentChatId from this and re-syncs whenever it changes (so
   // clicking another chat in the same project swaps sessions in place).
-  const initialChatIdFromRoute =
-    (location.state as Record<string, unknown> | null)?.sessionId as string | undefined;
+  const initialChatIdFromRoute = (location.state as Record<string, unknown> | null)?.sessionId as
+    | string
+    | undefined;
 
   const chatProps = {
     projectId: project?.id as number,
@@ -1636,7 +1645,11 @@ function ProjectPageInner() {
     sidebarExpanded: isLeftSidebarExpanded,
     isPointerOverPreviewRef,
     prefillMessage: prefillChatMessage,
-    onPrefillConsumed: () => setPrefillChatMessage(null),
+    prefillMentions: prefillChatMentions,
+    onPrefillConsumed: () => {
+      setPrefillChatMessage(null);
+      setPrefillChatMentions(null);
+    },
     onIdleWarning: handleIdleWarning,
     onEnvironmentStopping: handleEnvironmentStopping,
     onEnvironmentStopped: handleEnvironmentStopped,
@@ -1773,6 +1786,14 @@ function ProjectPageInner() {
     config: (_tab: TabInstance, _idx: number) =>
       project?.id ? (
         <ConfigPanel projectId={project.id as string} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <p className="text-xs text-[var(--text-muted)]">Loading project…</p>
+        </div>
+      ),
+    data: (_tab: TabInstance, _idx: number) =>
+      slug ? (
+        <DataPanel projectSlug={slug} onAskAgent={handleAskAgent} />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <p className="text-xs text-[var(--text-muted)]">Loading project…</p>
@@ -1970,11 +1991,13 @@ function ProjectPageInner() {
   // Desktop: chat + dock horizontal split (when both visible docked) or
   // whichever is alone. Floating chat (center) renders the dock full-width
   // in the main canvas and the chat lives in a separate fixed-position layer.
+  //
+  // We DO NOT short-circuit on `!hasAgents` — the dock canvas hosts panels
+  // (Data, Code, Terminal, Repository, Snapshots, Config, …) that work
+  // without any agent and must be reachable on a fresh project. The
+  // discovery nudge for adding an agent lives in the ChatContainer's
+  // own empty state + the floating overlay below.
   const renderDesktopContent = () => {
-    if (!hasAgents) {
-      return <div className="w-full h-full" />;
-    }
-
     // Floating chat mode: main canvas is dock-only. If the dock is closed,
     // render an empty canvas — the floating chat overlays everything.
     if (chatIsFloating) {
@@ -2037,9 +2060,9 @@ function ProjectPageInner() {
   };
 
   // Mobile: dock is always the primary view; chat floats on top via a button
-  // (mirrors desktop's chatPosition === 'center' treatment).
+  // (mirrors desktop's chatPosition === 'center' treatment). Same rationale
+  // as `renderDesktopContent` — never gate the dock on `hasAgents`.
   const renderMobileContent = () => {
-    if (!hasAgents) return <div className="w-full h-full" />;
     return (
       <div className="w-full h-full">
         {dockOpen ? renderDockContainer() : <div className="w-full h-full bg-[var(--bg)]" />}
@@ -2173,8 +2196,7 @@ function ProjectPageInner() {
             toast.success('Deployment started successfully!');
           }}
           defaultProvider={
-            deployModalProvider ??
-            (container?.deployment_provider as string | undefined)
+            deployModalProvider ?? (container?.deployment_provider as string | undefined)
           }
         />
       )}

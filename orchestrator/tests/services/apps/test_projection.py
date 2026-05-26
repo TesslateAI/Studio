@@ -36,7 +36,6 @@ from app import models, models_automations  # noqa: F401
 from app.database import Base
 from app.services.apps import projection
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — fresh in-memory SQLite per-test.
 # ---------------------------------------------------------------------------
@@ -219,9 +218,7 @@ async def _seed_app_version(
     return av
 
 
-async def _count_projection_rows(
-    db: AsyncSession, app_version_id: uuid.UUID
-) -> dict[str, int]:
+async def _count_projection_rows(db: AsyncSession, app_version_id: uuid.UUID) -> dict[str, int]:
     """Return per-table counts for one app_version_id (post-flush)."""
     counts = {}
     for label, model in (
@@ -233,10 +230,10 @@ async def _count_projection_rows(
         ("automation_templates", models_automations.AppAutomationTemplate),
     ):
         rows = (
-            await db.execute(
-                select(model).where(model.app_version_id == app_version_id)
-            )
-        ).scalars().all()
+            (await db.execute(select(model).where(model.app_version_id == app_version_id)))
+            .scalars()
+            .all()
+        )
         counts[label] = len(rows)
     return counts
 
@@ -328,9 +325,7 @@ async def test_idempotent_regeneration_does_not_duplicate(db: AsyncSession) -> N
 @pytest.mark.asyncio
 async def test_old_projection_rows_are_replaced(db: AsyncSession) -> None:
     parent = await _seed_marketplace_app(db, slug="parent-app")
-    av = await _seed_app_version(
-        db, app=parent, manifest=_full_manifest_2026_05()
-    )
+    av = await _seed_app_version(db, app=parent, manifest=_full_manifest_2026_05())
 
     # Pre-seed a stale projection row for THIS version that has nothing to
     # do with the current manifest. Regeneration must wipe it.
@@ -367,9 +362,7 @@ async def test_atomicity_invalid_dependency_aborts_savepoint(
 ) -> None:
     parent = await _seed_marketplace_app(db, slug="parent-app")
     # First seed a valid projection so we can prove it survives the failure.
-    av = await _seed_app_version(
-        db, app=parent, manifest=_full_manifest_2026_05()
-    )
+    av = await _seed_app_version(db, app=parent, manifest=_full_manifest_2026_05())
     await projection.regenerate_projection(db, app_version_id=av.id)
     pre_counts = await _count_projection_rows(db, av.id)
     assert pre_counts["actions"] == 2
@@ -393,9 +386,7 @@ async def test_atomicity_invalid_dependency_aborts_savepoint(
 @pytest.mark.asyncio
 async def test_legacy_manifest_skips_projection(db: AsyncSession) -> None:
     parent = await _seed_marketplace_app(db, slug="legacy-app")
-    av = await _seed_app_version(
-        db, app=parent, manifest=_legacy_2025_01_manifest()
-    )
+    av = await _seed_app_version(db, app=parent, manifest=_legacy_2025_01_manifest())
 
     result = await projection.regenerate_projection(db, app_version_id=av.id)
 
@@ -480,9 +471,7 @@ async def test_rebinds_dependents_to_new_app_action_ids(db: AsyncSession) -> Non
     UUID, but every dependent ``automation_action`` is repointed at it —
     not left dangling at NULL."""
     parent = await _seed_marketplace_app(db, slug="parent-app")
-    av = await _seed_app_version(
-        db, app=parent, manifest=_full_manifest_2026_05()
-    )
+    av = await _seed_app_version(db, app=parent, manifest=_full_manifest_2026_05())
 
     # First projection — establishes the initial AppAction rows.
     await projection.regenerate_projection(db, app_version_id=av.id)
@@ -496,9 +485,7 @@ async def test_rebinds_dependents_to_new_app_action_ids(db: AsyncSession) -> Non
     ).scalar_one()
 
     # Seed an automation that depends on the old AppAction.id.
-    defn_id, aa_id = await _seed_automation_pointing_at(
-        db, app_action_id=old_summarize_id
-    )
+    defn_id, aa_id = await _seed_automation_pointing_at(db, app_action_id=old_summarize_id)
 
     # Regenerate (mimics another user installing the same version).
     await projection.regenerate_projection(db, app_version_id=av.id)
@@ -544,9 +531,7 @@ async def test_pauses_definition_when_action_slug_removed_in_upgrade(
     can't be rebound — pause the owning definition with a structured reason
     so the cron stops firing into a dispatcher that would only reject."""
     parent = await _seed_marketplace_app(db, slug="parent-app")
-    av = await _seed_app_version(
-        db, app=parent, manifest=_full_manifest_2026_05()
-    )
+    av = await _seed_app_version(db, app=parent, manifest=_full_manifest_2026_05())
     await projection.regenerate_projection(db, app_version_id=av.id)
     old_summarize_id = (
         await db.execute(
@@ -556,17 +541,13 @@ async def test_pauses_definition_when_action_slug_removed_in_upgrade(
             )
         )
     ).scalar_one()
-    defn_id, aa_id = await _seed_automation_pointing_at(
-        db, app_action_id=old_summarize_id
-    )
+    defn_id, aa_id = await _seed_automation_pointing_at(db, app_action_id=old_summarize_id)
 
     # Replace manifest with one that drops "summarize" entirely. Also drop
     # the data_resource and automation_template that referenced it so the
     # parser doesn't reject the manifest before projection runs.
     upgraded = _full_manifest_2026_05()
-    upgraded["actions"] = [
-        a for a in upgraded["actions"] if a["name"] != "summarize"
-    ]
+    upgraded["actions"] = [a for a in upgraded["actions"] if a["name"] != "summarize"]
     upgraded["data_resources"] = []
     upgraded["automation_templates"] = []
     av.manifest_json = upgraded
@@ -600,9 +581,7 @@ async def test_rebinds_invocation_subjects_too(db: AsyncSession) -> None:
     the same FK lifecycle and get the same rebind treatment so historical
     spend doesn't lose its attribution column on every re-projection."""
     parent = await _seed_marketplace_app(db, slug="parent-app")
-    av = await _seed_app_version(
-        db, app=parent, manifest=_full_manifest_2026_05()
-    )
+    av = await _seed_app_version(db, app=parent, manifest=_full_manifest_2026_05())
     await projection.regenerate_projection(db, app_version_id=av.id)
     old_summarize_id = (
         await db.execute(

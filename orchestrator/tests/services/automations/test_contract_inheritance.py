@@ -14,6 +14,10 @@ from decimal import Decimal
 
 import pytest
 
+from app.services.automations.contract import (
+    ContractInheritanceError,
+    validate_child_contract,
+)
 from app.services.automations.scopes import (
     APP_INVOKE,
     AUTOMATIONS_WRITE,
@@ -25,11 +29,6 @@ from app.services.automations.scopes import (
     filter_to_inheritable,
     is_inheritable,
 )
-from app.services.automations.contract import (
-    ContractInheritanceError,
-    validate_child_contract,
-)
-
 
 # ---------------------------------------------------------------------------
 # Positive-list filter
@@ -50,9 +49,7 @@ class TestPositiveListFilter:
     def test_mcp_prefix_is_inheritable(self):
         assert is_inheritable("mcp.linear.read")
         assert is_inheritable("mcp.notion.write")
-        assert "mcp.linear.read" in filter_to_inheritable(
-            {"mcp.linear.read", MARKETPLACE_AUTHOR}
-        )
+        assert "mcp.linear.read" in filter_to_inheritable({"mcp.linear.read", MARKETPLACE_AUTHOR})
 
     def test_unknown_scope_is_not_inheritable(self):
         assert not is_inheritable("billing.refund")
@@ -151,9 +148,7 @@ class TestDailyBudgetInheritance:
             "max_spend_per_run_usd": "0.50",
             "max_spend_per_day_usd": "5.00",
         }
-        validate_child_contract(
-            parent, child, parent_remaining_daily_usd=Decimal("10.00")
-        )
+        validate_child_contract(parent, child, parent_remaining_daily_usd=Decimal("10.00"))
 
     def test_child_daily_above_remaining_rejected(self):
         parent = {"max_spend_per_run_usd": "1.00"}
@@ -162,9 +157,7 @@ class TestDailyBudgetInheritance:
             "max_spend_per_day_usd": "20.00",
         }
         with pytest.raises(ContractInheritanceError) as exc_info:
-            validate_child_contract(
-                parent, child, parent_remaining_daily_usd=Decimal("10.00")
-            )
+            validate_child_contract(parent, child, parent_remaining_daily_usd=Decimal("10.00"))
         assert exc_info.value.code == "daily_cap_exceeded"
         assert exc_info.value.detail["parent_remaining_daily_usd"] == "10.00"
 
@@ -180,6 +173,4 @@ class TestDailyBudgetInheritance:
     def test_child_with_no_daily_cap_passes(self):
         parent = {"max_spend_per_run_usd": "1.00"}
         child = {"max_spend_per_run_usd": "0.50"}
-        validate_child_contract(
-            parent, child, parent_remaining_daily_usd=Decimal("0.01")
-        )
+        validate_child_contract(parent, child, parent_remaining_daily_usd=Decimal("0.01"))

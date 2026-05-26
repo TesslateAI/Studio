@@ -23,9 +23,9 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, insert as core_insert, select
+from sqlalchemy import event, select
+from sqlalchemy import insert as core_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 # ---------------------------------------------------------------------------
 # Migration fixture (mirror of test_dispatcher / test_budget).
@@ -35,9 +35,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -147,8 +145,8 @@ async def _seed_automation(
 @pytest.mark.asyncio
 async def test_create_agent_inserts_draft_with_provenance(session_maker):
     from app.agent.tools.marketplace_ops.create_agent import create_agent_executor
-    from app.services.automations.scopes import MARKETPLACE_AUTHOR
     from app.models import MarketplaceAgent
+    from app.services.automations.scopes import MARKETPLACE_AUTHOR
 
     async with session_maker() as db:
         user_id = await _seed_user(db)
@@ -179,9 +177,7 @@ async def test_create_agent_inserts_draft_with_provenance(session_maker):
         # Re-load and verify provenance + draft state.
         agent_id = uuid.UUID(result["agent_id"])
         row = (
-            await db.execute(
-                select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id)
-            )
+            await db.execute(select(MarketplaceAgent).where(MarketplaceAgent.id == agent_id))
         ).scalar_one()
         assert row.is_published is False
         assert row.created_by_automation_id == automation_id
@@ -223,8 +219,8 @@ async def test_create_agent_missing_scope_rejected(session_maker):
 @pytest.mark.asyncio
 async def test_update_agent_rejects_published_row(session_maker):
     from app.agent.tools.marketplace_ops.update_agent import update_agent_executor
-    from app.services.automations.scopes import MARKETPLACE_AUTHOR
     from app.models import MarketplaceAgent
+    from app.services.automations.scopes import MARKETPLACE_AUTHOR
 
     async with session_maker() as db:
         user_id = await _seed_user(db)
@@ -263,8 +259,8 @@ async def test_update_agent_rejects_published_row(session_maker):
 @pytest.mark.asyncio
 async def test_update_agent_rejects_forbidden_field(session_maker):
     from app.agent.tools.marketplace_ops.update_agent import update_agent_executor
-    from app.services.automations.scopes import MARKETPLACE_AUTHOR
     from app.models import MarketplaceAgent
+    from app.services.automations.scopes import MARKETPLACE_AUTHOR
 
     async with session_maker() as db:
         user_id = await _seed_user(db)
@@ -410,8 +406,8 @@ async def test_attach_schedule_clean_child_succeeds(session_maker):
     from app.agent.tools.marketplace_ops.attach_schedule import (
         attach_schedule_executor,
     )
-    from app.services.automations.scopes import AUTOMATIONS_WRITE
     from app.models_automations import AutomationDefinition
+    from app.services.automations.scopes import AUTOMATIONS_WRITE
 
     async with session_maker() as db:
         user_id = await _seed_user(db)
@@ -447,9 +443,7 @@ async def test_attach_schedule_clean_child_succeeds(session_maker):
         child_id = uuid.UUID(result["automation_id"])
         child = (
             await db.execute(
-                select(AutomationDefinition).where(
-                    AutomationDefinition.id == child_id
-                )
+                select(AutomationDefinition).where(AutomationDefinition.id == child_id)
             )
         ).scalar_one()
         assert child.depth == 1

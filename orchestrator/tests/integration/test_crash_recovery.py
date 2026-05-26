@@ -30,7 +30,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration / session fixtures
 # ---------------------------------------------------------------------------
@@ -39,9 +38,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -107,9 +104,7 @@ class _StubRedis:
 @pytest.fixture
 def stub_queue(monkeypatch: pytest.MonkeyPatch) -> _StubQueue:
     queue = _StubQueue()
-    monkeypatch.setattr(
-        "app.services.task_queue.get_task_queue", lambda: queue, raising=True
-    )
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue, raising=True)
     return queue
 
 
@@ -120,9 +115,7 @@ def stub_redis(monkeypatch: pytest.MonkeyPatch) -> _StubRedis:
     async def _get():
         return redis
 
-    monkeypatch.setattr(
-        "app.services.cache_service.get_redis_client", _get, raising=True
-    )
+    monkeypatch.setattr("app.services.cache_service.get_redis_client", _get, raising=True)
     return redis
 
 
@@ -155,9 +148,7 @@ async def _seed_user(db) -> uuid.UUID:
     return user_id
 
 
-async def _seed_automation_with_action(
-    db, *, owner_user_id: uuid.UUID
-) -> uuid.UUID:
+async def _seed_automation_with_action(db, *, owner_user_id: uuid.UUID) -> uuid.UUID:
     from app.models_automations import AutomationAction, AutomationDefinition
 
     autom_id = uuid.uuid4()
@@ -206,21 +197,23 @@ async def _seed_event(db, *, automation_id: uuid.UUID) -> uuid.UUID:
 async def _load_run(db, run_id: uuid.UUID):
     from app.models_automations import AutomationRun
 
-    return (
-        await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
-    ).scalar_one()
+    return (await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))).scalar_one()
 
 
 async def _count_runs(db, *, automation_id: uuid.UUID, event_id: uuid.UUID) -> int:
     from app.models_automations import AutomationRun
 
     rows = (
-        await db.execute(
-            select(AutomationRun)
-            .where(AutomationRun.automation_id == automation_id)
-            .where(AutomationRun.event_id == event_id)
+        (
+            await db.execute(
+                select(AutomationRun)
+                .where(AutomationRun.automation_id == automation_id)
+                .where(AutomationRun.event_id == event_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return len(rows)
 
 
@@ -249,9 +242,7 @@ async def test_dispatch_idempotency_on_duplicate_event(
 
     async with session_maker() as db:
         owner_id = await _seed_user(db)
-        automation_id = await _seed_automation_with_action(
-            db, owner_user_id=owner_id
-        )
+        automation_id = await _seed_automation_with_action(db, owner_user_id=owner_id)
         event_id = await _seed_event(db, automation_id=automation_id)
         await db.commit()
 
@@ -288,12 +279,9 @@ async def test_dispatch_idempotency_on_duplicate_event(
     }, second.status
 
     async with session_maker() as db:
-        count = await _count_runs(
-            db, automation_id=automation_id, event_id=event_id
-        )
+        count = await _count_runs(db, automation_id=automation_id, event_id=event_id)
     assert count == 1, (
-        f"UNIQUE (automation_id, event_id) violated: {count} run rows for "
-        "the same event"
+        f"UNIQUE (automation_id, event_id) violated: {count} run rows for the same event"
     )
 
     # gateway.send executed exactly once -> exactly one XADD.
@@ -323,17 +311,13 @@ async def test_dispatch_refuses_re_enqueue_for_terminal_run(
 
     async with session_maker() as db:
         owner_id = await _seed_user(db)
-        automation_id = await _seed_automation_with_action(
-            db, owner_user_id=owner_id
-        )
+        automation_id = await _seed_automation_with_action(db, owner_user_id=owner_id)
         event_id = await _seed_event(db, automation_id=automation_id)
         await db.commit()
 
     # Run to completion.
     async with session_maker() as db:
-        first = await dispatch_automation(
-            db, automation_id=automation_id, event_id=event_id
-        )
+        first = await dispatch_automation(db, automation_id=automation_id, event_id=event_id)
     assert first.status == DispatchStatus.SUCCEEDED
 
     # Snapshot the row so we can compare retry_count + spend after.
@@ -346,9 +330,7 @@ async def test_dispatch_refuses_re_enqueue_for_terminal_run(
 
     # Re-dispatch the same event id — should noop.
     async with session_maker() as db:
-        second = await dispatch_automation(
-            db, automation_id=automation_id, event_id=event_id
-        )
+        second = await dispatch_automation(db, automation_id=automation_id, event_id=event_id)
     assert second.status == DispatchStatus.NOOP_TERMINAL, second.status
     assert second.run_id == first.run_id
 
@@ -356,8 +338,7 @@ async def test_dispatch_refuses_re_enqueue_for_terminal_run(
     async with session_maker() as db:
         after = await _load_run(db, first.run_id)
     assert after.retry_count == initial_retry, (
-        f"retry_count bumped on terminal re-dispatch: {initial_retry} -> "
-        f"{after.retry_count}"
+        f"retry_count bumped on terminal re-dispatch: {initial_retry} -> {after.retry_count}"
     )
     assert after.status == "succeeded"
 

@@ -33,7 +33,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Fixtures (mirror tests/services/automations/test_invocation_subject.py)
 # ---------------------------------------------------------------------------
@@ -42,9 +41,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -169,7 +166,6 @@ def test_resolve_with_parent_run_id_creates_parent_run_subject(
     from app.models_automations import (
         AutomationDefinition,
         AutomationRun,
-        InvocationSubject,
     )
     from app.services.automations.invocation_subject import (
         CreditSource,
@@ -189,40 +185,28 @@ def test_resolve_with_parent_run_id_creates_parent_run_subject(
         # Resolve the parent first so its subject row exists.
         async with session_maker() as db:
             parent_run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == parent_run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == parent_run_id))
             ).scalar_one()
             parent_autom = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == parent_autom_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == parent_autom_id)
                 )
             ).scalar_one()
-            await resolve_invocation_subject(
-                db, automation_run=parent_run, automation=parent_autom
-            )
+            await resolve_invocation_subject(db, automation_run=parent_run, automation=parent_autom)
             await db.commit()
 
         # Now resolve the child with parent_run= the parent's run.
         async with session_maker() as db:
             child_run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == child_run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == child_run_id))
             ).scalar_one()
             child_autom = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == child_autom_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == child_autom_id)
                 )
             ).scalar_one()
             parent_run_for_resolve = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == parent_run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == parent_run_id))
             ).scalar_one()
             child_resolved = await resolve_invocation_subject(
                 db,
@@ -277,21 +261,15 @@ def test_parent_run_id_unknown_falls_back_to_installer(session_maker) -> None:
 
         async with session_maker() as db:
             child_run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == child_run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == child_run_id))
             ).scalar_one()
             child_autom = (
                 await db.execute(
-                    select(AutomationDefinition).where(
-                        AutomationDefinition.id == child_autom_id
-                    )
+                    select(AutomationDefinition).where(AutomationDefinition.id == child_autom_id)
                 )
             ).scalar_one()
             parent_run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == parent_run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == parent_run_id))
             ).scalar_one()
             child_resolved = await resolve_invocation_subject(
                 db,

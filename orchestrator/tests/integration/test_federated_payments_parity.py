@@ -54,11 +54,8 @@ from app.models import (
 )
 from app.services.marketplace_client import MarketplaceClient
 from app.services.marketplace_federation import (
-    PurchaseRoute,
     dispatch_purchase,
-    evaluate_purchase_route,
 )
-
 
 _ASYNC_DB_URL = os.environ.get(
     "DATABASE_URL",
@@ -148,9 +145,7 @@ async def parity_user(db_session: AsyncSession):
     await db_session.execute(
         UserPurchasedAgent.__table__.delete().where(UserPurchasedAgent.user_id == user_id)
     )
-    await db_session.execute(
-        User.__table__.delete().where(User.id == user_id)
-    )
+    await db_session.execute(User.__table__.delete().where(User.id == user_id))
     await db_session.commit()
 
 
@@ -243,9 +238,7 @@ async def test_checkout_session_creation_parity_hub_vs_orchestrator(
     # Hub branch — respx mocks the marketplace service's checkout endpoint.
     async def _hub_call() -> dict[str, Any]:
         with respx.mock(base_url=hub_source.base_url) as router:
-            router.post(
-                f"/v1/items/agent/{parity_agent_hub.slug}/checkout"
-            ).mock(
+            router.post(f"/v1/items/agent/{parity_agent_hub.slug}/checkout").mock(
                 return_value=httpx.Response(
                     200,
                     headers={"X-Tesslate-Hub-Id": hub_source.pinned_hub_id},
@@ -345,7 +338,6 @@ async def test_webhook_reconciliation_parity_grant_endpoint_inserts_purchase(
     secret = "parity-test-secret"
 
     # Patch settings to expose the secret without rewriting environment.
-    from app.config import get_settings
     fake_settings = SimpleNamespace(
         marketplace_hub_entitlement_secret=secret,
     )
@@ -433,11 +425,12 @@ async def test_webhook_grant_rejects_invalid_signature(
     parity_agent_hub: MarketplaceAgent,
     parity_user: User,
 ) -> None:
+    from fastapi import HTTPException
+
     from app.routers.marketplace_sources import (
         EntitlementGrantPayload,
         grant_entitlement,
     )
-    from fastapi import HTTPException
 
     secret = "parity-test-secret"
     fake_settings = SimpleNamespace(marketplace_hub_entitlement_secret=secret)
@@ -485,11 +478,12 @@ async def test_webhook_grant_refuses_unpinned_source(
 ) -> None:
     """Sources without a pinned hub_id MUST NOT accept entitlement grants
     — the pin is the cryptographic anchor for the HMAC keying."""
+    from fastapi import HTTPException
+
     from app.routers.marketplace_sources import (
         EntitlementGrantPayload,
         grant_entitlement,
     )
-    from fastapi import HTTPException
 
     secret = "parity-test-secret"
     fake_settings = SimpleNamespace(marketplace_hub_entitlement_secret=secret)
@@ -580,9 +574,7 @@ async def test_subscription_cancel_parity_voids_purchase_row(
 
     # Patch the SDK-level subscription lookup so we don't need a real Stripe key.
     fake_subscription = {"id": "sub_test_PARITY"}
-    with patch.object(
-        stripe_service, "stripe", AsyncMock()
-    ):
+    with patch.object(stripe_service, "stripe", AsyncMock()):
         await stripe_service._handle_subscription_deleted(fake_subscription, db_session)
 
     await db_session.refresh(sub_row)
@@ -648,7 +640,6 @@ async def test_customer_portal_access_parity_request_shape(
     in v1, mirrored by the marketplace service) — we assert the
     orchestrator forwards the same fields it would have used for the
     direct Stripe portal API."""
-    from app.services.marketplace_client import MarketplaceClient
 
     # MarketplaceClient.create_checkout uses the same envelope semantics
     # (customer_email + URLs) the Stripe customer-portal endpoint uses.

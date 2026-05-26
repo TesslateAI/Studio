@@ -78,7 +78,15 @@ export function ChatMessageList({
     );
   }
 
-  const lastAiId = messages.findLast((m) => m.type === 'ai')?.id;
+  // findLast requires lib: es2023; emulate with a reverse-index walk so this
+  // file compiles under the app's ES2022 target.
+  let lastAiId: string | undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].type === 'ai') {
+      lastAiId = messages[i].id;
+      break;
+    }
+  }
 
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto">

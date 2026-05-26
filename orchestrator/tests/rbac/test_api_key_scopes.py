@@ -11,13 +11,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import app.models  # noqa: F401 — register all ORM models
-
 from app.permissions import (
-    Permission,
     ROLE_PERMISSIONS,
     SCOPE_LABELS,
+    Permission,
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -208,9 +206,11 @@ class TestRequireApiScope:
 
         mock_db = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership), \
-             patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+            patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             result = await dep(user=user, db=mock_db)
             assert result == user
@@ -248,9 +248,11 @@ class TestRequireApiScope:
 
         mock_db = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership), \
-             patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+            patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             result = await dep(user=user, db=mock_db)
             assert result == user
@@ -272,8 +274,10 @@ class TestRequireApiScope:
 
         mock_db = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             with pytest.raises(HTTPException) as exc_info:
                 await dep(user=user, db=mock_db)
@@ -292,8 +296,10 @@ class TestRequireApiScope:
 
         mock_db = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.services.audit_service.log_event", new_callable=AsyncMock):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.services.audit_service.log_event", new_callable=AsyncMock),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             result = await dep(user=user, db=mock_db)
             assert result == user
@@ -311,9 +317,11 @@ class TestRequireApiScope:
         mock_db = AsyncMock()
         mock_log_event = AsyncMock()
 
-        with patch("app.auth_external.get_external_api_user", return_value=user), \
-             patch("app.auth_external.get_team_membership", return_value=membership), \
-             patch("app.services.audit_service.log_event", mock_log_event):
+        with (
+            patch("app.auth_external.get_external_api_user", return_value=user),
+            patch("app.auth_external.get_team_membership", return_value=membership),
+            patch("app.services.audit_service.log_event", mock_log_event),
+        ):
             dep = require_api_scope(Permission.CHAT_SEND)
             await dep(user=user, db=mock_db)
 
@@ -350,8 +358,15 @@ class TestLegacyScopeMigration:
     def test_legacy_scopes_not_in_permission_enum(self):
         """Old-format scopes should not exist in the Permission enum."""
         valid_values = {p.value for p in Permission}
-        legacy_scopes = ["agent:invoke", "agent:status", "agent:events",
-                         "project:read", "project:write", "files:read", "files:write"]
+        legacy_scopes = [
+            "agent:invoke",
+            "agent:status",
+            "agent:events",
+            "project:read",
+            "project:write",
+            "files:read",
+            "files:write",
+        ]
         for scope in legacy_scopes:
             assert scope not in valid_values
 
@@ -391,11 +406,13 @@ class TestToolScopeEnforcement:
 
     def _get_registry(self):
         from app.agent.tools.registry import ToolRegistry
+
         return ToolRegistry()
 
     def test_tool_scope_mapping_covers_write_tools(self):
         """All write/dangerous tools should have a scope mapping."""
         from app.agent.tools.registry import ToolRegistry
+
         mapping = ToolRegistry.TOOL_REQUIRED_SCOPES
         write_tools = ["write_file", "patch_file", "multi_edit", "apply_patch"]
         for tool in write_tools:
@@ -405,6 +422,7 @@ class TestToolScopeEnforcement:
     def test_tool_scope_mapping_covers_shell_tools(self):
         """Shell tools should require terminal.access."""
         from app.agent.tools.registry import ToolRegistry
+
         mapping = ToolRegistry.TOOL_REQUIRED_SCOPES
         shell_tools = ["bash_exec", "shell_exec", "shell_open"]
         for tool in shell_tools:
@@ -453,15 +471,17 @@ class TestToolScopeEnforcement:
         from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry
 
         registry = ToolRegistry()
-        registry.register(Tool(
-            name="write_file",
-            description="Write a file",
-            parameters={"type": "object", "properties": {}},
-            executor=lambda p, c: {"success": True},
-            category=ToolCategory.FILE_OPS,
-            state_serializable=True,
-            holds_external_state=False,
-        ))
+        registry.register(
+            Tool(
+                name="write_file",
+                description="Write a file",
+                parameters={"type": "object", "properties": {}},
+                executor=lambda p, c: {"success": True},
+                category=ToolCategory.FILE_OPS,
+                state_serializable=True,
+                holds_external_state=False,
+            )
+        )
 
         context = {
             "api_key_scopes": ["file.read", "chat.view"],  # No file.write
@@ -480,15 +500,17 @@ class TestToolScopeEnforcement:
         async def mock_write(params, context):
             return {"success": True, "message": "written"}
 
-        registry.register(Tool(
-            name="write_file",
-            description="Write a file",
-            parameters={"type": "object", "properties": {}},
-            executor=mock_write,
-            category=ToolCategory.FILE_OPS,
-            state_serializable=True,
-            holds_external_state=False,
-        ))
+        registry.register(
+            Tool(
+                name="write_file",
+                description="Write a file",
+                parameters={"type": "object", "properties": {}},
+                executor=mock_write,
+                category=ToolCategory.FILE_OPS,
+                state_serializable=True,
+                holds_external_state=False,
+            )
+        )
 
         context = {
             "api_key_scopes": ["file.write", "file.read"],
@@ -496,7 +518,11 @@ class TestToolScopeEnforcement:
             "skip_approval_check": True,
         }
         result = await registry.execute("write_file", {}, context)
-        assert result.get("success") is True or "error" not in result or "scope" not in result.get("error", "").lower()
+        assert (
+            result.get("success") is True
+            or "error" not in result
+            or "scope" not in result.get("error", "").lower()
+        )
 
     @pytest.mark.asyncio
     async def test_execute_no_scope_check_when_null(self):
@@ -508,15 +534,17 @@ class TestToolScopeEnforcement:
         async def mock_write(params, context):
             return {"success": True}
 
-        registry.register(Tool(
-            name="write_file",
-            description="Write a file",
-            parameters={"type": "object", "properties": {}},
-            executor=mock_write,
-            category=ToolCategory.FILE_OPS,
-            state_serializable=True,
-            holds_external_state=False,
-        ))
+        registry.register(
+            Tool(
+                name="write_file",
+                description="Write a file",
+                parameters={"type": "object", "properties": {}},
+                executor=mock_write,
+                category=ToolCategory.FILE_OPS,
+                state_serializable=True,
+                holds_external_state=False,
+            )
+        )
 
         context = {
             "api_key_scopes": None,  # Full access — no restriction

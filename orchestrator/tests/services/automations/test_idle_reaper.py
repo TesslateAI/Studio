@@ -40,7 +40,6 @@ from app.models_automations import (
 )
 from app.services.apps.idle_reaper import reap_idle_runtimes
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -265,13 +264,9 @@ async def test_idle_deployment_produces_intent(db: AsyncSession) -> None:
 
     # Verify the intent row.
     intents = list(
-        (
-            await db.execute(
-                select(ControllerIntent).where(
-                    ControllerIntent.kind == "scale_to_zero"
-                )
-            )
-        ).scalars().all()
+        (await db.execute(select(ControllerIntent).where(ControllerIntent.kind == "scale_to_zero")))
+        .scalars()
+        .all()
     )
     assert len(intents) == 1
     assert intents[0].lease_term == 3
@@ -309,9 +304,7 @@ async def test_active_run_blocks_intent(db: AsyncSession) -> None:
     assert result.skipped_active == 1
     assert result.intents_recorded == 0
 
-    intents = list(
-        (await db.execute(select(ControllerIntent))).scalars().all()
-    )
+    intents = list((await db.execute(select(ControllerIntent))).scalars().all())
     assert intents == []
 
 
@@ -358,7 +351,5 @@ async def test_lease_lost_raises_and_records_no_intents(db: AsyncSession) -> Non
         await reap_idle_runtimes(db, our_term=99, now=now)
 
     # No intents written under a stale term.
-    intents = list(
-        (await db.execute(select(ControllerIntent))).scalars().all()
-    )
+    intents = list((await db.execute(select(ControllerIntent))).scalars().all())
     assert intents == []

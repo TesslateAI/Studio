@@ -32,7 +32,6 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from ....services.automations.scopes import AUTOMATIONS_WRITE
 from ....models import MarketplaceAgent
 from ....models_automations import (
     AutomationAction,
@@ -41,13 +40,19 @@ from ....models_automations import (
     AutomationTrigger,
     CommunicationDestination,
 )
+from ....services.automations.scopes import AUTOMATIONS_WRITE
 from ...tools.output_formatter import error_output, success_output
 from ...tools.registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
 
 
-_VALID_TRIGGER_KINDS = {"cron", "webhook", "app_invocation", "manual"}
+# Mirror of ``schemas_automations.AutomationTriggerIn._validate_kind``.
+# ``app_invocation`` is reserved but has no producer wired — see the docstring
+# on ``AutomationTriggerIn`` for context. Kept in lockstep so this tool fails
+# fast instead of constructing a silently-dead trigger row.
+# Tracking: TesslateAI/OpenSail-Enterprise#408.
+_VALID_TRIGGER_KINDS = {"cron", "webhook", "manual"}
 _VALID_WORKSPACE_SCOPES = {
     "none",
     "user_automation_workspace",
@@ -68,9 +73,7 @@ async def attach_schedule_executor(
     max_compute_tier = int(params.get("max_compute_tier", 0) or 0)
 
     if not agent_id_raw or not isinstance(trigger, dict) or not prompt_template:
-        return error_output(
-            message="agent_id, trigger (dict), and prompt_template are required"
-        )
+        return error_output(message="agent_id, trigger (dict), and prompt_template are required")
     if not isinstance(contract, dict):
         return error_output(message="contract (dict) is required")
     if workspace_scope not in _VALID_WORKSPACE_SCOPES:
@@ -95,9 +98,7 @@ async def attach_schedule_executor(
     # Trigger validation.
     trigger_kind = trigger.get("kind")
     if trigger_kind not in _VALID_TRIGGER_KINDS:
-        return error_output(
-            message=f"trigger.kind must be one of {sorted(_VALID_TRIGGER_KINDS)}"
-        )
+        return error_output(message=f"trigger.kind must be one of {sorted(_VALID_TRIGGER_KINDS)}")
     trigger_config = trigger.get("config") or {}
     if not isinstance(trigger_config, dict):
         return error_output(message="trigger.config must be a dict")
@@ -118,15 +119,11 @@ async def attach_schedule_executor(
             )
         parent_automation = (
             await db.execute(
-                select(AutomationDefinition).where(
-                    AutomationDefinition.id == parent_id
-                )
+                select(AutomationDefinition).where(AutomationDefinition.id == parent_id)
             )
         ).scalar_one_or_none()
         if parent_automation is None:
-            return error_output(
-                message=f"parent automation {parent_id} not found"
-            )
+            return error_output(message=f"parent automation {parent_id} not found")
 
         # Depth-1 cap. Parent at depth 1 -> child would be depth 2 ->
         # the DB CHECK would reject anyway, but we surface a typed
@@ -269,10 +266,10 @@ def register_attach_schedule_tool(registry):
             name="attach_schedule",
             description=(
                 "Create a draft AutomationDefinition that runs a target agent "
-                "on a trigger (cron/webhook/app_invocation/manual). The new "
-                "automation is a CHILD of the parent automation that called "
-                "this tool — depth-1 cap enforced. The contract must be a "
-                "strict restriction of the parent's contract (per-run cap + "
+                "on a trigger (cron/webhook/manual). The new automation is a "
+                "CHILD of the parent automation that called this tool — "
+                "depth-1 cap enforced. The contract must be a strict "
+                "restriction of the parent's contract (per-run cap + "
                 "positive-list scopes). Created with is_active=False; user "
                 "enables in UI. Required scope: automations.write."
             ),
@@ -282,7 +279,7 @@ def register_attach_schedule_tool(registry):
                     "agent_id": {"type": "string", "description": "Draft agent UUID"},
                     "trigger": {
                         "type": "object",
-                        "description": "{kind, config} — kind is cron|webhook|app_invocation|manual",
+                        "description": "{kind, config} — kind is cron|webhook|manual",
                     },
                     "prompt_template": {
                         "type": "string",

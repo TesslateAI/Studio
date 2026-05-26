@@ -85,6 +85,18 @@ class DeploymentRequest(BaseModel):
     framework: str | None = Field(
         None, description="Framework override (primary source is container.framework)"
     )
+    # Architecture-canvas hints — when supplied, drive connection-aware env
+    # injection (e.g. OPENSAIL_DATA_* from a workspace-data node wired to
+    # the container being deployed). Either one is enough; both are optional
+    # for backward compatibility with callers that don't know the graph.
+    container_id: UUID | None = Field(
+        None,
+        description="Specific container being deployed (for graph-aware env injection).",
+    )
+    deployment_target_id: UUID | None = Field(
+        None,
+        description="Deployment target node id (for graph-aware env injection).",
+    )
 
 
 class DeploymentResponse(BaseModel):
@@ -302,6 +314,75 @@ async def _execute_provider_deploy(
 # ============================================================================
 
 
+async def _inject_workspace_data_env(
+    db: AsyncSession,
+    project,
+    env_vars: dict[str, str],
+    user_id: UUID,
+    *,
+    deployment_target_id: UUID | None = None,
+    container_id: UUID | None = None,
+) -> dict[str, str]:
+    """Merge the Workspace Data Store env vars into a deploy's env_vars.
+
+    Thin adapter over the unified ``compute_env_for_containers`` resolver.
+    All resolution (graph walking, fallback, env_mapping rename, key
+    sourcing) happens in one place — this function just picks the target
+    container(s) and merges the result with caller-supplied overrides.
+
+    Caller-supplied env vars always win. Fully guarded — a failure here
+    never blocks a deploy.
+    """
+    try:
+        from ..models import DeploymentTargetConnection
+        from ..services.workspace_data_env import compute_env_for_containers
+
+        # Resolve which container(s) this deploy targets.
+        target_ids: list[UUID] = []
+        if container_id is not None:
+            target_ids = [container_id]
+        elif deployment_target_id is not None:
+            result = await db.execute(
+                select(DeploymentTargetConnection.container_id).where(
+                    DeploymentTargetConnection.deployment_target_id == deployment_target_id,
+                )
+            )
+            target_ids = [row for (row,) in result.all()]
+
+        # If we still don't know the target, blanket-inject for the project
+        # by passing an empty list but bypassing the container loop — call
+        # the single-project resolver directly so behaviour mirrors the
+        # pre-graph era for callers without a container hint.
+        if not target_ids:
+            from ..services.workspace_data_env import resolve_workspace_data_env
+
+            fallback = await resolve_workspace_data_env(
+                db, project, user_id=user_id, key_strategy="autoinject",
+            )
+            return {**fallback, **(env_vars or {})}
+
+        per_container = await compute_env_for_containers(
+            db, project, target_ids,
+            user_id=user_id,
+            default_key_strategy="autoinject",
+        )
+
+        # Multi-container deploys (rare) merge with last-write-wins. The
+        # canonical names are identical across containers; only env_mapping
+        # renames could differ — those reflect deliberate user config.
+        merged: dict[str, str] = {}
+        for cid_env in per_container.values():
+            merged.update(cid_env)
+        return {**merged, **(env_vars or {})}
+    except Exception:
+        logger.warning(
+            "Workspace Data env injection skipped for project %s",
+            getattr(project, "id", "?"),
+            exc_info=True,
+        )
+        return env_vars or {}
+
+
 @router.post(
     "/{project_slug}/deploy",
     response_model=DeploymentResponse,
@@ -341,6 +422,14 @@ async def deploy_project(
 
         project, _role = await get_project_with_access(
             db, project_slug, current_user.id, Permission.DEPLOYMENT_CREATE
+        )
+
+        # Inject the Workspace Data Store connection (Data API URL + a fresh
+        # anon key) so the deployed frontend can reach the built-in database.
+        request.env_vars = await _inject_workspace_data_env(
+            db, project, request.env_vars, current_user.id,
+            deployment_target_id=request.deployment_target_id,
+            container_id=request.container_id,
         )
 
         # 2. Fetch credentials

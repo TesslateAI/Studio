@@ -12,8 +12,10 @@ This migration adds:
 """
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
+
 # revision identifiers
 revision = "0020_admin_panel_schema"
 down_revision = "0019_add_deployment_targets"
@@ -49,7 +51,11 @@ def upgrade() -> None:
         op.add_column("users", sa.Column("suspended_by_id", GUID(), nullable=True))
         with op.batch_alter_table("users") as batch_op:
             batch_op.create_foreign_key(
-                "fk_users_suspended_by_id", "users", ["suspended_by_id"], ["id"], ondelete="SET NULL"
+                "fk_users_suspended_by_id",
+                "users",
+                ["suspended_by_id"],
+                ["id"],
+                ondelete="SET NULL",
             )
 
     # =========================================================================
@@ -94,7 +100,9 @@ def upgrade() -> None:
             sa.Column("response_time_ms", sa.Integer(), nullable=True),
             sa.Column("error_message", sa.Text(), nullable=True),
             sa.Column("extra_data", sa.JSON(), server_default="{}"),
-            sa.Column("checked_at", sa.DateTime(timezone=True), server_default=sa.func.now(), index=True),
+            sa.Column(
+                "checked_at", sa.DateTime(timezone=True), server_default=sa.func.now(), index=True
+            ),
         )
 
         # Create composite index for efficient queries
@@ -125,7 +133,9 @@ def upgrade() -> None:
             sa.Column("extra_data", sa.JSON(), server_default="{}"),
             sa.Column("ip_address", sa.String(45), nullable=True),  # IPv4 or IPv6
             sa.Column("user_agent", sa.Text(), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), index=True),
+            sa.Column(
+                "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), index=True
+            ),
         )
 
         # Create composite index for efficient target lookups

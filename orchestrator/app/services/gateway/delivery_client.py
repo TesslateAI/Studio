@@ -52,8 +52,7 @@ class GatewayDeliveryClient:
         redis = await get_redis_client()
         if redis is None:
             logger.info(
-                "[GW-DELIVERY] redis unavailable — skipping XADD kind=%s "
-                "config=%s",
+                "[GW-DELIVERY] redis unavailable — skipping XADD kind=%s config=%s",
                 kind,
                 config_id,
             )
@@ -128,14 +127,13 @@ class GatewayDeliveryClient:
         runner = _get_local_runner()
         if runner is None:
             logger.info(
-                "[GW-DELIVERY] no local gateway runner — DM via "
-                "%s skipped (will fall back)",
+                "[GW-DELIVERY] no local gateway runner — DM via %s skipped (will fall back)",
                 platform,
             )
             return False
 
         adapter = None
-        for cid, candidate in (runner.adapters or {}).items():
+        for _, candidate in (runner.adapters or {}).items():
             if getattr(candidate, "channel_type", None) == platform:
                 adapter = candidate
                 break

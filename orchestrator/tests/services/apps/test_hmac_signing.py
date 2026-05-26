@@ -33,7 +33,6 @@ from app.database import Base
 from app.models_automations import AppInstance
 from app.services.apps.connector_proxy import auth as proxy_auth
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -103,9 +102,7 @@ async def test_verify_valid_token_returns_instance_id(db: AsyncSession) -> None:
     await _seed_install(db, instance_id)
 
     signing_key = proxy_auth.derive_signing_key(instance_id)
-    token = proxy_auth.generate_pod_token(
-        app_instance_id=instance_id, signing_key=signing_key
-    )
+    token = proxy_auth.generate_pod_token(app_instance_id=instance_id, signing_key=signing_key)
     # Sanity: parse_app_instance_token unwraps cleanly.
     parsed_id, nonce, sig = proxy_auth.parse_app_instance_token(token)
     assert parsed_id == instance_id
@@ -124,9 +121,7 @@ async def test_verify_tampered_signature_raises_401(db: AsyncSession) -> None:
     await _seed_install(db, instance_id)
 
     signing_key = proxy_auth.derive_signing_key(instance_id)
-    token = proxy_auth.generate_pod_token(
-        app_instance_id=instance_id, signing_key=signing_key
-    )
+    token = proxy_auth.generate_pod_token(app_instance_id=instance_id, signing_key=signing_key)
     # Tamper: flip the last char of the signature segment.
     parsed_id, nonce, sig = proxy_auth.parse_app_instance_token(token)
     new_last = "0" if sig[-1] != "0" else "1"
@@ -154,9 +149,7 @@ async def test_verify_wrong_instance_id_in_secret_raises(db: AsyncSession) -> No
 
     # Build the token under B's key, then stamp A's id on the front.
     signing_key_b = proxy_auth.derive_signing_key(id_b)
-    token_b = proxy_auth.generate_pod_token(
-        app_instance_id=id_b, signing_key=signing_key_b
-    )
+    token_b = proxy_auth.generate_pod_token(app_instance_id=id_b, signing_key=signing_key_b)
     _, nonce, sig_b = proxy_auth.parse_app_instance_token(token_b)
     spoofed = f"{id_a}.{nonce}.{sig_b}"
 
@@ -176,9 +169,7 @@ async def test_constant_time_compare_used(db: AsyncSession) -> None:
     await _seed_install(db, instance_id)
 
     signing_key = proxy_auth.derive_signing_key(instance_id)
-    token = proxy_auth.generate_pod_token(
-        app_instance_id=instance_id, signing_key=signing_key
-    )
+    token = proxy_auth.generate_pod_token(app_instance_id=instance_id, signing_key=signing_key)
     request = _fake_request({proxy_auth.APP_INSTANCE_HEADER: token})
 
     # Wrap (not replace) so the call still returns the right truth value.

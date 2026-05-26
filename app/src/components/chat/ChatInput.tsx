@@ -90,6 +90,15 @@ interface ChatInputProps {
   onModelChange?: (model: string) => void;
   isDocked?: boolean; // When true, removes rounded corners at bottom
   prefillMessage?: string | null;
+  /**
+   * Structured @-mentions to seed into ``mentions[]`` alongside the
+   * prefill message — e.g. when the user clicks "Ask agent" on a Data
+   * collection row, the prefill text says "Summarize @submissions" AND a
+   * ``{kind:'data', ref_id:'submissions'}`` mention rides with it so the
+   * backend doesn't have to re-parse the slug. Consumed together with
+   * ``prefillMessage`` — both are cleared by a single ``onPrefillConsumed``.
+   */
+  prefillMentions?: ChatMention[] | null;
   onPrefillConsumed?: () => void;
   toolCallsCollapsed?: boolean;
   onToggleToolCallsCollapsed?: () => void;
@@ -134,6 +143,7 @@ export function ChatInput({
   onModelChange,
   isDocked = false,
   prefillMessage,
+  prefillMentions,
   onPrefillConsumed,
   toolCallsCollapsed = false,
   onToggleToolCallsCollapsed,
@@ -207,6 +217,8 @@ export function ChatInput({
   const [mentionAgents, setMentionAgents] = useState<MentionItem[]>([]);
   const [mentionMcps, setMentionMcps] = useState<MentionItem[]>([]);
   const [mentionApps, setMentionApps] = useState<MentionItem[]>([]);
+  const [mentionData, setMentionData] = useState<MentionItem[]>([]);
+  const [mentionProjects, setMentionProjects] = useState<MentionItem[]>([]);
   const [mentionFiles, setMentionFiles] = useState<MentionPickerFile[]>([]);
   const [mentionLoading, setMentionLoading] = useState(false);
 
@@ -326,13 +338,25 @@ export function ChatInput({
     return slashCommands.find((c) => c.command === trimmed) || null;
   }, [message, slashCommands]);
 
-  // Handle prefill message from external triggers (e.g. "Ask Agent" button)
+  // Handle prefill message + structured mentions from external triggers
+  // (e.g. DataPanel's "Ask agent" button). Both apply atomically — clearing
+  // either via onPrefillConsumed clears both at the caller side.
   useEffect(() => {
-    if (prefillMessage) {
-      setMessage(prefillMessage);
-      onPrefillConsumed?.();
+    if (!prefillMessage && !(prefillMentions && prefillMentions.length)) return;
+    if (prefillMessage) setMessage(prefillMessage);
+    if (prefillMentions && prefillMentions.length) {
+      setMentions((prev) => {
+        // Dedupe by (kind, ref_id) — never push the same structured mention
+        // twice if the user re-clicks before sending.
+        const seen = new Set(prev.map((m) => `${m.kind}:${m.ref_id}`));
+        const additions = prefillMentions.filter(
+          (m) => !seen.has(`${m.kind}:${m.ref_id}`)
+        );
+        return additions.length ? [...prev, ...additions] : prev;
+      });
     }
-  }, [prefillMessage, onPrefillConsumed]);
+    onPrefillConsumed?.();
+  }, [prefillMessage, prefillMentions, onPrefillConsumed]);
 
   // Detect slash commands
   useEffect(() => {
@@ -376,18 +400,24 @@ export function ChatInput({
   // before resolving @-mentions. Without this, hitting Enter before the
   // eager fetch resolves yields an empty library → no mentions shipped.
   const mentionLoadPromiseRef = useRef<Promise<void> | null>(null);
+  // Track the projectSlug we last loaded for so a project switch in the
+  // same component re-fetches the data/file lists.
+  const mentionLoadedSlugRef = useRef<string | null | undefined>(null);
   useEffect(() => {
-    if (mentionLoadedRef.current) return;
+    if (mentionLoadedRef.current && mentionLoadedSlugRef.current === projectSlug) return;
     let cancelled = false;
     setMentionLoading(true);
     const p = (async () => {
       try {
-        const result = await mentionApi.search();
+        const result = await mentionApi.search({ projectSlug });
         if (cancelled) return;
         setMentionAgents(result.agents);
         setMentionMcps(result.mcps);
         setMentionApps(result.apps);
+        setMentionData(result.data);
+        setMentionProjects(result.projects);
         mentionLoadedRef.current = true;
+        mentionLoadedSlugRef.current = projectSlug;
       } catch {
         // mentionApi.search swallows per-category failures itself; this
         // catch handles a complete fetch crash. Leave lists empty so the
@@ -400,7 +430,7 @@ export function ChatInput({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [projectSlug]);
 
   // Project files for the picker's Files section. Lazy-loaded the first
   // time the picker opens — only when the chat is project-scoped.
@@ -457,8 +487,10 @@ export function ChatInput({
     for (const a of mentionAgents) if (a.slug) m.set(a.slug, a);
     for (const x of mentionMcps) if (x.slug) m.set(x.slug, x);
     for (const x of mentionApps) if (x.slug) m.set(x.slug, x);
+    for (const x of mentionData) if (x.slug) m.set(x.slug, x);
+    for (const x of mentionProjects) if (x.slug) m.set(x.slug, x);
     return m;
-  }, [mentionAgents, mentionMcps, mentionApps]);
+  }, [mentionAgents, mentionMcps, mentionApps, mentionData, mentionProjects]);
 
   useEffect(() => {
     // Pull every ``@<slug>`` occurrence; slugs are kebab-case + dots
@@ -652,18 +684,24 @@ export function ChatInput({
       for (const a of mentionAgents) if (a.slug) library.set(a.slug, a);
       for (const x of mentionMcps) if (x.slug) library.set(x.slug, x);
       for (const x of mentionApps) if (x.slug) library.set(x.slug, x);
+      for (const x of mentionData) if (x.slug) library.set(x.slug, x);
+      for (const x of mentionProjects) if (x.slug) library.set(x.slug, x);
       if (library.size === 0) {
-        // Last-resort: do a one-shot fetch right now. This costs three
+        // Last-resort: do a one-shot fetch right now. This costs a few
         // GETs but only on the first Enter before eager fetch settled.
         try {
-          const result = await mentionApi.search();
+          const result = await mentionApi.search({ projectSlug });
           for (const a of result.agents) if (a.slug) library.set(a.slug, a);
           for (const x of result.mcps) if (x.slug) library.set(x.slug, x);
           for (const x of result.apps) if (x.slug) library.set(x.slug, x);
+          for (const x of result.data) if (x.slug) library.set(x.slug, x);
+          for (const x of result.projects) if (x.slug) library.set(x.slug, x);
           // Stash into state too so subsequent sends use the cache.
           setMentionAgents(result.agents);
           setMentionMcps(result.mcps);
           setMentionApps(result.apps);
+          setMentionData(result.data);
+          setMentionProjects(result.projects);
           mentionLoadedRef.current = true;
         } catch {
           // best-effort
@@ -1265,6 +1303,8 @@ export function ChatInput({
             agents={mentionAgents}
             mcps={mentionMcps}
             apps={mentionApps}
+            data={mentionData}
+            projects={mentionProjects}
             files={projectSlug ? mentionFiles : []}
             loading={mentionLoading}
             onSelectMention={handleMentionSelect}

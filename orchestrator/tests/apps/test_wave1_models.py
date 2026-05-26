@@ -11,15 +11,13 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from app import models
 from app.database import Base
-
 
 # -- Pure unit: import + metadata registration --------------------------------
 
@@ -89,7 +87,7 @@ def test_critical_yank_without_second_admin_raises(db_session):
         manifest_hash="sha256:" + ("0" * 64),
         feature_set_hash="sha256:" + ("0" * 64),
         yanked_is_critical=True,
-        yanked_at=datetime.now(timezone.utc),
+        yanked_at=datetime.now(UTC),
         yanked_second_admin_id=None,
     )
     db_session.add(bad_version)

@@ -164,12 +164,21 @@ Each secret lives in `k8s/overlays/minikube/secrets/` with a matching `.example.
 ```bash
 cd k8s/overlays/minikube/secrets
 
-cp app-secrets.example.yaml      app-secrets.yaml
-cp postgres-secret.example.yaml  postgres-secret.yaml
-cp s3-credentials.example.yaml   s3-credentials.yaml
-cp minio-credentials.example.yaml minio-credentials.yaml
+cp app-secrets.example.yaml        app-secrets.yaml
+cp postgres-secret.example.yaml    postgres-secret.yaml
+cp s3-credentials.example.yaml     s3-credentials.yaml
+cp marketplace-secret.example.yaml marketplace-secret.yaml
+
+cp k8s/overlays/minikube/minio/credentials.example.yaml \
+   k8s/overlays/minikube/minio/credentials.yaml
 
 cd -
+```
+
+Or use the init command which does this automatically:
+
+```bash
+scripts/minikube.sh init
 ```
 
 Fill in the required values. The bare minimum for a working cluster:
@@ -183,6 +192,8 @@ Fill in the required values. The bare minimum for a working cluster:
 | `postgres-secret.yaml` | `POSTGRES_PASSWORD` | Must match the password embedded in `DATABASE_URL` above |
 | `s3-credentials.yaml` | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Must match `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` |
 | `minio-credentials.yaml` | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | MinIO admin credentials |
+| `marketplace-secret.yaml` | `DATABASE_URL` | `postgresql+asyncpg://..@postgres:5432/tesslate_marketplace` |
+| `marketplace-secret.yaml` | `ADMIN_DATABASE_URL` | `postgresql://..@postgres:5432/postgres` — used by `create-database` init container to create the marketplace DB |
 
 Leave OAuth, Stripe, and SMTP blank unless you need those flows during local development. The backend boots fine with empty values.
 
@@ -202,16 +213,28 @@ kubectl --context=tesslate -n tesslate create secret generic llama-api-credentia
 ### Build and load the application images
 
 ```bash
-docker build -t tesslate-backend:latest    -f orchestrator/Dockerfile          .
-docker build -t tesslate-frontend:latest   -f app/Dockerfile.prod              app/
-docker build -t tesslate-devserver:latest  -f orchestrator/Dockerfile.devserver .
+docker build -t tesslate-backend:latest     -f orchestrator/Dockerfile                         .
+docker build -t tesslate-frontend:latest    -f app/Dockerfile.prod                             app/
+docker build -t tesslate-devserver:latest   -f orchestrator/Dockerfile.devserver               .
+docker build -t tesslate-btrfs-csi:latest   -f services/btrfs-csi/Dockerfile                   services/btrfs-csi
+docker build -t tesslate-ast:latest         -f services/ast/Dockerfile                         services/ast
+docker build -t tesslate-marketplace:latest -f packages/tesslate-marketplace/Dockerfile        packages/tesslate-marketplace/
 
 minikube -p tesslate image load tesslate-backend:latest
 minikube -p tesslate image load tesslate-frontend:latest
 minikube -p tesslate image load tesslate-devserver:latest
+minikube -p tesslate image load tesslate-btrfs-csi:latest
+minikube -p tesslate image load tesslate-ast:latest
+minikube -p tesslate image load tesslate-marketplace:latest
 ```
 
-The devserver image is the base image used for every user project container. The minikube overlay sets `K8S_DEVSERVER_IMAGE=tesslate-devserver:latest` and `K8S_IMAGE_PULL_POLICY=Never`, so the image must already exist inside the node before any project starts.
+Or use the script which handles all of this (including cache-busting):
+
+```bash
+scripts/minikube.sh rebuild --all
+```
+
+The devserver image is the base image for user project containers. The AST image runs as a sidecar in the backend pod. The marketplace image runs the federated catalog service. The minikube overlay sets `K8S_DEVSERVER_IMAGE=tesslate-devserver:latest` and `K8S_IMAGE_PULL_POLICY=Never`, so all images must exist inside the node before any service starts.
 
 ### Deploy MinIO
 
@@ -232,16 +255,26 @@ kubectl --context=tesslate apply -k k8s/overlays/minikube
 
 This applies everything in `k8s/base/` (namespace, backend, frontend, postgres, redis, ingress, security, volume-hub references) plus the minikube-specific patches (local images, `imagePullPolicy: Never`, HTTP-only ingress, single replicas).
 
+Before applying the overlay, patch NGINX Ingress to allow `server-snippet` annotations (blocked by default in v1.14). The `scripts/minikube.sh start` command does this automatically; if deploying manually:
+
+```bash
+kubectl --context=tesslate patch configmap ingress-nginx-controller -n ingress-nginx \
+  --type=merge -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical"}}'
+kubectl --context=tesslate rollout restart deployment/ingress-nginx-controller -n ingress-nginx
+kubectl --context=tesslate rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=60s
+```
+
 Wait for each deployment to become ready:
 
 ```bash
-kubectl --context=tesslate rollout status deployment/postgres          -n tesslate --timeout=180s
-kubectl --context=tesslate rollout status deployment/redis             -n tesslate --timeout=120s
-kubectl --context=tesslate rollout status deployment/tesslate-backend  -n tesslate --timeout=300s
-kubectl --context=tesslate rollout status deployment/tesslate-frontend -n tesslate --timeout=180s
+kubectl --context=tesslate rollout status deployment/postgres              -n tesslate --timeout=180s
+kubectl --context=tesslate rollout status deployment/redis                 -n tesslate --timeout=120s
+kubectl --context=tesslate rollout status deployment/tesslate-backend      -n tesslate --timeout=300s
+kubectl --context=tesslate rollout status deployment/tesslate-frontend     -n tesslate --timeout=180s
+kubectl --context=tesslate rollout status deployment/tesslate-marketplace  -n tesslate --timeout=180s
 ```
 
-The backend runs Alembic migrations on startup. If the first pod fails with a migration error, it will retry; wait a minute before investigating.
+The backend runs Alembic migrations on startup. The marketplace pod runs two init containers: `create-database` (creates `tesslate_marketplace` DB if absent) followed by `alembic-migrate`. If either fails, check `kubectl describe pod -n tesslate <marketplace-pod>` for the init container exit reason.
 
 ## 8. Access the app
 

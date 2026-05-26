@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -21,7 +21,6 @@ import pytest
 
 from app import models
 from app.services.apps import bundles, monitoring, submissions, yanks
-
 
 # ============================================================================
 # Unit tests — no DB
@@ -43,9 +42,9 @@ class _FakeResult:
             def all(self_inner):
                 if self_inner._row is None:
                     return []
-                return [self_inner._row] if not isinstance(
-                    self_inner._row, list
-                ) else self_inner._row
+                return (
+                    [self_inner._row] if not isinstance(self_inner._row, list) else self_inner._row
+                )
 
         return _S(self._row)
 
@@ -120,25 +119,19 @@ async def test_submission_transitions_enforced():
         id: UUID = sub_id
         app_version_id: UUID = av_id
         stage: str = "approved"
-        stage_entered_at: datetime = field(
-            default_factory=lambda: datetime.now(timezone.utc)
-        )
+        stage_entered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
         reviewer_user_id: UUID | None = None
         decision: str = "approved"
         decision_notes: str | None = None
 
     sess = _FakeSession(_SubRow())
     with pytest.raises(submissions.InvalidTransitionError):
-        await submissions.advance_stage(
-            sess, submission_id=sub_id, to_stage="stage1"
-        )
+        await submissions.advance_stage(sess, submission_id=sub_id, to_stage="stage1")
 
     # stage0 -> stage2 skipping stage1.
     sess2 = _FakeSession(_SubRow(stage="stage0", decision="pending"))
     with pytest.raises(submissions.InvalidTransitionError):
-        await submissions.advance_stage(
-            sess2, submission_id=sub_id, to_stage="stage2"
-        )
+        await submissions.advance_stage(sess2, submission_id=sub_id, to_stage="stage2")
 
 
 @pytest.mark.asyncio
@@ -155,9 +148,7 @@ async def test_yank_critical_needs_two_admins():
 
     # First admin signs -> pending + needs_second_admin flag.
     sess = _FakeSession(row, av)
-    result = await yanks.approve_yank(
-        sess, yank_request_id=yank_id, admin_user_id=admin_a
-    )
+    result = await yanks.approve_yank(sess, yank_request_id=yank_id, admin_user_id=admin_a)
     assert result == {"needs_second_admin": True}
     assert row.primary_admin_id == admin_a
     assert row.status == "pending"
@@ -165,15 +156,11 @@ async def test_yank_critical_needs_two_admins():
     # Same admin tries to double-sign -> NeedsSecondAdminError.
     sess_dup = _FakeSession(row, av)
     with pytest.raises(yanks.NeedsSecondAdminError):
-        await yanks.approve_yank(
-            sess_dup, yank_request_id=yank_id, admin_user_id=admin_a
-        )
+        await yanks.approve_yank(sess_dup, yank_request_id=yank_id, admin_user_id=admin_a)
 
     # Distinct admin finalizes -> approved + AV cascaded.
     sess_final = _FakeSession(row, av)
-    result2 = await yanks.approve_yank(
-        sess_final, yank_request_id=yank_id, admin_user_id=admin_b
-    )
+    result2 = await yanks.approve_yank(sess_final, yank_request_id=yank_id, admin_user_id=admin_b)
     assert result2 == {"status": "approved"}
     assert row.status == "approved"
     assert row.secondary_admin_id == admin_b
@@ -295,9 +282,7 @@ async def test_approve_yank_noncritical_happy_path(db_session):
         severity="low",
         reason="bug",
     )
-    result = await yanks.approve_yank(
-        db_session, yank_request_id=yid, admin_user_id=admin.id
-    )
+    result = await yanks.approve_yank(db_session, yank_request_id=yid, admin_user_id=admin.id)
     assert result == {"status": "approved"}
 
 
@@ -315,13 +300,9 @@ async def test_approve_yank_critical_two_admin_happy_path(db_session):
         severity="critical",
         reason="security",
     )
-    r1 = await yanks.approve_yank(
-        db_session, yank_request_id=yid, admin_user_id=admin_a.id
-    )
+    r1 = await yanks.approve_yank(db_session, yank_request_id=yid, admin_user_id=admin_a.id)
     assert r1 == {"needs_second_admin": True}
-    r2 = await yanks.approve_yank(
-        db_session, yank_request_id=yid, admin_user_id=admin_b.id
-    )
+    r2 = await yanks.approve_yank(db_session, yank_request_id=yid, admin_user_id=admin_b.id)
     assert r2 == {"status": "approved"}
     # DB CHECK constraint was NOT triggered — both admin ids populated.
 
@@ -357,9 +338,7 @@ async def test_submission_advance_to_approved_flips_app_version(db_session):
 @pytest.mark.asyncio
 async def test_upsert_creator_reputation_accumulates(db_session):
     user = _make_user(db_session)
-    await monitoring.upsert_creator_reputation(
-        db_session, user_id=user.id, delta_yanks=1
-    )
+    await monitoring.upsert_creator_reputation(db_session, user_id=user.id, delta_yanks=1)
     await monitoring.upsert_creator_reputation(
         db_session, user_id=user.id, delta_yanks=1, delta_score=Decimal("0.5")
     )

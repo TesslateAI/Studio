@@ -9,6 +9,7 @@ the tool has parked. We assert:
   * the event stream fires ``architecture_node_added`` →
     ``user_input_required`` → ``node_config_resumed`` in that order
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -71,7 +72,7 @@ def test_end_to_end_pause_and_resume_via_router(authenticated_client, monkeypatc
 
     # Fresh manager singleton per test
     am._manager = None
-    manager = am.get_pending_input_manager()
+    am.get_pending_input_manager()
 
     # Record events instead of publishing to Redis
     recorder = _EventRecorder()
@@ -101,19 +102,13 @@ def test_end_to_end_pause_and_resume_via_router(authenticated_client, monkeypatc
                 "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
                 pool_pre_ping=True,
             )
-            Session = async_sessionmaker(
-                engine, class_=AsyncSession, expire_on_commit=False
-            )
+            Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
             async def _submitter() -> None:
                 # Wait until the tool emits user_input_required
                 for _ in range(400):
                     ev = next(
-                        (
-                            e
-                            for e in recorder.events
-                            if e.get("type") == "user_input_required"
-                        ),
+                        (e for e in recorder.events if e.get("type") == "user_input_required"),
                         None,
                     )
                     if ev is not None:
@@ -177,11 +172,11 @@ def test_wait_for_input_false_returns_immediately_without_pausing(
     authenticated_client, monkeypatch
 ):
     """``wait_for_input=False`` should:
-      * NOT emit ``user_input_required``
-      * NOT pause the agent (no submit needed)
-      * Still emit ``architecture_node_added``
-      * Return key names from the preset schema with ``deferred=True``
-      * Persist a Container row with empty env_vars / secrets
+    * NOT emit ``user_input_required``
+    * NOT pause the agent (no submit needed)
+    * Still emit ``architecture_node_added``
+    * Return key names from the preset schema with ``deferred=True``
+    * Persist a Container row with empty env_vars / secrets
     """
     from app.agent.tools import approval_manager as am
     from app.agent.tools.node_config import request_node_config as rnc
@@ -209,9 +204,7 @@ def test_wait_for_input_false_returns_immediately_without_pausing(
                 "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
                 pool_pre_ping=True,
             )
-            Session = async_sessionmaker(
-                engine, class_=AsyncSession, expire_on_commit=False
-            )
+            Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
             async with Session() as db:
                 context = {

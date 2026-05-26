@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -34,7 +34,7 @@ async def test_budget_blocks_when_exhausted(async_session) -> None:
         project_id=project_id,
         monthly_limit_usd=Decimal("10"),
         spent_usd=Decimal("10"),
-        reset_at=datetime.now(timezone.utc) + timedelta(days=30),
+        reset_at=datetime.now(UTC) + timedelta(days=30),
     )
     async_session.add(row)
     await async_session.commit()
@@ -55,7 +55,7 @@ async def test_agent_wide_fallback_when_project_row_missing(async_session) -> No
         project_id=None,
         monthly_limit_usd=Decimal("50"),
         spent_usd=Decimal("40"),
-        reset_at=datetime.now(timezone.utc) + timedelta(days=30),
+        reset_at=datetime.now(UTC) + timedelta(days=30),
     )
     async_session.add(agent_wide)
     await async_session.commit()
@@ -81,7 +81,7 @@ async def test_record_spend_updates_existing_row(async_session) -> None:
         project_id=None,
         monthly_limit_usd=Decimal("100"),
         spent_usd=Decimal("5"),
-        reset_at=datetime.now(timezone.utc) + timedelta(days=30),
+        reset_at=datetime.now(UTC) + timedelta(days=30),
     )
     async_session.add(row)
     await async_session.commit()
@@ -91,9 +91,7 @@ async def test_record_spend_updates_existing_row(async_session) -> None:
     from sqlalchemy import select
 
     spent = (
-        await async_session.execute(
-            select(AgentBudget.spent_usd).where(AgentBudget.id == row.id)
-        )
+        await async_session.execute(select(AgentBudget.spent_usd).where(AgentBudget.id == row.id))
     ).scalar_one()
     assert Decimal(spent) == Decimal("12.25")
 
@@ -101,7 +99,7 @@ async def test_record_spend_updates_existing_row(async_session) -> None:
 @pytest.mark.asyncio
 async def test_reset_if_due_zeros_spend_and_advances_window(async_session) -> None:
     agent_id = uuid.uuid4()
-    past = datetime.now(timezone.utc) - timedelta(days=1)
+    past = datetime.now(UTC) - timedelta(days=1)
     row = AgentBudget(
         id=uuid.uuid4(),
         agent_id=agent_id,
@@ -127,8 +125,8 @@ async def test_reset_if_due_zeros_spend_and_advances_window(async_session) -> No
     # SQLite returns naive datetimes; normalize to UTC for comparison.
     reset_at = row_after[1]
     if reset_at.tzinfo is None:
-        reset_at = reset_at.replace(tzinfo=timezone.utc)
-    assert reset_at > datetime.now(timezone.utc)
+        reset_at = reset_at.replace(tzinfo=UTC)
+    assert reset_at > datetime.now(UTC)
 
 
 @pytest.mark.asyncio

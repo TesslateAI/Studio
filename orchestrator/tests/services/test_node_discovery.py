@@ -101,7 +101,7 @@ class TestInitClient:
     """Lazy K8s client initialization."""
 
     @patch("app.services.node_discovery.client.CoreV1Api")
-    @patch("app.services.node_discovery.config.load_incluster_config")
+    @patch("app.services.k8s_auth.k8s_config.load_incluster_config")
     def test_loads_incluster_config(self, mock_incluster, mock_core_v1):
         discovery = NodeDiscovery()
         api = discovery._init_client()
@@ -111,9 +111,9 @@ class TestInitClient:
         assert api is mock_core_v1.return_value
 
     @patch("app.services.node_discovery.client.CoreV1Api")
-    @patch("app.services.node_discovery.config.load_kube_config")
+    @patch("app.services.k8s_auth.k8s_config.load_kube_config")
     @patch(
-        "app.services.node_discovery.config.load_incluster_config",
+        "app.services.k8s_auth.k8s_config.load_incluster_config",
         side_effect=Exception("not in cluster"),
     )
     def test_falls_back_to_kubeconfig(self, mock_incluster, mock_kubeconfig, mock_core_v1):
@@ -132,11 +132,11 @@ class TestInitClient:
         assert api is mock_core_v1.return_value
 
     @patch(
-        "app.services.node_discovery.config.load_kube_config",
+        "app.services.k8s_auth.k8s_config.load_kube_config",
         side_effect=Exception("no kubeconfig"),
     )
     @patch(
-        "app.services.node_discovery.config.load_incluster_config",
+        "app.services.k8s_auth.k8s_config.load_incluster_config",
         side_effect=Exception("not in cluster"),
     )
     def test_raises_runtime_error_when_both_fail(self, mock_incluster, mock_kubeconfig):
@@ -150,7 +150,7 @@ class TestInitClient:
             discovery._init_client()
 
     @patch("app.services.node_discovery.client.CoreV1Api")
-    @patch("app.services.node_discovery.config.load_incluster_config")
+    @patch("app.services.k8s_auth.k8s_config.load_incluster_config")
     def test_caches_client_after_first_init(self, mock_incluster, mock_core_v1):
         discovery = NodeDiscovery()
         api1 = discovery._init_client()

@@ -157,9 +157,7 @@ class TelegramChannel(GatewayAdapter):
                     {"callback_query_id": cb_id, "text": f"Recorded: {choice}"},
                 )
             except Exception:
-                logger.warning(
-                    "[TG-GW] answerCallbackQuery failed cb_id=%s", cb_id
-                )
+                logger.warning("[TG-GW] answerCallbackQuery failed cb_id=%s", cb_id)
 
     async def _handle_command_message(self, message: dict[str, Any]) -> None:
         """Route a Telegram slash command / bot mention to the gateway-trigger
@@ -169,8 +167,8 @@ class TelegramChannel(GatewayAdapter):
             logger.warning("[TG-GW] command on adapter with no config_id")
             return
 
-        from ._inbound_dispatch import dispatch_gateway_command
         from ..gateway.triggers.telegram_command import handle_telegram_command
+        from ._inbound_dispatch import dispatch_gateway_command
 
         await dispatch_gateway_command(
             payload=message,
@@ -640,9 +638,7 @@ class TelegramChannel(GatewayAdapter):
         """
         from .approval_cards import build_telegram_inline_keyboard
 
-        keyboard = build_telegram_inline_keyboard(
-            input_id=input_id, actions=actions
-        )
+        keyboard = build_telegram_inline_keyboard(input_id=input_id, actions=actions)
         body: dict[str, Any] = {
             "chat_id": chat_id,
             "text": (

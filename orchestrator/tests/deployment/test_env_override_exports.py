@@ -52,12 +52,17 @@ def _make_container(
     return c
 
 
-def _make_connection(*, source_container_id, target_container_id, project_id=None):
+def _make_connection(*, source_container_id, target_container_id, project_id=None, config=None):
     conn = MagicMock()
     conn.source_container_id = source_container_id
     conn.target_container_id = target_container_id
     conn.project_id = project_id
     conn.connector_type = "env_injection"
+    # Mirror DB reality: ContainerConnection.config is None unless the
+    # caller passes an explicit env_mapping. MagicMock would otherwise
+    # auto-create a truthy attribute and short-circuit the template
+    # fallback path in build_env_overrides().
+    conn.config = config
     return conn
 
 

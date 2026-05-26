@@ -434,7 +434,7 @@ class TestToolDataclass:
             holds_external_state=False,
         )
 
-        assert tool.examples is None
+        assert tool.examples == []
 
     def test_tool_categories_enum(self):
         """Test ToolCategory enum values."""

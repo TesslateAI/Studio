@@ -1019,6 +1019,67 @@ SERVICES: dict[str, ServiceDefinition] = {
         outputs={"PROMETHEUS_URL": "Prometheus URL"},
         connection_template={"PROMETHEUS_URL": "http://{container_name}:{internal_port}"},
     ),
+    # Workspace Data Store — platform-managed per-project KV/document database.
+    # Special: credentials are computed at deploy time (Data API URL from the
+    # platform domain + a fresh anon key rotated per deploy) rather than
+    # supplied by the user. The connection_template values are placeholders
+    # that the deploy injector (``_inject_workspace_data_env``) resolves; the
+    # service node mainly exists so the contract is discoverable in the
+    # architecture canvas and the AI agent surveys it through the same
+    # pattern as every other external service.
+    "workspace-data": ServiceDefinition(
+        slug="workspace-data",
+        name="Workspace Data Store",
+        description=(
+            "Built-in per-project KV/document database. No pods, no lifecycle. "
+            "Deployed apps reach it via the auto-injected OPENSAIL_DATA_* env vars."
+        ),
+        category="database",
+        icon="🗄️",
+        service_type=ServiceType.EXTERNAL,
+        auth_type=AuthType.API_KEY,
+        docs_url="https://your-domain.com/docs/workspace-data",
+        credential_fields=[
+            CredentialField(
+                key="project_slug",
+                label="Workspace",
+                type="text",
+                required=False,
+                placeholder="(current workspace)",
+                help_text=(
+                    "Default: this project's own data store. Override to share data "
+                    "across workspaces (advanced — most apps should leave blank)."
+                ),
+            ),
+            CredentialField(
+                key="custom_key",
+                label="Custom API key",
+                type="password",
+                required=False,
+                placeholder="(auto-rotated on each deploy)",
+                help_text=(
+                    "Default: a fresh anon key is minted + injected per deploy. "
+                    "Override only if you need a stable key for an external service."
+                ),
+            ),
+        ],
+        outputs={
+            "OPENSAIL_DATA_API_URL": "Data API base URL (server-side)",
+            "OPENSAIL_DATA_KEY": "Anon key (server-side; rotates per deploy by default)",
+            "VITE_OPENSAIL_DATA_API_URL": "Data API URL (Vite-built frontends)",
+            "VITE_OPENSAIL_DATA_KEY": "Anon key (Vite-built frontends)",
+            "NEXT_PUBLIC_OPENSAIL_DATA_API_URL": "Data API URL (Next.js client components)",
+            "NEXT_PUBLIC_OPENSAIL_DATA_KEY": "Anon key (Next.js client components)",
+        },
+        connection_template={
+            "OPENSAIL_DATA_API_URL": "{computed_url}",
+            "OPENSAIL_DATA_KEY": "{computed_key}",
+            "VITE_OPENSAIL_DATA_API_URL": "{computed_url}",
+            "VITE_OPENSAIL_DATA_KEY": "{computed_key}",
+            "NEXT_PUBLIC_OPENSAIL_DATA_API_URL": "{computed_url}",
+            "NEXT_PUBLIC_OPENSAIL_DATA_KEY": "{computed_key}",
+        },
+    ),
     # ============================================================================
     # DEPLOYMENT TARGETS (external hosting providers)
     # ============================================================================

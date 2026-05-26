@@ -68,6 +68,7 @@ from .routers import (
     marketplace,
     marketplace_apps,
     marketplace_local,
+    marketplace_public,
     marketplace_sources,
     mcp,
     mcp_oauth,
@@ -90,7 +91,13 @@ from .routers import (
     webhooks,
     workspace_attach,
 )
+from .routers import (
+    triggers as triggers_router,
+)
 from .schemas_auth import UserCreate, UserRead, UserUpdate
+from .services import (
+    k8s_auth as _k8s_auth,  # noqa: F401 — applies BearerToken monkey-patch at import time
+)
 from .services.volume_manager import VolumeRestoringError, VolumeUnavailableError
 from .users import bearer_backend, cookie_backend, fastapi_users, get_user_manager
 
@@ -207,7 +214,72 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin")
 
-        # Get app domain from settings (e.g., "studio-demo.tesslate.com")
+        # Anonymous public marketplace browse is meant to be consumable from
+        # any origin (embeds, third-party sites, the desktop webview). It is
+        # read-only and unauthenticated, so a wildcard origin is safe here.
+        # Credentials are intentionally NOT allowed (incompatible with "*").
+        if request.url.path.startswith("/api/marketplace/public"):
+            if request.method == "OPTIONS":
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Accept, Origin",
+                        "Access-Control-Max-Age": "600",
+                    },
+                )
+            public_response = await call_next(request)
+            public_response.headers["Access-Control-Allow-Origin"] = "*"
+            public_response.headers["Access-Control-Expose-Headers"] = (
+                "Content-Length, X-Total-Count, ETag"
+            )
+            return public_response
+
+        # The public Workspace Data API is called cross-origin from deployed
+        # user frontends (Vercel/Cloudflare) on arbitrary domains. Auth is a
+        # per-project API key in the Authorization header, so a wildcard
+        # origin is safe — credentials/cookies are intentionally NOT allowed.
+        if request.url.path.startswith("/api/data/"):
+            # Lazy import so this module's import-graph isn't dependent on
+            # the wsdata router being ready at app construction time.
+            from .routers.workspace_data import DATA_API_VERSION
+
+            # Browsers hide every non-CORS-safelisted response header from
+            # cross-origin ``fetch().headers.get(...)`` unless we list them
+            # explicitly. Without this, deployed Vercel/CF apps can't read
+            # ``Retry-After`` (to back off properly on 429), the
+            # ``X-RateLimit-*`` triple (to surface a "you're hitting limits"
+            # banner), or the API version (to fail loud on shape drift).
+            # Curl never sees this restriction — only browsers do. This is
+            # the response-header equivalent of the request-side
+            # ``Access-Control-Allow-Headers`` we set on preflights below.
+            expose_headers = (
+                "Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining, "
+                "X-RateLimit-Reset, X-OpenSail-Data-API-Version, Content-Length"
+            )
+            if request.method == "OPTIONS":
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Origin",
+                        "Access-Control-Expose-Headers": expose_headers,
+                        "Access-Control-Max-Age": "600",
+                        "X-OpenSail-Data-API-Version": DATA_API_VERSION,
+                    },
+                )
+            data_response = await call_next(request)
+            data_response.headers["Access-Control-Allow-Origin"] = "*"
+            data_response.headers["Access-Control-Expose-Headers"] = expose_headers
+            # Stamped here (NOT via a FastAPI route dependency) so that
+            # HTTPException short-circuits — 401 / 404 / 429 — also carry
+            # the header. Router deps don't run on the exception path.
+            data_response.headers["X-OpenSail-Data-API-Version"] = DATA_API_VERSION
+            return data_response
+
+        # Get app domain from settings (e.g., "your-domain.com")
         app_domain = settings.app_domain
         # Escape dots for regex pattern matching
         escaped_domain = re.escape(app_domain)
@@ -219,6 +291,14 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             r"^http://localhost:\d+$",  # Local dev server (any port)
             r"^http://studio\.localhost$",  # Local main app
             r"^http://[\w-]+\.studio\.localhost$",  # Local user dev environments (subdomain)
+            # Tauri desktop WebView origins. The bundled React app loads from
+            # the framework's app:// scheme — `tauri://localhost` on Linux +
+            # macOS (WebKitGTK / WKWebView), `https://tauri.localhost` on
+            # Windows (WebView2) — and makes cross-origin requests to the
+            # 127.0.0.1 sidecar. These origins are reachable only from inside
+            # the Tauri shell, so credentials-bearing CORS is safe.
+            r"^tauri://localhost$",
+            r"^https://tauri\.localhost$",
         ]
 
         # Production patterns (generated from APP_DOMAIN)
@@ -649,11 +729,39 @@ async def startup():
     # Create users directory for Docker mode
     # In Docker mode, user project files are stored in the users directory
     # In K8s mode, files are stored on PVC and this is not needed
-    from .services.orchestration import is_docker_mode
+    from .services.orchestration import is_docker_mode, is_kubernetes_mode
 
     if is_docker_mode():
         os.makedirs("users", exist_ok=True)
         logger.info("Created users directory for Docker deployment mode")
+
+    # ----------------------------------------------------------------------
+    # K8s auth self-test
+    # ----------------------------------------------------------------------
+    # Eagerly applies the `Configuration.auth_settings` monkey-patch from
+    # `services.k8s_auth` and confirms the SA token actually attaches to
+    # an outbound request. Catches the kubernetes-client v33+ BearerToken
+    # regression on the very first boot — before background loops
+    # (compute_reaper, idle_monitor, namespace_reaper) fail silently every
+    # minute. Crashes with EX_CONFIG (78) on failure so K8s liveness
+    # restarts the pod and the failure is loud in logs.
+    if is_kubernetes_mode():
+        try:
+            from kubernetes import client as _k8s_client
+
+            from .services import k8s_auth as _k8s_auth
+
+            _k8s_auth.load_in_cluster_or_kube()
+            _k8s_client.CoreV1Api().list_namespace(_request_timeout=5, limit=1)
+            logger.info("[K8S] Auth self-test passed — Authorization header attaches correctly")
+        except Exception:
+            logger.exception(
+                "[K8S] Auth self-test FAILED — no `Authorization` header on the wire. "
+                "This is the kubernetes-client v33+ BearerToken regression. "
+                "Check `kubernetes` package version (must be <33) AND that "
+                "`services/k8s_auth.py` is imported. Aborting startup."
+            )
+            raise SystemExit(78) from None  # EX_CONFIG — K8s will restart the pod
 
     # Wave 9 D1: register DB row event listeners (whitelisted tables → Redis Streams).
     # Idempotent; safe to call once at startup. Producer side only this wave.
@@ -671,9 +779,7 @@ async def startup():
     try:
         from .services.apps import app_version_source_consistency  # noqa: F401
     except Exception:
-        logger.exception(
-            "Failed to wire AppVersion source_id consistency listener (non-fatal)"
-        )
+        logger.exception("Failed to wire AppVersion source_id consistency listener (non-fatal)")
 
     # Seed database (bases, agents, themes, workflows) — non-blocking background task
     from .seeds import run_all_seeds
@@ -1313,11 +1419,12 @@ app.include_router(workspace_attach.router, prefix="/api", tags=["workspace-atta
 app.include_router(sidebar.router)  # prefix set on the router itself (/api/sidebar)
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
-app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
-# Federated marketplace source CRUD (Wave 5). Mounted before the wildcard
-# /api/marketplace router so /api/marketplace/sources resolves to this
-# router rather than the legacy bare-slug fall-through.
+# Anonymous marketplace browse + the federated source CRUD are both mounted
+# before the wildcard /api/marketplace router so their specific paths resolve
+# to them rather than the legacy bare-slug fall-through.
+app.include_router(marketplace_public.router)  # /api/marketplace/public (no auth)
 app.include_router(marketplace_sources.router)  # /api/marketplace/sources
+app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
 app.include_router(creators.router)  # /api/creators - already prefixed in router
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(admin_spend.router, tags=["admin-spend"])  # /api/admin/spend
@@ -1384,6 +1491,22 @@ app.include_router(
     version.router, prefix="/api", tags=["version"]
 )  # /api/version - Deployment metadata + compat check
 
+# --- Workspace Data Store (built-in per-project KV/document database) -------
+from .routers import workspace_data as _workspace_data  # noqa: E402
+
+app.include_router(_workspace_data.mgmt_router)  # /api/workspace-data - data store mgmt
+app.include_router(_workspace_data.data_router)  # /api/data/v1 - public Data API (key auth)
+
+# --- Public desktop installer + Tauri auto-updater surface ------------------
+# Mounted at /desktop/releases/* (no /api prefix) so the Tauri updater
+# endpoint in tauri.conf.json and the install.{sh,ps1} scripts can hit the
+# canonical https://<app_base_url>/desktop/releases/latest.json URL.
+# Resolves binaries from GitHub Releases on demand — orchestrator never
+# streams the bytes itself.
+from .routers import desktop_releases as _desktop_releases  # noqa: E402
+
+app.include_router(_desktop_releases.router)
+
 # --- Tesslate Apps (Waves 1-3) ---------------------------------------------
 app.include_router(
     marketplace_apps.router, prefix="/api/marketplace-apps", tags=["apps:marketplace"]
@@ -1415,6 +1538,9 @@ app.include_router(
 
 # --- Automation Runtime + typed App Actions (Phase 1) ----------------------
 app.include_router(automations.router)  # /api/automations - definitions, runs, artifacts
+app.include_router(
+    triggers_router.router
+)  # /api/triggers - email + slack-message inbound (Phase E)
 app.include_router(app_actions.router)  # /api/apps/{instance}/actions/{name}
 app.include_router(
     communication_destinations.router

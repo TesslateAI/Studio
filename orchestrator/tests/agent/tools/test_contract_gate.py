@@ -24,7 +24,6 @@ from app.agent.tools.contract_gate import (
 )
 from app.agent.tools.registry import Tool, ToolCategory, ToolRegistry
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — minimal Tool builder + a registry with one safe tool
 # ---------------------------------------------------------------------------
@@ -72,17 +71,13 @@ def base_run_context() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_tool_not_in_allowed_tools_denies(
-    tool: Tool, base_run_context: dict
-) -> None:
+async def test_tool_not_in_allowed_tools_denies(tool: Tool, base_run_context: dict) -> None:
     contract = {
         "allowed_tools": ["write_file", "web_search"],
         "max_compute_tier": 0,
     }
     gate = ContractGate(contract, base_run_context)
-    decision = await gate.check(
-        tool_name="read_file", tool_call_params={}, tool=tool
-    )
+    decision = await gate.check(tool_name="read_file", tool_call_params={}, tool=tool)
     assert decision.allowed is False
     assert decision.breach_kind == BreachKind.TOOL_DISALLOWED
     assert "read_file" in (decision.reason or "")
@@ -90,15 +85,11 @@ async def test_tool_not_in_allowed_tools_denies(
 
 
 @pytest.mark.asyncio
-async def test_allowed_tools_none_means_no_enforcement(
-    tool: Tool, base_run_context: dict
-) -> None:
+async def test_allowed_tools_none_means_no_enforcement(tool: Tool, base_run_context: dict) -> None:
     """``allowed_tools=None`` is the "inherit project defaults" sentinel."""
     contract = {"allowed_tools": None, "max_compute_tier": 0}
     gate = ContractGate(contract, base_run_context)
-    decision = await gate.check(
-        tool_name="anything_at_all", tool_call_params={}, tool=tool
-    )
+    decision = await gate.check(tool_name="anything_at_all", tool_call_params={}, tool=tool)
     assert decision.allowed is True
     assert decision.breach_kind is None
 
@@ -110,17 +101,13 @@ async def test_allowed_tools_empty_list_blocks_everything(
     """An empty list is explicit 'deny all' — distinct from ``None``."""
     contract = {"allowed_tools": [], "max_compute_tier": 0}
     gate = ContractGate(contract, base_run_context)
-    decision = await gate.check(
-        tool_name="read_file", tool_call_params={}, tool=tool
-    )
+    decision = await gate.check(tool_name="read_file", tool_call_params={}, tool=tool)
     assert decision.allowed is False
     assert decision.breach_kind == BreachKind.TOOL_DISALLOWED
 
 
 @pytest.mark.asyncio
-async def test_allowed_mcps_blocks_unlisted_mcp(
-    tool: Tool, base_run_context: dict
-) -> None:
+async def test_allowed_mcps_blocks_unlisted_mcp(tool: Tool, base_run_context: dict) -> None:
     contract = {
         "allowed_tools": ["invoke_app_action"],
         "allowed_mcps": ["linear"],
@@ -170,9 +157,7 @@ async def test_tier_too_high_denies(base_run_context: dict) -> None:
         "max_compute_tier": 1,
     }
     gate = ContractGate(contract, base_run_context)
-    decision = await gate.check(
-        tool_name="heavy_build", tool_call_params={}, tool=tool_t2
-    )
+    decision = await gate.check(tool_name="heavy_build", tool_call_params={}, tool=tool_t2)
     assert decision.allowed is False
     assert decision.breach_kind == BreachKind.TIER_TOO_HIGH
     assert "tier 2" in (decision.reason or "")
@@ -187,9 +172,7 @@ async def test_tier_within_cap_passes(base_run_context: dict) -> None:
         "max_compute_tier": 2,
     }
     gate = ContractGate(contract, base_run_context)
-    decision = await gate.check(
-        tool_name="medium_tool", tool_call_params={}, tool=tool_t1
-    )
+    decision = await gate.check(tool_name="medium_tool", tool_call_params={}, tool=tool_t1)
     assert decision.allowed is True
 
 
@@ -217,9 +200,7 @@ async def test_spend_estimate_exceeds_remaining_budget_denies(
         new=AsyncMock(return_value=Decimal("0.50")),
         create=True,
     ):
-        decision = await gate.check(
-            tool_name="read_file", tool_call_params={}, tool=tool
-        )
+        decision = await gate.check(tool_name="read_file", tool_call_params={}, tool=tool)
 
     assert decision.allowed is False
     assert decision.breach_kind == BreachKind.BUDGET_EXCEEDED
@@ -228,9 +209,7 @@ async def test_spend_estimate_exceeds_remaining_budget_denies(
 
 
 @pytest.mark.asyncio
-async def test_spend_estimate_within_budget_passes(
-    tool: Tool, base_run_context: dict
-) -> None:
+async def test_spend_estimate_within_budget_passes(tool: Tool, base_run_context: dict) -> None:
     contract = {
         "allowed_tools": ["read_file"],
         "max_compute_tier": 0,
@@ -244,9 +223,7 @@ async def test_spend_estimate_within_budget_passes(
         new=AsyncMock(return_value=Decimal("0.05")),
         create=True,
     ):
-        decision = await gate.check(
-            tool_name="read_file", tool_call_params={}, tool=tool
-        )
+        decision = await gate.check(tool_name="read_file", tool_call_params={}, tool=tool)
 
     assert decision.allowed is True
 
@@ -283,16 +260,12 @@ async def test_delegates_to_model_skips_spend_estimate(
 
 
 @pytest.mark.asyncio
-async def test_no_max_spend_per_run_skips_estimate(
-    tool: Tool, base_run_context: dict
-) -> None:
+async def test_no_max_spend_per_run_skips_estimate(tool: Tool, base_run_context: dict) -> None:
     """Without ``max_spend_per_run_usd`` the gate has no per-call budget
     to compare against — only the daily cap applies (enforced elsewhere)."""
     contract = {"allowed_tools": ["read_file"], "max_compute_tier": 0}
     gate = ContractGate(contract, base_run_context)
-    decision = await gate.check(
-        tool_name="read_file", tool_call_params={}, tool=tool
-    )
+    decision = await gate.check(tool_name="read_file", tool_call_params={}, tool=tool)
     assert decision.allowed is True
 
 

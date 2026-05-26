@@ -119,10 +119,8 @@ async def cleanup(
             _cleanup_with_llm(transcript, model), timeout=CLEANUP_TIMEOUT_SECONDS
         )
         return CleanupResponse(cleaned=cleaned)
-    except asyncio.TimeoutError:
-        logger.info(
-            "asr.cleanup: timeout (model=%s) for user %s, returning raw", model, user.id
-        )
+    except TimeoutError:
+        logger.info("asr.cleanup: timeout (model=%s) for user %s, returning raw", model, user.id)
     except Exception as exc:  # noqa: BLE001 — best-effort; fall through to raw
         logger.info(
             "asr.cleanup: error (model=%s) for user %s (%s), returning raw",

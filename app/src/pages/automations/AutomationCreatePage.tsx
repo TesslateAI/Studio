@@ -17,9 +17,14 @@ import { DestinationPicker } from './components/DestinationPicker';
 import { WorkspacePicker } from './components/WorkspacePicker';
 import { LimitsForm } from './components/LimitsForm';
 
+// ``contract.max_compute_tier`` MUST agree with the column ``max_compute_tier``
+// (Bug #29 invariant — the create-time model_validator rejects mismatches).
+// Ship Light (0) by default to match the Power level radio's default; the
+// LimitsForm mirrors any subsequent radio change back into the contract so
+// the two can never drift.
 const DEFAULT_CONTRACT = `{
   "allowed_tools": ["read", "write", "bash"],
-  "max_compute_tier": 1,
+  "max_compute_tier": 0,
   "max_iterations": 25
 }`;
 
@@ -151,10 +156,52 @@ export default function AutomationCreatePage() {
       toast.success('Automation created');
       navigate(`/automations/${created.id}`);
     } catch (err) {
-      const msg =
-        (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ||
-        'Failed to create automation';
-      toast.error(typeof msg === 'string' ? msg : 'Failed to create automation');
+      const detail = (
+        err as { response?: { data?: { detail?: unknown } } }
+      ).response?.data?.detail;
+      let msg = 'Failed to create automation';
+      if (typeof detail === 'string') {
+        msg = detail;
+      } else if (Array.isArray(detail)) {
+        // FastAPI 422: detail = [{loc, msg, type}, ...]. Surface each
+        // entry — the Pydantic validators we ship return user-actionable
+        // messages, so showing them verbatim is more useful than a
+        // generic "validation failed".
+        msg = detail
+          .map((entry) => {
+            const e = entry as { loc?: unknown; msg?: unknown };
+            const loc = Array.isArray(e.loc) ? e.loc.slice(1).join('.') : '';
+            const text = typeof e.msg === 'string' ? e.msg : String(entry);
+            return loc ? `${loc}: ${text}` : text;
+          })
+          .join('; ');
+      } else if (detail && typeof detail === 'object') {
+        // Structured detail: {message, errors[]} — emitted by save-time
+        // input-schema validators. Show the message and append the
+        // first few field-level errors so the user can fix in place.
+        const d = detail as {
+          message?: unknown;
+          errors?: Array<{ path?: unknown; message?: unknown }>;
+        };
+        const baseMsg = typeof d.message === 'string' ? d.message : 'Validation failed';
+        const errs = Array.isArray(d.errors) ? d.errors : [];
+        if (errs.length === 0) {
+          msg = baseMsg;
+        } else {
+          msg = baseMsg + ' — ' + errs
+            .slice(0, 4)
+            .map((e) => {
+              const path = Array.isArray(e.path) && e.path.length > 0
+                ? e.path.join('.')
+                : '';
+              const text = typeof e.message === 'string' ? e.message : '';
+              return path ? `${path}: ${text}` : text;
+            })
+            .filter(Boolean)
+            .join('; ');
+        }
+      }
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -263,6 +310,7 @@ export default function AutomationCreatePage() {
               onMaxSpendPerRunChange={setMaxSpendPerRun}
               maxSpendPerDay={maxSpendPerDay}
               onMaxSpendPerDayChange={setMaxSpendPerDay}
+              workspaceScope={scope}
             />
           </Section>
 

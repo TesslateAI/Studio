@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -95,10 +96,10 @@ def test_probe_exception_is_non_blocking(client, monkeypatch):
 
 
 def test_tray_state_populates_running_projects_and_agents(app_with_desktop_router, stub_probe):
-    from datetime import datetime, timezone
+    from datetime import datetime
     from types import SimpleNamespace
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     project_row = SimpleNamespace(
         id="00000000-0000-0000-0000-000000000010",
         slug="demo",

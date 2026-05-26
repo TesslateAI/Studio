@@ -41,8 +41,21 @@ export interface AppsContextValue {
 export const AppsContext = createContext<AppsContextValue | null>(null);
 
 function extractError(err: unknown, fallback: string): string {
-  const e = err as { response?: { data?: { detail?: string } }; message?: string };
-  return e?.response?.data?.detail ?? e?.message ?? fallback;
+  // FastAPI returns `detail` as either a plain string OR a structured
+  // object — e.g. `{message, errors}` from the install router when the
+  // underlying ProjectionError carries a manifest validation error list.
+  // Surface the message; the caller can also read err.response.data.detail
+  // directly to render field-level errors.
+  const e = err as {
+    response?: { data?: { detail?: string | { message?: string } } };
+    message?: string;
+  };
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object' && typeof detail.message === 'string') {
+    return detail.message;
+  }
+  return e?.message ?? fallback;
 }
 
 export function AppsProvider({ children }: { children: ReactNode }) {

@@ -29,6 +29,7 @@ existed (silent fail). A purpose-built DB lets the test prove the
 
 from __future__ import annotations
 
+import contextlib
 import socket
 import subprocess
 import sys
@@ -47,14 +48,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-
 # Ensure orchestrator is importable.
 ORCHESTRATOR_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ORCHESTRATOR_DIR))
 
 from app import models, models_automations  # noqa: E402,F401 — register tables
 from app.types.guid import GUID  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Test database (independent of the shared ``tesslate_test`` so the alembic
@@ -193,10 +192,8 @@ async def db_session(db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, Non
         try:
             yield session
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await session.rollback()
-            except Exception:  # noqa: BLE001
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +216,7 @@ async def test_themes_id_is_now_uuid(db_engine: AsyncEngine) -> None:
     async with db_engine.connect() as conn:
         themes_id_type = await conn.run_sync(_column_type, "themes", "id")
         parent_id_type = await conn.run_sync(_column_type, "themes", "parent_theme_id")
-        ult_theme_id_type = await conn.run_sync(
-            _column_type, "user_library_themes", "theme_id"
-        )
+        ult_theme_id_type = await conn.run_sync(_column_type, "user_library_themes", "theme_id")
 
     assert themes_id_type == "uuid", (
         f"themes.id should be UUID after Wave 1.5, got {themes_id_type!r}"
@@ -268,10 +263,7 @@ async def test_create_theme_with_default_guid_pk(db_session: AsyncSession) -> No
     # Look up the seeded ``local`` source so the FK is satisfied.
     src = (
         await db_session.execute(
-            text(
-                "SELECT id FROM marketplace_sources WHERE handle='local' "
-                "AND scope='system'"
-            )
+            text("SELECT id FROM marketplace_sources WHERE handle='local' AND scope='system'")
         )
     ).first()
     assert src is not None, "alembic 0088 should have seeded the 'local' system source"
@@ -301,10 +293,7 @@ async def test_user_library_theme_fk_works_with_guid(
     resolve."""
     src = (
         await db_session.execute(
-            text(
-                "SELECT id FROM marketplace_sources WHERE handle='local' "
-                "AND scope='system'"
-            )
+            text("SELECT id FROM marketplace_sources WHERE handle='local' AND scope='system'")
         )
     ).first()
     local_source_id = src[0]
@@ -343,9 +332,7 @@ async def test_user_library_theme_fk_works_with_guid(
     # Read it back via ORM to verify the FK survives a round-trip.
     fetched = (
         await db_session.execute(
-            text("SELECT theme_id FROM user_library_themes WHERE id = :id").bindparams(
-                id=lib.id
-            )
+            text("SELECT theme_id FROM user_library_themes WHERE id = :id").bindparams(id=lib.id)
         )
     ).first()
     assert fetched is not None
@@ -360,10 +347,7 @@ async def test_parent_theme_self_fk_works_with_guid(
     GUID column."""
     src = (
         await db_session.execute(
-            text(
-                "SELECT id FROM marketplace_sources WHERE handle='local' "
-                "AND scope='system'"
-            )
+            text("SELECT id FROM marketplace_sources WHERE handle='local' AND scope='system'")
         )
     ).first()
     local_source_id = src[0]
@@ -391,9 +375,7 @@ async def test_parent_theme_self_fk_works_with_guid(
 
     fetched = (
         await db_session.execute(
-            text("SELECT parent_theme_id FROM themes WHERE id = :id").bindparams(
-                id=child.id
-            )
+            text("SELECT parent_theme_id FROM themes WHERE id = :id").bindparams(id=child.id)
         )
     ).first()
     assert fetched is not None

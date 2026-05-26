@@ -34,6 +34,7 @@ from ..services.apps.installer import (
     SourceMismatchError,
     delete_per_pod_signing_key,
     install_app,
+    mark_attempt_committed,
     propagate_user_secrets_post_install,
 )
 from ..services.apps.user_secret_propagator import delete_user_secrets
@@ -50,6 +51,7 @@ class InstallRequest(BaseModel):
     wallet_mix_consent: dict[str, Any] = Field(default_factory=dict)
     mcp_consents: list[dict[str, Any]] = Field(default_factory=list)
     update_policy: str = "manual"
+    user_credentials: dict[str, str] = Field(default_factory=dict)
 
 
 class InstallResponse(BaseModel):
@@ -134,6 +136,65 @@ def _get_hub_client() -> HubClient:
     return HubClient(settings.volume_hub_address)
 
 
+def _provision_user_credentials(user_credentials: dict[str, str]) -> None:
+    """Create/update K8s Secrets in the platform namespace from user-provided values.
+
+    Each key in ``user_credentials`` is a ``secret_ref`` in the form
+    ``"secret-name/key"`` (matching the ``${secret:name/key}`` manifest
+    pattern). Values are grouped by secret name and upserted as Opaque
+    Secrets in the platform namespace.
+
+    Only runs in Kubernetes mode; silently returns otherwise.
+    """
+    settings = get_settings()
+    if not getattr(settings, "is_kubernetes_mode", False):
+        return
+
+    # Group refs by secret name: {"zep-credentials": {"api_key": "val"}}
+    grouped: dict[str, dict[str, str]] = {}
+    for ref, value in user_credentials.items():
+        if "/" not in ref:
+            continue
+        secret_name, key = ref.split("/", 1)
+        grouped.setdefault(secret_name, {})[key] = value
+
+    if not grouped:
+        return
+
+    from kubernetes import client as k8s_client
+    from kubernetes.client.rest import ApiException
+
+    core_v1 = k8s_client.CoreV1Api()
+    namespace = getattr(settings, "k8s_default_namespace", "tesslate")
+
+    for secret_name, string_data in grouped.items():
+        body = k8s_client.V1Secret(
+            metadata=k8s_client.V1ObjectMeta(
+                name=secret_name,
+                namespace=namespace,
+                labels={
+                    "tesslate.io/managed-by": "user-credential-install",
+                },
+            ),
+            type="Opaque",
+            string_data=string_data,
+        )
+        try:
+            core_v1.create_namespaced_secret(namespace=namespace, body=body)
+            logger.info("user_credentials: created secret=%s in ns=%s", secret_name, namespace)
+        except ApiException as exc:
+            if exc.status == 409:
+                # Secret already exists — patch with new values.
+                core_v1.patch_namespaced_secret(
+                    name=secret_name,
+                    namespace=namespace,
+                    body={"stringData": string_data},
+                )
+                logger.info("user_credentials: patched secret=%s in ns=%s", secret_name, namespace)
+            else:
+                raise
+
+
 @router.post("/install", response_model=InstallResponse, status_code=status.HTTP_201_CREATED)
 async def install_endpoint(
     payload: InstallRequest,
@@ -154,6 +215,13 @@ async def install_endpoint(
                 update_policy=payload.update_policy,
             )
             await db.commit()
+            # Flip the saga ledger row AFTER commit so the FK check in the
+            # independent session can see the committed AppInstance row.
+            if result.attempt_id is not None:
+                await mark_attempt_committed(
+                    attempt_id=result.attempt_id,
+                    app_instance_id=result.app_instance_id,
+                )
         except AlreadyInstalledError as e:
             await db.rollback()
             raise HTTPException(status_code=409, detail=str(e)) from e
@@ -183,6 +251,15 @@ async def install_endpoint(
             ) from e
         except IncompatibleAppError as e:
             await db.rollback()
+            # Surface field-level manifest validation errors when present so
+            # the UI can render which keys/paths were rejected. Fall back to
+            # a plain string when no structured errors are available.
+            errors = getattr(e, "errors", None) or []
+            if errors:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"message": str(e), "errors": errors},
+                ) from e
             raise HTTPException(status_code=422, detail=str(e)) from e
         except ConsentRejectedError as e:
             await db.rollback()
@@ -197,6 +274,21 @@ async def install_endpoint(
                 await close()
             except Exception:  # pragma: no cover
                 logger.debug("hub_client close failed", exc_info=True)
+
+    # Best-effort: materialize user-provided credentials as K8s Secrets in
+    # the platform namespace. At runtime start, secret_propagator copies
+    # them into the project namespace where the pod resolves them via
+    # ${secret:name/key} env var references.
+    if payload.user_credentials:
+        try:
+            _provision_user_credentials(payload.user_credentials)
+        except Exception:
+            logger.warning(
+                "install_endpoint: user credential provisioning failed for instance=%s "
+                "(install succeeded; credentials can be re-provisioned via reseed or kubectl)",
+                result.app_instance_id,
+                exc_info=True,
+            )
 
     # Best-effort: materialize per-user OAuth/API-key Secrets for any
     # ``exposure='env'`` connector grants. Failures here MUST NOT roll back
@@ -253,9 +345,7 @@ async def list_my_installs(
     source_id_filter: Any = None
     if source:
         source_row = (
-            await db.execute(
-                select(MarketplaceSource).where(MarketplaceSource.handle == source)
-            )
+            await db.execute(select(MarketplaceSource).where(MarketplaceSource.handle == source))
         ).scalar_one_or_none()
         if source_row is None:
             raise HTTPException(
@@ -459,11 +549,7 @@ async def get_install_detail(
                 (
                     await db.execute(
                         select(AutomationTrigger)
-                        .where(
-                            AutomationTrigger.automation_id.in_(
-                                [r.id for r in defn_rows]
-                            )
-                        )
+                        .where(AutomationTrigger.automation_id.in_([r.id for r in defn_rows]))
                         .order_by(AutomationTrigger.created_at.asc())
                     )
                 )

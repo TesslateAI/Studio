@@ -521,6 +521,13 @@ variable "enable_cert_manager" {
   default     = true
 }
 
+variable "cert_alert_webhook_url" {
+  description = "Webhook URL (Slack/Discord/Mattermost) the cert-monitor CronJob POSTs to when a Certificate is expiring or stuck. Leave empty to disable webhook delivery — findings still land in kubectl logs of the cert-monitor Job."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # -----------------------------------------------------------------------------
 # Frontend Configuration
 # -----------------------------------------------------------------------------

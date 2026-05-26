@@ -37,7 +37,6 @@ from alembic.config import Config
 from sqlalchemy import event, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # SQLite migration fixture — same shape as test_dispatcher.py.
 # ---------------------------------------------------------------------------
@@ -46,9 +45,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -176,9 +173,7 @@ async def _seed_action(
 async def _load_run(db, run_id: uuid.UUID):
     from app.models_automations import AutomationRun
 
-    return (
-        await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
-    ).scalar_one()
+    return (await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))).scalar_one()
 
 
 # ---------------------------------------------------------------------------
@@ -207,9 +202,7 @@ class _StubRedis:
 @pytest.fixture
 def stub_queue(monkeypatch: pytest.MonkeyPatch) -> _StubQueue:
     queue = _StubQueue()
-    monkeypatch.setattr(
-        "app.services.task_queue.get_task_queue", lambda: queue, raising=True
-    )
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue, raising=True)
     return queue
 
 
@@ -220,9 +213,7 @@ def stub_redis(monkeypatch: pytest.MonkeyPatch) -> _StubRedis:
     async def _get():
         return redis
 
-    monkeypatch.setattr(
-        "app.services.cache_service.get_redis_client", _get, raising=True
-    )
+    monkeypatch.setattr("app.services.cache_service.get_redis_client", _get, raising=True)
     return redis
 
 
@@ -256,9 +247,7 @@ def test_agent_run_dispatch_leaves_run_in_running_state(
             await db.commit()
 
         async with session_maker() as db:
-            result = await dispatch_automation(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            result = await dispatch_automation(db, automation_id=automation_id, event_id=event_id)
 
         async with session_maker() as db:
             run = await _load_run(db, result.run_id)
@@ -311,9 +300,7 @@ def test_gateway_send_dispatch_writes_succeeded_terminal(
             await db.commit()
 
         async with session_maker() as db:
-            result = await dispatch_automation(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            result = await dispatch_automation(db, automation_id=automation_id, event_id=event_id)
 
         async with session_maker() as db:
             run = await _load_run(db, result.run_id)
@@ -334,17 +321,11 @@ def test_gateway_send_dispatch_writes_succeeded_terminal(
 async def _set_run_status(db, run_id: uuid.UUID, status: str) -> None:
     from app.models_automations import AutomationRun
 
-    await db.execute(
-        update(AutomationRun)
-        .where(AutomationRun.id == run_id)
-        .values(status=status)
-    )
+    await db.execute(update(AutomationRun).where(AutomationRun.id == run_id).values(status=status))
     await db.commit()
 
 
-def _patch_session_local_for_worker_helpers(
-    monkeypatch: pytest.MonkeyPatch, session_maker
-) -> None:
+def _patch_session_local_for_worker_helpers(monkeypatch: pytest.MonkeyPatch, session_maker) -> None:
     """Point ``app.database.AsyncSessionLocal`` at the test's session
     factory so worker helpers (which open their own session inside
     ``async with AsyncSessionLocal()``) see the test DB."""
@@ -381,9 +362,7 @@ def test_finalize_writes_succeeded_when_run_is_running(
             await db.commit()
 
         async with session_maker() as db:
-            result = await dispatch_automation(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            result = await dispatch_automation(db, automation_id=automation_id, event_id=event_id)
 
         # Sanity: dispatcher left it at running.
         async with session_maker() as db:
@@ -441,9 +420,7 @@ def test_finalize_does_not_stomp_terminal_or_paused_rows(
             await db.commit()
 
         async with session_maker() as db:
-            result = await dispatch_automation(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            result = await dispatch_automation(db, automation_id=automation_id, event_id=event_id)
 
         # Pre-set the row to the protected status before worker tries to
         # finalize. Models a user-cancellation or contract-breach pause
@@ -462,8 +439,7 @@ def test_finalize_does_not_stomp_terminal_or_paused_rows(
 
     run = asyncio.run(go())
     assert run.status == preexisting_status, (
-        f"_finalize stomped {preexisting_status!r} — "
-        f"WHERE-clause guard failed; got {run.status!r}"
+        f"_finalize stomped {preexisting_status!r} — WHERE-clause guard failed; got {run.status!r}"
     )
 
 
@@ -495,14 +471,15 @@ def test_finalize_supports_failed_terminal(
             await db.commit()
 
         async with session_maker() as db:
-            result = await dispatch_automation(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            result = await dispatch_automation(db, automation_id=automation_id, event_id=event_id)
 
         await _finalize_automation_run(
             result.run_id,
             status="failed",
-            raw_output={"error": "ConnectionError: notion timeout", "error_type": "ConnectionError"},
+            raw_output={
+                "error": "ConnectionError: notion timeout",
+                "error_type": "ConnectionError",
+            },
         )
 
         async with session_maker() as db:
@@ -543,9 +520,7 @@ def test_finalize_supports_waiting_approval_for_tool_pauses(
             await db.commit()
 
         async with session_maker() as db:
-            result = await dispatch_automation(
-                db, automation_id=automation_id, event_id=event_id
-            )
+            result = await dispatch_automation(db, automation_id=automation_id, event_id=event_id)
 
         await _finalize_automation_run(
             result.run_id,

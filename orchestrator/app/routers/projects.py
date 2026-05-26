@@ -472,6 +472,17 @@ async def _perform_project_setup(
                 task=task,
             )
 
+            # Drop the Workspace Data Store SDK helper into the project so
+            # the AI agent has a canonical client file to import — no need
+            # to hallucinate env-var names or URL paths. Guarded: failure
+            # here never blocks creation.
+            try:
+                from ..services.workspace_data_scaffold import scaffold_workspace_data
+
+                await scaffold_workspace_data(db_project, user_id, settings)
+            except Exception:
+                logger.warning("[CREATE] workspace-data scaffold skipped", exc_info=True)
+
             db_project.environment_status = "active"
             await db.commit()
 
@@ -600,6 +611,15 @@ async def _materialize_empty_workspace(project: Project, settings: Any) -> None:
             project.id,
             exc,
         )
+
+    # Drop the Workspace Data reference doc into empty workspaces too — gives
+    # the agent the env-var contract right at the project root.
+    try:
+        from ..services.workspace_data_scaffold import scaffold_workspace_data
+
+        await scaffold_workspace_data(project, project.owner_id, settings)
+    except Exception:
+        logger.warning("[CREATE-EMPTY] workspace-data scaffold skipped", exc_info=True)
 
 
 def _materialize_imported_root(source_path: str, project_root: str) -> None:
@@ -2856,91 +2876,38 @@ async def get_setup_config(
     }
 
 
-async def _auto_start_project(project_id: UUID, project_slug: str, user_id: UUID) -> None:
-    """Background task: start all containers for a freshly configured project.
-
-    Opens its own DB session because the caller's session ends with the
-    response. Never raises — a failed auto-start logs a warning but doesn't
-    leave the user stuck with no response.
-    """
-    from ..database import AsyncSessionLocal
-    from ..services.orchestration import get_orchestrator
-
-    try:
-        async with AsyncSessionLocal() as bg_db:
-            proj_result = await bg_db.execute(select(Project).where(Project.id == project_id))
-            bg_project = proj_result.scalar_one_or_none()
-            if bg_project is None:
-                return
-
-            containers_result = await bg_db.execute(
-                select(Container)
-                .where(Container.project_id == project_id)
-                .options(selectinload(Container.base))
-            )
-            containers = list(containers_result.scalars().all())
-            if not containers:
-                return
-
-            conns_result = await bg_db.execute(
-                select(ContainerConnection).where(ContainerConnection.project_id == project_id)
-            )
-            connections = list(conns_result.scalars().all())
-
-            orchestrator = get_orchestrator()
-            await orchestrator.start_project(bg_project, containers, connections, user_id, bg_db)
-            logger.info(f"[AUTO_START] Started containers for new project {project_slug}")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"[AUTO_START] Failed to auto-start project {project_slug}: {exc}")
-
-
 @router.post("/{project_slug}/setup-config", response_model=SetupConfigSyncResponse)
 async def save_setup_config(
     project_slug: str,
     config_data: TesslateConfigCreate,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Save .tesslate/config.json and replace the project's container graph.
 
-    When this is the first config sync (no existing containers), auto-start
-    the newly created containers so the user lands on a running environment
-    rather than having to click 'Start Environment'. Subsequent syncs (canvas
-    edits on an already-configured project) do not auto-start — that would
-    interrupt a user editing their running project.
+    Never auto-starts containers. The user always explicitly clicks
+    Start All / Start <container> when they want compute. This avoids:
+
+      * Lock races when setup-config is called rapidly (the bg auto-start
+        used to collide with a manual Start All clicked seconds later).
+      * Surprise spend on a deploy/tier that the user wasn't ready to
+        consume yet (config edits happen often; running pods cost money).
+      * Inconsistent first-impression — sometimes auto-start succeeded,
+        sometimes the lock conflict popped a red toast.
+
+    The Start button is the single contract for 'I want this running'.
     """
     project = await get_project_by_slug(db, project_slug, current_user, Permission.FILE_WRITE)
     await track_project_activity(project.id, db)
 
     from ..services.config_sync import ConfigSyncError, sync_project_config
 
-    # Detect first-sync before running the sync (afterwards, containers exist)
-    pre_count_result = await db.execute(
-        select(func.count(Container.id)).where(Container.project_id == project.id)
-    )
-    is_first_sync = (pre_count_result.scalar() or 0) == 0
-
     try:
         result = await sync_project_config(db, project, config_data, current_user.id)
     except ConfigSyncError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if is_first_sync and result.container_ids and can_auto_start(project):
-        background_tasks.add_task(_auto_start_project, project.id, project.slug, current_user.id)
-
     return result
-
-
-def can_auto_start(project: Project) -> bool:
-    """Gate auto-start to healthy environment states.
-
-    Don't auto-start if the environment is mid-transition (provisioning,
-    starting, stopping) or in an error state — a background start there
-    would race with the active workflow.
-    """
-    status_value = getattr(project, "environment_status", None)
-    return status_value in {None, "active", "stopped"}
 
 
 @router.post("/{project_slug}/sync-config")
@@ -6860,7 +6827,11 @@ async def check_container_health(
         external_url = f"{settings.k8s_container_url_protocol}://{project.slug}-{container_dir}.{settings.app_domain}"
         # Internal URL for health check (always reachable from within cluster)
         # Service naming: dev-{container_dir} in namespace proj-{project.id}
-        service_port = container.effective_port
+        # When readiness_port is set (stashed in resources JSON), the K8s
+        # Service exposes that port instead of effective_port.
+        _res = container.resources or {}
+        _rp = _res.get("readiness_port") if isinstance(_res, dict) else None
+        service_port = int(_rp) if _rp else container.effective_port
         health_check_url = (
             f"http://dev-{container_dir}.proj-{project.id}.svc.cluster.local:{service_port}"
         )

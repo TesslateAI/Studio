@@ -31,9 +31,9 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, insert as core_insert
+from sqlalchemy import event
+from sqlalchemy import insert as core_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirror tests/services/automations/test_wake.py)
@@ -43,9 +43,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -174,11 +172,14 @@ async def _seed_app_install(
     return install.id
 
 
-async def _seed_app_and_version(
-    db, *, creator_user_id: uuid.UUID
-) -> tuple[uuid.UUID, uuid.UUID]:
+async def _seed_app_and_version(db, *, creator_user_id: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
     """Insert a MarketplaceApp + AppVersion via core insert (no relationships needed)."""
     from app.models import AppVersion, MarketplaceApp
+
+    # 0088_marketplace_sources made marketplace_apps.source_id NOT NULL
+    # (and 0092 the same on app_versions). The "local" sentinel source is
+    # seeded by 0088 with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 
     app_id = uuid.uuid4()
     suffix = uuid.uuid4().hex[:8]
@@ -190,6 +191,7 @@ async def _seed_app_and_version(
             creator_user_id=creator_user_id,
             state="draft",
             visibility="public",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     av_id = uuid.uuid4()
@@ -205,6 +207,7 @@ async def _seed_app_and_version(
             feature_set_hash="fs:test",
             required_features=[],
             approval_state="stage1_approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     await db.flush()
@@ -279,9 +282,7 @@ def test_resolve_runtime_returns_deployment_for_full_chain(session_maker) -> Non
         async with session_maker() as db:
             user_id = await _seed_user(db)
             app_id, av_id = await _seed_app_and_version(db, creator_user_id=user_id)
-            deployment_id = await _seed_runtime_deployment(
-                db, app_id=app_id, app_version_id=av_id
-            )
+            deployment_id = await _seed_runtime_deployment(db, app_id=app_id, app_version_id=av_id)
             await _seed_app_install(
                 db,
                 installer_user_id=user_id,
@@ -316,9 +317,7 @@ def test_resolve_runtime_returns_none_when_no_app_invoke_action(
     async def go():
         async with session_maker() as db:
             user_id = await _seed_user(db)
-            run_id = await _seed_run_with_app_invoke(
-                db, owner_user_id=user_id, app_action_id=None
-            )
+            run_id = await _seed_run_with_app_invoke(db, owner_user_id=user_id, app_action_id=None)
             await db.commit()
 
         async with session_maker() as db:
@@ -380,9 +379,7 @@ def test_resolve_runtime_scopes_install_lookup_to_owner(session_maker) -> None:
             owner_id = await _seed_user(db)
             stranger_id = await _seed_user(db)
             app_id, av_id = await _seed_app_and_version(db, creator_user_id=owner_id)
-            deployment_id = await _seed_runtime_deployment(
-                db, app_id=app_id, app_version_id=av_id
-            )
+            deployment_id = await _seed_runtime_deployment(db, app_id=app_id, app_version_id=av_id)
             # The install belongs to the stranger, not the automation owner.
             await _seed_app_install(
                 db,

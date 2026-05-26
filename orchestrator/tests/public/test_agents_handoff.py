@@ -1,4 +1,5 @@
 """Unit tests for agent handoff bundle + service helpers."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -9,8 +10,8 @@ import pytest
 import app.models  # noqa: F401
 from app.services.public.handoff_service import (
     HandoffBundle,
-    bundle_from_payload,
     build_enqueue_payload,
+    bundle_from_payload,
     make_continuation_token,
     parse_continuation_token,
     serialize_task,

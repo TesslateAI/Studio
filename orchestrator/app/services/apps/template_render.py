@@ -31,10 +31,10 @@ become a small pool — but a singleton is fine for now.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import sys
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class TemplateRenderClient:
     """Async-safe supervisor for a single render-worker subprocess."""
 
     def __init__(self) -> None:
-        self._proc: Optional[asyncio.subprocess.Process] = None
+        self._proc: asyncio.subprocess.Process | None = None
         # Lock serializes stdin writes + stdout reads. The IPC contract is
         # one-line-in / one-line-out, so two concurrent renders would
         # interleave each other's JSON otherwise.
@@ -124,10 +124,8 @@ class TemplateRenderClient:
             try:
                 proc.stdin.write(payload.encode("utf-8") + b"\n")
                 await proc.stdin.drain()
-                line = await asyncio.wait_for(
-                    proc.stdout.readline(), timeout=timeout
-                )
-            except asyncio.TimeoutError as exc:
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
+            except TimeoutError as exc:
                 # Worker is now out-of-sync (its stdout response line, if
                 # any, will desync the next caller). Kill and respawn on
                 # next call.
@@ -190,12 +188,10 @@ class TemplateRenderClient:
             if proc.stdin is not None and not proc.stdin.is_closing():
                 proc.stdin.close()
             await asyncio.wait_for(proc.wait(), timeout=2.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._kill_worker(proc)
-            try:
+            with contextlib.suppress(Exception):
                 await proc.wait()
-            except Exception:  # noqa: BLE001
-                pass
         except ProcessLookupError:
             pass
         except Exception:  # noqa: BLE001
@@ -206,7 +202,7 @@ class TemplateRenderClient:
 # Singleton accessor
 # ---------------------------------------------------------------------------
 
-_singleton: Optional[TemplateRenderClient] = None
+_singleton: TemplateRenderClient | None = None
 
 
 def get_render_client() -> TemplateRenderClient:

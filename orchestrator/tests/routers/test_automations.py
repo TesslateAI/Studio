@@ -29,9 +29,9 @@ from typing import Any
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import event, insert as core_insert
+from sqlalchemy import event
+from sqlalchemy import insert as core_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 
 # ---------------------------------------------------------------------------
 # Shared SQLite migration fixtures
@@ -41,9 +41,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001 - SA event signature
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -88,6 +86,14 @@ def session_maker(migrated_sqlite: str):
 # ---------------------------------------------------------------------------
 
 
+# Stable UUID for the seeded system agent used by ``_good_create_payload``.
+# System agents bypass the library-scope check in
+# ``services/marketplace_agent_scope.resolve_agent_in_user_scope``, so the
+# test can reuse one fixture-seeded row across every CRUD case without
+# also needing a ``UserPurchasedAgent`` link per test user.
+_TEST_SYSTEM_AGENT_ID = uuid.UUID("00000000-0000-0000-0000-00000000a9e7")
+
+
 async def _seed_user(db) -> uuid.UUID:
     from app.models_auth import User
 
@@ -110,6 +116,43 @@ async def _seed_user(db) -> uuid.UUID:
     return user_id
 
 
+async def _seed_system_agent(db) -> uuid.UUID:
+    """Insert a system MarketplaceAgent with the well-known test UUID.
+
+    Anchored to the ``tesslate-official`` system source seeded by alembic
+    ``0088_marketplace_sources`` so the NOT NULL constraint on
+    ``marketplace_agents.source_id`` is satisfied. Idempotent — a duplicate
+    insert across the same test DB returns the existing row's id.
+    """
+    from app.models import MarketplaceAgent
+
+    existing = await db.get(MarketplaceAgent, _TEST_SYSTEM_AGENT_ID)
+    if existing is not None:
+        return existing.id
+
+    # Mirrors the constant in alembic/versions/0088_marketplace_sources.py.
+    tesslate_official_source_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+    await db.execute(
+        core_insert(MarketplaceAgent.__table__).values(
+            id=_TEST_SYSTEM_AGENT_ID,
+            name="Router-Test System Agent",
+            slug="router-test-system-agent",
+            description="System agent seeded for routers/test_automations.py",
+            category="builder",
+            item_type="agent",
+            agent_type="IterativeAgent",
+            pricing_type="free",
+            source_id=tesslate_official_source_id,
+            is_active=True,
+            is_system=True,
+            is_published=True,
+        )
+    )
+    await db.flush()
+    return _TEST_SYSTEM_AGENT_ID
+
+
 # ---------------------------------------------------------------------------
 # FastAPI test client + dep overrides
 # ---------------------------------------------------------------------------
@@ -128,9 +171,7 @@ def stub_queue(monkeypatch: pytest.MonkeyPatch):
             return f"job-{len(self.calls)}"
 
     queue = _StubQueue()
-    monkeypatch.setattr(
-        "app.services.task_queue.get_task_queue", lambda: queue, raising=True
-    )
+    monkeypatch.setattr("app.services.task_queue.get_task_queue", lambda: queue, raising=True)
     return queue
 
 
@@ -205,10 +246,13 @@ def app_client(session_maker, stub_queue, stub_dispatcher):
     from app.routers import automations as automations_router
     from app.users import current_active_user
 
-    # Seed an owner user up front so the override dep can return them.
+    # Seed an owner user + the well-known system agent up front so the
+    # override dep can return the user and ``_good_create_payload`` has a
+    # valid ``agent_id`` for ``agent.run`` actions.
     async def _seed():
         async with session_maker() as db:
             uid = await _seed_user(db)
+            await _seed_system_agent(db)
             await db.commit()
             return uid
 
@@ -248,6 +292,15 @@ def app_client(session_maker, stub_queue, stub_dispatcher):
 
 
 def _good_create_payload() -> dict[str, Any]:
+    # Uses ``agent.run`` so the fixture stays minimal — gateway.send now
+    # requires a delivery_target, and a real CommunicationDestination row
+    # would force every test to seed one. gateway.send-specific validation
+    # has its own dedicated tests below.
+    #
+    # ``config.agent_id`` references the seeded system agent (see
+    # ``_seed_system_agent``). System agents bypass the per-user library
+    # check, so the same UUID works for every test owner without extra
+    # ``UserPurchasedAgent`` plumbing.
     return {
         "name": "router-test-automation",
         "workspace_scope": "none",
@@ -260,8 +313,8 @@ def _good_create_payload() -> dict[str, Any]:
         "triggers": [{"kind": "manual", "config": {}}],
         "actions": [
             {
-                "action_type": "gateway.send",
-                "config": {"body_template": "hello {x}"},
+                "action_type": "agent.run",
+                "config": {"agent_id": str(_TEST_SYSTEM_AGENT_ID), "prompt": "noop"},
                 "ordinal": 0,
             }
         ],
@@ -304,15 +357,29 @@ def test_create_rejects_zero_actions(app_client) -> None:
 
 
 @pytest.mark.unit
-def test_create_rejects_multi_actions(app_client) -> None:
+def test_create_accepts_multi_actions(app_client) -> None:
+    """Multi-step automations are accepted as of issue #469 / Phase A —
+    the workflow engine walks ordinals when len(actions) > 1. This
+    test used to assert 422; relaxing it to 201 codifies the new
+    contract."""
     client, _, _ = app_client
     payload = _good_create_payload()
     payload["actions"] = [
-        {"action_type": "gateway.send", "config": {}, "ordinal": 0},
-        {"action_type": "gateway.send", "config": {}, "ordinal": 1},
+        {
+            "action_type": "agent.run",
+            "config": {"agent_id": str(_TEST_SYSTEM_AGENT_ID), "prompt": "a"},
+            "ordinal": 0,
+        },
+        {
+            "action_type": "agent.run",
+            "config": {"agent_id": str(_TEST_SYSTEM_AGENT_ID), "prompt": "b"},
+            "ordinal": 1,
+        },
     ]
     resp = client.post("/api/automations", json=payload)
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert len(body["actions"]) == 2
 
 
 @pytest.mark.unit
@@ -327,7 +394,7 @@ def test_create_persists_definition_with_children(app_client) -> None:
     assert len(body["triggers"]) == 1
     assert body["triggers"][0]["kind"] == "manual"
     assert len(body["actions"]) == 1
-    assert body["actions"][0]["action_type"] == "gateway.send"
+    assert body["actions"][0]["action_type"] == "agent.run"
     assert body["delivery_targets"] == []
 
 
@@ -382,7 +449,10 @@ def test_patch_replace_triggers(app_client) -> None:
         f"/api/automations/{aid}",
         json={
             "triggers": [
-                {"kind": "cron", "config": {"expr": "0 * * * *"}},
+                {
+                    "kind": "cron",
+                    "config": {"expression": "0 * * * *", "timezone": "UTC"},
+                },
                 {"kind": "manual", "config": {}},
             ]
         },
@@ -390,6 +460,167 @@ def test_patch_replace_triggers(app_client) -> None:
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert sorted(t["kind"] for t in body["triggers"]) == ["cron", "manual"]
+
+
+# ---------------------------------------------------------------------------
+# Schedule trigger + gateway.send delivery validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_create_rejects_invalid_cron_expression(app_client) -> None:
+    """4-field cron used to be silently coerced to empty string."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [{"kind": "cron", "config": {"expression": "* * * *"}}]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "expression" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_rejects_empty_cron_expression(app_client) -> None:
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [{"kind": "cron", "config": {"expression": ""}}]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.unit
+def test_create_rejects_cron_without_timezone(app_client) -> None:
+    """Empty / missing timezone used to silently default to UTC."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [{"kind": "cron", "config": {"expression": "*/5 * * * *"}}]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "timezone" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_rejects_cron_with_empty_timezone(app_client) -> None:
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {"expression": "*/5 * * * *", "timezone": ""},
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "timezone" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_rejects_cron_with_invalid_timezone(app_client) -> None:
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {
+                "expression": "*/5 * * * *",
+                "timezone": "Mars/Olympus_Mons",
+            },
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "timezone" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_populates_next_run_at_for_cron(app_client) -> None:
+    """Previously NULL → cron producer fired on the next leader-tick."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {"expression": "*/5 * * * *", "timezone": "UTC"},
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 201, resp.text
+    trig = resp.json()["triggers"][0]
+    assert trig["next_run_at"] is not None
+    # Should be in the future, not "now or earlier". SQLite drops tz info
+    # in the JSON serialization, so coerce to UTC-aware before comparing.
+    nxt = datetime.fromisoformat(trig["next_run_at"].replace("Z", "+00:00"))
+    if nxt.tzinfo is None:
+        nxt = nxt.replace(tzinfo=UTC)
+    assert nxt > datetime.now(UTC)
+
+
+@pytest.mark.unit
+def test_create_rejects_six_field_cron_expression(app_client) -> None:
+    """6-field (seconds-first) cron used to be accepted by croniter and
+    silently quantized by the producer to multi-minute boundaries —
+    the user's '*/30 * * * * *' (every 30s) would actually fire at
+    coarser intervals with no warning."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {
+                "expression": "*/30 * * * * *",
+                "timezone": "UTC",
+            },
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "5-field" in resp.text or "sub-minute" in resp.text
+
+
+@pytest.mark.unit
+def test_create_rejects_seven_field_cron_expression(app_client) -> None:
+    """7-field (seconds + year) cron has the same coercion problem."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["triggers"] = [
+        {
+            "kind": "cron",
+            "config": {
+                "expression": "0 */30 * * * * 2026",
+                "timezone": "UTC",
+            },
+        }
+    ]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.unit
+def test_create_rejects_gateway_send_without_delivery_target(app_client) -> None:
+    """gateway.send + zero delivery_targets used to save as 'Active'."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["actions"] = [
+        {
+            "action_type": "gateway.send",
+            "config": {"body": "hello"},
+            "ordinal": 0,
+        }
+    ]
+    payload["delivery_targets"] = []
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "delivery target" in resp.text.lower()
+
+
+@pytest.mark.unit
+def test_create_rejects_gateway_send_with_empty_body(app_client) -> None:
+    """gateway.send used to accept config={}."""
+    client, _, _ = app_client
+    payload = _good_create_payload()
+    payload["actions"] = [{"action_type": "gateway.send", "config": {}, "ordinal": 0}]
+    resp = client.post("/api/automations", json=payload)
+    assert resp.status_code == 422, resp.text
+    assert "body" in resp.text.lower()
 
 
 @pytest.mark.unit
@@ -503,9 +734,7 @@ def test_artifact_404_when_missing(app_client) -> None:
     created = client.post("/api/automations", json=_good_create_payload()).json()
     aid = created["id"]
     run = client.post(f"/api/automations/{aid}/run", json={}).json()
-    resp = client.get(
-        f"/api/automations/{aid}/runs/{run['run_id']}/artifacts/{uuid.uuid4()}"
-    )
+    resp = client.get(f"/api/automations/{aid}/runs/{run['run_id']}/artifacts/{uuid.uuid4()}")
     assert resp.status_code == 404
 
 
@@ -525,6 +754,10 @@ async def _seed_app_install(db, owner_id: uuid.UUID) -> uuid.UUID:
     from app.models import AppVersion, MarketplaceApp
     from app.models_automations import AppInstance
 
+    # 0088_marketplace_sources made marketplace_apps/app_versions.source_id
+    # NOT NULL. The "local" sentinel source is seeded by 0088 with this UUID.
+    LOCAL_SOURCE_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
     app_id = uuid.uuid4()
     db.add(
         MarketplaceApp(
@@ -534,6 +767,7 @@ async def _seed_app_install(db, owner_id: uuid.UUID) -> uuid.UUID:
             category="utility",
             creator_user_id=owner_id,
             state="approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     version_id = uuid.uuid4()
@@ -547,6 +781,7 @@ async def _seed_app_install(db, owner_id: uuid.UUID) -> uuid.UUID:
             manifest_hash="x" * 64,
             feature_set_hash="y" * 64,
             approval_state="stage1_approved",
+            source_id=LOCAL_SOURCE_ID,
         )
     )
     install_id = uuid.uuid4()
@@ -592,9 +827,7 @@ def test_list_filters_by_app_instance_id(app_client) -> None:
     assert unscoped.status_code == 201, unscoped.text
 
     # Filtered list returns only the scoped row.
-    resp = client.get(
-        f"/api/automations?app_instance_id={install_id}"
-    )
+    resp = client.get(f"/api/automations?app_instance_id={install_id}")
     assert resp.status_code == 200, resp.text
     names = [i["name"] for i in resp.json()]
     assert names == ["scoped"]
@@ -647,9 +880,7 @@ def test_runs_by_install_returns_runs_across_automations(app_client) -> None:
             "app_instance_id": str(install_id),
         },
     ).json()
-    other = client.post(
-        "/api/automations", json={**_good_create_payload(), "name": "other"}
-    ).json()
+    other = client.post("/api/automations", json={**_good_create_payload(), "name": "other"}).json()
 
     r1 = client.post(f"/api/automations/{a1['id']}/run", json={}).json()
     r2 = client.post(f"/api/automations/{a2['id']}/run", json={}).json()

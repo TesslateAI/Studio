@@ -6,8 +6,10 @@ Create Date: 2026-03-12
 """
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
+
 # revision identifiers
 revision = "0026_add_agent_mcp_assignments"
 down_revision = "0025_channels_mcp"

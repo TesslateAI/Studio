@@ -30,7 +30,6 @@ from alembic.config import Config
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 # ---------------------------------------------------------------------------
 # Migration fixture (mirrors test_dispatcher.py)
 # ---------------------------------------------------------------------------
@@ -39,9 +38,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 def _install_sqlite_now(engine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_conn, _record):  # noqa: ARG001
-        dbapi_conn.create_function(
-            "now", 0, lambda: datetime.now(UTC).isoformat(sep=" ")
-        )
+        dbapi_conn.create_function("now", 0, lambda: datetime.now(UTC).isoformat(sep=" "))
 
 
 def _alembic_cfg() -> Config:
@@ -153,14 +150,9 @@ def test_determine_strategy_app_invoke_always_redispatch() -> None:
         determine_resume_strategy,
     )
 
+    assert determine_resume_strategy("app.invoke", {}, {}) == ResumeStrategy.REDISPATCH
     assert (
-        determine_resume_strategy("app.invoke", {}, {})
-        == ResumeStrategy.REDISPATCH
-    )
-    assert (
-        determine_resume_strategy(
-            "app.invoke", {"in_flight_non_serializable_tools": ["bash"]}, {}
-        )
+        determine_resume_strategy("app.invoke", {"in_flight_non_serializable_tools": ["bash"]}, {})
         == ResumeStrategy.REDISPATCH
     )
 
@@ -172,10 +164,7 @@ def test_determine_strategy_gateway_send_always_redispatch() -> None:
         determine_resume_strategy,
     )
 
-    assert (
-        determine_resume_strategy("gateway.send", {}, {})
-        == ResumeStrategy.REDISPATCH
-    )
+    assert determine_resume_strategy("gateway.send", {}, {}) == ResumeStrategy.REDISPATCH
 
 
 @pytest.mark.unit
@@ -220,8 +209,7 @@ def test_determine_strategy_unknown_action_falls_back_to_restart() -> None:
     )
 
     assert (
-        determine_resume_strategy("mystery.kind", {}, {})
-        == ResumeStrategy.RESTART_FROM_CHECKPOINT
+        determine_resume_strategy("mystery.kind", {}, {}) == ResumeStrategy.RESTART_FROM_CHECKPOINT
     )
 
 
@@ -248,9 +236,7 @@ def test_serialize_then_hydrate_round_trip_app_invoke(session_maker) -> None:
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             cp = await serialize_checkpoint(
                 db,
@@ -316,9 +302,7 @@ def test_serialize_marks_agent_run_with_non_serializable_as_restart(
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             await serialize_checkpoint(
                 db,
@@ -341,9 +325,7 @@ def test_serialize_marks_agent_run_with_non_serializable_as_restart(
     loaded = asyncio.run(go())
     assert loaded is not None
     assert loaded.resume_strategy == ResumeStrategy.RESTART_FROM_CHECKPOINT
-    assert loaded.action_state["in_flight_non_serializable_tools"] == [
-        "bash_session"
-    ]
+    assert loaded.action_state["in_flight_non_serializable_tools"] == ["bash_session"]
 
 
 @pytest.mark.unit
@@ -363,9 +345,7 @@ def test_serialize_clean_agent_run_marks_continue(session_maker) -> None:
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             await serialize_checkpoint(
                 db,
@@ -436,9 +416,7 @@ def test_serialize_rejects_unknown_action_type(session_maker) -> None:
 
         async with session_maker() as db:
             run = (
-                await db.execute(
-                    select(AutomationRun).where(AutomationRun.id == run_id)
-                )
+                await db.execute(select(AutomationRun).where(AutomationRun.id == run_id))
             ).scalar_one()
             with pytest.raises(ValueError, match="action_type"):
                 await serialize_checkpoint(

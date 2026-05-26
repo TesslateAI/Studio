@@ -33,8 +33,9 @@ bound on "this event is genuinely orphaned, not just slow."
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -111,9 +112,7 @@ async def sweep_once(
     return fired
 
 
-async def _enqueue_dispatch(
-    arq_pool: Any | None, automation_id: UUID, event_id: UUID
-) -> None:
+async def _enqueue_dispatch(arq_pool: Any | None, automation_id: UUID, event_id: UUID) -> None:
     args = (str(automation_id), str(event_id), "controller-sweep")
     job_id = str(event_id)
 

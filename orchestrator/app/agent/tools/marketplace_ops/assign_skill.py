@@ -14,17 +14,15 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from ....services.automations.scopes import MARKETPLACE_AUTHOR
 from ....models import AgentSkillAssignment, MarketplaceAgent
+from ....services.automations.scopes import MARKETPLACE_AUTHOR
 from ..output_formatter import error_output, success_output
 from ..registry import Tool, ToolCategory
 
 logger = logging.getLogger(__name__)
 
 
-async def assign_skill_executor(
-    params: dict[str, Any], context: dict[str, Any]
-) -> dict[str, Any]:
+async def assign_skill_executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     agent_id_raw = params.get("agent_id")
     skill_id_raw = params.get("skill_id")
     if not agent_id_raw or not skill_id_raw:

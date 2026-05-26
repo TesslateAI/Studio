@@ -22,6 +22,7 @@ Two layers of coverage live here:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 import uuid
@@ -39,7 +40,6 @@ from app.services.apps.app_version_source_consistency import (
     scan_orphans,
 )
 
-
 _ASYNC_DB_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
@@ -54,10 +54,8 @@ async def db_session() -> AsyncSession:
         try:
             yield session
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await session.rollback()
-            except Exception:  # noqa: BLE001
-                pass
     await engine.dispose()
 
 
@@ -127,26 +125,18 @@ async def two_sources(db_session: AsyncSession) -> tuple[MarketplaceSource, Mark
         for src in (s_a, s_b):
             apps = (
                 await db_session.execute(
-                    MarketplaceApp.__table__.select().where(
-                        MarketplaceApp.source_id == src.id
-                    )
+                    MarketplaceApp.__table__.select().where(MarketplaceApp.source_id == src.id)
                 )
             ).all()
             for app_row in apps:
                 await db_session.execute(
-                    AppVersion.__table__.delete().where(
-                        AppVersion.app_id == app_row[0]
-                    )
+                    AppVersion.__table__.delete().where(AppVersion.app_id == app_row[0])
                 )
             await db_session.execute(
-                MarketplaceApp.__table__.delete().where(
-                    MarketplaceApp.source_id == src.id
-                )
+                MarketplaceApp.__table__.delete().where(MarketplaceApp.source_id == src.id)
             )
         await db_session.execute(
-            MarketplaceSource.__table__.delete().where(
-                MarketplaceSource.id.in_((s_a.id, s_b.id))
-            )
+            MarketplaceSource.__table__.delete().where(MarketplaceSource.id.in_((s_a.id, s_b.id)))
         )
         await db_session.commit()
     except Exception:  # noqa: BLE001

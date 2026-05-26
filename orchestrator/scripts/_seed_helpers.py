@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from app.models_auth import User
 
 
-async def resolve_seeder_user(db: "AsyncSession") -> tuple["User", UUID]:
+async def resolve_seeder_user(db: AsyncSession) -> tuple[User, UUID]:
     """Return the first user with an active TeamMembership plus their team_id.
 
     Raises:

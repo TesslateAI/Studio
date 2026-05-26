@@ -10,7 +10,7 @@ includes, and each submodule contributes its endpoints via
 | Submodule       | Endpoints                                                                                  |
 |-----------------|--------------------------------------------------------------------------------------------|
 | `tray.py`       | `GET /runtime-probe`, `GET /tray-state`                                                    |
-| `auth.py`       | `GET /auth/status`, `POST /auth/token`, `DELETE /auth/token`                               |
+| `auth.py`       | `GET /auth/status`, `POST`/`DELETE /auth/token`, `PUT`/`DELETE /cloud-url`, `GET`/`POST /first-run` |
 | `tickets.py`    | `GET /agents/tickets`, `POST /agents/{ticket_id}/approve`                                  |
 | `directories.py`| `GET /directories`, `POST /directories`, `DELETE /directories/{directory_id}`              |
 | `sessions.py`   | `GET /agents/sessions`, `GET /agents/{ticket_id}/diff`                                     |

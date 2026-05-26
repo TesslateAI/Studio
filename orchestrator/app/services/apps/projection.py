@@ -39,7 +39,8 @@ from ...models_automations import (
     InvocationSubject,
 )
 from .app_manifest import AppManifest2026_05
-from .manifest_parser import ManifestValidationError, parse as parse_manifest
+from .manifest_parser import ManifestValidationError
+from .manifest_parser import parse as parse_manifest
 
 __all__ = [
     "ProjectionError",
@@ -71,7 +72,18 @@ class ManifestInvalid(ProjectionError):
 
     Wraps the underlying ``ManifestValidationError`` so the install caller
     can catch a single domain error type and roll back.
+
+    ``errors`` mirrors ``ManifestValidationError.errors`` (a list of
+    ``{path, message, validator, validator_value}`` dicts) so callers can
+    surface field-level detail in API responses without unpacking the
+    cause chain.
     """
+
+    def __init__(
+        self, message: str, errors: list[dict[str, Any]] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.errors: list[dict[str, Any]] = errors or []
 
 
 class DependencyAppNotFound(ProjectionError):
@@ -99,7 +111,7 @@ class ProjectionResult:
     automation_templates_count: int
 
     @classmethod
-    def empty(cls) -> "ProjectionResult":
+    def empty(cls) -> ProjectionResult:
         return cls(0, 0, 0, 0, 0, 0)
 
 
@@ -160,7 +172,8 @@ async def regenerate_projection(
         parsed = parse_manifest(av.manifest_json or {})
     except ManifestValidationError as e:
         raise ManifestInvalid(
-            f"AppVersion {app_version_id} manifest_json failed validation: {e}"
+            f"AppVersion {app_version_id} manifest_json failed validation: {e}",
+            errors=list(getattr(e, "errors", []) or []),
         ) from e
 
     manifest = parsed.manifest
@@ -184,9 +197,7 @@ async def regenerate_projection(
         if dep.app_id in dependency_resolutions:
             continue
         child_id = (
-            await db.execute(
-                select(MarketplaceApp.id).where(MarketplaceApp.slug == dep.app_id)
-            )
+            await db.execute(select(MarketplaceApp.id).where(MarketplaceApp.slug == dep.app_id))
         ).scalar_one_or_none()
         if child_id is None:
             raise DependencyAppNotFound(dep.app_id)
@@ -234,9 +245,7 @@ async def regenerate_projection(
             AppView,
             AppAction,
         ):
-            await db.execute(
-                delete(table).where(table.app_version_id == app_version_id)
-            )
+            await db.execute(delete(table).where(table.app_version_id == app_version_id))
 
         # 5b. INSERT new rows in FK-friendly order:
         #   actions → views → data_resources (FK→actions) → dependencies
@@ -284,9 +293,7 @@ async def regenerate_projection(
             else:
                 owning_def_id = (
                     await db.execute(
-                        select(AutomationAction.automation_id).where(
-                            AutomationAction.id == aa_id
-                        )
+                        select(AutomationAction.automation_id).where(AutomationAction.id == aa_id)
                     )
                 ).scalar_one_or_none()
                 if owning_def_id is not None:
@@ -403,9 +410,7 @@ async def regenerate_projection(
                     description=tmpl_spec.description,
                     trigger_config=_to_jsonable(tmpl_spec.trigger),
                     action_config=_to_jsonable(tmpl_spec.action),
-                    delivery_config=_to_jsonable(tmpl_spec.delivery)
-                    if tmpl_spec.delivery
-                    else {},
+                    delivery_config=_to_jsonable(tmpl_spec.delivery) if tmpl_spec.delivery else {},
                     contract_template=tmpl_spec.contract_template or {},
                     is_default_enabled=tmpl_spec.is_default_enabled,
                 )

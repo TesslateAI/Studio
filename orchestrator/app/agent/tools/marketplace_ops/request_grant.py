@@ -42,9 +42,7 @@ _VALID_RESOURCE_KINDS = {
 }
 
 
-async def request_grant_executor(
-    params: dict[str, Any], context: dict[str, Any]
-) -> dict[str, Any]:
+async def request_grant_executor(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     resource = params.get("resource")
     capability = params.get("capability")
     if not isinstance(resource, dict) or not capability:
@@ -55,9 +53,7 @@ async def request_grant_executor(
     resource_kind = resource.get("kind")
     resource_id = resource.get("id")
     if resource_kind not in _VALID_RESOURCE_KINDS:
-        return error_output(
-            message=f"resource.kind must be one of {sorted(_VALID_RESOURCE_KINDS)}"
-        )
+        return error_output(message=f"resource.kind must be one of {sorted(_VALID_RESOURCE_KINDS)}")
     if not resource_id:
         return error_output(message="resource.id is required")
     if not isinstance(capability, str) or "." not in capability:
@@ -71,10 +67,7 @@ async def request_grant_executor(
     # list cannot live on a child contract. We still allow the request
     # (the user might be granting it on the PARENT automation) but flag
     # it so the agent knows to handle the rejection cleanly.
-    if not is_inheritable(capability):
-        non_inheritable_warning = True
-    else:
-        non_inheritable_warning = False
+    non_inheritable_warning = not is_inheritable(capability)
 
     session_id = (
         context.get("chat_id")

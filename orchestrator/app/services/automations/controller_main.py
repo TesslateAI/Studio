@@ -37,13 +37,15 @@ auto-launched anywhere.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import random
 import signal
 import socket
 import uuid
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .intents import LeaseLost
 from .lease import Lease, LeaseToken, get_lease_backend
@@ -70,11 +72,11 @@ def _make_holder_id() -> str:
 
 
 async def run_controller(
-    lease_backend: Optional[Lease] = None,
-    db_factory: Optional[Callable[[], Any]] = None,
+    lease_backend: Lease | None = None,
+    db_factory: Callable[[], Any] | None = None,
     arq_pool: Any | None = None,
     *,
-    holder_id: Optional[str] = None,
+    holder_id: str | None = None,
     lease_name: str = _LEASE_NAME,
     ttl_seconds: int = _LEASE_TTL_SECONDS,
     renew_interval_seconds: int = _RENEW_INTERVAL_SECONDS,
@@ -119,12 +121,10 @@ async def run_controller(
             shutdown_event.set()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            signal.signal(sig, _on_signal)
-        except (ValueError, OSError):
+        with contextlib.suppress(ValueError, OSError):
             # Not on the main thread — supervisor is being run from a
             # test loop. Skip; the test owns the cancellation.
-            pass
+            signal.signal(sig, _on_signal)
 
     logger.info(
         "[CONTROLLER] supervisor starting holder=%s lease=%s ttl=%ds",
@@ -136,17 +136,13 @@ async def run_controller(
     while not shutdown_event.is_set():
         token = await lease_backend.acquire(lease_name, holder_id, ttl_seconds)
         if token is None:
-            sleep_for = random.uniform(
-                _STANDBY_BASE_SLEEP_SECONDS, _STANDBY_MAX_SLEEP_SECONDS
-            )
+            sleep_for = random.uniform(_STANDBY_BASE_SLEEP_SECONDS, _STANDBY_MAX_SLEEP_SECONDS)
             logger.debug(
                 "[CONTROLLER] standby — failed to acquire lease, sleeping %.1fs",
                 sleep_for,
             )
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(shutdown_event.wait(), timeout=sleep_for)
-            except TimeoutError:
-                pass
             continue
 
         logger.info(
@@ -257,14 +253,17 @@ async def _run_as_leader(
     # Best-effort release so a fast restart doesn't have to wait for TTL.
     try:
         await lease_backend.release(current_token)
-        logger.info(
-            "[CONTROLLER] released lease term=%d", current_token.term
-        )
+        logger.info("[CONTROLLER] released lease term=%d", current_token.term)
     except Exception:
         logger.warning("[CONTROLLER] release failed", exc_info=True)
 
 
-_LEADER_TICK_INTERVAL_SECONDS = 60
+# A 60s tick made every cron fire up to 60s late — a `*/5 * * * *`
+# schedule could observe ~35s drift on the very first real boundary. 15s
+# keeps wall-clock drift inside the ±30s tolerance while only 4x'ing the
+# (already cheap, idempotent) heartbeat / approval-timeout sweeps that
+# share the same tick.
+_LEADER_TICK_INTERVAL_SECONDS = 15
 
 
 async def _leader_tick_loop(
@@ -325,9 +324,7 @@ async def _leader_tick_loop(
                     current_term=current_term,
                 )
         except LeaseLost:
-            logger.warning(
-                "[LEADER-TICK] lease lost in heartbeat sweep; standing down"
-            )
+            logger.warning("[LEADER-TICK] lease lost in heartbeat sweep; standing down")
             return
         except Exception:
             logger.exception("[LEADER-TICK] heartbeat sweep failed")
@@ -340,9 +337,7 @@ async def _leader_tick_loop(
                     current_term=current_term,
                 )
         except LeaseLost:
-            logger.warning(
-                "[LEADER-TICK] lease lost in approval sweep; standing down"
-            )
+            logger.warning("[LEADER-TICK] lease lost in approval sweep; standing down")
             return
         except Exception:
             logger.exception("[LEADER-TICK] approval-timeout sweep failed")
@@ -360,10 +355,8 @@ async def _wait_for_either(a: asyncio.Event, b: asyncio.Event) -> None:
     )
     for p in pending:
         p.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await p
-        except (asyncio.CancelledError, Exception):
-            pass
 
 
 async def _renew_loop(
@@ -377,9 +370,7 @@ async def _renew_loop(
     """Renew the lease at a fixed interval; signal ``lease_lost`` on failure."""
     while not lease_lost.is_set() and not shutdown_event.is_set():
         try:
-            await asyncio.wait_for(
-                shutdown_event.wait(), timeout=renew_interval_seconds
-            )
+            await asyncio.wait_for(shutdown_event.wait(), timeout=renew_interval_seconds)
             # Shutdown — exit cleanly without renewing.
             return
         except TimeoutError:
@@ -389,9 +380,7 @@ async def _renew_loop(
         try:
             ok = await lease_backend.renew(token)
         except Exception:
-            logger.exception(
-                "[CONTROLLER] renew raised; treating as lease loss"
-            )
+            logger.exception("[CONTROLLER] renew raised; treating as lease loss")
             ok = False
 
         if not ok:

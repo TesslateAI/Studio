@@ -393,7 +393,7 @@ spec:
 
         # Hibernation Settings
         - name: K8S_HIBERNATION_IDLE_MINUTES
-          value: "30"
+          value: "2880"
         - name: K8S_HIBERNATION_GRACE_SECONDS
           value: "120"
         - name: K8S_DEHYDRATION_EXCLUDE_PATTERNS

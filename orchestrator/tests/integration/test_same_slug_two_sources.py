@@ -30,7 +30,6 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-
 _TESSLATE_OFFICIAL_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _COMMUNITY_SOURCE_ID = uuid.UUID("aabbccdd-1111-2222-3333-444455556666")
 _TESSLATE_AGENT_ID = uuid.UUID("aaaa1111-2222-3333-4444-555566667777")
@@ -62,9 +61,7 @@ def _run_db(coro_fn, *args, **kwargs):
         # pool that might outlive this loop.
         from sqlalchemy.pool import NullPool
 
-        engine = create_async_engine(
-            _ASYNC_DB_URL, pool_pre_ping=False, poolclass=NullPool
-        )
+        engine = create_async_engine(_ASYNC_DB_URL, pool_pre_ping=False, poolclass=NullPool)
         try:
             session_maker = async_sessionmaker(engine, expire_on_commit=False)
             async with session_maker() as db:
@@ -84,9 +81,7 @@ def _run_db(coro_fn, *args, **kwargs):
             for task in pending:
                 task.cancel()
             if pending:
-                loop.run_until_complete(
-                    asyncio.gather(*pending, return_exceptions=True)
-                )
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         except Exception:
             pass
         loop.close()

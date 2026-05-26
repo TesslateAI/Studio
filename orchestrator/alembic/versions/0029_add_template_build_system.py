@@ -11,8 +11,10 @@ Create Date: 2026-03-14
 """
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
+
 # revision identifiers
 revision = "0029_template_builds"
 down_revision = "0028_fix_fk_ondelete"

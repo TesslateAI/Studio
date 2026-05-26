@@ -82,9 +82,7 @@ def test_transition_accepts_string_values() -> None:
 
 
 def test_terminal_state_set_is_exactly_settled_revoked_failed() -> None:
-    assert TERMINAL_STATES == frozenset(
-        {KeyState.SETTLED, KeyState.REVOKED, KeyState.FAILED}
-    )
+    assert frozenset({KeyState.SETTLED, KeyState.REVOKED, KeyState.FAILED}) == TERMINAL_STATES
     for st in (KeyState.PENDING, KeyState.ACTIVE, KeyState.SETTLING, KeyState.REAPED):
         assert not is_terminal(st)
     for st in TERMINAL_STATES:
@@ -136,9 +134,7 @@ def test_nested_mint_rejects_non_active_parent() -> None:
 def test_nested_mint_rejects_zero_or_negative_budget() -> None:
     parent = _active()
     with pytest.raises(KeyMintError):
-        assert_can_mint_nested(
-            NestedMintRequest(parent=parent, requested_budget_usd=Decimal("0"))
-        )
+        assert_can_mint_nested(NestedMintRequest(parent=parent, requested_budget_usd=Decimal("0")))
     with pytest.raises(KeyMintError):
         assert_can_mint_nested(
             NestedMintRequest(parent=parent, requested_budget_usd=Decimal("-0.01"))
@@ -156,9 +152,7 @@ def test_nested_mint_rejects_over_remaining_budget() -> None:
 
 def test_nested_mint_at_exactly_remaining_budget_ok() -> None:
     parent = _active(budget="1.00", spent="0.80")
-    assert_can_mint_nested(
-        NestedMintRequest(parent=parent, requested_budget_usd=Decimal("0.20"))
-    )
+    assert_can_mint_nested(NestedMintRequest(parent=parent, requested_budget_usd=Decimal("0.20")))
 
 
 def test_nested_depth_enforced_default() -> None:

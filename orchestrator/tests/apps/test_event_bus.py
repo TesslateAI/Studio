@@ -24,7 +24,6 @@ from sqlalchemy.orm import Session
 from app import models
 from app.services.apps import event_bus
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -82,7 +81,7 @@ def _run(coro):
 
 def test_whitelist_contents():
     """Whitelist must be the explicit Wave 9 D1 set — no accidental drift."""
-    assert event_bus.WHITELIST_TABLES == {"marketplace_apps", "app_instances"}
+    assert {"marketplace_apps", "app_instances"} == event_bus.WHITELIST_TABLES
 
 
 def test_insert_marketplace_app_publishes_on_commit():

@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.services import marketplace_governance as gov
 
-
 _ASYNC_DB_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql+asyncpg://tesslate_test:testpass@localhost:5433/tesslate_test",
@@ -181,7 +180,12 @@ def test_mirror_submission_updates_stage_and_appends_checks() -> None:
             "decision_reason": "auto_approved",
             "checks": [
                 {"stage": "stage1", "name": "slug_format", "status": "passed", "details": {}},
-                {"stage": "stage3", "name": "reviewer_assignment", "status": "passed", "details": {}},
+                {
+                    "stage": "stage3",
+                    "name": "reviewer_assignment",
+                    "status": "passed",
+                    "details": {},
+                },
             ],
         }
         result = await gov.mirror_submission_into_cache(
@@ -201,10 +205,16 @@ def test_mirror_submission_updates_stage_and_appends_checks() -> None:
             await db.execute(select(models.AppSubmission).where(models.AppSubmission.id == sub.id))
         ).scalar_one()
         check_rows = (
-            await db.execute(
-                select(models.SubmissionCheck).where(models.SubmissionCheck.submission_id == sub.id)
+            (
+                await db.execute(
+                    select(models.SubmissionCheck).where(
+                        models.SubmissionCheck.submission_id == sub.id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # Eagerly extract values so the caller can compare without the engine.
         return {
             "result": result is not None,
@@ -229,8 +239,9 @@ def test_mirror_submission_idempotent_on_repeated_calls() -> None:
     """Second call with the same envelope must not duplicate check rows."""
 
     async def _scenario(db):
-        from app import models
         from sqlalchemy import select
+
+        from app import models
 
         ux = uuid.uuid4().hex[:8]
         user = models.User(
@@ -288,10 +299,16 @@ def test_mirror_submission_idempotent_on_repeated_calls() -> None:
         await db.commit()
 
         check_rows = (
-            await db.execute(
-                select(models.SubmissionCheck).where(models.SubmissionCheck.submission_id == sub.id)
+            (
+                await db.execute(
+                    select(models.SubmissionCheck).where(
+                        models.SubmissionCheck.submission_id == sub.id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [(c.stage, c.check_name) for c in check_rows]
 
     checks = _run_db(_scenario)
@@ -302,8 +319,9 @@ def test_mirror_submission_idempotent_on_repeated_calls() -> None:
 @pytest.mark.integration
 def test_mirror_yank_cascades_to_app_version() -> None:
     async def _scenario(db):
-        from app import models
         from sqlalchemy import select
+
+        from app import models
 
         ux = uuid.uuid4().hex[:8]
         user = models.User(
@@ -357,9 +375,7 @@ def test_mirror_yank_cascades_to_app_version() -> None:
             "state": "resolved",
             "resolution": "second_admin_confirmed",
         }
-        await gov.mirror_yank_into_cache(
-            db, local_yank_id=yank.id, marketplace_envelope=envelope
-        )
+        await gov.mirror_yank_into_cache(db, local_yank_id=yank.id, marketplace_envelope=envelope)
         await db.commit()
 
         ref_av = (

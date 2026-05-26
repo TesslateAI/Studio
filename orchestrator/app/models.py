@@ -3349,10 +3349,24 @@ from .models_automations import (  # noqa: F401, E402
     AppInstallAttempt,
     AppInstance,
 )
+from .models_inbox import InboxItem  # noqa: F401, E402
 from .models_team import (  # noqa: F401, E402
     AuditLog,
     ProjectMembership,
     Team,
     TeamInvitation,
     TeamMembership,
+)
+from .models_workflows import (  # noqa: F401, E402
+    WorkflowHealthSnapshot,
+    WorkflowLearning,
+    WorkflowProposal,
+    WorkflowVersion,
+)
+
+# Workspace Data Store — built-in per-project KV/document database.
+from .models_workspace_data import (  # noqa: F401, E402
+    WorkspaceCollection,
+    WorkspaceDataKey,
+    WorkspaceRecord,
 )

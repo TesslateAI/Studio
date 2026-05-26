@@ -15,7 +15,7 @@
 #   deploy-k8s         Reapply app manifests and restart pods
 #   deploy-compute     Reapply btrfs-CSI + Volume Hub manifests
 #   rebuild <svc>      Rebuild image, load into minikube, restart pod
-#   rebuild --all      Rebuild all images (backend, frontend, devserver, btrfs-csi, ast)
+#   rebuild --all      Rebuild all images (backend, frontend, devserver, btrfs-csi, ast, marketplace)
 #   restart [svc]      Restart pod(s) for a service
 #
 # Operations:
@@ -68,13 +68,14 @@ MINIKUBE_NODES="${MINIKUBE_NODES:-1}"
 resolve_k8s() {
   local name="${1:-backend}"
   case "$name" in
-    backend)  echo "tesslate-backend" ;;
-    frontend) echo "tesslate-frontend" ;;
-    worker)   echo "tesslate-worker" ;;
-    ast)      echo "tesslate-ast" ;;
-    postgres) echo "postgres" ;;
-    redis)    echo "redis" ;;
-    *)        echo "$name" ;;
+    backend)     echo "tesslate-backend" ;;
+    frontend)    echo "tesslate-frontend" ;;
+    worker)      echo "tesslate-worker" ;;
+    ast)         echo "tesslate-ast" ;;
+    marketplace) echo "tesslate-marketplace" ;;
+    postgres)    echo "postgres" ;;
+    redis)       echo "redis" ;;
+    *)           echo "$name" ;;
   esac
 }
 
@@ -82,51 +83,55 @@ resolve_k8s() {
 resolve_label() {
   local name="${1:-backend}"
   case "$name" in
-    backend)  echo "tesslate-backend" ;;
-    frontend) echo "tesslate-frontend" ;;
-    worker)   echo "tesslate-worker" ;;
-    ast)      echo "tesslate-ast" ;;
-    postgres) echo "postgres" ;;
-    redis)    echo "redis" ;;
-    *)        echo "$name" ;;
+    backend)     echo "tesslate-backend" ;;
+    frontend)    echo "tesslate-frontend" ;;
+    worker)      echo "tesslate-worker" ;;
+    ast)         echo "tesslate-ast" ;;
+    marketplace) echo "tesslate-marketplace" ;;
+    postgres)    echo "postgres" ;;
+    redis)       echo "redis" ;;
+    *)           echo "$name" ;;
   esac
 }
 
 # Image build config
 image_name() {
   case "$1" in
-    backend)    echo "tesslate-backend" ;;
-    frontend)   echo "tesslate-frontend" ;;
-    devserver)  echo "tesslate-devserver" ;;
-    btrfs-csi)  echo "tesslate-btrfs-csi" ;;
-    ast)        echo "tesslate-ast" ;;
-    markitdown) echo "tesslate-markitdown" ;;
-    deerflow)   echo "tesslate-deerflow" ;;
+    backend)     echo "tesslate-backend" ;;
+    frontend)    echo "tesslate-frontend" ;;
+    devserver)   echo "tesslate-devserver" ;;
+    btrfs-csi)   echo "tesslate-btrfs-csi" ;;
+    ast)         echo "tesslate-ast" ;;
+    marketplace) echo "tesslate-marketplace" ;;
+    markitdown)  echo "tesslate-markitdown" ;;
+    deerflow)    echo "tesslate-deerflow" ;;
     *) echo "" ;;
   esac
 }
 
 image_dockerfile() {
   case "$1" in
-    backend)    echo "orchestrator/Dockerfile" ;;
-    frontend)   echo "app/Dockerfile.prod" ;;
-    devserver)  echo "orchestrator/Dockerfile.devserver" ;;
-    btrfs-csi)  echo "services/btrfs-csi/Dockerfile" ;;
-    ast)        echo "services/ast/Dockerfile" ;;
-    markitdown) echo "seeds/apps/markitdown/Dockerfile" ;;
-    deerflow)   echo "seeds/apps/deer-flow/Dockerfile" ;;
+    backend)     echo "orchestrator/Dockerfile" ;;
+    frontend)    echo "app/Dockerfile.prod" ;;
+    devserver)   echo "orchestrator/Dockerfile.devserver" ;;
+    btrfs-csi)   echo "services/btrfs-csi/Dockerfile" ;;
+    ast)         echo "services/ast/Dockerfile" ;;
+    marketplace) echo "packages/tesslate-marketplace/Dockerfile" ;;
+    markitdown)  echo "seeds/apps/markitdown/Dockerfile" ;;
+    deerflow)    echo "seeds/apps/deer-flow/Dockerfile" ;;
   esac
 }
 
 image_context() {
   case "$1" in
-    backend)    echo "." ;;
-    frontend)   echo "app" ;;
-    devserver)  echo "." ;;
-    btrfs-csi)  echo "services/btrfs-csi" ;;
-    ast)        echo "services/ast" ;;
-    markitdown) echo "seeds/apps/markitdown" ;;
-    deerflow)   echo "seeds/apps/deer-flow" ;;
+    backend)     echo "." ;;
+    frontend)    echo "app" ;;
+    devserver)   echo "." ;;
+    btrfs-csi)   echo "services/btrfs-csi" ;;
+    ast)         echo "services/ast" ;;
+    marketplace) echo "packages/tesslate-marketplace" ;;
+    markitdown)  echo "seeds/apps/markitdown" ;;
+    deerflow)    echo "seeds/apps/deer-flow" ;;
   esac
 }
 
@@ -161,6 +166,30 @@ wait_for_backend_ready() {
     -l app=tesslate-backend \
     -n "$NAMESPACE" \
     --timeout=120s
+}
+
+# Patch the NGINX ingress ConfigMap to allow server-snippet annotations.
+# Required for the internal API block in ingress.yaml (nginx v1.14 blocks
+# snippets by default). Idempotent — no-op if already configured.
+_ensure_nginx_snippets() {
+  info "Waiting for NGINX ingress controller..."
+  $KC rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
+
+  local current
+  current=$($KC get configmap ingress-nginx-controller -n ingress-nginx \
+    -o jsonpath='{.data.allow-snippet-annotations}' 2>/dev/null || echo "")
+
+  if [[ "$current" == "true" ]]; then
+    info "NGINX snippet annotations already enabled — skipping"
+    return
+  fi
+
+  info "Enabling NGINX server-snippet annotations..."
+  $KC patch configmap ingress-nginx-controller -n ingress-nginx --type=merge \
+    -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical"}}'
+  $KC rollout restart deployment/ingress-nginx-controller -n ingress-nginx
+  $KC rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=60s
+  success "NGINX snippet annotations enabled"
 }
 
 # Ensure git submodules are present on disk. The orchestrator Dockerfile
@@ -204,10 +233,14 @@ build_and_load() {
   # `docker save` / `minikube image load` can't find it.
   docker buildx build --load $cache_flag -t "$img" -f "$dockerfile" "$context"
 
-  # Remove the old image from ALL minikube nodes before loading to prevent
-  # stale cached layers from being served instead of the new build.
-  # `minikube image load` distributes to all nodes, but stale tags on
-  # worker nodes can cause pods to run the old image.
+  load_image_to_minikube "$img"
+  success "$img built and loaded"
+}
+
+# Remove stale image tags from all minikube nodes, then load image.
+# Shared by build_and_load (local builds) and pull_and_load (remote pulls).
+load_image_to_minikube() {
+  local img="$1"
   info "Loading $img into minikube..."
   local nodes
   nodes=$(minikube -p "$PROFILE" node list 2>/dev/null | awk '{print $1}')
@@ -215,7 +248,85 @@ build_and_load() {
     minikube -p "$PROFILE" ssh -n "$node" -- docker rmi -f "$img" 2>/dev/null || true
   done
   minikube -p "$PROFILE" image load "$img"
-  success "$img built and loaded"
+}
+
+# Pull a remote image and load it into minikube.
+pull_and_load() {
+  local img="$1"
+  info "Pulling $img..."
+  docker pull "$img"
+  load_image_to_minikube "$img"
+  success "$img pulled and loaded"
+}
+
+# Walk seed app manifests and pre-load any container images that use
+# source_strategy=image.
+#
+# DEFAULT: only pre-load images we can build locally (Dockerfile alongside
+# the manifest). Remote-only images (ghcr.io, docker.io) are skipped —
+# containerd inside minikube pulls them lazily on first install via
+# IfNotPresent (compute_manager.py forces this for image-strategy
+# containers). The lazy path avoids the host-level disk-pressure burst
+# that breaks WSL2 + Docker Desktop when multiple multi-GB images stream
+# through the kicbase loopback btrfs pool simultaneously.
+#
+# OPT-IN: set MINIKUBE_PRELOAD_REMOTE=1 to pre-load remote images too
+# (offline dev, slow registries). Be aware the load goes through the
+# kicbase container's vhdx with btrfs write amplification — only enable
+# if you have headroom.
+#
+# Idempotent — skips images already present in minikube.
+preload_seed_images() {
+  header "Pre-loading seed app images"
+  local preload_remote="${MINIKUBE_PRELOAD_REMOTE:-0}"
+  local manifest
+  for manifest in "$PROJECT_ROOT"/seeds/apps/*/app.manifest.json; do
+    [[ -f "$manifest" ]] || continue
+    local app_dir
+    app_dir="$(dirname "$manifest")"
+    local images
+    if ! images=$(python3 -c "
+import json, sys
+m = json.load(open(sys.argv[1]))
+for c in m.get('compute', {}).get('containers', []):
+    if c.get('source_strategy') == 'image' and c.get('image'):
+        print(c['image'])
+" "$manifest" 2>&1); then
+      warn "Failed to parse $manifest — skipping ($images)"
+      continue
+    fi
+    [[ -z "$images" ]] && continue
+
+    local img
+    while IFS= read -r img; do
+      [[ -z "$img" ]] && continue
+      # Skip if already in minikube
+      if minikube -p "$PROFILE" ssh -- docker image inspect "$img" &>/dev/null; then
+        info "Image $img already loaded, skipping"
+        continue
+      fi
+      # Local Dockerfile → build, otherwise remote pull (opt-in only).
+      if [[ -f "$app_dir/Dockerfile" ]]; then
+        info "Image $img not found — building from $app_dir/Dockerfile..."
+        if docker buildx build --load -t "$img" -f "$app_dir/Dockerfile" "$app_dir"; then
+          if load_image_to_minikube "$img"; then
+            success "$img built and loaded"
+          else
+            warn "Built $img but load to minikube failed (non-fatal)"
+          fi
+        else
+          warn "Failed to build $img (non-fatal)"
+        fi
+      elif [[ "$preload_remote" == "1" ]]; then
+        pull_and_load "$img" \
+          || warn "Failed to pull $img (non-fatal)"
+      else
+        info "Skipping remote image $img — containerd will pull on first install"
+        info "  (set MINIKUBE_PRELOAD_REMOTE=1 to preload remote images up-front)"
+      fi
+    done <<< "$images"
+  done
+  success "Seed image pre-load complete"
 }
 
 # ── Init (secret generation) ──────────────────────────────────────────
@@ -226,6 +337,7 @@ STACK_SECRETS=(
   "k8s/overlays/minikube/secrets/postgres-secret.example.yaml:k8s/overlays/minikube/secrets/postgres-secret.yaml:postgres-secret"
   "k8s/overlays/minikube/secrets/s3-credentials.example.yaml:k8s/overlays/minikube/secrets/s3-credentials.yaml:s3-credentials"
   "k8s/overlays/minikube/secrets/app-secrets.example.yaml:k8s/overlays/minikube/secrets/app-secrets.yaml:app-secrets"
+  "k8s/overlays/minikube/secrets/marketplace-secret.example.yaml:k8s/overlays/minikube/secrets/marketplace-secret.yaml:marketplace-secret"
   "k8s/overlays/minikube/minio/credentials.example.yaml:k8s/overlays/minikube/minio/credentials.yaml:minio-credentials"
   "services/btrfs-csi/overlays/minikube/csi-credentials.example.yaml:services/btrfs-csi/overlays/minikube/csi-credentials.yaml:csi-credentials"
 )
@@ -335,7 +447,7 @@ cmd_start() {
   fi
 
   # Ensure all images are loaded (app + infrastructure)
-  for svc in backend frontend devserver btrfs-csi; do
+  for svc in backend frontend devserver btrfs-csi ast marketplace; do
     local img
     img="$(image_name "$svc"):latest"
     if ! minikube -p "$PROFILE" ssh -- docker image inspect "$img" &>/dev/null 2>&1; then
@@ -376,6 +488,11 @@ cmd_start() {
   header "Applying Compute Pool"
   $KC apply -k k8s/base/compute-pool
 
+  # 4b. NGINX snippet annotations — must be configured before the ingress
+  #     manifest is applied, because ingress.yaml uses server-snippet to
+  #     block /api/internal/* and NGINX v1.14 rejects snippets by default.
+  _ensure_nginx_snippets
+
   # 5. Main application (tesslate namespace)
   header "Applying Tesslate application"
   $KC apply -k k8s/overlays/minikube
@@ -385,6 +502,7 @@ cmd_start() {
   wait_for_rollout "postgres" 120
   wait_for_rollout "tesslate-backend" 180
   wait_for_rollout "tesslate-frontend" 120
+  wait_for_rollout "tesslate-marketplace" 180
 
   success "All services deployed"
   echo ""
@@ -459,7 +577,7 @@ cmd_rebuild() {
   done
 
   if [[ "$target" == "--all" ]]; then
-    for svc in backend frontend devserver btrfs-csi ast; do
+    for svc in backend frontend devserver btrfs-csi ast marketplace; do
       build_and_load "$svc" "$cache_flag"
     done
     info "Restarting all pods..."
@@ -468,6 +586,7 @@ cmd_rebuild() {
     $KC delete pod -n kube-system -l app=tesslate-btrfs-csi-node
     wait_for_rollout "tesslate-backend" 180  # ast sidecar comes up with backend
     wait_for_rollout "tesslate-frontend" 120
+    wait_for_rollout "tesslate-marketplace" 180
     $KC rollout status deployment/tesslate-volume-hub -n kube-system --timeout=120s
     $KC rollout status daemonset/tesslate-btrfs-csi-node -n kube-system --timeout=120s
     success "Full rebuild complete"
@@ -475,14 +594,14 @@ cmd_rebuild() {
   fi
 
   if [[ -z "$target" ]]; then
-    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|ast|markitdown|deerflow|--all> [--no-cache]"
+    error "Usage: minikube.sh rebuild <backend|frontend|devserver|btrfs-csi|ast|marketplace|markitdown|deerflow|--all> [--no-cache]"
     exit 1
   fi
 
   local img
   img=$(image_name "$target")
   if [[ -z "$img" ]]; then
-    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, ast, markitdown, deerflow, --all"
+    error "No image build config for '$target'. Use: backend, frontend, devserver, btrfs-csi, ast, marketplace, markitdown, deerflow, --all"
     exit 1
   fi
 
@@ -579,39 +698,24 @@ cmd_seed() {
   ensure_minikube
   wait_for_backend_ready
 
+  preload_seed_images
+
   header "Seeding database"
-  local backend_pod
-  backend_pod=$($KC get pods -n "$NAMESPACE" -l app=tesslate-backend -o jsonpath='{.items[0].metadata.name}')
-  if [[ -z "$backend_pod" ]]; then
-    error "No backend pod found"
-    exit 1
-  fi
 
-  local seed_dir="$PROJECT_ROOT/scripts/seed"
-  if [[ ! -d "$seed_dir" ]]; then
-    error "Seed directory not found: $seed_dir"
-    exit 1
-  fi
+  # Seed Tesslate Apps via the federated marketplace pipeline.
+  # TSL_APPS_DEV_AUTO_APPROVE=1 auto-approves submissions so apps are
+  # immediately installable without manual review.
+  info "Seeding Tesslate Apps..."
+  $KC exec -n "$NAMESPACE" deployment/tesslate-backend -c backend -- \
+    env TSL_APPS_DEV_AUTO_APPROVE=1 python -m scripts.seed_apps 2>&1 || {
+    warn "seed_apps failed (non-fatal), continuing..."
+  }
 
-  local scripts=(
-    seed_marketplace_bases.py
-    seed_marketplace_agents.py
-    seed_opensource_agents.py
-    seed_skills.py
-    seed_themes.py
-    seed_mcp_servers.py
-    seed_community_bases.py
-  )
-
-  for script in "${scripts[@]}"; do
-    if [[ -f "$seed_dir/$script" ]]; then
-      info "Running $script..."
-      $KC cp "$seed_dir/$script" "$NAMESPACE/${backend_pod}:/tmp/$script"
-      $KC exec -n "$NAMESPACE" "$backend_pod" -- python "/tmp/$script" 2>&1 || {
-        warn "$script failed (non-fatal), continuing..."
-      }
-    fi
-  done
+  info "Seeding contract templates..."
+  $KC exec -n "$NAMESPACE" deployment/tesslate-backend -c backend -- \
+    python -m scripts.seed_contract_templates 2>&1 || {
+    warn "seed_contract_templates failed (non-fatal), continuing..."
+  }
 
   success "Database seeded"
 }
@@ -887,7 +991,7 @@ _usage() {
   echo "Deploy:"
   echo "  deploy-k8s         Reapply app manifests and restart pods"
   echo "  deploy-compute     Reapply btrfs-CSI + Volume Hub manifests"
-  echo "  rebuild <svc>      Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|ast|--all)"
+  echo "  rebuild <svc>      Rebuild image, load, restart (backend|frontend|devserver|btrfs-csi|ast|marketplace|--all)"
   echo "  restart [svc]      Restart pod(s) for a service"
   echo ""
   echo "Operations:"
@@ -906,7 +1010,7 @@ _usage() {
   echo "  cf status          Show tunnel status"
   echo "  cf logs            Tail cloudflared logs"
   echo ""
-  echo "Services: backend, frontend, worker, postgres, redis, devserver, btrfs-csi"
+  echo "Services: backend, frontend, worker, marketplace, postgres, redis, devserver, btrfs-csi, ast"
 }
 
 main() {

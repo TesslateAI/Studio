@@ -10,13 +10,13 @@ Uses the shared Postgres test DB (port 5433) and the authenticated_client
 fixture. Fresh PendingUserInputManager state is created per test by resetting
 the module-level singleton.
 """
+
 from __future__ import annotations
 
 import asyncio
 from uuid import UUID, uuid4
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,13 +36,12 @@ async def _create_project_and_container(
     encrypted_secrets: dict | None = None,
     environment_vars: dict | None = None,
 ) -> tuple[UUID, UUID]:
+    from sqlalchemy import select
     from sqlalchemy.ext.asyncio import (
         AsyncSession,
         async_sessionmaker,
         create_async_engine,
     )
-
-    from sqlalchemy import select
 
     from app.models import Container, Project
     from app.models_team import TeamMembership
@@ -140,9 +139,7 @@ def test_submit_unknown_input_returns_404(authenticated_client):
 def test_submit_resolves_pending_input(authenticated_client):
     _reset_manager()
     client, user_data = authenticated_client
-    project_id, container_id = _run(
-        _create_project_and_container(UUID(user_data["id"]))
-    )
+    project_id, container_id = _run(_create_project_and_container(UUID(user_data["id"])))
 
     from app.agent.tools.approval_manager import get_pending_input_manager
 
@@ -178,9 +175,7 @@ def test_submit_resolves_pending_input(authenticated_client):
 def test_submit_rejects_non_owner(api_client_session, authenticated_client):
     _reset_manager()
     owner_client, owner_user = authenticated_client
-    project_id, container_id = _run(
-        _create_project_and_container(UUID(owner_user["id"]))
-    )
+    project_id, container_id = _run(_create_project_and_container(UUID(owner_user["id"])))
 
     from app.agent.tools.approval_manager import get_pending_input_manager
 
@@ -228,9 +223,7 @@ def test_submit_rejects_non_owner(api_client_session, authenticated_client):
 def test_cancel_resolves_pending_input(authenticated_client):
     _reset_manager()
     client, user_data = authenticated_client
-    project_id, container_id = _run(
-        _create_project_and_container(UUID(user_data["id"]))
-    )
+    project_id, container_id = _run(_create_project_and_container(UUID(user_data["id"])))
     from app.agent.tools.approval_manager import get_pending_input_manager
 
     manager = get_pending_input_manager()
@@ -277,9 +270,7 @@ def test_get_config_masks_secret_values_as_sentinel(authenticated_client):
         )
     )
 
-    resp = client.get(
-        f"/api/projects/{project_id}/containers/{container_id}/config"
-    )
+    resp = client.get(f"/api/projects/{project_id}/containers/{container_id}/config")
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["preset"] == "supabase"
@@ -295,9 +286,7 @@ def test_get_config_masks_secret_values_as_sentinel(authenticated_client):
 def test_get_config_403_for_non_owner(api_client_session, authenticated_client):
     _reset_manager()
     _, owner_user = authenticated_client
-    project_id, container_id = _run(
-        _create_project_and_container(UUID(owner_user["id"]))
-    )
+    project_id, container_id = _run(_create_project_and_container(UUID(owner_user["id"])))
 
     # Register a different user
     other_register = {
@@ -328,9 +317,7 @@ def test_get_config_403_for_non_owner(api_client_session, authenticated_client):
 def test_patch_config_applies_merge_semantics(authenticated_client):
     _reset_manager()
     client, user_data = authenticated_client
-    project_id, container_id = _run(
-        _create_project_and_container(UUID(user_data["id"]))
-    )
+    project_id, container_id = _run(_create_project_and_container(UUID(user_data["id"])))
 
     resp = client.patch(
         f"/api/projects/{project_id}/containers/{container_id}/config",
@@ -404,8 +391,7 @@ def test_reveal_secret_returns_plaintext_for_owner(authenticated_client):
     )
 
     resp = client.post(
-        f"/api/projects/{project_id}/containers/{container_id}"
-        f"/secrets/SUPABASE_ANON_KEY/reveal"
+        f"/api/projects/{project_id}/containers/{container_id}/secrets/SUPABASE_ANON_KEY/reveal"
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"value": "revealed-plaintext-value"}
@@ -415,12 +401,9 @@ def test_reveal_secret_returns_plaintext_for_owner(authenticated_client):
 def test_reveal_missing_key_returns_404(authenticated_client):
     _reset_manager()
     client, user_data = authenticated_client
-    project_id, container_id = _run(
-        _create_project_and_container(UUID(user_data["id"]))
-    )
+    project_id, container_id = _run(_create_project_and_container(UUID(user_data["id"])))
     resp = client.post(
-        f"/api/projects/{project_id}/containers/{container_id}"
-        f"/secrets/DOES_NOT_EXIST/reveal"
+        f"/api/projects/{project_id}/containers/{container_id}/secrets/DOES_NOT_EXIST/reveal"
     )
     assert resp.status_code == 404
 
@@ -481,18 +464,14 @@ async def _create_consumer_with_env_injection(
 
 
 @pytest.mark.integration
-def test_patch_dispatches_restart_to_env_injection_consumer(
-    authenticated_client, monkeypatch
-):
+def test_patch_dispatches_restart_to_env_injection_consumer(authenticated_client, monkeypatch):
     """PATCHing an external service that's wired into a container via
     env_injection should schedule a restart of that consumer and emit a
     `containers_restarting` SSE event with the consumer in ``restart_target_ids``.
     """
     _reset_manager()
     client, user_data = authenticated_client
-    project_id, source_id = _run(
-        _create_project_and_container(UUID(user_data["id"]))
-    )
+    project_id, source_id = _run(_create_project_and_container(UUID(user_data["id"])))
     consumer_id = _run(_create_consumer_with_env_injection(project_id, source_id))
 
     # Replace the orchestrator-touching restart with a no-op so we don't
@@ -662,16 +641,12 @@ def test_patch_internal_container_restarts_itself(authenticated_client, monkeypa
 
 
 @pytest.mark.integration
-def test_patch_external_with_no_consumers_schedules_no_restarts(
-    authenticated_client, monkeypatch
-):
+def test_patch_external_with_no_consumers_schedules_no_restarts(authenticated_client, monkeypatch):
     """External service with zero env_injection consumers → no restart targets,
     no ``containers_restarting`` event."""
     _reset_manager()
     client, user_data = authenticated_client
-    project_id, container_id = _run(
-        _create_project_and_container(UUID(user_data["id"]))
-    )
+    project_id, container_id = _run(_create_project_and_container(UUID(user_data["id"])))
 
     scheduled: list[UUID] = []
 
@@ -718,17 +693,13 @@ def test_patch_external_with_no_consumers_schedules_no_restarts(
 
 
 @pytest.mark.integration
-def test_patch_with_no_changed_keys_skips_restart_dispatch(
-    authenticated_client, monkeypatch
-):
+def test_patch_with_no_changed_keys_skips_restart_dispatch(authenticated_client, monkeypatch):
     """If the merge produced an empty ``updated_keys`` set (e.g. only the
     sentinel was sent), restart dispatch is a no-op — neither targets nor
     SSE event."""
     _reset_manager()
     client, user_data = authenticated_client
-    project_id, source_id = _run(
-        _create_project_and_container(UUID(user_data["id"]))
-    )
+    project_id, source_id = _run(_create_project_and_container(UUID(user_data["id"])))
     # Add a consumer so we'd notice if the dispatch fired incorrectly.
     _run(_create_consumer_with_env_injection(project_id, source_id))
 
@@ -816,8 +787,7 @@ def test_reveal_rejects_external_api_key_auth(authenticated_client):
     app.dependency_overrides[current_active_user] = _api_key_user
     try:
         resp = client.post(
-            f"/api/projects/{project_id}/containers/{container_id}"
-            f"/secrets/SUPABASE_ANON_KEY/reveal"
+            f"/api/projects/{project_id}/containers/{container_id}/secrets/SUPABASE_ANON_KEY/reveal"
         )
     finally:
         app.dependency_overrides.pop(current_active_user, None)

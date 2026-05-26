@@ -37,11 +37,11 @@ uniqueness would fail if any same-slug-different-source pairs exist after
 the wave ships.
 """
 
+import contextlib
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-
 
 revision: str = "0091_drop_legacy_slug_uq"
 down_revision: str | Sequence[str] | None = "0090_msrc_pubkey"
@@ -159,14 +159,11 @@ def upgrade() -> None:
         if is_postgres:
             op.drop_constraint(legacy_handle_uq, "marketplace_apps", type_="unique")
         else:
-            with op.batch_alter_table("marketplace_apps") as batch:
-                try:
-                    batch.drop_constraint(legacy_handle_uq, type_="unique")
-                except Exception:
-                    # SQLite batch mode rebuilds from current metadata —
-                    # the model no longer declares this UQ so the rebuild
-                    # naturally omits it.
-                    pass
+            with op.batch_alter_table("marketplace_apps") as batch, contextlib.suppress(Exception):
+                # SQLite batch mode rebuilds from current metadata —
+                # the model no longer declares this UQ so the rebuild
+                # naturally omits it.
+                batch.drop_constraint(legacy_handle_uq, type_="unique")
 
 
 def downgrade() -> None:

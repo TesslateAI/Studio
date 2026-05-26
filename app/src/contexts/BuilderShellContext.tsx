@@ -59,6 +59,7 @@ export function BuilderShellProvider({ children }: { children: ReactNode }) {
   return <BuilderShellContext.Provider value={value}>{children}</BuilderShellContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useBuilderShell(): BuilderShellContextValue {
   const ctx = useContext(BuilderShellContext);
   if (!ctx) {
@@ -74,6 +75,7 @@ export function useBuilderShell(): BuilderShellContextValue {
  * Note: `setBuilderSection` writes to a useState slot. Since BuilderSection IS
  * a function, we have to use the lazy `() => fn` form — otherwise React
  * interprets the value as a state updater and calls it with the prev state. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useRegisterBuilderSection(section: BuilderSection | undefined) {
   const { setBuilderSection } = useBuilderShell();
   useEffect(() => {

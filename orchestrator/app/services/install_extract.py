@@ -236,9 +236,7 @@ def _resolve_within(dest_root: Path, name: str) -> Path:
     return candidate
 
 
-def _check_link_target_safe(
-    dest_root: Path, entry_name: str, link_target: str, kind: str
-) -> Path:
+def _check_link_target_safe(dest_root: Path, entry_name: str, link_target: str, kind: str) -> Path:
     """Resolve a sym/hard link target relative to the entry's parent dir
     and refuse if it lands outside ``dest_root``.
 
@@ -326,144 +324,131 @@ def safe_extract(
     result = ExtractionResult()
 
     decompressor = zstandard.ZstdDecompressor()
-    with archive.open("rb") as src:
-        with decompressor.stream_reader(src) as reader:
-            buffered = io.BufferedReader(reader)
-            # Streaming mode tar (``r|``) so we don't try to seek the
-            # decompressed stream.
-            with tarfile.open(fileobj=buffered, mode="r|") as tf:
-                for member in tf:
-                    name = member.name
-                    _check_no_null_byte(name)
+    with archive.open("rb") as src, decompressor.stream_reader(src) as reader:
+        buffered = io.BufferedReader(reader)
+        # Streaming mode tar (``r|``) so we don't try to seek the
+        # decompressed stream.
+        with tarfile.open(fileobj=buffered, mode="r|") as tf:
+            for member in tf:
+                name = member.name
+                _check_no_null_byte(name)
 
-                    # Reject anything other than reg/dir/sym/hard.
-                    if not (
-                        member.isreg()
-                        or member.isdir()
-                        or member.issym()
-                        or member.islnk()
-                    ):
+                # Reject anything other than reg/dir/sym/hard.
+                if not (member.isreg() or member.isdir() or member.issym() or member.islnk()):
+                    raise UnsafeArchiveError(
+                        "unsupported_member_type",
+                        f"member type {member.type!r} not allowed",
+                        entry=name,
+                    )
+
+                normalised = _normalise_name(name)
+                if not normalised:
+                    # Skip the archive's own ``./`` root marker silently
+                    # — it's harmless and common.
+                    continue
+
+                _check_not_absolute(normalised)
+                _check_no_parent_segment(normalised)
+                safe_path = _resolve_within(dest_resolved, normalised)
+
+                # Ensure parent dir exists for files / links.
+                if not member.isdir():
+                    safe_path.parent.mkdir(parents=True, exist_ok=True)
+
+                if member.isdir():
+                    safe_path.mkdir(parents=True, exist_ok=True)
+                    result.dirs += 1
+                    result.members.append(normalised)
+                    continue
+
+                if member.issym():
+                    _check_link_target_safe(dest_resolved, normalised, member.linkname, "symlink")
+                    # Replace any pre-existing entry at that name.
+                    if safe_path.exists() or safe_path.is_symlink():
+                        safe_path.unlink()
+                    os.symlink(member.linkname, safe_path)
+                    result.symlinks += 1
+                    result.members.append(normalised)
+                    # Symlinks contribute 0 uncompressed bytes — the
+                    # link target is what matters and we already
+                    # validated it.
+                    continue
+
+                if member.islnk():
+                    # Hardlinks inside tar archives reference another
+                    # archive entry by name. Refuse if the linkname
+                    # points outside dest_root.
+                    target_path = _check_link_target_safe(
+                        dest_resolved, normalised, member.linkname, "hardlink"
+                    )
+                    # tarfile cannot replay hardlinks across an
+                    # extraction boundary easily; if the target file
+                    # was already extracted, hardlink to it; otherwise
+                    # refuse — out-of-order hardlinks suggest a
+                    # malicious archive.
+                    if not target_path.is_file():
                         raise UnsafeArchiveError(
-                            "unsupported_member_type",
-                            f"member type {member.type!r} not allowed",
-                            entry=name,
-                        )
-
-                    normalised = _normalise_name(name)
-                    if not normalised:
-                        # Skip the archive's own ``./`` root marker silently
-                        # — it's harmless and common.
-                        continue
-
-                    _check_not_absolute(normalised)
-                    _check_no_parent_segment(normalised)
-                    safe_path = _resolve_within(dest_resolved, normalised)
-
-                    # Ensure parent dir exists for files / links.
-                    if not member.isdir():
-                        safe_path.parent.mkdir(parents=True, exist_ok=True)
-
-                    if member.isdir():
-                        safe_path.mkdir(parents=True, exist_ok=True)
-                        result.dirs += 1
-                        result.members.append(normalised)
-                        continue
-
-                    if member.issym():
-                        target = _check_link_target_safe(
-                            dest_resolved, normalised, member.linkname, "symlink"
-                        )
-                        # Replace any pre-existing entry at that name.
-                        if safe_path.exists() or safe_path.is_symlink():
-                            safe_path.unlink()
-                        os.symlink(member.linkname, safe_path)
-                        result.symlinks += 1
-                        result.members.append(normalised)
-                        # Symlinks contribute 0 uncompressed bytes — the
-                        # link target is what matters and we already
-                        # validated it.
-                        continue
-
-                    if member.islnk():
-                        # Hardlinks inside tar archives reference another
-                        # archive entry by name. Refuse if the linkname
-                        # points outside dest_root.
-                        target_path = _check_link_target_safe(
-                            dest_resolved, normalised, member.linkname, "hardlink"
-                        )
-                        # tarfile cannot replay hardlinks across an
-                        # extraction boundary easily; if the target file
-                        # was already extracted, hardlink to it; otherwise
-                        # refuse — out-of-order hardlinks suggest a
-                        # malicious archive.
-                        if not target_path.is_file():
-                            raise UnsafeArchiveError(
-                                "hardlink_dangling",
-                                f"hardlink target not present in archive: {member.linkname!r}",
-                                entry=normalised,
-                            )
-                        if safe_path.exists() or safe_path.is_symlink():
-                            safe_path.unlink()
-                        os.link(target_path, safe_path)
-                        result.hardlinks += 1
-                        result.members.append(normalised)
-                        continue
-
-                    # Regular file
-                    size = int(member.size)
-                    if size < 0:
-                        raise UnsafeArchiveError(
-                            "negative_size",
-                            f"member declares negative size {size}",
+                            "hardlink_dangling",
+                            f"hardlink target not present in archive: {member.linkname!r}",
                             entry=normalised,
                         )
-                    # Pre-check size before allocating space.
-                    projected_total = result.total_uncompressed_bytes + size
-                    if projected_total > max_uncompressed_bytes:
-                        raise ArchiveTooLargeError(projected_total, max_uncompressed_bytes)
-
-                    extracted_file = tf.extractfile(member)
-                    if extracted_file is None:
-                        # Some pseudo-regular files (e.g. PAX headers) report
-                        # isreg() but yield None — skip them.
-                        continue
-
-                    bytes_written = 0
-                    with safe_path.open("wb") as out:
-                        while True:
-                            chunk = extracted_file.read(_READ_CHUNK_BYTES)
-                            if not chunk:
-                                break
-                            bytes_written += len(chunk)
-                            # Re-check inside the loop so a header that lies
-                            # about its size still can't bomb us.
-                            if (
-                                result.total_uncompressed_bytes + bytes_written
-                                > max_uncompressed_bytes
-                            ):
-                                # Best-effort cleanup of the partial file.
-                                try:
-                                    out.close()
-                                    safe_path.unlink(missing_ok=True)
-                                finally:
-                                    raise ArchiveTooLargeError(
-                                        result.total_uncompressed_bytes + bytes_written,
-                                        max_uncompressed_bytes,
-                                    )
-                            out.write(chunk)
-
-                    result.total_uncompressed_bytes += bytes_written
-                    result.files += 1
+                    if safe_path.exists() or safe_path.is_symlink():
+                        safe_path.unlink()
+                    os.link(target_path, safe_path)
+                    result.hardlinks += 1
                     result.members.append(normalised)
+                    continue
 
-                    # Strip dangerous mode bits.
-                    if member.mode:
-                        try:
-                            os.chmod(safe_path, _safe_mode(member.mode))
-                        except OSError as exc:
-                            logger.debug(
-                                "safe_extract: chmod failed for %s: %s", safe_path, exc
-                            )
+                # Regular file
+                size = int(member.size)
+                if size < 0:
+                    raise UnsafeArchiveError(
+                        "negative_size",
+                        f"member declares negative size {size}",
+                        entry=normalised,
+                    )
+                # Pre-check size before allocating space.
+                projected_total = result.total_uncompressed_bytes + size
+                if projected_total > max_uncompressed_bytes:
+                    raise ArchiveTooLargeError(projected_total, max_uncompressed_bytes)
+
+                extracted_file = tf.extractfile(member)
+                if extracted_file is None:
+                    # Some pseudo-regular files (e.g. PAX headers) report
+                    # isreg() but yield None — skip them.
+                    continue
+
+                bytes_written = 0
+                with safe_path.open("wb") as out:
+                    while True:
+                        chunk = extracted_file.read(_READ_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        bytes_written += len(chunk)
+                        # Re-check inside the loop so a header that lies
+                        # about its size still can't bomb us.
+                        if result.total_uncompressed_bytes + bytes_written > max_uncompressed_bytes:
+                            # Best-effort cleanup of the partial file.
+                            try:
+                                out.close()
+                                safe_path.unlink(missing_ok=True)
+                            finally:
+                                raise ArchiveTooLargeError(
+                                    result.total_uncompressed_bytes + bytes_written,
+                                    max_uncompressed_bytes,
+                                )
+                        out.write(chunk)
+
+                result.total_uncompressed_bytes += bytes_written
+                result.files += 1
+                result.members.append(normalised)
+
+                # Strip dangerous mode bits.
+                if member.mode:
+                    try:
+                        os.chmod(safe_path, _safe_mode(member.mode))
+                    except OSError as exc:
+                        logger.debug("safe_extract: chmod failed for %s: %s", safe_path, exc)
 
     logger.info(
         "safe_extract: extracted %d files / %d dirs / %d symlinks / %d hardlinks "

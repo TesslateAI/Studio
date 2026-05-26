@@ -15,13 +15,21 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     gnupg \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
-    && chmod a+r /etc/apt/keyrings/docker.asc \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y docker-ce-cli \
     && rm -rf /var/lib/apt/lists/*
+
+# docker-ce-cli is only needed for DEPLOYMENT_MODE=docker. K8s deploys
+# don't use it. Install best-effort so a network-degraded build (WSL
+# DNS, restricted egress) still produces a usable image for k8s mode;
+# starting the orchestrator in docker mode will fail loudly if the CLI
+# is missing, which is the right behavior.
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && (curl -fsSL --max-time 60 --retry 3 https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+        && chmod a+r /etc/apt/keyrings/docker.asc \
+        && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+        && apt-get update \
+        && apt-get install -y docker-ce-cli \
+        && rm -rf /var/lib/apt/lists/*) \
+    || echo "WARNING: docker-ce-cli install failed (network); image will lack docker CLI — fine for k8s mode"
 
 COPY orchestrator/pyproject.toml ./
 COPY orchestrator/app ./app

@@ -6,8 +6,10 @@ Create Date: 2026-04-07
 """
 
 import sqlalchemy as sa
-from app.types.guid import GUID
 from alembic import op
+
+from app.types.guid import GUID
+
 revision = "0042_comm_proto_v2"
 down_revision = "0041_team_theme_preset"
 branch_labels = None
@@ -23,7 +25,11 @@ def upgrade() -> None:
     op.add_column("chats", sa.Column("channel_config_id", GUID(), nullable=True))
     with op.batch_alter_table("chats") as batch_op:
         batch_op.create_foreign_key(
-            "fk_chats_channel_config_id", "channel_configs", ["channel_config_id"], ["id"], ondelete="SET NULL"
+            "fk_chats_channel_config_id",
+            "channel_configs",
+            ["channel_config_id"],
+            ["id"],
+            ondelete="SET NULL",
         )
     op.add_column(
         "chats",

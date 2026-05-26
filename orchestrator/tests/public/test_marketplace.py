@@ -37,11 +37,18 @@ from app.routers.public.marketplace import (
 # ---------------------------------------------------------------------------
 
 
-def _make_user(default_team_id=None):
+_UNSET = object()
+
+
+def _make_user(default_team_id=_UNSET):
+    """Build a mock User. ``default_team_id`` defaults to a fresh UUID when
+    omitted; pass ``None`` explicitly to test the no-team branch (the
+    previous ``or uuid.uuid4()`` fallback masked None and made the
+    user-ownership branch untestable)."""
     user = MagicMock()
     user.id = uuid.uuid4()
     user.is_active = True
-    user.default_team_id = default_team_id or uuid.uuid4()
+    user.default_team_id = uuid.uuid4() if default_team_id is _UNSET else default_team_id
     return user
 
 
@@ -80,6 +87,10 @@ def _make_agent(item_type="agent", pricing_type="free", **overrides):
     agent.skill_body = overrides.get("skill_body", "# Skill body")
     agent.config = overrides.get("config", {"env_vars": ["API_KEY"]})
     agent.tool_configs = overrides.get("tool_configs")
+    # Wave 4: get_* endpoints fetch the joined MarketplaceSource when
+    # source_row is None and agent.source_id is set. Default to None so
+    # tests don't trigger that extra db.execute unless they opt in.
+    agent.source_id = overrides.get("source_id")
     return agent
 
 
@@ -107,6 +118,7 @@ def _make_base(**overrides):
     base.long_description = overrides.get("long_description", "Long base desc")
     base.features = overrides.get("features", ["hot-reload"])
     base.source_type = overrides.get("source_type", "official")
+    base.source_id = overrides.get("source_id")
     return base
 
 
@@ -145,6 +157,7 @@ def _make_theme(**overrides):
     theme.long_description = overrides.get("long_description", "Long theme desc")
     theme.source_type = overrides.get("source_type", "official")
     theme.parent_theme_id = overrides.get("parent_theme_id")
+    theme.source_id = overrides.get("source_id")
     return theme
 
 
@@ -161,8 +174,24 @@ def _make_api_key(scopes=None):
 # ---------------------------------------------------------------------------
 
 
-def _mock_paginated_db(total: int, items: list):
-    """Return an AsyncMock db whose execute returns count then rows."""
+def _make_source_lookup_result(source=None):
+    """Mock the result of `select(MarketplaceSource).where(handle=...)`.
+
+    Wave 4 endpoints call ``_resolve_public_source_filter`` first; when
+    no source is seeded the helper returns ``(None, None)`` and falls
+    through to the unfiltered list. Tests pass ``source=None`` to
+    exercise that fall-through path."""
+    src_result = MagicMock()
+    src_result.scalar_one_or_none.return_value = source
+    return src_result
+
+
+def _mock_paginated_db(total: int, items: list, source=None):
+    """Return an AsyncMock db whose execute returns:
+    1. the source-handle lookup (None → unfiltered),
+    2. the count query,
+    3. the rows query.
+    """
     mock_db = AsyncMock()
     count_result = MagicMock()
     count_result.scalar_one.return_value = total
@@ -172,16 +201,28 @@ def _mock_paginated_db(total: int, items: list):
     scalars_mock.all.return_value = items
     rows_result.scalars.return_value = scalars_mock
 
-    mock_db.execute = AsyncMock(side_effect=[count_result, rows_result])
+    mock_db.execute = AsyncMock(
+        side_effect=[_make_source_lookup_result(source), count_result, rows_result]
+    )
     return mock_db
 
 
-def _mock_detail_db(item):
-    """Return an AsyncMock db whose execute returns a single item or None."""
+def _mock_detail_db(item, *, with_source=True, source=None):
+    """Return an AsyncMock db whose execute returns:
+    1. (when with_source) the source-handle lookup,
+    2. the item lookup (single row or None).
+
+    Some endpoints (``get_skill_body``, ``get_agent_manifest``) are
+    purchase-gated and do not perform source resolution — pass
+    ``with_source=False`` for those callers.
+    """
     mock_db = AsyncMock()
     result = MagicMock()
     result.scalar_one_or_none.return_value = item
-    mock_db.execute = AsyncMock(return_value=result)
+    side_effect = (
+        [_make_source_lookup_result(source), result] if with_source else [result]
+    )
+    mock_db.execute = AsyncMock(side_effect=side_effect)
     return mock_db
 
 
@@ -204,7 +245,11 @@ class TestHelpers:
         assert d["tags"] == ["ai", "code"]
         assert d["is_featured"] is False
         assert d["creator_type"] == "official"
-        assert d["creator_name"] == "Tesslate"
+        # Wave 4: when no MarketplaceSource is passed, the hard fallback is
+        # "Community" — the legacy "Tesslate" hardcode is gone. Callers in
+        # production now always pass the joined source row, which provides
+        # display_name (e.g. "Tesslate"). See _agent_to_dict docstring.
+        assert d["creator_name"] == "Community"
         # Detail fields must NOT be present in basic mode
         assert "system_prompt" not in d
         assert "long_description" not in d
@@ -338,6 +383,7 @@ class TestAgentEndpoints:
             pricing_type=None,
             search=None,
             sort="featured",
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -362,6 +408,7 @@ class TestAgentEndpoints:
             pricing_type=None,
             search="search",
             sort="featured",
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -378,6 +425,7 @@ class TestAgentEndpoints:
         result = await get_agent(
             slug="test-agent",
             response=response,
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -394,6 +442,7 @@ class TestAgentEndpoints:
             await get_agent(
                 slug="nonexistent",
                 response=response,
+                source=None,
                 user=_make_user(),
                 db=mock_db,
             )
@@ -496,6 +545,7 @@ class TestSkillEndpoints:
             pricing_type=None,
             search=None,
             sort="featured",
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -509,7 +559,7 @@ class TestSkillEndpoints:
             pricing_type="free",
             skill_body="# Do the thing",
         )
-        mock_db = _mock_detail_db(skill)
+        mock_db = _mock_detail_db(skill, with_source=False)
 
         result = await get_skill_body(
             slug="test-skill",
@@ -554,6 +604,7 @@ class TestSkillEndpoints:
         result = await get_skill(
             slug="test-skill",
             response=response,
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -585,6 +636,7 @@ class TestBaseEndpoints:
             pricing_type=None,
             search=None,
             sort="featured",
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -601,6 +653,7 @@ class TestBaseEndpoints:
         result = await get_base(
             slug="react-starter",
             response=response,
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -630,6 +683,7 @@ class TestMcpServerEndpoints:
             pricing_type=None,
             search=None,
             sort="featured",
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -649,6 +703,7 @@ class TestMcpServerEndpoints:
         result = await get_mcp_server(
             slug="test-mcp",
             response=response,
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -678,6 +733,7 @@ class TestThemeEndpoints:
             pricing_type=None,
             search=None,
             sort="featured",
+            source=None,
             user=_make_user(),
             db=mock_db,
         )
@@ -697,6 +753,7 @@ class TestThemeEndpoints:
         result = await get_theme(
             slug="dark-mode-pro",
             response=response,
+            source=None,
             user=_make_user(),
             db=mock_db,
         )

@@ -4,7 +4,7 @@
     "id": "com.tesslate.crm",
     "slug": "crm-demo",
     "name": "Tesslate CRM",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "A minimal CRM demo with a chat-drawer agent running on the Tesslate Apps runtime.",
     "category": "productivity",
     "forkable": "true"
@@ -28,7 +28,7 @@
         "ports": [
           3000
         ],
-        "startup_command": "sh -c 'cd /app && mkdir -p data && (test -d node_modules || npm install) && npx prisma db push --skip-generate --accept-data-loss && npm run dev'",
+        "startup_command": "sh /app/.tesslate/startup.sh",
         "resources": {
           "memory_limit": "2Gi"
         },

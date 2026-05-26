@@ -22,6 +22,9 @@ from uuid import UUID
 
 from arq.connections import RedisSettings
 
+from .services import (
+    k8s_auth as _k8s_auth,  # noqa: F401 — applies BearerToken monkey-patch at import time
+)
 from .services.apps.app_invocations import invoke_app_instance_task
 from .services.apps.settlement_worker import settle_spend_batch as settle_spend_batch_cron
 from .services.marketplace_sync import (
@@ -229,6 +232,28 @@ async def _heartbeat_lock(pubsub, chat_id: str, task_id: str):
         pass
 
 
+async def _contract_gate_hook(tool_name, parameters, context, tool):
+    """Pre-execute hook bridging the submodule registry into ContractGate.
+
+    The orchestrator's automation contract gate lives in-tree (it touches
+    ``automation_runs``, billing tables, etc., which the submodule must
+    not depend on). The submodule registry exposes a ``pre_execute_hook``
+    seam so we can wedge the gate in without duplicating its logic.
+
+    Returns ``None`` for non-automation invocations (no contract in
+    context) so chat sessions are unaffected, or a tool-result envelope
+    when the gate denies the call (same shape as the in-tree path).
+    """
+    from .agent.tools.registry import check_contract_gate
+
+    return await check_contract_gate(
+        tool_name=tool_name,
+        parameters=parameters,
+        context=context,
+        tool=tool,
+    )
+
+
 def _build_submodule_registry(in_tree_registry, approval_handler=None):
     """Transfer tools from an in-tree ToolRegistry to a submodule ToolRegistry.
 
@@ -240,11 +265,20 @@ def _build_submodule_registry(in_tree_registry, approval_handler=None):
     ``approval_handler`` is an optional async callable injected into the
     submodule registry so the orchestrator's interactive approval flow (Redis
     pub/sub + frontend dialog) is used instead of the env-var-based fallback.
+
+    The submodule registry's ``pre_execute_hook`` is wired to
+    ``_contract_gate_hook`` so automation runs enforce ``allowed_tools`` /
+    ``allowed_mcps`` / ``allowed_skills`` / ``max_compute_tier`` /
+    ``max_spend_per_run_usd`` — without this the in-tree ContractGate is
+    dead code on every automation dispatch (TC-04 Bug #22).
     """
     try:
         from tesslate_agent.agent.tools.registry import ToolRegistry as SubmoduleRegistry
 
-        sub = SubmoduleRegistry(approval_handler=approval_handler)
+        sub = SubmoduleRegistry(
+            approval_handler=approval_handler,
+            pre_execute_hook=_contract_gate_hook,
+        )
         for tool in in_tree_registry._tools.values():
             sub.register(tool)
         return sub
@@ -397,27 +431,62 @@ async def _finalize_automation_run(
     from .models_automations import AutomationRun
 
     now = datetime.now(tz=UTC)
+    automation_id_for_event: UUID | None = None
     try:
         async with AsyncSessionLocal() as db:
-            await db.execute(
-                _sa_update(AutomationRun)
-                .where(AutomationRun.id == automation_run_id)
-                .where(AutomationRun.status.in_(_AUTOMATION_RUN_NON_TERMINAL))
-                .values(
-                    status=status,
-                    ended_at=now,
-                    heartbeat_at=now,
-                    raw_output=raw_output,
+            # Re-read the row so we can carry automation_id into the
+            # workflow_event fan-out below.
+            row = (
+                await db.execute(
+                    _sa_update(AutomationRun)
+                    .where(AutomationRun.id == automation_run_id)
+                    .where(AutomationRun.status.in_(_AUTOMATION_RUN_NON_TERMINAL))
+                    .values(
+                        status=status,
+                        ended_at=now,
+                        heartbeat_at=now,
+                        raw_output=raw_output,
+                    )
+                    .returning(AutomationRun.automation_id)
                 )
-            )
+            ).first()
+            if row is not None:
+                automation_id_for_event = row[0]
             await db.commit()
     except Exception:
         logger.exception(
-            "[WORKER] failed to write terminal automation_run state "
-            "(run=%s status=%s)",
+            "[WORKER] failed to write terminal automation_run state (run=%s status=%s)",
             automation_run_id,
             status,
         )
+
+    # G5 (#469): fan out workflow_event subscribers (e.g. per-workflow
+    # doctor) when a tier-2 async agent run lands on a terminal status.
+    # The synchronous dispatcher path goes through `_finalize_failure` /
+    # `_finalize_success`; this is the async equivalent. Best-effort.
+    if automation_id_for_event is not None and status in (
+        "failed",
+        "failed_preflight",
+        "timed_out",
+        "expired",
+    ):
+        try:
+            from .services.workflows.event_log import emit_run_finished
+
+            async with AsyncSessionLocal() as db2:
+                await emit_run_finished(
+                    db2,
+                    run_id=automation_run_id,
+                    automation_id=automation_id_for_event,
+                    status=status,
+                )
+        except Exception:
+            logger.debug(
+                "[WORKER] emit_run_finished failed run=%s status=%s",
+                automation_run_id,
+                status,
+                exc_info=True,
+            )
 
 
 async def execute_agent_task(ctx: dict, payload_dict: dict):
@@ -445,6 +514,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
         MarketplaceAgent,
         Message,
         Project,
+        User,
         UserPurchasedAgent,
     )
     from .services.agent_context import (
@@ -562,29 +632,197 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 heartbeat_task = asyncio.create_task(_heartbeat_lock(pubsub, chat_id, task_id))
 
             # 3. Load agent model
-            agent_model = None
-            if payload.agent_id:
-                result = await db.execute(
-                    select(MarketplaceAgent).where(
-                        MarketplaceAgent.id == UUID(payload.agent_id),
-                        MarketplaceAgent.is_active.is_(True),
-                    )
-                )
-                agent_model = result.scalar_one_or_none()
-            else:
-                result = await db.execute(
-                    select(MarketplaceAgent)
-                    .where(
-                        MarketplaceAgent.is_active.is_(True),
-                        MarketplaceAgent.agent_type == "IterativeAgent",
-                    )
-                    .limit(1)
-                )
-                agent_model = result.scalar_one_or_none()
+            #
+            # Resolution rules:
+            #   * Automation-driven runs (``auto_run_id`` set by the
+            #     dispatcher) MUST carry an explicit, valid ``agent_id``.
+            #     The route-level validator (``_replace_actions``) already
+            #     refuses to save an automation without one — this branch
+            #     is the run-time safety net for legacy rows that predate
+            #     the validator + a defense-in-depth team-scope check.
+            #     A miss writes a terminal ``failed`` row with a typed
+            #     ``raw_output.error`` so the run doesn't hang at
+            #     ``running`` forever (TC-03 Bug #20d).
+            #   * Chat / ticket / external-agent paths keep the legacy
+            #     "first active IterativeAgent" fallback for unauthenticated
+            #     paths that don't carry an agent_id. The fallback is
+            #     SUPPRESSED for automation runs because it silently runs
+            #     the wrong agent on the user's behalf (TC-03 Bug #20e).
+            from .services.marketplace_agent_scope import (
+                AgentScopeError,
+                resolve_agent_in_user_scope,
+            )
 
-            if not agent_model:
-                await _publish_error(pubsub, task_id, "No agent found")
+            agent_model: MarketplaceAgent | None = None
+            agent_load_error: str | None = None
+            agent_load_reason: str | None = None
+            try:
+                if payload.agent_id:
+                    try:
+                        requested_agent_id = UUID(payload.agent_id)
+                    except (TypeError, ValueError) as exc:
+                        # Pre-validator rows could carry a non-UUID string.
+                        # Don't leak the ValueError — surface a typed error
+                        # the dispatcher / UI can render.
+                        raise AgentScopeError(
+                            AgentScopeError.REASON_NOT_FOUND,
+                            f"agent_id {payload.agent_id!r} is not a valid UUID",
+                        ) from exc
+
+                    if auto_run_id is not None:
+                        # Automation context — apply the same scope check
+                        # the assign-time path uses, so a stale or
+                        # cross-team agent_id can't reach the agent loop.
+                        owner = (
+                            await db.execute(select(User).where(User.id == UUID(payload.user_id)))
+                        ).scalar_one_or_none()
+                        if owner is None:
+                            raise AgentScopeError(
+                                AgentScopeError.REASON_NOT_FOUND,
+                                f"user {payload.user_id} no longer exists",
+                            )
+                        agent_model = await resolve_agent_in_user_scope(
+                            db, agent_id=requested_agent_id, user=owner
+                        )
+                    else:
+                        # Chat / ticket path — existence + active + correct
+                        # item_type are still required (a skill UUID can't
+                        # run an agent loop without crashing on a None tool
+                        # list) but library scope is enforced upstream.
+                        from .services.marketplace_agent_scope import (
+                            RUNNABLE_AGENT_ITEM_TYPE,
+                        )
+
+                        result = await db.execute(
+                            select(MarketplaceAgent).where(
+                                MarketplaceAgent.id == requested_agent_id,
+                                MarketplaceAgent.is_active.is_(True),
+                                MarketplaceAgent.item_type == RUNNABLE_AGENT_ITEM_TYPE,
+                            )
+                        )
+                        agent_model = result.scalar_one_or_none()
+                        if agent_model is None:
+                            raise AgentScopeError(
+                                AgentScopeError.REASON_NOT_FOUND,
+                                f"agent {requested_agent_id} is not loadable "
+                                "(missing, inactive, or wrong item_type)",
+                            )
+                elif auto_run_id is not None:
+                    # Automation run with no agent_id at all — historically
+                    # this silently fell through to "first active
+                    # IterativeAgent". That ran the wrong agent on the
+                    # user's behalf without warning. Refuse instead.
+                    raise AgentScopeError(
+                        AgentScopeError.REASON_NOT_FOUND,
+                        "automation run is missing agent_id — automations "
+                        "must bind an explicit agent at assign time",
+                    )
+                else:
+                    # Legacy chat fallback: pick the first active
+                    # IterativeAgent. Kept for unauthenticated entrypoints
+                    # that historically depended on it.
+                    from .services.marketplace_agent_scope import (
+                        RUNNABLE_AGENT_ITEM_TYPE,
+                    )
+
+                    result = await db.execute(
+                        select(MarketplaceAgent)
+                        .where(
+                            MarketplaceAgent.is_active.is_(True),
+                            MarketplaceAgent.agent_type == "IterativeAgent",
+                            MarketplaceAgent.item_type == RUNNABLE_AGENT_ITEM_TYPE,
+                        )
+                        .limit(1)
+                    )
+                    agent_model = result.scalar_one_or_none()
+                    if agent_model is None:
+                        raise AgentScopeError(
+                            AgentScopeError.REASON_NOT_FOUND,
+                            "no active IterativeAgent registered",
+                        )
+            except AgentScopeError as exc:
+                agent_load_error = str(exc)
+                agent_load_reason = exc.reason
+                agent_model = None
+
+            if agent_model is None:
+                # Publish the error so the chat surface / SSE can render
+                # it — same call we made before this fix.
+                await _publish_error(pubsub, task_id, f"No agent found: {agent_load_error}")
+                # Critically, write the terminal automation_runs row when
+                # this was an automation-driven run. Without this the row
+                # sat at ``status='running'`` indefinitely (TC-03 Bug #20d).
+                if auto_run_id is not None:
+                    await _finalize_automation_run(
+                        auto_run_id,
+                        status="failed",
+                        raw_output={
+                            "task_id": task_id,
+                            "error": agent_load_error,
+                            "error_type": "agent_load_failed",
+                            "reason": agent_load_reason,
+                            "agent_id": payload.agent_id,
+                        },
+                    )
                 return
+
+            # 3b. Persist agent identity for the audit / spend rollups.
+            #
+            # The dispatcher's preflight does NOT yet write an
+            # ``invocation_subjects`` row (the full Phase-2 resolver has
+            # dependencies on budget allocation that aren't wired yet).
+            # Without a row, ``invocation_subjects`` is empty for every
+            # automation run — the only trace of which agent executed
+            # lives on the editable ``automation_actions.config.agent_id``
+            # JSON field, so a post-run PATCH can rewrite history
+            # (TC-03 Bug #19). Insert one here keyed off the loaded
+            # ``agent_model`` so the run row is permanently joinable to
+            # the agent that actually ran. Defaults match the existing
+            # ``invocation_subject.PayerPolicy.INSTALLER`` /
+            # ``CreditSource.OPENSAIL_CREDITS`` decision tree — the
+            # full payer-policy resolver will replace this stub when
+            # it lands without changing the public API surface.
+            if auto_run_id is not None:
+                from .models_automations import InvocationSubject
+                from .services.automations.invocation_subject import (
+                    CreditSource,
+                    PayerPolicy,
+                )
+
+                # Idempotent — the worker may be re-entered after an
+                # approval pause, and a duplicate INSERT would orphan the
+                # audit chain. SELECT-then-INSERT is fine: the only writer
+                # for this row at runtime is this branch (the dispatcher's
+                # preflight stub leaves ``agent_id=NULL``; we'd just
+                # update it).
+                existing_subject_id = (
+                    await db.execute(
+                        select(InvocationSubject.id)
+                        .where(InvocationSubject.automation_run_id == auto_run_id)
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if existing_subject_id is None:
+                    db.add(
+                        InvocationSubject(
+                            automation_run_id=auto_run_id,
+                            invoking_user_id=UUID(payload.user_id),
+                            team_id=UUID(payload.team_id) if payload.team_id else None,
+                            agent_id=agent_model.id,
+                            payer_policy=PayerPolicy.INSTALLER.value,
+                            credit_source=CreditSource.OPENSAIL_CREDITS.value,
+                        )
+                    )
+                else:
+                    from sqlalchemy import update as _sa_update
+
+                    await db.execute(
+                        _sa_update(InvocationSubject)
+                        .where(InvocationSubject.id == existing_subject_id)
+                        .where(InvocationSubject.agent_id.is_(None))
+                        .values(agent_id=agent_model.id)
+                    )
+                await db.commit()
 
             # 4. Get model name
             model_name = payload.model_name
@@ -695,6 +933,26 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 approval_handler=_approval_handler,
             )
 
+            # Plumb ``contract.max_iterations`` onto the agent runner so the
+            # cap declared on the automation actually fires. Mirrors the
+            # ``chat.py:1146`` pattern. Without this the submodule defaults
+            # to ``DEFAULT_MAX_ITERATIONS=0`` (unlimited) and a runaway
+            # tool-call loop only stops at the worker timeout (TC-04 Bug #27).
+            _max_iter = (payload.contract or {}).get("max_iterations") if payload.contract else None
+            if _max_iter is not None:
+                try:
+                    _max_iter_int = int(_max_iter)
+                except (TypeError, ValueError):
+                    _max_iter_int = None
+                if _max_iter_int is not None and _max_iter_int > 0:
+                    inner = getattr(agent_run_obj, "inner", None)
+                    if inner is not None and hasattr(inner, "max_iterations"):
+                        inner.max_iterations = _max_iter_int
+                        logger.info(
+                            "[WORKER] Applied contract.max_iterations=%d to agent runner",
+                            _max_iter_int,
+                        )
+
             # 7b. Load MCP tools for this user/agent and inject into tool registry
             mcp_context: dict | None = None
             try:
@@ -773,9 +1031,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     already_loaded_ma_ids: set[str] = set()
                     if mcp_context and mcp_context.get("mcp_configs"):
                         for cfg in mcp_context["mcp_configs"].values():
-                            ma_id = (cfg.get("server") or {}).get(
-                                "marketplace_agent_id"
-                            )
+                            ma_id = (cfg.get("server") or {}).get("marketplace_agent_id")
                             if ma_id:
                                 already_loaded_ma_ids.add(str(ma_id))
 
@@ -797,9 +1053,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                         )
                     # Merge extra mcp_configs so executors can reconnect.
                     if extra_ctx.get("mcp_configs"):
-                        merged = dict(
-                            (mcp_context or {}).get("mcp_configs") or {}
-                        )
+                        merged = dict((mcp_context or {}).get("mcp_configs") or {})
                         merged.update(extra_ctx["mcp_configs"])
                         # Ensure context dict reflects the merge (built later
                         # may re-read mcp_context; keep both authoritative).
@@ -827,9 +1081,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                     authorized_agents: list[dict[str, str]] = []
                     if auth_uuids:
                         ag_result = await db.execute(
-                            _sa_select(MarketplaceAgent).where(
-                                MarketplaceAgent.id.in_(auth_uuids)
-                            )
+                            _sa_select(MarketplaceAgent).where(MarketplaceAgent.id.in_(auth_uuids))
                         )
                         for ag in ag_result.scalars().all():
                             authorized_agents.append(
@@ -920,6 +1172,28 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                 )
                 if tesslate_ctx:
                     project_context["tesslate_context"] = tesslate_ctx
+
+            # Single-call run-context enrichment (data store overview,
+            # @data / @project deep-dive). Idempotent — if chat.py already
+            # populated either block on the inline path, RunContextEnrichment
+            # rewrites it from the same inputs so the worker never sees a
+            # stale view of the data store.
+            if project:
+                from .services.agent_context import (
+                    MentionPayload,
+                    enrich_project_context_for_run,
+                )
+
+                _run_ctx = await enrich_project_context_for_run(
+                    db=db,
+                    project=project,
+                    user_id=UUID(payload.user_id),
+                    mentions=MentionPayload.from_lists(
+                        data_collection_refs=payload.mention_data_collection_refs,
+                        project_ids=payload.mention_project_ids,
+                    ),
+                )
+                _run_ctx.apply(project_context)
 
             # Warm the local plan mirror from Redis before the agent builds its prompt.
             from .services.plan_manager import PlanManager
@@ -1154,9 +1428,11 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
 
                     from .models import (
                         AppInstance,
-                        MarketplaceAgent as _MarketplaceAgent,
                         MarketplaceApp,
                         UserMcpConfig,
+                    )
+                    from .models import (
+                        MarketplaceAgent as _MarketplaceAgent,
                     )
                     from .models_automations import (
                         AppAction,
@@ -1248,8 +1524,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 _sa_select(AppInstance)
                                 .where(
                                     AppInstance.id.in_(app_uuids),
-                                    AppInstance.installer_user_id
-                                    == UUID(payload.user_id),
+                                    AppInstance.installer_user_id == UUID(payload.user_id),
                                 )
                                 .options(
                                     _selectinload(AppInstance.app).selectinload(
@@ -1258,9 +1533,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 )
                             )
                             instances = list(inst_result.scalars().all())
-                            version_ids = [
-                                i.app_version_id for i in instances if i.app_version_id
-                            ]
+                            version_ids = [i.app_version_id for i in instances if i.app_version_id]
                             actions_by_v: dict[UUID, list[AppAction]] = {}
                             views_by_v: dict[UUID, list[AppView]] = {}
                             dr_by_v: dict[UUID, list[AppDataResource]] = {}
@@ -1271,40 +1544,32 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                     )
                                 )
                                 for a in ar.scalars().all():
-                                    actions_by_v.setdefault(
-                                        a.app_version_id, []
-                                    ).append(a)
+                                    actions_by_v.setdefault(a.app_version_id, []).append(a)
                                 vr = await db.execute(
                                     _sa_select(AppView).where(
                                         AppView.app_version_id.in_(version_ids)
                                     )
                                 )
                                 for v in vr.scalars().all():
-                                    views_by_v.setdefault(
-                                        v.app_version_id, []
-                                    ).append(v)
+                                    views_by_v.setdefault(v.app_version_id, []).append(v)
                                 drr = await db.execute(
                                     _sa_select(AppDataResource).where(
                                         AppDataResource.app_version_id.in_(version_ids)
                                     )
                                 )
                                 for d in drr.scalars().all():
-                                    dr_by_v.setdefault(
-                                        d.app_version_id, []
-                                    ).append(d)
+                                    dr_by_v.setdefault(d.app_version_id, []).append(d)
 
                             for inst in instances:
                                 slug = (
-                                    getattr(inst.app, "slug", "")
-                                    if inst.app is not None
-                                    else ""
+                                    getattr(inst.app, "slug", "") if inst.app is not None else ""
                                 ) or "?"
-                                lines: list[str] = [
-                                    f"  - @{slug} app_instance_id={inst.id}"
-                                ]
+                                lines: list[str] = [f"  - @{slug} app_instance_id={inst.id}"]
                                 actions = actions_by_v.get(inst.app_version_id, [])
                                 if actions:
-                                    lines.append("    actions (call via invoke_app_action with this exact app_instance_id):")
+                                    lines.append(
+                                        "    actions (call via invoke_app_action with this exact app_instance_id):"
+                                    )
                                     for a in actions:
                                         # Pull the top-level input keys so the
                                         # agent sees the parameter shape
@@ -1313,28 +1578,22 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                         keys: list[str] = []
                                         try:
                                             schema = a.input_schema or {}
-                                            props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+                                            props = (
+                                                (schema.get("properties") or {})
+                                                if isinstance(schema, dict)
+                                                else {}
+                                            )
                                             keys = list(props.keys())
                                         except Exception:
                                             keys = []
                                         keys_str = (
-                                            f" input_keys=[{', '.join(keys)}]"
-                                            if keys
-                                            else ""
+                                            f" input_keys=[{', '.join(keys)}]" if keys else ""
                                         )
                                         rc = a.required_connectors or []
-                                        rc_str = (
-                                            f" needs_connectors={list(rc)}"
-                                            if rc
-                                            else ""
-                                        )
-                                        lines.append(
-                                            f"      - {a.name}{keys_str}{rc_str}"
-                                        )
+                                        rc_str = f" needs_connectors={list(rc)}" if rc else ""
+                                        lines.append(f"      - {a.name}{keys_str}{rc_str}")
                                 else:
-                                    lines.append(
-                                        "    actions: (none declared in manifest)"
-                                    )
+                                    lines.append("    actions: (none declared in manifest)")
                                 views = views_by_v.get(inst.app_version_id, [])
                                 if views:
                                     lines.append(
@@ -1344,8 +1603,39 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                                 drs = dr_by_v.get(inst.app_version_id, [])
                                 if drs:
                                     lines.append(
-                                        "    data_resources: "
-                                        + ", ".join(d.name for d in drs)
+                                        "    data_resources: " + ", ".join(d.name for d in drs)
+                                    )
+
+                                # Bridge to the project's workspace-data store
+                                # so the agent knows it can READ + ANALYZE what
+                                # this app has stored, not just invoke its
+                                # actions. Apps installed in a project share
+                                # the project's OPENSAIL_DATA_* env contract
+                                # via the auto-inject path — the data they
+                                # write is queryable via the workspace_data
+                                # tool. Surfaces collection names + counts
+                                # only when the project actually has any.
+                                try:
+                                    from .services import workspace_data as wd
+
+                                    coll_rows = await wd.list_collections(db, inst.project_id)
+                                    if coll_rows:
+                                        coll_summaries: list[str] = []
+                                        for c in coll_rows[:10]:
+                                            n = await wd.collection_record_count(db, c.id)
+                                            coll_summaries.append(f"{c.name} ({n})")
+                                        lines.append(
+                                            "    workspace_data collections "
+                                            "(this app shares the project's "
+                                            "built-in data store — use the "
+                                            "workspace_data tool's summarize / "
+                                            "schema / aggregate / query actions "
+                                            "to read or analyze): " + ", ".join(coll_summaries)
+                                        )
+                                except Exception as wd_err:
+                                    logger.debug(
+                                        "[WORKER] @app data-store hint skipped: %s",
+                                        wd_err,
                                     )
                                 sections.append("\n".join(lines))
 
@@ -1359,8 +1649,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                             "\n\n[mentions]\n"
                             "The user attached structured @-mentions to this "
                             "message. Treat them as authoritative — do not "
-                            "guess slugs or ids; use the values below.\n\n"
-                            + "\n\n".join(sections)
+                            "guess slugs or ids; use the values below.\n\n" + "\n\n".join(sections)
                         )
                         effective_message = effective_message + hint_block
                         logger.info(
@@ -1639,9 +1928,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
             # successful. The WHERE-clause guard inside _finalize lets a
             # racing user-cancellation or contract-breach pause win.
             if auto_run_id is not None:
-                final_status = (
-                    "cancelled" if completion_reason == "cancelled" else "succeeded"
-                )
+                final_status = "cancelled" if completion_reason == "cancelled" else "succeeded"
                 await _finalize_automation_run(
                     auto_run_id,
                     status=final_status,
@@ -1700,9 +1987,7 @@ async def execute_agent_task(ctx: dict, payload_dict: dict):
                             "approval_required": {
                                 "tool_name": e.tool_name,
                                 "ticket_id": (
-                                    str(e.ticket_id)
-                                    if getattr(e, "ticket_id", None)
-                                    else None
+                                    str(e.ticket_id) if getattr(e, "ticket_id", None) else None
                                 ),
                             },
                         },
@@ -1845,7 +2130,9 @@ async def dispatch_automation_task(
                 await db.rollback()
             raise
 
-        status_value = result.status.value if hasattr(result.status, "value") else str(result.status)
+        status_value = (
+            result.status.value if hasattr(result.status, "value") else str(result.status)
+        )
         return {
             "run_id": str(result.run_id),
             "status": status_value,
@@ -1898,9 +2185,7 @@ async def resume_automation_run(ctx: dict, run_id_str: str) -> dict:
             result = await resume_run(db, checkpoint=checkpoint)
             await db.commit()
         except Exception:
-            logger.exception(
-                "[WORKER] resume_automation_run failed run=%s", run_id_str
-            )
+            logger.exception("[WORKER] resume_automation_run failed run=%s", run_id_str)
             with contextlib.suppress(Exception):
                 await db.rollback()
             raise

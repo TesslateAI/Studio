@@ -14,7 +14,6 @@ import hashlib
 import hmac
 import logging
 import time
-import uuid
 from typing import Any
 
 import httpx
@@ -391,9 +390,7 @@ class SlackChannel(GatewayAdapter):
                 return None
             return (data.get("channel") or {}).get("id")
         except Exception:
-            logger.exception(
-                "[SLACK] conversations.open raised for user=%s", user_id
-            )
+            logger.exception("[SLACK] conversations.open raised for user=%s", user_id)
             return None
         finally:
             if owns_client:
@@ -635,9 +632,7 @@ class SlackChannel(GatewayAdapter):
         owns_client = http_client is None
         client = http_client or httpx.AsyncClient(timeout=15.0)
         try:
-            channel_id = await self._resolve_dm_channel(
-                user_id, http_client=client
-            )
+            channel_id = await self._resolve_dm_channel(user_id, http_client=client)
             if not channel_id:
                 return False
             result = await self.send_approval_card(
@@ -683,9 +678,7 @@ class SlackChannel(GatewayAdapter):
             channel_result: dict[str, Any] = {"ok": False, "skipped": True}
 
             if owner_user_id:
-                dm_channel_id = await self._resolve_dm_channel(
-                    owner_user_id, http_client=client
-                )
+                dm_channel_id = await self._resolve_dm_channel(owner_user_id, http_client=client)
                 if dm_channel_id:
                     dm_result = await self.send_approval_card(
                         dm_channel_id,
@@ -736,9 +729,7 @@ class SlackChannel(GatewayAdapter):
             return False
         for action in actions:
             action_id = action.get("action_id") if isinstance(action, dict) else None
-            if isinstance(action_id, str) and action_id.startswith(
-                "automation_approve:"
-            ):
+            if isinstance(action_id, str) and action_id.startswith("automation_approve:"):
                 return True
         return False
 
@@ -784,8 +775,8 @@ class SlackChannel(GatewayAdapter):
             logger.warning("[SLACK] slash command on adapter with no config_id")
             return
 
-        from ._inbound_dispatch import dispatch_gateway_command
         from ..gateway.triggers.slack_slash import handle_slash_command
+        from ._inbound_dispatch import dispatch_gateway_command
 
         await dispatch_gateway_command(
             payload=payload,

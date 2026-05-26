@@ -23,6 +23,7 @@ agent / engineer wiring real fixtures should drop the
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -32,7 +33,6 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-
 
 # Skip the entire module if integration fixtures aren't reachable. The
 # integration conftest provides ``api_client_session``; if it raises during
@@ -61,9 +61,7 @@ def stub_arq_pool(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     async def _get_pool() -> Any:
         return pool
 
-    monkeypatch.setattr(
-        "app.routers.app_triggers.get_arq_pool", _get_pool, raising=True
-    )
+    monkeypatch.setattr("app.routers.app_triggers.get_arq_pool", _get_pool, raising=True)
     return pool
 
 
@@ -100,7 +98,8 @@ async def _seed_webhook_automation(
     # Make sure the owner row is present -- skipped if the email collides
     # with an existing seed (idempotent).
     suffix = uuid4().hex[:8]
-    try:
+    with contextlib.suppress(Exception):
+        # Already exists from a prior test in the same session.
         await db.execute(
             core_insert(User.__table__).values(
                 id=owner_user_id,
@@ -114,9 +113,6 @@ async def _seed_webhook_automation(
                 slug=f"wh-{suffix}",
             )
         )
-    except Exception:
-        # Already exists from a prior test in the same session.
-        pass
 
     autom_id = uuid4()
     db.add(
@@ -143,9 +139,7 @@ async def _seed_webhook_automation(
             config={
                 "name": trigger_name,
                 "instance_id": str(instance_id),
-                "webhook_secrets": [
-                    {"kid": "v1", "secret": secret, "algo": "hmac-sha256"}
-                ],
+                "webhook_secrets": [{"kid": "v1", "secret": secret, "algo": "hmac-sha256"}],
             },
             is_active=True,
         )
@@ -202,9 +196,7 @@ def test_webhook_handler_p50_under_50ms(
 
         autom_id, trigger_id = asyncio.run(_seed())
     except Exception as exc:
-        pytest.skip(
-            f"webhook trigger seed failed (real DB likely unavailable): {exc!r}"
-        )
+        pytest.skip(f"webhook trigger seed failed (real DB likely unavailable): {exc!r}")
 
     url = f"/api/app-instances/{instance_id}/trigger/{trigger_name}"
 
@@ -248,12 +240,14 @@ def test_webhook_handler_p50_under_50ms(
         async def _check_all_dispatched() -> int:
             async with AsyncSessionLocal() as db:
                 rows = (
-                    await db.execute(
-                        select(AutomationEvent).where(
-                            AutomationEvent.automation_id == autom_id
+                    (
+                        await db.execute(
+                            select(AutomationEvent).where(AutomationEvent.automation_id == autom_id)
                         )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 missing = sum(1 for r in rows if r.dispatched_at is None)
                 return missing
 

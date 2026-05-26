@@ -39,7 +39,6 @@ from app.database import Base
 from app.models_automations import (
     AppAction,
     AppDataResource,
-    AppEmbed,
     AppInstance,
     AppInstanceLink,
 )
@@ -55,7 +54,6 @@ from app.services.apps.embed_token import (
     sign_embed_token,
     verify_embed_token,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures — fresh in-memory SQLite per test.
@@ -273,9 +271,7 @@ async def test_dispatch_via_link_succeeds_when_action_in_grants(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
     _, _, child = await _seed_app_install(
         db,
         creator_user_id=user.id,
@@ -291,9 +287,7 @@ async def test_dispatch_via_link_succeeds_when_action_in_grants(
     )
 
     recorder = _DispatchRecorder(output={"accounts": [{"id": "1"}]})
-    monkeypatch.setattr(
-        composition.action_dispatcher, "dispatch_app_action", recorder
-    )
+    monkeypatch.setattr(composition.action_dispatcher, "dispatch_app_action", recorder)
 
     result = await composition.dispatch_via_link(
         db,
@@ -317,9 +311,7 @@ async def test_dispatch_via_link_rejects_action_not_in_grants(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
     _, _, child = await _seed_app_install(
         db,
         creator_user_id=user.id,
@@ -335,9 +327,7 @@ async def test_dispatch_via_link_rejects_action_not_in_grants(
     )
 
     recorder = _DispatchRecorder()
-    monkeypatch.setattr(
-        composition.action_dispatcher, "dispatch_app_action", recorder
-    )
+    monkeypatch.setattr(composition.action_dispatcher, "dispatch_app_action", recorder)
 
     with pytest.raises(composition.ActionNotInGrants):
         await composition.dispatch_via_link(
@@ -357,9 +347,7 @@ async def test_dispatch_via_link_unknown_alias_raises_alias_not_found(
     db: AsyncSession,
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
 
     with pytest.raises(composition.AliasNotFound):
         await composition.dispatch_via_link(
@@ -377,9 +365,7 @@ async def test_dispatch_via_link_ignores_revoked_links(
 ) -> None:
     """A revoked link is invisible to the runtime."""
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
     _, _, child = await _seed_app_install(
         db,
         creator_user_id=user.id,
@@ -487,12 +473,8 @@ async def test_mint_embed_token_rejects_view_not_in_grants(
     db: AsyncSession,
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
-    _, _, child = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="crm"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
+    _, _, child = await _seed_app_install(db, creator_user_id=user.id, app_slug="crm")
     await _seed_link(
         db,
         parent_install=parent,
@@ -517,12 +499,8 @@ async def test_mint_embed_token_succeeds_for_granted_view(
     db: AsyncSession,
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
-    _, _, child = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="crm"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
+    _, _, child = await _seed_app_install(db, creator_user_id=user.id, app_slug="crm")
     await _seed_link(
         db,
         parent_install=parent,
@@ -579,9 +557,7 @@ async def test_query_data_resource_caches_on_second_call(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
     _, _, child = await _seed_app_install(
         db,
         creator_user_id=user.id,
@@ -604,18 +580,14 @@ async def test_query_data_resource_caches_on_second_call(
     )
 
     recorder = _DispatchRecorder(output={"accounts": [{"id": "a1"}]})
-    monkeypatch.setattr(
-        composition.action_dispatcher, "dispatch_app_action", recorder
-    )
+    monkeypatch.setattr(composition.action_dispatcher, "dispatch_app_action", recorder)
 
     fake_redis = _MemoryCacheRedis()
 
     async def _fake_get_redis():
         return fake_redis
 
-    monkeypatch.setattr(
-        "app.services.cache_service.get_redis_client", _fake_get_redis
-    )
+    monkeypatch.setattr("app.services.cache_service.get_redis_client", _fake_get_redis)
 
     # 1st call — dispatcher hit + cache write.
     out1 = await composition.query_data_resource(
@@ -638,9 +610,7 @@ async def test_query_data_resource_caches_on_second_call(
         input={"team_id": "abc"},
     )
     assert out2 == {"accounts": [{"id": "a1"}]}
-    assert len(recorder.calls) == 1, (
-        "second call should have hit the cache, not the dispatcher"
-    )
+    assert len(recorder.calls) == 1, "second call should have hit the cache, not the dispatcher"
 
 
 @pytest.mark.asyncio
@@ -648,9 +618,7 @@ async def test_query_data_resource_force_refresh_bypasses_cache(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
     _, _, child = await _seed_app_install(
         db,
         creator_user_id=user.id,
@@ -673,18 +641,14 @@ async def test_query_data_resource_force_refresh_bypasses_cache(
     )
 
     recorder = _DispatchRecorder(output={"v": 1})
-    monkeypatch.setattr(
-        composition.action_dispatcher, "dispatch_app_action", recorder
-    )
+    monkeypatch.setattr(composition.action_dispatcher, "dispatch_app_action", recorder)
 
     fake_redis = _MemoryCacheRedis()
 
     async def _fake_get_redis():
         return fake_redis
 
-    monkeypatch.setattr(
-        "app.services.cache_service.get_redis_client", _fake_get_redis
-    )
+    monkeypatch.setattr("app.services.cache_service.get_redis_client", _fake_get_redis)
 
     # Prime the cache.
     await composition.query_data_resource(
@@ -713,9 +677,7 @@ async def test_query_data_resource_rejects_resource_not_in_grants(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
     _, _, child = await _seed_app_install(
         db,
         creator_user_id=user.id,
@@ -739,9 +701,7 @@ async def test_query_data_resource_rejects_resource_not_in_grants(
     )
 
     recorder = _DispatchRecorder()
-    monkeypatch.setattr(
-        composition.action_dispatcher, "dispatch_app_action", recorder
-    )
+    monkeypatch.setattr(composition.action_dispatcher, "dispatch_app_action", recorder)
 
     with pytest.raises(composition.DataResourceNotInGrants):
         await composition.query_data_resource(
@@ -803,12 +763,8 @@ async def test_wire_install_links_writes_positive_grants(
     db: AsyncSession,
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
-    child_app, _, child = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="crm"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
+    child_app, _, child = await _seed_app_install(db, creator_user_id=user.id, app_slug="crm")
     parent_manifest = _minimal_2026_05_manifest_with_dep(
         parent_slug="dashboard",
         child_slug=child_app.slug,
@@ -830,9 +786,7 @@ async def test_wire_install_links_writes_positive_grants(
     assert link.parent_install_id == parent.id
     assert link.child_install_id == child.id
     assert link.alias == "crm"
-    assert sorted(link.granted_actions) == sorted(
-        ["list_accounts", "summarize_pipeline"]
-    )
+    assert sorted(link.granted_actions) == sorted(["list_accounts", "summarize_pipeline"])
     assert link.granted_views == ["account_card"]
     assert link.granted_data_resources == ["accounts"]
 
@@ -842,12 +796,8 @@ async def test_wire_install_links_raises_for_required_missing_dep(
     db: AsyncSession,
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
-    child_app, _, _ = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="crm"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
+    child_app, _, _ = await _seed_app_install(db, creator_user_id=user.id, app_slug="crm")
     parent_manifest = _minimal_2026_05_manifest_with_dep(
         parent_slug="dashboard",
         child_slug=child_app.slug,
@@ -873,12 +823,8 @@ async def test_wire_install_links_skips_optional_missing_dep(
     db: AsyncSession,
 ) -> None:
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
-    child_app, _, _ = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="support"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
+    child_app, _, _ = await _seed_app_install(db, creator_user_id=user.id, app_slug="support")
     parent_manifest = _minimal_2026_05_manifest_with_dep(
         parent_slug="dashboard",
         child_slug=child_app.slug,
@@ -899,12 +845,14 @@ async def test_wire_install_links_skips_optional_missing_dep(
     # Optional + missing → silently skipped, no row.
     assert written == []
     rows = (
-        await db.execute(
-            select(AppInstanceLink).where(
-                AppInstanceLink.parent_install_id == parent.id
+        (
+            await db.execute(
+                select(AppInstanceLink).where(AppInstanceLink.parent_install_id == parent.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows == []
 
 
@@ -914,12 +862,8 @@ async def test_wire_install_links_is_idempotent_on_repeat(
 ) -> None:
     """Second call with new grants UPDATES the row instead of duplicating."""
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
-    child_app, _, child = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="crm"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
+    child_app, _, child = await _seed_app_install(db, creator_user_id=user.id, app_slug="crm")
     manifest_v1 = _minimal_2026_05_manifest_with_dep(
         parent_slug="dashboard",
         child_slug=child_app.slug,
@@ -951,17 +895,17 @@ async def test_wire_install_links_is_idempotent_on_repeat(
     )
 
     rows = (
-        await db.execute(
-            select(AppInstanceLink).where(
-                AppInstanceLink.parent_install_id == parent.id
+        (
+            await db.execute(
+                select(AppInstanceLink).where(AppInstanceLink.parent_install_id == parent.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     refreshed = rows[0]
-    assert sorted(refreshed.granted_actions) == sorted(
-        ["list_accounts", "summarize_pipeline"]
-    )
+    assert sorted(refreshed.granted_actions) == sorted(["list_accounts", "summarize_pipeline"])
     assert refreshed.granted_views == ["account_card"]
 
 
@@ -989,9 +933,7 @@ async def test_dispatch_via_link_propagates_parent_run_id(
     )
 
     user = await _seed_user(db, "alice")
-    _, _, parent = await _seed_app_install(
-        db, creator_user_id=user.id, app_slug="dashboard"
-    )
+    _, _, parent = await _seed_app_install(db, creator_user_id=user.id, app_slug="dashboard")
     _, _, child = await _seed_app_install(
         db,
         creator_user_id=user.id,
@@ -1084,9 +1026,7 @@ async def test_dispatch_via_link_propagates_parent_run_id(
             error=None,
         )
 
-    monkeypatch.setattr(
-        composition.action_dispatcher, "dispatch_app_action", _stub_dispatch
-    )
+    monkeypatch.setattr(composition.action_dispatcher, "dispatch_app_action", _stub_dispatch)
 
     await composition.dispatch_via_link(
         db,
@@ -1107,9 +1047,7 @@ async def test_dispatch_via_link_propagates_parent_run_id(
     # And that child subject row has payer_policy='parent_run' +
     # parent_run_id pointing at the parent run.
     child_subject = (
-        await db.execute(
-            select(InvocationSubject).where(InvocationSubject.id == child_subject_id)
-        )
+        await db.execute(select(InvocationSubject).where(InvocationSubject.id == child_subject_id))
     ).scalar_one()
     assert child_subject.payer_policy == "parent_run"
     assert child_subject.parent_run_id == parent_run.id

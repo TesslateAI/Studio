@@ -23,7 +23,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import (
@@ -31,7 +30,6 @@ from app.models import (
     MarketplaceSource,
 )
 from app.services.marketplace_federation import (
-    InstallGuardResult,
     PurchaseRoute,
     ResolvedItem,
     dispatch_purchase,
@@ -42,7 +40,6 @@ from app.services.marketplace_federation import (
     live_resolve,
     mcp_install_prompt,
 )
-
 
 # ---------------------------------------------------------------------------
 # install_guard matrix
@@ -849,9 +846,7 @@ async def test_live_resolve_skips_manifest_when_already_pinned(
 
     try:
         await live_resolve(source, "agent", "x", client=fake, db=db_session)
-        assert fake.manifest_calls == 0, (
-            "must not re-fetch manifest on already-pinned source"
-        )
+        assert fake.manifest_calls == 0, "must not re-fetch manifest on already-pinned source"
         await db_session.refresh(source)
         assert source.pinned_hub_id == "locked-hub-id"
     finally:
@@ -897,7 +892,9 @@ async def test_live_resolve_refuses_unpinned_source_without_db(
 
 
 @pytest_asyncio.fixture
-async def two_federated_sources(db_session: AsyncSession) -> tuple[MarketplaceSource, MarketplaceSource]:
+async def two_federated_sources(
+    db_session: AsyncSession,
+) -> tuple[MarketplaceSource, MarketplaceSource]:
     """Spin up two federated sources with disjoint catalog rows for the
     cross-source-filter assertions."""
     suffix = f"{os.getpid()}-{int(time.time() * 1000) % 10_000_000}"
@@ -928,9 +925,7 @@ async def two_federated_sources(db_session: AsyncSession) -> tuple[MarketplaceSo
 
     # Teardown — delete agents first to avoid FK violations.
     await db_session.execute(
-        MarketplaceAgent.__table__.delete().where(
-            MarketplaceAgent.source_id.in_((s1.id, s2.id))
-        )
+        MarketplaceAgent.__table__.delete().where(MarketplaceAgent.source_id.in_((s1.id, s2.id)))
     )
     await db_session.delete(s1)
     await db_session.delete(s2)
@@ -989,16 +984,12 @@ async def test_list_cached_items_filters_by_source_handle(
     db_session.add_all(rows)
     await db_session.commit()
 
-    only_a = await list_cached_items(
-        db_session, kind="agent", source_handle=s1.handle, limit=100
-    )
+    only_a = await list_cached_items(db_session, kind="agent", source_handle=s1.handle, limit=100)
     only_a_slugs = {r.slug for r in only_a}
     assert {f"a-agent-1-{suffix}", f"a-agent-2-{suffix}"} <= only_a_slugs
     assert f"b-agent-1-{suffix}" not in only_a_slugs
 
-    only_b = await list_cached_items(
-        db_session, kind="agent", source_handle=s2.handle, limit=100
-    )
+    only_b = await list_cached_items(db_session, kind="agent", source_handle=s2.handle, limit=100)
     only_b_slugs = {r.slug for r in only_b}
     assert f"b-agent-1-{suffix}" in only_b_slugs
     assert f"a-agent-1-{suffix}" not in only_b_slugs
@@ -1045,9 +1036,7 @@ async def test_list_cached_items_excludes_deleted_upstream_by_default(
     db_session.add_all(rows)
     await db_session.commit()
 
-    default = await list_cached_items(
-        db_session, kind="agent", source_handle=s1.handle, limit=100
-    )
+    default = await list_cached_items(db_session, kind="agent", source_handle=s1.handle, limit=100)
     slugs = {r.slug for r in default}
     assert live_slug in slugs
     assert tomb_slug not in slugs, "deleted_upstream rows must be hidden by default"
@@ -1105,9 +1094,7 @@ async def test_get_cached_item_returns_row_or_none(
     db_session.add_all(rows)
     await db_session.commit()
 
-    hit = await get_cached_item(
-        db_session, source_handle=s1.handle, kind="agent", slug=target_slug
-    )
+    hit = await get_cached_item(db_session, source_handle=s1.handle, kind="agent", slug=target_slug)
     assert hit is not None
     assert hit.slug == target_slug
 

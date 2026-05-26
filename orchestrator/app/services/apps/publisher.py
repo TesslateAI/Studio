@@ -33,9 +33,8 @@ from ...utils.slug_generator import slugify
 from ..hub_client import HubClient
 from ..marketplace_constants import LOCAL_SOURCE_ID
 from . import compatibility
-from .manifest_parser import ManifestValidationError
+from .manifest_parser import ManifestValidationError, validate_result_templates
 from .manifest_parser import parse as parse_manifest
-from .manifest_parser import validate_result_templates
 
 __all__ = [
     "PublishError",
@@ -146,9 +145,7 @@ async def publish_version(
     # creators no longer declare runtime features per-manifest, and the
     # schema version itself is the gating signal we feed compatibility.check.
     required_features = list(compat_dict.get("required_features") or [])
-    manifest_schema_str = (
-        compat_dict.get("manifest_schema") or manifest_schema_version
-    )
+    manifest_schema_str = compat_dict.get("manifest_schema") or manifest_schema_version
 
     # 2) Compat check vs server feature set.
     report = compatibility.check(
@@ -170,8 +167,7 @@ async def publish_version(
         raise SourceNotPublishableError(f"project {project_id} not found")
     if project.project_kind != PROJECT_KIND_APP_SOURCE:
         raise SourceNotPublishableError(
-            f"project {project_id} has project_kind={project.project_kind!r}, "
-            f"expected 'app_source'"
+            f"project {project_id} has project_kind={project.project_kind!r}, expected 'app_source'"
         )
     if not project.volume_id:
         raise SourceNotPublishableError(

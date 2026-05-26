@@ -10,31 +10,21 @@
     "beforeBuildCommand": "pnpm --dir ../app build"
   },
   "app": {
-    "windows": [
-      {
-        "title": "OpenSail",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 960,
-        "minHeight": 600,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "trafficLightPosition": { "x": 20, "y": 20 }
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
   },
   "plugins": {
     "updater": {
-      "endpoints": ["https://opensail.tesslate.com/desktop/releases/latest.json"],
-      "pubkey": "PLACEHOLDER — replace with output of `cargo tauri signer generate` once the release keypair is created; store the private key as CI secret TAURI_SIGNING_PRIVATE_KEY",
+      "endpoints": ["https://your-domain.com/desktop/releases/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ3NkI1RkE5NTIyMTVBMDgKUldRSVdpRlNxVjlyUjBhWldpVy9mdTJuZ0FuY1NyczdLMi9jcE5xc0c1dnhYSHNJVWxHNHArSVgK",
       "dialog": false
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "externalBin": ["binaries/tesslate-studio-orchestrator"],
     "icon": [

@@ -32,7 +32,6 @@ older than the stale cutoff.
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import logging
 import os
 from datetime import UTC, datetime
@@ -42,6 +41,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 from sqlalchemy import or_, select
+
+from ...utils.file_lock import lock_exclusive, unlock
 
 logger = logging.getLogger(__name__)
 
@@ -63,13 +64,9 @@ class CronScheduler:
         lock_path = os.path.join(self._lock_dir, "cron-tick.lock")
         Path(self._lock_dir).mkdir(parents=True, exist_ok=True)
 
-        fd = None
-        try:
-            fd = open(lock_path, "w")  # noqa: SIM115 — must stay open for lock duration
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            if fd:
-                fd.close()
+        fd = open(lock_path, "w")  # noqa: SIM115 — must stay open for lock duration
+        if not lock_exclusive(fd.fileno(), blocking=False):
+            fd.close()
             return 0  # Another tick is running
 
         try:
@@ -79,9 +76,8 @@ class CronScheduler:
             logger.exception("[CRON] Tick error")
             return 0
         finally:
-            if fd:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-                fd.close()
+            unlock(fd.fileno())
+            fd.close()
 
     async def run_loop(self, db_factory, arq_pool, interval: int = 60) -> None:
         """Run the tick loop until stopped."""

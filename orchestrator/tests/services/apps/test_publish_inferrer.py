@@ -40,7 +40,6 @@ from app.services.apps.publish_inferrer import (
     infer_draft,
 )
 
-
 # ---------------------------------------------------------------------------
 # Schema 2026-05 — top-level keys the publisher accepts. Anything else at
 # the root will 422 with additionalProperties: false.
@@ -263,9 +262,7 @@ async def test_infer_draft_loads_config_via_orchestrator_in_k8s_mode(
     # Patch the lazily imported get_orchestrator inside _load_tesslate_config.
     import app.services.orchestration as orchestration_module
 
-    monkeypatch.setattr(
-        orchestration_module, "get_orchestrator", lambda *a, **kw: fake
-    )
+    monkeypatch.setattr(orchestration_module, "get_orchestrator", lambda *a, **kw: fake)
 
     draft = await infer_draft(db, project=project_with_container)
 
@@ -308,7 +305,9 @@ async def test_infer_draft_yaml_with_connection_does_not_leak_kind(
     # Find the first container's id.
     first = (
         await db.execute(  # type: ignore[attr-defined]
-            __import__("sqlalchemy").select(Container).where(
+            __import__("sqlalchemy")
+            .select(Container)
+            .where(
                 Container.project_id == project_with_container.id,
                 Container.name == "backend",
             )
@@ -328,8 +327,6 @@ async def test_infer_draft_yaml_with_connection_does_not_leak_kind(
     draft = await infer_draft(db, project=project_with_container)
     parsed = yaml.safe_load(draft.yaml_str)
     leaked = set(parsed.keys()) - ALLOWED_ROOT_KEYS
-    assert not leaked, (
-        f"connection hint leaked keys {sorted(leaked)}. YAML was:\n{draft.yaml_str}"
-    )
+    assert not leaked, f"connection hint leaked keys {sorted(leaked)}. YAML was:\n{draft.yaml_str}"
     for forbidden in ("from", "to", "kind"):
         assert forbidden not in parsed

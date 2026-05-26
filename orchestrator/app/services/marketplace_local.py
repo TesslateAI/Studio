@@ -34,11 +34,11 @@ import json
 import logging
 import os
 import tarfile
-import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, Iterable, Literal
+from typing import Any, Final, Literal
 from uuid import UUID
 
 import zstandard
@@ -309,9 +309,7 @@ def scan_kind(kind: str) -> list[LocalItemRecord]:
         else:
             manifest_path = slug_dir / _MANIFEST_FILENAME
             if not manifest_path.is_file():
-                logger.debug(
-                    "marketplace_local: skipping %s/%s (no manifest)", kind, slug
-                )
+                logger.debug("marketplace_local: skipping %s/%s (no manifest)", kind, slug)
                 continue
             manifest = _read_manifest(manifest_path)
             if manifest is None:
@@ -387,9 +385,7 @@ def get_bundle_envelope(kind: str, slug: str, version: str | None = None) -> Loc
         candidates = [
             (c.name, c)
             for c in slug_dir.iterdir()
-            if c.is_dir()
-            and _looks_like_version_dir(c.name)
-            and (c / _MANIFEST_FILENAME).is_file()
+            if c.is_dir() and _looks_like_version_dir(c.name) and (c / _MANIFEST_FILENAME).is_file()
         ]
         if candidates:
             candidates.sort(key=lambda t: t[0], reverse=True)
@@ -397,9 +393,7 @@ def get_bundle_envelope(kind: str, slug: str, version: str | None = None) -> Loc
         else:
             manifest = _read_manifest(slug_dir / _MANIFEST_FILENAME)
             if manifest is None:
-                raise FileNotFoundError(
-                    f"local marketplace item missing manifest: {kind}/{slug}"
-                )
+                raise FileNotFoundError(f"local marketplace item missing manifest: {kind}/{slug}")
             version = str(manifest.get("version") or "0.0.0")
             vdir = slug_dir
     else:
@@ -502,9 +496,7 @@ async def sync_local(
     # Resolve the local source row.
     if source_id is not None:
         source = (
-            await db.execute(
-                select(MarketplaceSource).where(MarketplaceSource.id == source_id)
-            )
+            await db.execute(select(MarketplaceSource).where(MarketplaceSource.id == source_id))
         ).scalar_one_or_none()
     else:
         source = (
@@ -569,9 +561,7 @@ async def sync_local(
             cached_rows = (await db.execute(stmt)).scalars().all()
             for row in cached_rows:
                 if (kind, row.slug) not in on_disk_keys:
-                    result.events.append(
-                        LocalChangeEvent(op="delete", kind=kind, slug=row.slug)
-                    )
+                    result.events.append(LocalChangeEvent(op="delete", kind=kind, slug=row.slug))
                     result.items_deleted += 1
 
         source.last_synced_at = datetime.now(UTC)
@@ -631,7 +621,7 @@ async def sync_local_loop(
                     return
             else:
                 await asyncio.sleep(interval_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
         except asyncio.CancelledError:
             return

@@ -13,6 +13,9 @@ Supported schema versions:
               Validated structurally only — code paths that need new fields
               read from the raw dict.
   * 2026-05 — App Runtime Contract. Typed mirror: :class:`AppManifest2026_05`.
+  * 2026-06 — container-shape additive over 2025-02 (compute.credentials[],
+              compute.containers[].readiness_port, state.mount_path).
+              Validated structurally only.
 """
 
 from __future__ import annotations
@@ -26,7 +29,8 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
-from pydantic import BaseModel, ValidationError as PydanticValidationError
+from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from .app_manifest import (
     MANIFEST_SCHEMA_VERSION,
@@ -39,12 +43,14 @@ from .template_render import RenderError, get_render_client
 _SCHEMA_PATH = Path(__file__).parent / "app_manifest_2025_01.schema.json"
 _SCHEMA_PATH_2025_02 = Path(__file__).parent / "app_manifest_2025_02.schema.json"
 _SCHEMA_PATH_2026_05 = Path(__file__).parent / "app_manifest_2026_05.schema.json"
+_SCHEMA_PATH_2026_06 = Path(__file__).parent / "app_manifest_2026_06.schema.json"
 
 # Registry of supported schema files keyed by manifest_schema_version.
 _SCHEMA_PATHS: dict[str, Path] = {
     "2025-01": _SCHEMA_PATH,
     "2025-02": _SCHEMA_PATH_2025_02,
     "2026-05": _SCHEMA_PATH_2026_05,
+    "2026-06": _SCHEMA_PATH_2026_06,
 }
 
 
@@ -85,11 +91,13 @@ def schema_hash(version: str = "2025-01") -> str:
 _validator = Draft202012Validator(load_schema("2025-01"))
 _validator_2025_02 = Draft202012Validator(load_schema("2025-02"))
 _validator_2026_05 = Draft202012Validator(load_schema("2026-05"))
+_validator_2026_06 = Draft202012Validator(load_schema("2026-06"))
 
 _VALIDATORS: dict[str, Any] = {
     "2025-01": _validator,
     "2025-02": _validator_2025_02,
     "2026-05": _validator_2026_05,
+    "2026-06": _validator_2026_06,
 }
 
 # Map of schema version -> typed Pydantic model. Versions absent from this
@@ -115,8 +123,7 @@ def parse(source: str | bytes | dict[str, Any]) -> ParsedManifest:
     if declared not in _VALIDATORS:
         supported = ", ".join(SUPPORTED_SCHEMA_VERSIONS)
         raise ManifestValidationError(
-            f"unsupported manifest_schema_version: {declared!r} "
-            f"(supported: {supported})"
+            f"unsupported manifest_schema_version: {declared!r} (supported: {supported})"
         )
 
     validator = _VALIDATORS[declared]
@@ -156,9 +163,7 @@ def _coerce_to_dict(source: str | bytes | dict[str, Any]) -> dict[str, Any]:
     # YAML is a superset of JSON; yaml.safe_load handles both.
     data = yaml.safe_load(source)
     if not isinstance(data, dict):
-        raise ManifestValidationError(
-            f"manifest root must be an object, got {type(data).__name__}"
-        )
+        raise ManifestValidationError(f"manifest root must be an object, got {type(data).__name__}")
     return data
 
 

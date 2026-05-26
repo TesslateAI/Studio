@@ -89,11 +89,16 @@ if kubectl get namespace cert-manager &>/dev/null; then
   else
     echo "⚠️  cert-manager namespace exists but deployment not found"
     echo "   Re-installing cert-manager..."
-    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.0/cert-manager.yaml
+    # v1.20.2: do NOT downgrade below v1.18. Cloudflare deprecated the
+    # per-record zone_id JSON field on 2024-11-30, breaking DNS-01
+    # cleanup in cert-manager <=v1.17 (renewals leak orphan TXT
+    # records, then wedge the issuance pipeline). Fixed upstream in v1.18+.
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
   fi
 else
   echo "⚠️  cert-manager not found. Installing..."
-  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.0/cert-manager.yaml
+  # v1.20.2 — see Cloudflare zone_id deprecation note above.
+  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
 
   echo "⏳ Waiting for cert-manager to be ready..."
 

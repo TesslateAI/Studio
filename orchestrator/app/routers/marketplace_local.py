@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..models import User
-from ..services import marketplace_installer, token_store
+from ..services import marketplace_installer
 from ..services.cloud_client import (
     CircuitOpenError,
     NotPairedError,
@@ -144,7 +144,9 @@ async def _fetch_cloud(kind: str) -> list[dict[str, Any]]:
     """Best-effort cloud fetch. Never raises; returns ``[]`` on failure."""
     try:
         client = await get_cloud_client()
-        resp = await client.get(f"/api/public/marketplace/{kind}s")
+        # Anonymous browse: the production marketplace catalog is public, so
+        # unpaired desktops can fetch it without a cloud token.
+        resp = await client.get(f"/api/marketplace/public/{kind}s", anonymous=True)
     except (NotPairedError, CircuitOpenError) as exc:
         logger.debug("marketplace_local: cloud fetch skipped (%s): %s", kind, exc)
         return []
@@ -218,7 +220,9 @@ async def list_items(
         raise HTTPException(status_code=400, detail=f"unknown kind: {kind}")
 
     settings = get_settings()
-    cloud_enabled = settings.pull_from_cloud and token_store.is_paired()
+    # The production marketplace catalog is public, so the cloud merge no
+    # longer requires a paired account — only that cloud pull is enabled.
+    cloud_enabled = settings.pull_from_cloud
 
     cached, fresh = _read_cache(kind)
     if cached is not None and fresh:

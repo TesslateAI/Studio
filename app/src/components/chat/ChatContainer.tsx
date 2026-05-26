@@ -95,6 +95,9 @@ interface ChatContainerProps {
   isDocked?: boolean; // When true, renders as docked panel instead of floating
   isPointerOverPreviewRef?: RefObject<boolean>; // Tracks if mouse is over preview iframe
   prefillMessage?: string | null;
+  /** Structured @-mentions to seed alongside ``prefillMessage`` (e.g. from
+   *  DataPanel's "Ask agent" button). See ChatInput.prefillMentions. */
+  prefillMentions?: ChatMention[] | null;
   onPrefillConsumed?: () => void;
   onExpandedChange?: (expanded: boolean) => void;
   // Lifecycle event callbacks
@@ -132,6 +135,7 @@ export function ChatContainer({
   isDocked = false,
   isPointerOverPreviewRef,
   prefillMessage,
+  prefillMentions,
   onPrefillConsumed,
   onExpandedChange,
   onIdleWarning,
@@ -2301,7 +2305,7 @@ export function ChatContainer({
           bg-[var(--bg)]
           ${
             isDocked
-              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border-hover)] overflow-hidden'
+              ? 'w-full h-full rounded-[var(--radius)] border border-[var(--border-hover)]'
               : `
               fixed
               z-40
@@ -2690,6 +2694,7 @@ export function ChatContainer({
             onPlanMode={() => setEditMode('plan')}
             isDocked={isDocked}
             prefillMessage={prefillMessage}
+            prefillMentions={prefillMentions}
             onPrefillConsumed={onPrefillConsumed}
             toolCallsCollapsed={toolCallsCollapsed}
             onToggleToolCallsCollapsed={() => setToolCallsCollapsed((prev) => !prev)}

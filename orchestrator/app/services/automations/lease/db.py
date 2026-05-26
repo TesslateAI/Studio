@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 
 from sqlalchemy import text
 
@@ -53,9 +52,7 @@ class DBLease(Lease):
     from any caller without requiring a session-context kwarg.
     """
 
-    async def acquire(
-        self, name: str, holder_id: str, ttl_seconds: int
-    ) -> Optional[LeaseToken]:
+    async def acquire(self, name: str, holder_id: str, ttl_seconds: int) -> LeaseToken | None:
         from app.database import AsyncSessionLocal
 
         now = _utcnow()
@@ -106,9 +103,7 @@ class DBLease(Lease):
                         },
                     )
                     await session.commit()
-                    return LeaseToken(
-                        name=name, holder=holder_id, term=1, expires_at=new_expiry
-                    )
+                    return LeaseToken(name=name, holder=holder_id, term=1, expires_at=new_expiry)
 
                 cur_holder = row[1]
                 cur_term = int(row[2] or 0)
@@ -165,7 +160,9 @@ class DBLease(Lease):
         from app.database import AsyncSessionLocal
 
         now = _utcnow()
-        new_expiry = now + (token.expires_at - now if token.expires_at > now else timedelta(seconds=60))
+        new_expiry = now + (
+            token.expires_at - now if token.expires_at > now else timedelta(seconds=60)
+        )
         # On renew we keep the same TTL window length the holder originally
         # asked for. We can't know that from the token alone, so default
         # to a 60s extension — the supervisor calls renew well before

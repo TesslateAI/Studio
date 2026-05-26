@@ -526,7 +526,7 @@ S3_BUCKET_NAME=tesslate-project-storage-prod
 S3_ENDPOINT_URL=https://s3.us-east-1.amazonaws.com
 
 # Hibernation
-K8S_HIBERNATION_IDLE_MINUTES=30
+K8S_HIBERNATION_IDLE_MINUTES=2880
 ```
 
 ## Next Steps

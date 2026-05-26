@@ -366,9 +366,28 @@ def upgrade() -> None:  # noqa: PLR0915 — every step is load-bearing
         # we rebuild atomically. The batch operation issues a single
         # CREATE TABLE _alembic_tmp ... + INSERT SELECT + DROP + RENAME
         # so the swap is still atomic from an outside observer's view.
+        # SQLite caveat: the FK on user_library_themes.theme_id was created
+        # inline in 0015 with no explicit name, and the unique constraint
+        # may not be reflected under its Postgres-convention name either.
+        # batch.drop_constraint(name) raises ValueError at context exit if
+        # the named constraint isn't in the reflected metadata, and the
+        # error is *not* catchable inside the with-block because batch ops
+        # are deferred. Probe inspector first and only request drops for
+        # names we can actually see.
+        inspector = sa.inspect(bind)
+        ult_fk_names = {
+            fk["name"] for fk in inspector.get_foreign_keys("user_library_themes")
+            if fk.get("name")
+        }
+        ult_uq_names = {
+            uq["name"] for uq in inspector.get_unique_constraints("user_library_themes")
+            if uq.get("name")
+        }
         with op.batch_alter_table("user_library_themes") as batch:
-            batch.drop_constraint(ULT_FK_NAME, type_="foreignkey")
-            batch.drop_constraint(ULT_UNIQUE_NAME, type_="unique")
+            if ULT_FK_NAME in ult_fk_names:
+                batch.drop_constraint(ULT_FK_NAME, type_="foreignkey")
+            if ULT_UNIQUE_NAME in ult_uq_names:
+                batch.drop_constraint(ULT_UNIQUE_NAME, type_="unique")
         with op.batch_alter_table("themes") as batch:
             for candidate in PARENT_FK_NAME_OLD_CANDIDATES:
                 try:
@@ -379,6 +398,10 @@ def upgrade() -> None:  # noqa: PLR0915 — every step is load-bearing
 
         # PK swap on themes via batch.
         with op.batch_alter_table("themes") as batch:
+            # Drop the old indexed-PK lookup index inside the batch so the
+            # rebuild doesn't carry it onto the renamed id_legacy column;
+            # we recreate it on the new UUID id below.
+            batch.drop_index("ix_themes_id")
             batch.alter_column("id", new_column_name="id_legacy")
             batch.alter_column("uuid", new_column_name="id")
             batch.create_primary_key("themes_pkey", ["id"])

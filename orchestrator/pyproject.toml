@@ -34,7 +34,15 @@ dependencies = [
     "aiohttp>=3.9.0",
     # SQLite async driver for desktop mode
     "aiosqlite>=0.21.0",
-    "kubernetes>=28.1.0",
+    # v33+ has a regression in `Configuration.auth_settings()` where it only
+    # registers a `BearerToken` auth entry when the token is in
+    # `api_key['BearerToken']`, but `load_incluster_config()` puts it under
+    # `api_key['authorization']`. The mismatch silently drops the
+    # `Authorization` header on every K8s call → 401 system:anonymous.
+    # The defensive backstop in `services/k8s_auth.py` covers in-process,
+    # but the upper bound prevents the bug from re-entering the image at
+    # `pip install` time. See orchestrator/app/services/k8s_auth.py.
+    "kubernetes>=28.1.0,<33.0.0",
     "docker>=7.0.0",
     "nanoid>=2.0.0",
     # Authentication
@@ -85,6 +93,7 @@ dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pytest-cov>=6.0.0",
+    "pytest-xdist>=3.6.0",
     "freezegun>=1.2.0",
     "pytest-timeout>=2.2.0",
     "respx>=0.22.0",
@@ -100,6 +109,7 @@ dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "pytest-mock>=3.15.1",
+    "pytest-xdist>=3.6.0",
     "respx>=0.23.1",
     "fakeredis>=2.35.0",
     "lupa>=2.8",
@@ -153,7 +163,7 @@ indent-style = "space"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-asyncio_default_test_loop_scope = "function"
+asyncio_default_test_loop_scope = "module"
 # Ignore broken test files referencing moved/deleted modules
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]

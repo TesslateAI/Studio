@@ -36,7 +36,7 @@ from ._helpers import (
     _serialize_session,
     _serialize_ticket,
 )
-from .auth import CloudTokenBody
+from .auth import CloudTokenBody, CloudUrlBody
 from .directories import DirectoryCreate
 from .handoff import HandoffPullBody
 from .projects import DesktopImportBody
@@ -76,6 +76,7 @@ __all__ = [
     "_serialize_directory",
     "_serialize_session",
     "CloudTokenBody",
+    "CloudUrlBody",
     "DirectoryCreate",
     "DesktopImportBody",
     "HandoffPullBody",

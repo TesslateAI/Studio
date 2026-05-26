@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -88,7 +88,7 @@ def test_list_and_approve_roundtrip(app_and_maker) -> None:
                 requires_approval_for=["deploy"],
             )
             t2.status = "awaiting_approval"
-            t2.updated_at = datetime.now(timezone.utc)
+            t2.updated_at = datetime.now(UTC)
             await s.commit()
             return t2.id
 

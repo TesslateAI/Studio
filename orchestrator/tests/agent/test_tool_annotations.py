@@ -31,7 +31,6 @@ Reference: Phase 1 §"Tool-state CI enforcement" in
 from __future__ import annotations
 
 import importlib
-import inspect
 import pkgutil
 
 import pytest

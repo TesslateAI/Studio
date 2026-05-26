@@ -37,7 +37,6 @@ from app.services.apps.action_dispatcher import (
     dispatch_app_action,
 )
 
-
 # ---------------------------------------------------------------------------
 # Same scripted-DB harness as test_action_dispatcher_tenancy
 # ---------------------------------------------------------------------------
@@ -92,16 +91,18 @@ class FakeDb:
 
 
 def _mk_instance(*, project_id=None, runtime_deployment_id=None) -> MagicMock:
-    inst = MagicMock(spec_set=[
-        "id",
-        "app_id",
-        "app_version_id",
-        "installer_user_id",
-        "project_id",
-        "primary_container_id",
-        "wallet_mix",
-        "runtime_deployment_id",
-    ])
+    inst = MagicMock(
+        spec_set=[
+            "id",
+            "app_id",
+            "app_version_id",
+            "installer_user_id",
+            "project_id",
+            "primary_container_id",
+            "wallet_mix",
+            "runtime_deployment_id",
+        ]
+    )
     inst.id = uuid4()
     inst.app_id = uuid4()
     inst.app_version_id = uuid4()
@@ -212,9 +213,7 @@ def _patch_wake(monkeypatch, *, ready: bool, reason: str = "ready"):
         result.approval_request_id = None
         return result
 
-    monkeypatch.setattr(
-        "app.services.automations.wake.provision_for_run", fake_wake
-    )
+    monkeypatch.setattr("app.services.automations.wake.provision_for_run", fake_wake)
     return captured
 
 

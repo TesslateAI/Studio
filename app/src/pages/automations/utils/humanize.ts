@@ -168,6 +168,9 @@ const TRIGGER_KIND_LABELS: Record<AutomationTriggerKind, string> = {
   webhook: 'When a URL receives data',
   manual: 'Only when I run it',
   app_invocation: 'When an app calls it',
+  slack_message: 'When a Slack message arrives',
+  email_inbound: 'When an email arrives',
+  workflow_event: 'When another workflow emits an event',
 };
 
 export function humanizeTriggerKind(kind: AutomationTriggerKind | string): string {
@@ -178,6 +181,10 @@ const ACTION_TYPE_LABELS: Record<AutomationActionType, string> = {
   'agent.run': 'Run an AI agent',
   'app.invoke': 'Use one of my apps',
   'gateway.send': 'Send a message',
+  deliver: 'Deliver to inbox / webhook',
+  sub_workflow: 'Run another automation',
+  branch: 'Branch on a condition',
+  parallel: 'Run steps in parallel',
 };
 
 export function humanizeActionType(type: AutomationActionType | string): string {

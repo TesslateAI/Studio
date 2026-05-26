@@ -8,6 +8,7 @@ Create Date: 2026-02-22
 
 import sqlalchemy as sa
 from alembic import op
+
 from app.types.guid import GUID
 
 # revision identifiers, used by Alembic.
@@ -53,7 +54,11 @@ def upgrade() -> None:
     op.add_column("themes", sa.Column("parent_theme_id", sa.String(100), nullable=True))
     with op.batch_alter_table("themes") as batch_op:
         batch_op.create_foreign_key(
-            "fk_themes_created_by_user_id", "users", ["created_by_user_id"], ["id"], ondelete="SET NULL"
+            "fk_themes_created_by_user_id",
+            "users",
+            ["created_by_user_id"],
+            ["id"],
+            ondelete="SET NULL",
         )
         batch_op.create_foreign_key(
             "fk_themes_parent_theme_id", "themes", ["parent_theme_id"], ["id"], ondelete="SET NULL"

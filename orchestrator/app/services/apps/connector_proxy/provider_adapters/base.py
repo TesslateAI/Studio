@@ -16,10 +16,10 @@ upstream — every endpoint must be explicitly allowlisted so a leak from
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Awaitable
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -71,9 +71,7 @@ class AllowedEndpoint:
             return False
         # Strip leading/trailing slashes so callers don't depend on prefix.
         request_segments = [s for s in path.strip("/").split("/") if s]
-        pattern_segments = [
-            s for s in self.path.strip("/").split("/") if s
-        ]
+        pattern_segments = [s for s in self.path.strip("/").split("/") if s]
         if len(request_segments) != len(pattern_segments):
             return False
         for req, pat in zip(request_segments, pattern_segments, strict=True):
@@ -103,9 +101,7 @@ class ProviderAdapter:
     refresh_hook: RefreshHook | None = field(default=None)
 
     def is_allowed(self, method: str, path: str) -> bool:
-        return any(
-            ep.matches(method, path) for ep in self.allowed_endpoints
-        )
+        return any(ep.matches(method, path) for ep in self.allowed_endpoints)
 
     def build_auth_header(self, token: str) -> tuple[str, str]:
         """Return the ``(header_name, header_value)`` to inject."""
@@ -117,9 +113,7 @@ class ProviderAdapter:
         if scheme is AuthScheme.BASIC:
             import base64
 
-            encoded = base64.b64encode(f"{token}:".encode("utf-8")).decode(
-                "ascii"
-            )
+            encoded = base64.b64encode(f"{token}:".encode()).decode("ascii")
             return self.auth_header_name, f"Basic {encoded}"
         if scheme is AuthScheme.API_KEY_HEADER:
             return self.auth_header_name, token
@@ -141,8 +135,7 @@ class AdapterRegistry:
     def register(self, adapter: ProviderAdapter) -> None:
         if adapter.connector_id in self._adapters:
             raise ValueError(
-                f"adapter for connector_id={adapter.connector_id!r} already "
-                "registered"
+                f"adapter for connector_id={adapter.connector_id!r} already registered"
             )
         self._adapters[adapter.connector_id] = adapter
 

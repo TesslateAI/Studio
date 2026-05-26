@@ -26,7 +26,6 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-
 # Stable UUIDs for the fake sources / apps so re-runs are deterministic.
 _OFFICIAL_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _ADMIN_TRUSTED_SOURCE_ID = uuid.UUID("aaaa1111-2222-3333-4444-555555555555")
@@ -272,9 +271,7 @@ def test_list_apps_without_source_filter_returns_all(authenticated_client):
     body = resp.json()
     assert "items" in body
 
-    filtered = client.get(
-        "/api/marketplace-apps?source=admin-trusted-test-w7&limit=500"
-    ).json()
+    filtered = client.get("/api/marketplace-apps?source=admin-trusted-test-w7&limit=500").json()
     assert len(body["items"]) >= len(filtered["items"])
 
 
@@ -288,9 +285,7 @@ def test_get_app_with_matching_source_filter_returns_row(authenticated_client):
     _seed_sync()
     client, _ = authenticated_client
 
-    resp = client.get(
-        f"/api/marketplace-apps/{_ADMIN_TRUSTED_APP_ID}?source=admin-trusted-test-w7"
-    )
+    resp = client.get(f"/api/marketplace-apps/{_ADMIN_TRUSTED_APP_ID}?source=admin-trusted-test-w7")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["id"] == str(_ADMIN_TRUSTED_APP_ID)
@@ -304,9 +299,7 @@ def test_get_app_with_mismatched_source_filter_returns_404(authenticated_client)
     client, _ = authenticated_client
 
     # The app belongs to admin-trusted but we request it scoped to private.
-    resp = client.get(
-        f"/api/marketplace-apps/{_ADMIN_TRUSTED_APP_ID}?source=private-test-w7"
-    )
+    resp = client.get(f"/api/marketplace-apps/{_ADMIN_TRUSTED_APP_ID}?source=private-test-w7")
     assert resp.status_code == 404, resp.text
 
 
@@ -338,8 +331,7 @@ def test_fork_app_from_admin_trusted_source_passes_install_guard(authenticated_c
         detail = resp.json().get("detail")
         assert not (
             isinstance(detail, dict)
-            and detail.get("error")
-            in ("install_blocked", "install_requires_confirmation")
+            and detail.get("error") in ("install_blocked", "install_requires_confirmation")
         ), f"install_guard rejected admin_trusted fork: {detail!r}"
 
 

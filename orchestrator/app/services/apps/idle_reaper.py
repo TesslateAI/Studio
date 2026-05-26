@@ -63,7 +63,7 @@ _NON_TERMINAL_RUN_STATUSES = frozenset(
     }
 )
 
-_DEFAULT_IDLE_TIMEOUT_SECONDS = 600
+_DEFAULT_IDLE_TIMEOUT_SECONDS = 172800  # 2 days
 _DEFAULT_LEASE_NAME = "controller"
 
 
@@ -107,9 +107,7 @@ async def _has_active_run(db: AsyncSession, deployment_id: UUID) -> bool:
     return (await db.execute(stmt)).first() is not None
 
 
-def _idle_timeout_for(
-    deployment: AppRuntimeDeployment, default_seconds: int
-) -> int:
+def _idle_timeout_for(deployment: AppRuntimeDeployment, default_seconds: int) -> int:
     if deployment.idle_timeout_seconds and deployment.idle_timeout_seconds > 0:
         return int(deployment.idle_timeout_seconds)
     return default_seconds

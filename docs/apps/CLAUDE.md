@@ -33,12 +33,43 @@ Tesslate Apps turns Studio projects into distributable marketplace apps. A creat
 
 ## Manifest Schemas
 
-| File | Schema Version |
-|------|---------------|
-| `services/apps/app_manifest_2025_01.schema.json` | `2025-01` |
-| `services/apps/app_manifest_2025_02.schema.json` | `2025-02` |
+The parser accepts four schemas; pick by **app shape**, not by date.
 
-Key manifest sections: `meta`, `compatibility`, `surfaces`, `compute`, `state`, `connectors`, `billing`, `schedules`, `source_visibility`, `migrations`.
+| File | Schema Version | Shape | Use for |
+|------|---------------|-------|---------|
+| `services/apps/app_manifest_2025_01.schema.json` | `2025-01` | container | Legacy maintenance only |
+| `services/apps/app_manifest_2025_02.schema.json` | `2025-02` | container | Predecessor of 2026-06 |
+| `services/apps/app_manifest_2026_05.schema.json` | `2026-05` | action | New typed-RPC apps (App Runtime Contract) |
+| `services/apps/app_manifest_2026_06.schema.json` | `2026-06` | container | New container-shape apps (long-running pods, PVC state, surfaces) |
+
+**Container-shape** apps declare `compute.containers[]` + `compute.connections[]` + `state` + `surfaces[]`. Long-running pods, PVC-backed state, multi-service stacks (deer-flow / mirofish / crm-with-postgres). Manifest sections: `app`, `compatibility`, `surfaces`, `compute`, `state`, `connectors`, `billing`, `listing`, `schedules`, `source_visibility`, `migrations`.
+
+**Action-shape** apps declare `runtime` + `actions[]` + `views[]` + `data_resources[]` + `dependencies[]` + `automation_templates[]` + `connectors[]`. No persistent pods; the platform dispatches typed actions to ephemeral handlers and bills per call. Manifest sections: `app`, `runtime`, `billing`, `actions`, `views`, `data_resources`, `dependencies`, `connectors`, `automation_templates`, `surfaces`.
+
+Top-level `additionalProperties: false` on every schema rejects mixing the two shapes. See `docs/specs/README.md` for the full version table and `.agents/skills/build-tesslate-app/SKILL.md` for an authoring decision tree.
+
+### Container-shape: install-time user credentials (2026-06)
+
+Apps that need a user-supplied secret at install time (third-party API keys, etc.) declare `compute.credentials[]`:
+
+```json
+"compute": {
+  "containers": [{ "name": "web", "env": { "ZEP_API_KEY": "${secret:zep-credentials/api_key}" } }],
+  "credentials": [
+    { "secret_ref": "zep-credentials/api_key", "label": "Zep API Key", "required": true }
+  ]
+}
+```
+
+Flow: install modal renders password inputs and gates the install button on required fields → install request carries `user_credentials: { "<secret_name>/<key>": "<value>" }` → `routers/app_installs.py::_provision_user_credentials` upserts platform-namespace K8s Secrets → `secret_propagator.py` copies them into the project namespace at start time → `env_resolver.resolve_env_for_pod()` resolves the `${secret:...}` refs in container env (compound values use synthetic `__tsecret_*` `secretKeyRef` + K8s `$(VAR)` substitution; secret never appears in plaintext in pod spec). K8s mode only.
+
+### Container-shape: decoupled readiness port (2026-06)
+
+When an in-pod reverse proxy fronts the app on a different port than the dev server, set `compute.containers[].readiness_port`. The K8s readiness probe + Service + Ingress all use this port instead of `ports[0]`. Stashed inside `Container.resources` JSON to avoid a DB migration; extracted by `compute_manager.py` and forwarded to `helpers.create_v2_dev_deployment()`. Without it, the iframe preview and health checks hit the dev server directly and miss the proxy's auth/routing logic.
+
+### Container security context (orthogonal to manifest)
+
+For `source_strategy=image` containers, the platform runs the pod as the image's baked-in user (often root). For bundle-strategy containers, the platform locks the pod to uid 1000. The pod always has `fsGroup=1000` so the per-install PVC is group-writable. Manifest authors picking image-strategy own the runtime user — handle file ownership in startup commands if the upstream image bakes files as root (e.g. mirofish's `chmod -R u+w /app/backend/.venv`).
 
 ## Routers (orchestrator/app/routers/)
 

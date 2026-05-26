@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -57,7 +57,7 @@ def test_0050_creates_tables_and_column(sqlite_db: str) -> None:
         ticket_id = str(uuid4())
         budget_id = str(uuid4())
         agent_id = str(uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         conn.execute(
             "INSERT INTO agent_tasks (id, ref_id, project_id, status, created_at)"

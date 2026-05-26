@@ -98,7 +98,16 @@ class Settings(BaseSettings):
     # Desktop: cloud companion endpoint. The desktop sidecar talks to this URL
     # via services.cloud_client.CloudClient for marketplace pulls, model proxy,
     # sync, etc. Bearer token is sourced from services.token_store.
-    tesslate_cloud_url: str = "https://opensail.tesslate.com"
+    tesslate_cloud_url: str = "https://your-domain.com"
+
+    # ── Public desktop-release surface (see routers/desktop_releases.py) ──
+    # The `/desktop/releases/{latest.json,<filename>}` routes proxy to the
+    # configured GitHub repo's releases. The Tauri updater + install
+    # scripts hard-code `https://<app_base_url>/desktop/releases/*` so the
+    # canonical URL is stable across CI/CDN changes.
+    desktop_releases_github_repo: str = "TesslateAI/OpenSail"
+    desktop_releases_github_token: str = ""
+    desktop_releases_tag_prefix: str = "desktop-v"
 
     # Desktop marketplace: when True and paired, /api/desktop/marketplace/items
     # merges cloud catalog entries with local installed items. Toggle off to
@@ -154,9 +163,7 @@ class Settings(BaseSettings):
         """
         if self.is_connector_proxy_dedicated:
             return "http://opensail-runtime:8400"
-        return (
-            "http://tesslate-backend-service:8000/api/v1/connector-proxy"
-        )
+        return "http://tesslate-backend-service:8000/api/v1/connector-proxy"
 
     # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_level: str = "INFO"
@@ -185,11 +192,11 @@ class Settings(BaseSettings):
     # Application domain (no protocol, just domain)
     # Used for subdomain routing and CORS wildcard pattern matching
     # Format: "subdomain.domain.com" (no protocol, no wildcards)
-    # Examples: localhost (local), studio-demo.tesslate.com (production)
+    # Examples: localhost (local), your-domain.com (production)
     app_domain: str = "localhost"
 
     # Application base URL (full URL with protocol)
-    # Format: "https://studio-demo.tesslate.com" or "http://localhost"
+    # Format: "https://your-domain.com" or "http://localhost"
     # Used for OAuth redirects and other absolute URL generation
     app_base_url: str = ""  # Will default to http://app_domain if not set
 
@@ -296,6 +303,12 @@ class Settings(BaseSettings):
     # CSRF Protection
     csrf_secret_key: str = ""  # Separate secret for CSRF tokens (defaults to secret_key if not set)
     csrf_token_max_age: int = 86400  # CSRF token expiration in seconds (default: 24 hours)
+
+    # Phase E (#474) inbound trigger signing migrated to per-trigger
+    # secrets stored in ``trigger.config["webhook_secrets"][]`` so they
+    # share the rotation-friendly model that develop's per-automation
+    # webhook uses (see services/triggers/webhook_hmac.py). The global
+    # env-var secrets that lived here are intentionally removed.
 
     # Cookie Security Settings
     cookie_secure: bool = True  # HTTPS-only cookies; set to False for local dev without TLS
@@ -508,7 +521,9 @@ class Settings(BaseSettings):
     k8s_snapshot_ready_timeout_seconds: int = (
         300  # EBS/CSI snapshot readiness can exceed 90s under load; keep hibernation reliable
     )
-    k8s_hibernation_idle_minutes: int = 10  # Hibernate pods after X minutes of inactivity
+    k8s_hibernation_idle_minutes: int = (
+        2880  # Hibernate pods after X minutes of inactivity (2 days)
+    )
 
     # ==========================================================================
     # Kubernetes Storage Settings
@@ -692,7 +707,7 @@ class Settings(BaseSettings):
         2  # How often to run cleanup (default: every 2 minutes)
     )
     container_cleanup_tier1_idle_minutes: int = (
-        15  # Tier 1: Pause containers idle for X minutes (default: 15)
+        2880  # Tier 1: Pause containers idle for X minutes (default: 2880 = 2 days)
     )
     container_cleanup_tier2_paused_hours: int = (
         24  # Tier 2: Remove containers paused for X hours (default: 24)
@@ -705,6 +720,21 @@ class Settings(BaseSettings):
         ""  # Fernet key for channel credentials. Uses deployment_encryption_key if empty
     )
     channel_webhook_rate_limit: int = 60  # Max webhook calls per config per minute
+
+    # ==========================================================================
+    # Workspace Data Store — public Data API (/api/data/v1/*)
+    # ==========================================================================
+    # The Data API is internet-exposed (deployed user frontends call it across
+    # arbitrary origins with a per-project Bearer key). Two rate-limit tiers:
+    # per-IP catches bad-key spammers before any DB hit; per-key catches misuse
+    # of a leaked anon key without taking down the whole project.
+    #
+    # Defaults: 600/min per IP (10 RPS sustained), 1200/min per key (20 RPS).
+    # Tune via env vars for high-traffic projects without a code change.
+    wsdata_api_per_ip_capacity: int = 600
+    wsdata_api_per_ip_window_seconds: int = 60
+    wsdata_api_per_key_capacity: int = 1200
+    wsdata_api_per_key_window_seconds: int = 60
 
     @property
     def get_channel_encryption_key(self) -> str:

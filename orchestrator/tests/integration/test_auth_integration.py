@@ -140,7 +140,8 @@ def test_authenticated_users_me(authenticated_client):
     assert data["id"] == user_data["id"]
     assert data["email"] == user_data["email"]
     assert "slug" in data
-    assert "subscription_tier" in data
+    # subscription_tier moved from User to Team in the team-scoped billing
+    # rebase; surface it via /api/teams/{id} or /api/billing instead.
 
 
 @pytest.mark.integration

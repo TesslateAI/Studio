@@ -30,7 +30,6 @@ from app.services.install_extract import (
     safe_extract,
 )
 
-
 # ---------------------------------------------------------------------------
 # Corpus directory
 # ---------------------------------------------------------------------------
@@ -175,6 +174,7 @@ def tar_bomb_archive() -> Path:
         info.type = tarfile.REGTYPE
         info.mode = 0o644
         info.size = declared_size
+
         # Stream zeros into the tar. Use ``addfile`` with a streaming
         # reader so we don't allocate 2 GB in memory.
         class _ZeroReader(io.RawIOBase):
