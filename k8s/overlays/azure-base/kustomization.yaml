@@ -1,0 +1,16 @@
+# Azure AKS Base Overlay (shared across beta/production)
+# Do not deploy directly — use azure-beta or azure-production
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tesslate
+
+resources:
+  - ../../base
+  - storage-class.yaml
+
+patches:
+  - path: frontend-patch.yaml
+  - path: backend-patch.yaml
+  - path: worker-patch.yaml
+  - path: marketplace-patch.yaml

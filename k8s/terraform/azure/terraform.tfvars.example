@@ -1,0 +1,202 @@
+# =============================================================================
+# OpenSail - Azure AKS Terraform Variables
+# =============================================================================
+# Copy to terraform.{environment}.tfvars and fill in your values.
+# DO NOT commit terraform.*.tfvars to version control!
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# General Settings
+# -----------------------------------------------------------------------------
+project_name = "tesslate"
+environment  = "production"
+azure_region = "eastus"
+
+# -----------------------------------------------------------------------------
+# Domain Configuration (REQUIRED)
+# -----------------------------------------------------------------------------
+domain_name = "example.com"
+# wildcard_domain = ""
+
+# -----------------------------------------------------------------------------
+# Cloudflare Configuration (REQUIRED)
+# -----------------------------------------------------------------------------
+# Token permissions: Zone:DNS:Edit + Zone:Zone:Read
+cloudflare_api_token = "your-cloudflare-api-token"
+cloudflare_zone_id   = ""
+# cloudflare_zone_name = ""
+
+# -----------------------------------------------------------------------------
+# VNet Configuration
+# -----------------------------------------------------------------------------
+vnet_cidr             = "10.0.0.0/16"
+aks_subnet_cidr       = "10.0.0.0/20"
+postgres_subnet_cidr  = "10.0.16.0/24"
+redis_subnet_cidr     = "10.0.17.0/24"
+
+# -----------------------------------------------------------------------------
+# AKS Configuration
+# -----------------------------------------------------------------------------
+aks_cluster_version        = "1.33"
+aks_system_node_vm_size    = "Standard_D2s_v5"
+aks_system_node_count      = 2
+aks_user_node_vm_size      = "Standard_D4s_v5"
+aks_user_node_count        = 2
+aks_user_node_min_count    = 1
+aks_user_node_max_count    = 5
+aks_user_node_disk_size_gb = 100
+aks_spot_node_vm_size      = "Standard_D4s_v5"
+aks_spot_node_count        = 1
+aks_spot_node_max_count    = 10
+aks_spot_max_price         = -1   # -1 = pay up to on-demand
+
+# -----------------------------------------------------------------------------
+# Storage Account Configuration
+# -----------------------------------------------------------------------------
+storage_account_tier        = "Standard"
+storage_account_replication = "LRS"  # LRS (cheap) / ZRS (recommended prod) / GRS (cross-region DR)
+storage_force_destroy       = false
+
+# -----------------------------------------------------------------------------
+# Database Configuration (managed Postgres Flexible Server)
+# -----------------------------------------------------------------------------
+create_postgres        = false  # true = Azure Postgres, false = K8s pod
+postgres_sku_name      = "B_Standard_B2ms"
+postgres_version       = "15"
+postgres_storage_mb    = 32768
+postgres_database_name = "tesslate"
+postgres_admin_username = "tesslate_admin"
+
+# -----------------------------------------------------------------------------
+# Application Secrets (REQUIRED)
+# -----------------------------------------------------------------------------
+# Generate with: openssl rand -hex 32
+postgres_password    = "your-secure-postgres-password"
+app_secret_key       = "your-app-secret-key"
+internal_api_secret  = "your-internal-api-secret"
+
+# -----------------------------------------------------------------------------
+# LiteLLM Configuration (REQUIRED for AI features)
+# -----------------------------------------------------------------------------
+litellm_master_key     = "your-litellm-master-key"
+litellm_default_models = "claude-sonnet-4.6,claude-opus-4.6"
+
+litellm_create_postgres   = false
+litellm_postgres_sku_name = "B_Standard_B1ms"
+litellm_db_password       = "your-litellm-db-password"
+litellm_image_tag         = "main-v1.81.9-stable"
+litellm_public_access     = false
+
+# -----------------------------------------------------------------------------
+# AI Provider Keys
+# -----------------------------------------------------------------------------
+bedrock_api_key    = "your-bedrock-api-key"
+bedrock_aws_region = "us-east-1"
+
+vertex_project     = ""
+vertex_location    = "us-central1"
+vertex_credentials = ""
+
+nanogpt_api_key    = ""
+
+azure_api_key      = ""
+azure_api_base     = ""
+azure_api_version  = "2024-12-01-preview"
+
+# -----------------------------------------------------------------------------
+# OAuth Configuration (Optional)
+# -----------------------------------------------------------------------------
+google_client_id     = ""
+google_client_secret = ""
+google_oauth_enabled = false
+
+github_client_id     = ""
+github_client_secret = ""
+github_oauth_enabled = false
+
+# -----------------------------------------------------------------------------
+# Deployment Provider OAuth (Optional)
+# -----------------------------------------------------------------------------
+vercel_client_id     = ""
+vercel_client_secret = ""
+netlify_client_id    = ""
+netlify_client_secret = ""
+
+deployment_encryption_key = ""
+
+# -----------------------------------------------------------------------------
+# MCP Connector OAuth Apps (Optional)
+# -----------------------------------------------------------------------------
+mcp_oauth_app_github_client_id     = ""
+mcp_oauth_app_github_client_secret = ""
+mcp_oauth_app_slack_client_id      = ""
+mcp_oauth_app_slack_client_secret  = ""
+
+# -----------------------------------------------------------------------------
+# Stripe Configuration (Optional)
+# -----------------------------------------------------------------------------
+stripe_secret_key            = ""
+stripe_publishable_key       = ""
+stripe_webhook_secret        = ""
+stripe_connect_client_id     = ""
+stripe_basic_price_id        = ""
+stripe_pro_price_id          = ""
+stripe_ultra_price_id        = ""
+stripe_basic_annual_price_id = ""
+stripe_pro_annual_price_id   = ""
+stripe_ultra_annual_price_id = ""
+
+# -----------------------------------------------------------------------------
+# SMTP Configuration (Optional - Email / 2FA)
+# -----------------------------------------------------------------------------
+smtp_host         = ""
+smtp_port         = 587
+smtp_username     = ""
+smtp_password     = ""
+smtp_use_tls      = true
+smtp_sender_email = ""
+two_fa_enabled    = false
+
+# -----------------------------------------------------------------------------
+# Email Compliance (Optional)
+# -----------------------------------------------------------------------------
+allowed_email_domains = ""
+blocked_email_domains = ""
+
+# -----------------------------------------------------------------------------
+# Feature Flags
+# -----------------------------------------------------------------------------
+enable_cluster_autoscaler = true
+enable_metrics_server     = true
+enable_external_dns       = true
+enable_cert_manager       = true
+
+# -----------------------------------------------------------------------------
+# Redis Configuration (Azure Cache for Redis)
+# -----------------------------------------------------------------------------
+create_redis    = false   # true = managed Redis, false = K8s pod
+redis_sku       = "Standard"   # Basic / Standard / Premium
+redis_capacity  = 0       # 0 = C0 (250MB), 1 = C1 (1GB), ...
+
+# -----------------------------------------------------------------------------
+# Team Access (AAD groups for AKS RBAC)
+# -----------------------------------------------------------------------------
+# Required: at least one AAD group object ID for cluster-admin
+aks_admin_group_object_ids = [
+  "00000000-0000-0000-0000-000000000000",  # replace with the prod admins AAD group object id
+]
+aks_deployer_group_object_ids = []
+aks_observer_group_object_ids = []
+aks_debugger_group_object_ids = []
+
+# Key Vault Secrets Officer — engineers who can upload/download the tfvars
+# backup via scripts/terraform/azure-secrets.sh. AAD user OR group object ids.
+# AKS admin group above also gets Key Vault Secrets Officer automatically;
+# only add explicit users here who are NOT in that group.
+kv_secrets_officer_object_ids = []
+
+# -----------------------------------------------------------------------------
+# Replicas
+# -----------------------------------------------------------------------------
+nginx_ingress_replicas = 2
+coredns_replicas       = 2

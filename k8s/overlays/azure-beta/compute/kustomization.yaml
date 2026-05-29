@@ -1,0 +1,21 @@
+# Azure AKS Beta Overlay for Compute Infrastructure
+# Includes: btrfs CSI driver (node DaemonSet) + Volume Hub (CSI controller + orchestrator)
+# Deploy with: ./scripts/azure-deploy.sh deploy-compute beta
+# SA + config Secret are created by terraform (kubernetes.tf) — not kustomize
+#
+# REGISTRY: replace `tesslateacr` below with var.acr_name from
+# terraform/azure/terraform.beta.tfvars.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../../services/btrfs-csi/deploy
+  - ../../../../k8s/base/volume-hub
+
+images:
+  - name: tesslate-btrfs-csi
+    newName: tesslateacr.azurecr.io/tesslate-btrfs-csi
+    newTag: beta
+  - name: tesslate-devserver
+    newName: tesslateacr.azurecr.io/tesslate-devserver
+    newTag: beta
