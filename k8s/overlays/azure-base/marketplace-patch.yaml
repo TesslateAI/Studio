@@ -1,0 +1,26 @@
+# Marketplace deployment patch for Azure AKS
+# - Forces imagePullPolicy: Always on every container so the mutable
+#   :production / :beta tags actually re-pull on rollout.
+# - Adds Workload Identity opt-in so the marketplace pod (which reuses
+#   tesslate-backend-sa) can write bundle archives to its dedicated
+#   Blob container via federated credentials.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-marketplace
+  namespace: tesslate
+spec:
+  template:
+    metadata:
+      labels:
+        azure.workload.identity/use: "true"
+    spec:
+      containers:
+        - name: marketplace
+          imagePullPolicy: Always
+      initContainers:
+        - name: alembic-migrate
+          imagePullPolicy: Always
+        # create-database uses the upstream postgres:16-alpine image
+        # which is content-addressed enough that IfNotPresent is fine —
+        # not patched here.

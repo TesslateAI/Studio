@@ -1,0 +1,36 @@
+# Azure AKS Production Overlay
+# Deploy with: kubectl apply -k k8s/overlays/azure-production
+#
+# REGISTRY: replace `tesslateacr` below with the var.acr_name from
+# terraform/azure/terraform.production.tfvars.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../azure-base
+
+patches:
+  - path: replicas-patch.yaml
+  - path: env-patch.yaml
+
+images:
+  - name: tesslate-backend
+    newName: tesslateacr.azurecr.io/tesslate-backend
+    newTag: production
+  - name: tesslate-frontend
+    newName: tesslateacr.azurecr.io/tesslate-frontend
+    newTag: production
+  - name: tesslate-devserver
+    newName: tesslateacr.azurecr.io/tesslate-devserver
+    newTag: production
+  - name: tesslate-ast
+    newName: tesslateacr.azurecr.io/tesslate-ast
+    newTag: production
+  - name: tesslate-marketplace
+    newName: tesslateacr.azurecr.io/tesslate-marketplace
+    newTag: production
+
+labels:
+  - pairs:
+      environment: production
+    includeSelectors: false

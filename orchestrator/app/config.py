@@ -838,10 +838,12 @@ class Settings(BaseSettings):
 
     # Tesslate Apps — registry prefix applied to short image names in app
     # manifests (e.g. "tesslate-markitdown:latest"). Empty on minikube where
-    # images live in the node's docker daemon directly. On AWS/other clouds
-    # set to e.g. "<ECR_REGISTRY>" so the
-    # cluster can pull from ECR. Images that already contain "/" (registry
-    # path) are left untouched.
+    # images live in the node's docker daemon directly. On hosted clouds
+    # set to the registry host so the cluster can pull short-named images:
+    #   AWS EKS:   "<ECR_REGISTRY>"
+    #   Azure AKS: "<acr-name>.azurecr.io"
+    #   GKE:       "<region>-docker.pkg.dev/<project>/tesslate"
+    # Images that already contain "/" (registry path) are left untouched.
     app_image_registry_prefix: str = ""
 
     # ==========================================================================
@@ -861,10 +863,13 @@ class Settings(BaseSettings):
     # (deterministic-shape URL pointed at non-resolving DNS). Default off.
     managed_postgres_allow_stub: bool = False
 
-    # Object storage admin credentials. Endpoint may be an S3-compatible
-    # MinIO URL (dev) or empty for AWS S3 default. Region is required for
-    # both. The admin key/secret are used to create per-app buckets +
-    # scoped IAM users; they are NOT propagated into app pods.
+    # Object storage admin credentials. Endpoint may be:
+    #   - empty                                 → AWS S3 default (IRSA / static creds)
+    #   - "https://<account>.blob.core.windows.net" → Azure Blob S3-compatible
+    #   - any S3-compatible URL (MinIO dev, R2, etc.)
+    # Region is required for all of the above. The admin key/secret are used
+    # to create per-app buckets/containers + scoped IAM/RBAC; they are NOT
+    # propagated into app pods.
     managed_object_storage_endpoint: str = ""
     managed_object_storage_region: str = ""
     managed_object_storage_admin_key_id: str = ""

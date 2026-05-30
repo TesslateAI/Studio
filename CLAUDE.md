@@ -378,7 +378,11 @@ Load the most specific CLAUDE.md first, then follow its "Related Contexts" links
 |------|--------|----------|
 | Desktop | `DEPLOYMENT_MODE=desktop` | Tauri app — SQLite + local queue, per-project `runtime` column (local/docker/k8s-remote) |
 | Docker | `DEPLOYMENT_MODE=docker` | Local dev — Traefik routes `*.localhost` |
-| Kubernetes | `DEPLOYMENT_MODE=kubernetes` | Minikube / EKS — per-project namespaces, btrfs CSI + Volume Hub, NGINX Ingress |
+| Kubernetes | `DEPLOYMENT_MODE=kubernetes` | Minikube / EKS / AKS — per-project namespaces, btrfs CSI + Volume Hub, NGINX Ingress |
+
+Hosted cloud overlays:
+- **AWS EKS** — `k8s/overlays/aws-{base,beta,production}` + `k8s/terraform/aws/` + `scripts/aws-deploy.sh`
+- **Azure AKS** — `k8s/overlays/azure-{base,beta,production}` + `k8s/terraform/azure/` + `scripts/azure-deploy.sh` (full feature parity with AWS — AKS + ACR + Storage Account + Workload Identity + Postgres Flexible Server + Azure Cache for Redis)
 
 Detailed mode architecture → [docs/architecture/CLAUDE.md](docs/architecture/CLAUDE.md). K8s config settings, minikube↔prod mapping, Volume Hub + btrfs CSI, and AWS overlay conventions → [docs/infrastructure/kubernetes/CLAUDE.md](docs/infrastructure/kubernetes/CLAUDE.md).
 

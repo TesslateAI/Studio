@@ -335,3 +335,47 @@ spec:
   egress:
   - to:
     - namespaceSelector: {}
+
+---
+# Allow marketplace egress — the marketplace pod connects to:
+#   - postgres in the tesslate ns (psql for create-database init container,
+#     then asyncpg for the running service)
+#   - S3-compatible blob storage for bundle archives (443 external)
+#   - the orchestrator's official-marketplace endpoint (in-cluster)
+#
+# Without this policy, default-deny-egress (declared earlier in this file)
+# drops every outbound packet, so the create-database init container hangs
+# on the psql connect and the pod can never finish PodInitializing.
+#
+# Mirrors allow-backend-egress's "any namespace + external 80/443" shape
+# rather than allow-snapshot-cleanup's "namespaces only" — marketplace
+# needs internet for blob uploads.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-marketplace-egress
+  namespace: tesslate
+spec:
+  podSelector:
+    matchLabels:
+      app: tesslate-marketplace
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector: {}
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.169.254/32  # Block cloud IMDS — prevents credential theft
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 9000  # MinIO / S3-compatible object store

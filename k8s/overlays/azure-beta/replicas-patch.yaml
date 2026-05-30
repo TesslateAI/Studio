@@ -1,0 +1,36 @@
+# Replica counts and resource limits for beta environment.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+  namespace: tesslate
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: backend
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-frontend
+  namespace: tesslate
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-worker
+  namespace: tesslate
+spec:
+  replicas: 1

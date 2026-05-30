@@ -1,0 +1,38 @@
+# Azure AKS Beta Overlay
+# Deploy with: kubectl apply -k k8s/overlays/azure-beta
+#
+# REGISTRY: replace `tesslateacr` below with the var.acr_name from
+# terraform/azure/terraform.beta.tfvars. The orchestrator + worker pods
+# also read APP_IMAGE_REGISTRY_PREFIX from tesslate-app-secrets — keep
+# both in sync.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../azure-base
+
+patches:
+  - path: replicas-patch.yaml
+  - path: env-patch.yaml
+
+images:
+  - name: tesslate-backend
+    newName: tesslateacr.azurecr.io/tesslate-backend
+    newTag: beta
+  - name: tesslate-frontend
+    newName: tesslateacr.azurecr.io/tesslate-frontend
+    newTag: beta
+  - name: tesslate-devserver
+    newName: tesslateacr.azurecr.io/tesslate-devserver
+    newTag: beta
+  - name: tesslate-ast
+    newName: tesslateacr.azurecr.io/tesslate-ast
+    newTag: beta
+  - name: tesslate-marketplace
+    newName: tesslateacr.azurecr.io/tesslate-marketplace
+    newTag: beta
+
+labels:
+  - pairs:
+      environment: beta
+    includeSelectors: false

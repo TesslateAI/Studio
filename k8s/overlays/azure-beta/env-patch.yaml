@@ -1,0 +1,57 @@
+# Set DEPLOYMENT_ENV for feature flag overlay selection
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+  namespace: tesslate
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend
+          env:
+            - name: DEPLOYMENT_ENV
+              value: "beta"
+            # Use the standalone opensail-runtime pod for connector-proxy
+            # traffic instead of the embedded in-process router.
+            - name: CONNECTOR_PROXY_MODE
+              value: "dedicated"
+---
+# Marketplace pod — beta uses a staging-like OPENSAIL_ENV, disables
+# on-startup seed loading so a pod restart never re-seeds the live
+# catalog.
+#
+# Bundle storage backend: INHERITS the base default `BUNDLE_STORAGE_BACKEND
+# = local` — bundles land on the marketplace-data PVC at /data/bundles.
+# Unlike AWS (where boto3 + IRSA against real S3 works), Azure Blob is not
+# S3-protocol compatible AND boto3 doesn't understand Azure Workload
+# Identity, so the AWS pattern (s3 backend + IRSA-shaped creds) cannot
+# work here. Local-PVC matches what minikube does and needs no external
+# object storage. Volume sizing comes from the base PVC (5Gi); bump it in
+# a separate beta PVC patch if bundle volume grows.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-marketplace
+  namespace: tesslate
+spec:
+  template:
+    spec:
+      containers:
+        - name: marketplace
+          env:
+            - name: OPENSAIL_ENV
+              value: "staging"
+            - name: HUB_DISPLAY_NAME
+              value: "Tesslate Beta"
+            - name: MARKETPLACE_LOAD_SEEDS_ON_STARTUP
+              value: "false"
+      initContainers:
+        # IMPORTANT: list both initContainers here in execution order.
+        # Kustomize's strategic merge of initContainers reorders by the
+        # patch sequence; create-database must run before alembic-migrate.
+        - name: create-database
+        - name: alembic-migrate
+          env:
+            - name: OPENSAIL_ENV
+              value: "staging"

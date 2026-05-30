@@ -5,6 +5,8 @@
 
 This plan is **product- and experience-focused**. It deliberately does **not** re-test things already covered by the automated suites (auth gates, route protection, token refresh, 2FA mechanics, RBAC enforcement, webhook signature checks, API-key scope rejection, generic form validation). Those live in `docs/testing/README.md`. Here we test the **value loop**: creating projects, the AI agent building real software, running and previewing apps, the marketplace, the Tesslate App economy, deployment, collaboration, and billing.
 
+**New tester?** If you need to run the platform yourself, start with the general [dev environment onboarding](../../ONBOARDING.md) - it covers the dev tools and Minikube setup that apply to everyone working on OpenSail. Then read this README's **Test environment & accounts** section and [PROCEDURE.md](PROCEDURE.md) for the testing workflow.
+
 ---
 
 ## How to use this plan

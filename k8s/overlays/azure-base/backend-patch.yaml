@@ -1,0 +1,125 @@
+# Azure AKS Backend Deployment Patch (Shared)
+#
+# Mirrors aws-base/backend-patch.yaml. Only Azure-specific changes:
+#   - SA `tesslate-backend-sa` carries the Workload Identity annotation
+#     (added by terraform/azure/kubernetes.tf), not IRSA. The Pod label
+#     `azure.workload.identity/use: "true"` opts the pod into the
+#     workload-identity webhook (mutates ENV to inject the AAD token).
+#   - APP_IMAGE_REGISTRY_PREFIX points at the ACR host instead of ECR.
+#     Templated in terraform/azure/kubernetes.tf so the registry-name
+#     stays the single source of truth.
+#   - S3_ENDPOINT_URL points at the Azure Blob Storage S3-compatible
+#     endpoint baked into the s3-credentials Secret. Code that reads
+#     S3_ENDPOINT_URL=="" (empty = native AWS) treats Azure as a normal
+#     S3-compatible endpoint — no per-cloud branching in the app code.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tesslate-backend
+  namespace: tesslate
+spec:
+  template:
+    metadata:
+      labels:
+        # Workload Identity opt-in: mutating webhook injects
+        # AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_FEDERATED_TOKEN_FILE
+        # so the pod can request AAD tokens without static secrets.
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: tesslate-backend-sa
+      containers:
+        - name: backend
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: tesslate-app-secrets
+            - secretRef:
+                name: postgres-secret
+            - secretRef:
+                name: s3-credentials
+          env:
+            - $patch: replace
+            - name: DEPLOYMENT_MODE
+              value: "kubernetes"
+            - name: KUBERNETES_NAMESPACE
+              value: "tesslate"
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            # JWT
+            - name: ALGORITHM
+              value: "HS256"
+            - name: ACCESS_TOKEN_EXPIRE_MINUTES
+              value: "30"
+            # Kubernetes settings
+            - name: K8S_NAMESPACE_PER_PROJECT
+              value: "true"
+            - name: K8S_ENABLE_NETWORK_POLICIES
+              value: "true"
+            - name: K8S_STORAGE_CLASS
+              value: "tesslate-block-storage"
+            - name: K8S_PVC_SIZE
+              value: "5Gi"
+            - name: K8S_INGRESS_CLASS
+              value: "nginx"
+            # Alias: K8S_INGRESS_DOMAIN reads APP_DOMAIN from secret
+            - name: K8S_INGRESS_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: APP_DOMAIN
+            - name: K8S_IMAGE_PULL_SECRET
+              value: ""
+            - name: K8S_IMAGE_PULL_POLICY
+              value: "Always"
+            - name: K8S_WILDCARD_TLS_SECRET
+              value: "tesslate-wildcard-tls"
+            # S3-compatible — Azure Blob via S3 endpoint. The Storage Account
+            # name + endpoint URL live in s3-credentials (terraform-managed).
+            # Leaving this empty would force native AWS S3 — keep envFrom
+            # winning by intentionally not overriding here.
+            # Pod Affinity
+            - name: K8S_ENABLE_POD_AFFINITY
+              value: "true"
+            - name: K8S_AFFINITY_TOPOLOGY_KEY
+              value: "kubernetes.io/hostname"
+            # Hibernation
+            - name: K8S_HIBERNATION_IDLE_MINUTES
+              value: "2880"
+            - name: K8S_HIBERNATION_GRACE_SECONDS
+              value: "120"
+            - name: K8S_DEHYDRATION_EXCLUDE_PATTERNS
+              value: "node_modules,.git,__pycache__,venv,.venv"
+            # Feature flags
+            - name: DEPLOYMENT_ENV
+              value: "production"
+            # Tesslate Apps — short image names get prefixed with this ACR
+            # host so AKS nodes can pull. Templated by terraform from
+            # var.acr_name; overlays only inject the per-env tag.
+            - name: APP_IMAGE_REGISTRY_PREFIX
+              valueFrom:
+                secretKeyRef:
+                  name: tesslate-app-secrets
+                  key: APP_IMAGE_REGISTRY_PREFIX
+            # Cookies
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: COOKIE_SAMESITE
+              value: "lax"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
