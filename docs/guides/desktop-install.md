@@ -42,13 +42,15 @@ Common to all platforms:
 ## 3. Install from release
 
 Direct downloads live at
-[github.com/TesslateAI/opensail/releases](https://github.com/TesslateAI/opensail/releases).
-Pick the latest tagged release and grab the artifact for your OS.
+[github.com/TesslateAI/opensail/releases](https://github.com/TesslateAI/opensail/releases)
+when a desktop release includes installer assets. If the latest release has no
+desktop installer attached yet, use the build-from-source flow below.
 
 ### macOS (`.dmg`)
 
 1. Download `OpenSail_<version>_aarch64.dmg` (Apple Silicon) or
-   `OpenSail_<version>_x64.dmg` (Intel).
+   `OpenSail_<version>_x64.dmg` (Intel) when those assets are attached to the
+   release.
 2. Open the DMG and drag `OpenSail.app` into `/Applications`.
 3. First launch: right-click the app, pick "Open", then "Open" again at the
    Gatekeeper prompt. Shipped builds are codesigned with a Developer ID and
@@ -56,7 +58,7 @@ Pick the latest tagged release and grab the artifact for your OS.
 
 ### Windows (`.msi`)
 
-1. Download `OpenSail_<version>_x64_en-US.msi`.
+1. Download `OpenSail_<version>_x64_en-US.msi` when it is attached to the release.
 2. Double-click and step through the installer. It installs to
    `%LOCALAPPDATA%\Programs\OpenSail` by default and pins a Start menu entry.
 3. If SmartScreen flags the installer as "unrecognized", click "More info"
